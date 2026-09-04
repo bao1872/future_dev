@@ -17,6 +17,7 @@ env/
 # Environment / secrets
 .env
 .env.*
+!.env.example
 *.key
 *.pem
 
@@ -28,3 +29,6 @@ silver_main_data/
 .vscode/
 .idea/
 .DS_Store
+
+# WorkBuddy 本地工作数据（含会话日志，不入库）
+.workbuddy/
