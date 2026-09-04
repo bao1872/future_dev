@@ -7,16 +7,15 @@ and save them as offline CSV files.
 Symbol:
     KQ.m@SHFE.ag  (SHFE Silver main continuous)
 
-Timeframe alignment:
-    三个周期（15m / 1h / 4h）强制对齐到 15m 的时间窗口。
-    15m 取满 TqSdk 单序列上限 8000 根（约 1 年）；1h / 4h 同样先取满 8000 根，
-    再按 15m 的 [起,止] 时间戳截断，保证三份数据覆盖完全相同的日历区间，
-    便于多周期策略与回测按时间戳对齐。
+Fixed-window design (current target):
+    三个周期（15m / 1h / 4h）各自从 TqSdk 取 data_length = 10000 根。
+    15m 的 [window_start, window_end] 作为统一对齐窗口；1h / 4h 直接按
+    15m 的真实时间戳窗口截断，保证三份数据覆盖完全相同的 [win_min, win_max]。
 
-    截断后根数（约）：
-        15m : 8000
-        1h  : ~2970
-        4h  : ~1075
+    截断后根数（约，取决于服务端实际返回）：
+        15m : 10000
+        1h  : 由 15m 窗口内的 1h bar 数决定
+        4h  : 由 15m 窗口内的 4h bar 数决定
 
 Install:
     python -m pip install -U tqsdk pandas
@@ -38,8 +37,8 @@ Output:
 """
 
 import os
-from pathlib import Path
 import sys
+from pathlib import Path
 
 import pandas as pd
 from tqsdk import TqApi, TqAuth
@@ -75,11 +74,11 @@ SYMBOL = "KQ.m@SHFE.ag"
 # 输出目录：脚本所在目录下的 silver_main_data/
 OUTPUT_DIR = Path(__file__).resolve().parent / "silver_main_data"
 
-# 每个周期先取满 TqSdk 单序列上限 8000 根，之后 1h / 4h 会按 15m 窗口截断
+# 每个周期取 data_length = 10000 根；之后 1h / 4h 按 15m 窗口截断
 REQUESTS = {
-    "15m": {"duration_seconds": 15 * 60, "data_length": 8000},
-    "1h":  {"duration_seconds": 60 * 60, "data_length": 8000},
-    "4h":  {"duration_seconds": 4 * 60 * 60, "data_length": 8000},
+    "15m": {"duration_seconds": 15 * 60, "data_length": 10000},
+    "1h":  {"duration_seconds": 60 * 60, "data_length": 10000},
+    "4h":  {"duration_seconds": 4 * 60 * 60, "data_length": 10000},
 }
 
 # CSV保留的行情字段
@@ -111,10 +110,7 @@ def prepare_for_csv(df: pd.DataFrame, timeframe: str) -> pd.DataFrame:
     out = out[out["datetime"].notna()].copy()
     out = out[out["datetime"] > 0].copy()
 
-    # Preserve original TqSdk nanosecond timestamp.
-    # Cast back to int64: TqSdk exposes the column as float64 (it can hold
-    # NaN placeholders), which would be written to CSV in scientific notation
-    # and silently truncate sub-microsecond digits.
+    # Preserve original TqSdk nanosecond timestamp as int64.
     out.rename(columns={"datetime": "datetime_ns"}, inplace=True)
     out["datetime_ns"] = out["datetime_ns"].astype("int64")
 
@@ -129,20 +125,12 @@ def prepare_for_csv(df: pd.DataFrame, timeframe: str) -> pd.DataFrame:
             out.rename(columns={"symbol": "underlying_symbol"}, inplace=True)
 
     # Unix epoch timestamp -> Beijing time.
-    # TqSdk datetime is nanoseconds since Unix epoch.
     beijing_time = (
         pd.to_datetime(out["datetime_ns"].astype("int64"), unit="ns", utc=True)
         .dt.tz_convert("Asia/Shanghai")
     )
+    out.insert(0, "datetime", beijing_time.dt.strftime("%Y-%m-%d %H:%M:%S"))
 
-    # Write ISO-like local time without timezone suffix for easy offline use.
-    out.insert(
-        0,
-        "datetime",
-        beijing_time.dt.strftime("%Y-%m-%d %H:%M:%S"),
-    )
-
-    # Add useful metadata.
     out.insert(1, "symbol", SYMBOL)
     out.insert(2, "timeframe", timeframe)
 
@@ -150,14 +138,10 @@ def prepare_for_csv(df: pd.DataFrame, timeframe: str) -> pd.DataFrame:
         "datetime",
         "datetime_ns",
         "symbol",
-        "underlying_symbol",
         "timeframe",
         *MARKET_COLUMNS,
     ]
-
-    # Be defensive in case a future TqSdk version changes columns.
     wanted = [col for col in wanted if col in out.columns]
-
     out = out[wanted].reset_index(drop=True)
     return out
 
@@ -165,6 +149,21 @@ def prepare_for_csv(df: pd.DataFrame, timeframe: str) -> pd.DataFrame:
 def _fmt_ns(ns: int) -> str:
     return (pd.to_datetime(ns, unit="ns", utc=True)
             .tz_convert("Asia/Shanghai").strftime("%Y-%m-%d %H:%M:%S"))
+
+
+def validate(df: pd.DataFrame, tf: str) -> None:
+    """Minimal data validation per audit spec. Raises AssertionError on failure."""
+    assert len(df) > 0, f"[{tf}] empty frame"
+    assert df["datetime_ns"].is_monotonic_increasing, f"[{tf}] datetime_ns not monotonic increasing"
+    assert not df["datetime_ns"].duplicated().any(), f"[{tf}] duplicate datetime_ns"
+
+    req = ["open", "high", "low", "close", "volume", "open_oi", "close_oi"]
+    assert not df[req].isna().any().any(), f"[{tf}] NaN in OHLCV/OI"
+
+    assert (df["high"] >= df[["open", "close"]].max(axis=1)).all(), \
+        f"[{tf}] high < max(open, close)"
+    assert (df["low"] <= df[["open", "close"]].min(axis=1)).all(), \
+        f"[{tf}] low > min(open, close)"
 
 
 def main() -> None:
@@ -187,6 +186,7 @@ def main() -> None:
         api = TqApi(auth=TqAuth(TQ_USER, TQ_PASSWORD))
 
         # Subscribe all three series first.
+        # data_length=10000 is the single API assumption being verified this run.
         series = {}
         for timeframe, cfg in REQUESTS.items():
             print(
@@ -207,7 +207,7 @@ def main() -> None:
 
         print("All requested K-line series are ready.\n")
 
-        # 1) 先处理 15m，确定全周期统一对齐窗口（用于多周期策略/回测对齐）
+        # 1) 15m 作为统一对齐窗口
         clean_15m = prepare_for_csv(series["15m"], "15m")
         win_min = int(clean_15m["datetime_ns"].min())
         win_max = int(clean_15m["datetime_ns"].max())
@@ -226,26 +226,31 @@ def main() -> None:
             )
             frames[timeframe] = clean
 
-        # 2) 写出三份 CSV
+        # 2) 校验
+        print("\nValidating...")
+        for tf, df in frames.items():
+            validate(df, tf)
+            print(f"  [{tf}] validation PASS ({len(df)} bars)")
+
+        # 3) 写出三份 CSV
         for timeframe, clean_df in frames.items():
             output_file = OUTPUT_DIR / f"silver_main_{timeframe}.csv"
-            clean_df.to_csv(
-                output_file,
-                index=False,
-                encoding="utf-8-sig",
-            )
+            clean_df.to_csv(output_file, index=False, encoding="utf-8-sig")
+            print(f"[{timeframe}] saved: {output_file.name}")
 
-            first_dt = clean_df.iloc[0]["datetime"] if len(clean_df) else "N/A"
-            last_dt = clean_df.iloc[-1]["datetime"] if len(clean_df) else "N/A"
-
-            print(
-                f"[{timeframe}] saved: {output_file.name}\n"
-                f"    rows: {len(clean_df)}\n"
-                f"    range: {first_dt} -> {last_dt}"
-            )
+        # 4) 报告
+        print("\n================ REPORT ================")
+        for tf in ("15m", "1h", "4h"):
+            df = frames[tf]
+            print(f"{tf}:")
+            print(f"  bars  = {len(df)}")
+            print(f"  start = {df.iloc[0]['datetime']}")
+            print(f"  end   = {df.iloc[-1]['datetime']}")
+        print("共同窗口:")
+        print(f"  {_fmt_ns(win_min)} -> {_fmt_ns(win_max)}")
+        print("========================================")
 
         print("\nDone.")
-        print(f"CSV files are in: {OUTPUT_DIR}")
 
     finally:
         if api is not None:
