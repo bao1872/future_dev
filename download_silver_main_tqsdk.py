@@ -9,16 +9,16 @@ Symbol:
 
 Fixed-window design (current target):
     三个周期（15m / 1h / 4h）各自从 TqSdk 取 data_length = 10000 根。
-    15m 的 [window_start, window_end] 作为统一对齐窗口；1h / 4h 直接按
-    15m 的真实时间戳窗口截断，保证三份数据覆盖完全相同的 [win_min, win_max]。
-
-    截断后根数（约，取决于服务端实际返回）：
-        15m : 10000
-        1h  : 由 15m 窗口内的 1h bar 数决定
-        4h  : 由 15m 窗口内的 4h bar 数决定
+    按“bar 闭合覆盖”对齐三周期窗口（而非只看 bar start 是否落在 15m 区间）：
+        共同起点 = 三周期第一根 bar start 的最大值
+        共同终点 = 三周期最后一根 bar 的 bar_end（start + 周期时长）的最小值
+    每个周期只保留 bar_start >= 共同起点 且 bar_end <= 共同终点的行，
+    保证三份数据覆盖完全相同的“已闭合”时间区间（避免某周期多带一根尚未
+    闭合的尾巴，或把窗口起点前的不完整段算进来）。
 
     每个周期会丢弃末尾尚未走完的 forming bar（其名义结束时间晚于当前
-    UTC 时间），并做 15m→1h、1h→4h 的跨周期聚合一致性校验后才落盘。
+    UTC 时间），并做 15m→1h、1h→4h 的跨周期聚合一致性校验（含覆盖统计，
+    缺失低周期数据的 higher bar 直接记 error，不再静默跳过）后才落盘。
 
 Install:
     python -m pip install -U tqsdk pandas
@@ -184,27 +184,87 @@ def drop_unclosed_tail(
     return df
 
 
+def align_common_closed_window(
+    prepared: dict,
+    requests: dict,
+):
+    """
+    按“bar 闭合覆盖”对齐三周期到完全相同的窗口。
+
+    共同起点 = 三周期第一根 bar start 的最大值。
+    共同终点 = 三周期最后一根 bar 的 bar_end（start + 周期时长）的最小值。
+
+    每个周期只保留 bar_start >= common_start 且 bar_end <= common_end 的行。
+    这样三份数据覆盖的是同一段“所有周期均已完整闭合”的时间区间，而不是
+    仅仅把各周期 bar start 截到 15m 的 [min,max]（那样会让 15m 多带一根
+    bar_end 超出共同终点的尾巴，或把起点前的不完整段算进来）。
+
+    返回 (aligned: dict, common_start_ns: int, common_end_ns: int)。
+    """
+    starts = {
+        tf: int(df.iloc[0]["datetime_ns"])
+        for tf, df in prepared.items()
+    }
+    ends = {
+        tf: int(df.iloc[-1]["datetime_ns"]) + requests[tf]["duration_seconds"] * NS_PER_SECOND
+        for tf, df in prepared.items()
+    }
+
+    common_start = max(starts.values())
+    common_end = min(ends.values())
+
+    aligned = {}
+    for tf, df in prepared.items():
+        duration_ns = requests[tf]["duration_seconds"] * NS_PER_SECOND
+        bar_end = df["datetime_ns"] + duration_ns
+        x = df[
+            (df["datetime_ns"] >= common_start)
+            & (bar_end <= common_end)
+        ].copy()
+        aligned[tf] = x.reset_index(drop=True)
+
+    return aligned, common_start, common_end
+
+
 def validate_aggregation(
     lower: pd.DataFrame,
     higher: pd.DataFrame,
     lower_tf: str,
     higher_tf: str,
+    higher_duration_seconds: int,
 ):
     """
     用“高周期实际相邻 timestamp”作为 bucket 边界，验证低周期聚合是否
     与高周期完全一致。中国期货交易时段不连续，不能用简单 resample。
 
-    对 higher 的第 i 根（i < len-1），取其 [start, next_start) 区间内的
-    lower 子序列，逐字段对比 OHLC / volume / open_oi / close_oi。
-    返回 mismatch 列表（空列表即一致）。
+    对 higher 的每一根 bar：
+      - 非最后一根：bucket = [start, 下一根 start)
+      - 最后一根（edge）：bucket = [start, start + 周期时长)
+        （窗口已按“闭合覆盖”对齐，最后一根必然完整闭合，可用名义结束时间
+        作为上界，这样最后一根不再被无声跳过）
+    任意一根 higher bar 若在其 bucket 内完全找不到低周期数据，直接记
+    error（不再静默 continue），避免 false-green。
+
+    返回 (errors, stats)。stats 含：
+        higher_total / compared / skipped_edge / empty / mismatch_count
     """
     errors = []
+    higher_total = len(higher)
+    compared = 0
+    skipped_edge = 0
+    empty = 0
+    mismatch_count = 0
 
-    for i in range(len(higher) - 1):
+    for i in range(higher_total):
         h = higher.iloc[i]
-
         start_ns = int(h["datetime_ns"])
-        end_ns = int(higher.iloc[i + 1]["datetime_ns"])
+
+        if i < higher_total - 1:
+            end_ns = int(higher.iloc[i + 1]["datetime_ns"])
+        else:
+            # 最后一根：用名义结束时间作上界（闭合窗口内必然完整）
+            end_ns = start_ns + higher_duration_seconds * NS_PER_SECOND
+            skipped_edge += 1
 
         sub = lower[
             (lower["datetime_ns"] >= start_ns)
@@ -212,7 +272,16 @@ def validate_aggregation(
         ]
 
         if sub.empty:
+            empty += 1
+            errors.append({
+                "datetime": h["datetime"],
+                "type": "missing_lower_bars",
+                "from": lower_tf,
+                "to": higher_tf,
+            })
             continue
+
+        compared += 1
 
         expected = {
             "open": float(sub.iloc[0]["open"]),
@@ -226,8 +295,8 @@ def validate_aggregation(
 
         for field, exp in expected.items():
             actual = float(h[field])
-
             if abs(actual - exp) > 1e-9:
+                mismatch_count += 1
                 errors.append({
                     "datetime": h["datetime"],
                     "from": lower_tf,
@@ -237,7 +306,14 @@ def validate_aggregation(
                     "actual": actual,
                 })
 
-    return errors
+    stats = {
+        "higher_total": higher_total,
+        "compared": compared,
+        "skipped_edge": skipped_edge,
+        "empty": empty,
+        "mismatch_count": mismatch_count,
+    }
+    return errors, stats
 
 
 def validate(df: pd.DataFrame, tf: str) -> None:
@@ -302,67 +378,90 @@ def main() -> None:
 
         print("All requested K-line series are ready.\n")
 
-        # 1) 每个周期先 prepare，并丢弃未完成尾部 bar，再确定统一对齐窗口
+        # 1) 每个周期先 prepare，并丢弃未完成尾部 bar
         prepared = {}
         for tf, cfg in REQUESTS.items():
             df = prepare_for_csv(series[tf], tf)
             df = drop_unclosed_tail(df, cfg["duration_seconds"], tf)
             prepared[tf] = df
 
-        clean_15m = prepared["15m"]
-        win_min = int(clean_15m["datetime_ns"].min())
-        win_max = int(clean_15m["datetime_ns"].max())
-        print(f"对齐窗口 (以 15m 为准): {_fmt_ns(win_min)} -> {_fmt_ns(win_max)}\n")
-
-        frames = {"15m": clean_15m}
-        for tf in ("1h", "4h"):
-            clean = prepared[tf]
-            before = len(clean)
-            mask = (clean["datetime_ns"] >= win_min) & (clean["datetime_ns"] <= win_max)
-            clean = clean[mask].reset_index(drop=True)
-            dropped = before - len(clean)
+        # 2) 按“bar 闭合覆盖”把三周期对齐到完全相同窗口
+        frames, common_start, common_end = align_common_closed_window(prepared, REQUESTS)
+        print(
+            f"共同闭合窗口: {_fmt_ns(common_start)} -> {_fmt_ns(common_end)}\n"
+        )
+        for tf in ("15m", "1h", "4h"):
+            before = len(prepared[tf])
             print(
-                f"[{tf}] 截断到对齐窗口: {before} -> {len(clean)} 根 "
-                f"(丢弃窗口外 {dropped} 根)"
+                f"[{tf}] 闭合窗口对齐: {before} -> {len(frames[tf])} 根 "
+                f"(丢弃 {before - len(frames[tf])} 根窗口外/未闭合)"
             )
-            frames[tf] = clean
 
-        # 2) 单周期内部校验
+        # 3) 单周期内部校验
         print("\nValidating...")
         for tf, df in frames.items():
             validate(df, tf)
             print(f"  [{tf}] internal validation PASS ({len(df)} bars)")
 
-        # 2b) 跨周期聚合一致性校验（高周期实际相邻 timestamp 作为 bucket 边界）
+        # 4) 跨周期聚合一致性校验（带覆盖统计，不再静默跳过缺失）
         print("\nCross-timeframe aggregation check...")
-        errors_15m_1h = validate_aggregation(frames["15m"], frames["1h"], "15m", "1h")
-        errors_1h_4h = validate_aggregation(frames["1h"], frames["4h"], "1h", "4h")
-        print(f"  15m -> 1h mismatches: {len(errors_15m_1h)}")
-        print(f"  1h  -> 4h mismatches: {len(errors_1h_4h)}")
-        if errors_15m_1h:
-            print("  sample 15m->1h mismatches:", errors_15m_1h[:10])
-        if errors_1h_4h:
-            print("  sample 1h->4h mismatches:", errors_1h_4h[:10])
-        assert not errors_15m_1h, "15m->1h aggregation mismatches found"
-        assert not errors_1h_4h, "1h->4h aggregation mismatches found"
+        errors_15m_1h, stats_15m_1h = validate_aggregation(
+            frames["15m"], frames["1h"], "15m", "1h",
+            REQUESTS["1h"]["duration_seconds"],
+        )
+        errors_1h_4h, stats_1h_4h = validate_aggregation(
+            frames["1h"], frames["4h"], "1h", "4h",
+            REQUESTS["4h"]["duration_seconds"],
+        )
+
+        def _print_stats(label, stats):
+            print(f"  {label}:")
+            print(f"    higher_total = {stats['higher_total']}")
+            print(f"    compared     = {stats['compared']}")
+            print(f"    skipped_edge = {stats['skipped_edge']}")
+            print(f"    empty        = {stats['empty']}")
+            print(f"    mismatches   = {stats['mismatch_count']}")
+            if stats["empty"]:
+                print("    EMPTY (missing lower bars):", errors_15m_1h if "15m" in label else errors_1h_4h)
+            if stats["mismatch_count"]:
+                sample = (errors_15m_1h if "15m" in label else errors_1h_4h)[:10]
+                print("    sample:", sample)
+
+        _print_stats("15m -> 1h", stats_15m_1h)
+        _print_stats("1h  -> 4h", stats_1h_4h)
+
+        assert stats_15m_1h["empty"] == 0, "15m->1h has higher bars with no lower coverage"
+        assert stats_1h_4h["empty"] == 0, "1h->4h has higher bars with no lower coverage"
+        assert stats_15m_1h["mismatch_count"] == 0, "15m->1h aggregation mismatches found"
+        assert stats_1h_4h["mismatch_count"] == 0, "1h->4h aggregation mismatches found"
         print("  cross-timeframe aggregation PASS")
 
-        # 3) 写出三份 CSV
+        # 5) 写出三份 CSV
         for timeframe, clean_df in frames.items():
             output_file = OUTPUT_DIR / f"silver_main_{timeframe}.csv"
             clean_df.to_csv(output_file, index=False, encoding="utf-8-sig")
             print(f"[{timeframe}] saved: {output_file.name}")
 
-        # 4) 报告
+        # 6) 报告
         print("\n================ REPORT ================")
+        print("COMMON CLOSED WINDOW")
+        print(f"  start = {_fmt_ns(common_start)}")
+        print(f"  end   = {_fmt_ns(common_end)}")
         for tf in ("15m", "1h", "4h"):
             df = frames[tf]
-            print(f"{tf}:")
-            print(f"  bars  = {len(df)}")
+            print(f"{tf} bars = {len(df)}")
             print(f"  start = {df.iloc[0]['datetime']}")
             print(f"  end   = {df.iloc[-1]['datetime']}")
-        print("共同窗口:")
-        print(f"  {_fmt_ns(win_min)} -> {_fmt_ns(win_max)}")
+        print("\n15m -> 1h:")
+        print(f"  higher_total = {stats_15m_1h['higher_total']}")
+        print(f"  compared     = {stats_15m_1h['compared']}")
+        print(f"  empty        = {stats_15m_1h['empty']}")
+        print(f"  mismatches   = {stats_15m_1h['mismatch_count']}")
+        print("1h -> 4h:")
+        print(f"  higher_total = {stats_1h_4h['higher_total']}")
+        print(f"  compared     = {stats_1h_4h['compared']}")
+        print(f"  empty        = {stats_1h_4h['empty']}")
+        print(f"  mismatches   = {stats_1h_4h['mismatch_count']}")
         print("========================================")
 
         print("\nDone.")
