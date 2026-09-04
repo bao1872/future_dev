@@ -21,9 +21,9 @@ env/
 *.key
 *.pem
 
-# Data output (generated CSVs)
-silver_main_data/
-*.csv
+# Data output (committed: SHFE silver main-continuous offline data for backtest)
+# 原始 K 线 / 前复权序列 / 换月明细入库；
+# .env、.workbuddy、Python 缓存等仍按上方规则忽略。
 
 # Editors / OS
 .vscode/

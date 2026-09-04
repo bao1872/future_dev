@@ -7,13 +7,16 @@ and save them as offline CSV files.
 Symbol:
     KQ.m@SHFE.ag  (SHFE Silver main continuous)
 
-Bars:
-    15m: 8000   (TqSdk 单序列上限)
-    1h : 2000
-    4h : 500
+Timeframe alignment:
+    三个周期（15m / 1h / 4h）强制对齐到 15m 的时间窗口。
+    15m 取满 TqSdk 单序列上限 8000 根（约 1 年）；1h / 4h 同样先取满 8000 根，
+    再按 15m 的 [起,止] 时间戳截断，保证三份数据覆盖完全相同的日历区间，
+    便于多周期策略与回测按时间戳对齐。
 
-Nominal time coverage is matched:
-    8000 * 15m = 2000 * 1h = 500 * 4h
+    截断后根数（约）：
+        15m : 8000
+        1h  : ~2970
+        4h  : ~1075
 
 Install:
     python -m pip install -U tqsdk pandas
@@ -72,14 +75,11 @@ SYMBOL = "KQ.m@SHFE.ag"
 # 输出目录：脚本所在目录下的 silver_main_data/
 OUTPUT_DIR = Path(__file__).resolve().parent / "silver_main_data"
 
-# 周期秒数与数据长度
-# TqSdk 单个 K 线序列最大只支持 8000 根，因此以 15m 的 8000 根为基准长度，
-# 其余周期按相同名义时间覆盖换算：
-#   8000 * 15m = 2000 * 1h = 500 * 4h
+# 每个周期先取满 TqSdk 单序列上限 8000 根，之后 1h / 4h 会按 15m 窗口截断
 REQUESTS = {
     "15m": {"duration_seconds": 15 * 60, "data_length": 8000},
-    "1h":  {"duration_seconds": 60 * 60, "data_length": 2000},
-    "4h":  {"duration_seconds": 4 * 60 * 60, "data_length": 500},
+    "1h":  {"duration_seconds": 60 * 60, "data_length": 8000},
+    "4h":  {"duration_seconds": 4 * 60 * 60, "data_length": 8000},
 }
 
 # CSV保留的行情字段
@@ -162,6 +162,11 @@ def prepare_for_csv(df: pd.DataFrame, timeframe: str) -> pd.DataFrame:
     return out
 
 
+def _fmt_ns(ns: int) -> str:
+    return (pd.to_datetime(ns, unit="ns", utc=True)
+            .tz_convert("Asia/Shanghai").strftime("%Y-%m-%d %H:%M:%S"))
+
+
 def main() -> None:
     if not TQ_USER or not TQ_PASSWORD:
         print(
@@ -175,7 +180,7 @@ def main() -> None:
 
     api = None
     try:
-        print(f"Connecting to TqSdk...")
+        print("Connecting to TqSdk...")
         print(f"Symbol: {SYMBOL}")
         print(f"Output directory: {OUTPUT_DIR}\n")
 
@@ -202,10 +207,27 @@ def main() -> None:
 
         print("All requested K-line series are ready.\n")
 
-        # Save each timeframe independently.
-        for timeframe, df in series.items():
-            clean_df = prepare_for_csv(df, timeframe)
+        # 1) 先处理 15m，确定全周期统一对齐窗口（用于多周期策略/回测对齐）
+        clean_15m = prepare_for_csv(series["15m"], "15m")
+        win_min = int(clean_15m["datetime_ns"].min())
+        win_max = int(clean_15m["datetime_ns"].max())
+        print(f"对齐窗口 (以 15m 为准): {_fmt_ns(win_min)} -> {_fmt_ns(win_max)}\n")
 
+        frames = {"15m": clean_15m}
+        for timeframe in ("1h", "4h"):
+            clean = prepare_for_csv(series[timeframe], timeframe)
+            before = len(clean)
+            mask = (clean["datetime_ns"] >= win_min) & (clean["datetime_ns"] <= win_max)
+            clean = clean[mask].reset_index(drop=True)
+            dropped = before - len(clean)
+            print(
+                f"[{timeframe}] 截断到对齐窗口: {before} -> {len(clean)} 根 "
+                f"(丢弃窗口外 {dropped} 根)"
+            )
+            frames[timeframe] = clean
+
+        # 2) 写出三份 CSV
+        for timeframe, clean_df in frames.items():
             output_file = OUTPUT_DIR / f"silver_main_{timeframe}.csv"
             clean_df.to_csv(
                 output_file,
@@ -213,18 +235,12 @@ def main() -> None:
                 encoding="utf-8-sig",
             )
 
-            if len(clean_df) > 0:
-                first_dt = clean_df.iloc[0]["datetime"]
-                last_dt = clean_df.iloc[-1]["datetime"]
-            else:
-                first_dt = "N/A"
-                last_dt = "N/A"
-
-            expected = REQUESTS[timeframe]["data_length"]
+            first_dt = clean_df.iloc[0]["datetime"] if len(clean_df) else "N/A"
+            last_dt = clean_df.iloc[-1]["datetime"] if len(clean_df) else "N/A"
 
             print(
                 f"[{timeframe}] saved: {output_file.name}\n"
-                f"    rows: {len(clean_df)} / requested {expected}\n"
+                f"    rows: {len(clean_df)}\n"
                 f"    range: {first_dt} -> {last_dt}"
             )
 

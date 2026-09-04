@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import time
 from pathlib import Path
 
 import pandas as pd
@@ -46,10 +47,22 @@ import pandas as pd
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "silver_main_data"
 ADJ_DIR = DATA_DIR / "adjusted"
-OWNER_FILE = DATA_DIR / "rollover_owner.csv"
-SEG_FILE = DATA_DIR / "rollover_segments.csv"
-CLOSE_FILE = DATA_DIR / "contract_closes.csv"
-REPORT_FILE = DATA_DIR / "rollover_report.csv"
+
+
+def owner_file(tf: str) -> Path:
+    return DATA_DIR / f"rollover_owner_{tf}.csv"
+
+
+def close_file(tf: str) -> Path:
+    return DATA_DIR / f"contract_closes_{tf}.csv"
+
+
+def seg_file(tf: str) -> Path:
+    return DATA_DIR / f"rollover_segments_{tf}.csv"
+
+
+def report_file(tf: str) -> Path:
+    return DATA_DIR / f"rollover_report_{tf}.csv"
 
 SYMBOL = "KQ.m@SHFE.ag"
 TIMEFRAMES = ("15m", "1h", "4h")
@@ -104,8 +117,11 @@ def candidate_months(start_ns: int, end_ns: int) -> list[str]:
     return codes
 
 
-def build_owner_map() -> tuple[pd.DataFrame, pd.DataFrame]:
-    """联网构建归属表。返回 (owner_df[ns,contract], closes_df[ns,contract...])。"""
+def build_owner_map(tf: str) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    联网构建某个周期的归属表。归属表与目标序列同周期，bar 一一对应。
+    返回 (owner_df[ns,contract], closes_df[ns,contract...])。
+    """
     from tqsdk import TqApi, TqAuth
 
     load_dotenv(BASE_DIR / ".env")
@@ -113,42 +129,61 @@ def build_owner_map() -> tuple[pd.DataFrame, pd.DataFrame]:
     if not user or not pwd:
         raise SystemExit("ERROR: 未设置 TQ_USER / TQ_PASSWORD（写入 .env 或导出环境变量）")
 
+    # 用已下载、已对齐到 15m 窗口的原始 CSV 确定候选合约范围，
+    # 避免对全历史合约逐个试探（1h/4h 取满 8000 根会回溯到 2018/2023）。
+    raw_path = DATA_DIR / f"silver_main_{tf}.csv"
+    if not raw_path.is_file():
+        raise SystemExit(f"ERROR: 缺少 {raw_path.name}，请先运行 download_silver_main_tqsdk.py")
+    raw_ns = pd.read_csv(raw_path)["datetime_ns"]
+    win_min = int(pd.to_numeric(raw_ns).min())
+    win_max = int(pd.to_numeric(raw_ns).max())
+    codes = candidate_months(win_min, win_max)
+
     api = TqApi(auth=TqAuth(user, pwd))
     try:
-        main_raw = api.get_kline_serial(SYMBOL, DURATION["15m"], data_length=8000)
+        main_raw = api.get_kline_serial(SYMBOL, DURATION[tf], data_length=8000)
         while not api.is_serial_ready(main_raw):
             api.wait_update()
         main = _prep(main_raw)
-        print(f"主连: {len(main)} 根 {fmt_ns(main.index[0])} -> {fmt_ns(main.index[-1])}")
+        # 只保留对齐窗口内的 bar 用于匹配（与原始 CSV 一一对应）
+        main = main[(main.index >= win_min) & (main.index <= win_max)]
+        print(f"[{tf}] 主连(窗口内): {len(main)} 根 "
+              f"{fmt_ns(main.index[0])} -> {fmt_ns(main.index[-1])}")
 
         owner = pd.Series(index=main.index, dtype="object")
         closes: dict[str, pd.Series] = {}
+        t0 = time.time()
 
-        for code in candidate_months(main.index[0], main.index[-1]):
+        for n_done, code in enumerate(codes, 1):
+            if n_done % 20 == 0 or n_done == len(codes):
+                print(f"    扫描合约 {n_done}/{len(codes)} "
+                      f"({time.time() - t0:.0f}s, 已匹配 {int(owner.notna().sum())} 根)")
             try:
-                raw = api.get_kline_serial(code, DURATION["15m"], data_length=8000)
+                raw = api.get_kline_serial(code, DURATION[tf], data_length=8000)
                 while not api.is_serial_ready(raw):
                     api.wait_update()
-            except Exception as exc:       # 未上市/已摘牌合约会超时或报错
-                print(f"  {code}: 跳过 ({type(exc).__name__})")
+            except Exception as exc:       # 未上市/无数据合约会报错或超时
                 continue
             sub = _prep(raw)
             if len(sub) == 0:
                 continue
             joined = main.join(sub, how="inner", lsuffix="_m", rsuffix="_s")
-            hit = ((joined["close_m"] == joined["close_s"])
-                   & (joined["close_oi_m"] == joined["close_oi_s"]))
+            # 仅按收盘价精确匹配：TqSdk 换月时会把新合约的 open_oi 接成旧合约的
+            # close_oi，导致 (close, close_oi) 同时相等在换月临界 bar 上必然失败；
+            # 而同一时间戳只有一个合约在交易，收盘价本身即可唯一确定归属。
+            hit = (joined["close_m"] == joined["close_s"])
             hit = hit[hit]
             if len(hit) == 0:
                 continue
             owner.loc[hit.index] = code
             closes[code] = sub["close"]
-            print(f"  {code}: 命中 {len(hit)} 根 "
+            print(f"    {code}: 命中 {len(hit)} 根 "
                   f"{fmt_ns(hit.index[0])} -> {fmt_ns(hit.index[-1])}")
 
         owner = _fill_isolated_gaps(owner)
         unmatched = int(owner.isna().sum())
-        print(f"未匹配 bar: {unmatched} / {len(owner)}")
+        print(f"[{tf}] 未匹配 bar: {unmatched} / {len(owner)} "
+              f"(耗时 {time.time() - t0:.0f}s)")
         return (owner.rename("contract").rename_axis("ns").reset_index(),
                 pd.DataFrame(closes))
     finally:
@@ -250,59 +285,39 @@ def compute_factors(segments: pd.DataFrame,
 
 
 # =========================
-# 步骤 3：按 bar 实际覆盖映射到合约
+# 步骤 3：映射到合约并施加复权因子
 # =========================
-
-def assign_contracts(bar_ns: pd.Series, owner_df: pd.DataFrame,
-                     tf: str) -> tuple[pd.Series, int]:
-    """
-    按 bar 的时间窗 [t, t_next) 内实际包含的 15m bar 归属，取占比最高的合约。
-    返回 (每根bar的合约, 跨合约bar数量)。
-    """
-    all_ns = owner_df["ns"].values
-    owners = owner_df["contract"].values
-    result, straddled = [], 0
-
-    for i, ns in enumerate(bar_ns.values):
-        t_next = (bar_ns.values[i + 1] if i + 1 < len(bar_ns)
-                  else ns + DURATION[tf] * NS_PER_SEC)
-        lo = int(pd.Series(all_ns).searchsorted(ns, side="left"))
-        hi = int(pd.Series(all_ns).searchsorted(t_next, side="left"))
-        if hi <= lo:                              # 窗口内无 15m bar，回退到最后已知段
-            k = max(0, int(pd.Series(all_ns).searchsorted(ns, side="right")) - 1)
-            result.append(owners[k] if k < len(owners) else "<UNKNOWN>")
-            continue
-        vals = owners[lo:hi]
-        counts = pd.Series(vals).value_counts()
-        if len(counts) > 1:
-            straddled += 1
-        result.append(counts.idxmax())
-
-    return pd.Series(result, index=bar_ns.index), straddled
-
 
 def adjust_timeframe(tf: str, segments: pd.DataFrame,
                      owner_df: pd.DataFrame) -> pd.DataFrame:
     df = pd.read_csv(DATA_DIR / f"silver_main_{tf}.csv", parse_dates=["datetime"])
     # 直接用 TqSdk 原始纳秒时间戳，不要从 datetime 列反推：
     # pandas 3.0 起默认时间精度为微秒，astype("int64") 得到的是微秒，会差 1000 倍。
-    bar_ns = df["datetime_ns"].astype("int64")
+    df["_ns"] = df["datetime_ns"].astype("int64")
 
-    owners, straddled = assign_contracts(bar_ns, owner_df, tf)
+    # 归属表与该周期的目标序列同频率，按 ns 直接左连接即可一一对应。
+    merged = df.merge(owner_df[["ns", "contract"]], how="left",
+                      left_on="_ns", right_on="ns")
+    missing = int(merged["contract"].isna().sum())
+    if missing:
+        raise SystemExit(
+            f"ERROR: {tf} 有 {missing} 根 bar 不在归属表内，"
+            f"请先执行 --refresh 重建（数据区间可能已扩展）")
+
     factor_map = segments.set_index("contract")["factor"].to_dict()
-    factors = owners.map(factor_map)
+    factors = merged["contract"].map(factor_map)
     if factors.isna().any():
-        raise SystemExit(f"ERROR: {tf} 有 {int(factors.isna().sum())} 根 bar 未匹配到合约")
+        unknown = sorted(set(merged.loc[factors.isna(), "contract"]))
+        raise SystemExit(f"ERROR: {tf} 有合约缺少复权因子: {unknown}")
 
-    out = df.copy()
+    out = merged.drop(columns=["_ns", "ns"]).copy()
     for col in PRICE_COLUMNS:
         out[col] = (out[col] * factors).round(2)
-    out["contract"] = owners.values
     out["adj_factor"] = factors.round(8).values
 
     raw_max = df["close"].pct_change().abs().max() * 100
     adj_max = out["close"].pct_change().abs().max() * 100
-    print(f"[{tf}] {len(out)} 根 | 跨合约bar {straddled} | "
+    print(f"[{tf}] {len(out)} 根 | {out['contract'].nunique()} 个合约 | "
           f"单bar最大波动 {raw_max:.2f}% -> {adj_max:.2f}%")
     return out
 
@@ -314,46 +329,43 @@ def adjust_timeframe(tf: str, segments: pd.DataFrame,
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--refresh", action="store_true", help="联网重建主连合约归属表")
+    ap.add_argument("--tf", nargs="+", choices=list(TIMEFRAMES), default=list(TIMEFRAMES),
+                    help="只处理指定周期（默认全部）")
     args = ap.parse_args()
 
     ADJ_DIR.mkdir(parents=True, exist_ok=True)
 
-    if args.refresh or not OWNER_FILE.is_file():
-        print("== 构建主连合约归属表 ==")
-        owner_df, closes = build_owner_map()
-        owner_df.to_csv(OWNER_FILE, index=False)
-        closes.to_csv(CLOSE_FILE, index_label="ns")
-        print(f"已缓存 {OWNER_FILE.name}, {CLOSE_FILE.name}\n")
-    else:
-        owner_df = pd.read_csv(OWNER_FILE)
-        closes = pd.read_csv(CLOSE_FILE, index_col=0)
-        # 缓存中可能残留未匹配 bar（例如当时正在形成的最后一根），这里补一次
-        owner_df["contract"] = _fill_isolated_gaps(owner_df["contract"])
-        print(f"== 使用缓存归属表 {OWNER_FILE.name} ==")
+    print("=== 生成前复权序列 ===")
+    for tf in args.tf:
+        print(f"\n---- {tf} ----")
+        if args.refresh or not owner_file(tf).is_file():
+            owner_df, closes = build_owner_map(tf)
+            owner_df.to_csv(owner_file(tf), index=False)
+            closes.to_csv(close_file(tf), index_label="ns")
+        else:
+            owner_df = pd.read_csv(owner_file(tf))
+            closes = pd.read_csv(close_file(tf), index_col=0)
+            # 缓存中可能残留未匹配 bar（例如当时正在形成的最后一根），补一次
+            owner_df["contract"] = _fill_isolated_gaps(owner_df["contract"])
 
-    segments = to_segments(owner_df)
-    print("\n=== 主连合约构成 ===")
-    print(segments[["contract", "start", "end", "bars"]].to_string(index=False))
+        segments = to_segments(owner_df)
+        print(f"  合约构成: {len(segments)} 段")
+        segments, report = compute_factors(segments, closes)
+        report.to_csv(report_file(tf), index=False, encoding="utf-8-sig")
+        segments.to_csv(seg_file(tf), index=False, encoding="utf-8-sig")
+        if len(report):
+            top = report.reindex(report["spread_pct"].abs().nlargest(3).index)
+            worst = top["spread_pct"].abs().max()
+            print(f"  换月 {len(report)} 次 | 最大价差 {worst:.3f}% | "
+                  f"累计因子 {segments['factor'].min():.4f} ~ {segments['factor'].max():.4f}")
 
-    segments, report = compute_factors(segments, closes)
-    print("\n=== 换月价差与复权因子 ===")
-    if len(report):
-        print(report.to_string(index=False,
-                               formatters={"spread_pct": "{:+.3f}".format,
-                                           "ratio": "{:.6f}".format,
-                                           "cum_factor": "{:.6f}".format}))
-    report.to_csv(REPORT_FILE, index=False, encoding="utf-8-sig")
-    segments.to_csv(SEG_FILE, index=False, encoding="utf-8-sig")
-
-    print("\n=== 生成前复权序列 ===")
-    for tf in TIMEFRAMES:
         out = adjust_timeframe(tf, segments, owner_df)
         dst = ADJ_DIR / f"silver_main_{tf}_adj.csv"
         out.to_csv(dst, index=False, encoding="utf-8-sig")
-        print(f"    -> {dst}")
+        print(f"  -> {dst}")
 
     print("\n注意: volume / open_oi / close_oi 未做复权（成交量与持仓量不可按比例缩放）。")
-    print(f"复权明细: {REPORT_FILE}")
+    print("归属表与换月明细: silver_main_data/rollover_*_{tf}.csv")
 
 
 if __name__ == "__main__":

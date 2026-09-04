@@ -27,16 +27,17 @@ cp .env.example .env   # 然后填入自己的账号
 python download_silver_main_tqsdk.py
 ```
 
-输出到 `silver_main_data/`：
+输出到 `silver_main_data/`，三个周期**强制对齐到 15m 的时间窗口**
+（多周期策略/回测按时间戳对齐用）：
 
-| 文件 | 周期 | 根数 | 名义覆盖 |
+| 文件 | 周期 | 根数（约） | 时间窗口 |
 | --- | --- | --- | --- |
-| `silver_main_15m.csv` | 15 分钟 | 8000 | 约 11 个月 |
-| `silver_main_1h.csv` | 1 小时 | 2000 | 同上 |
-| `silver_main_4h.csv` | 4 小时 | 500 | 同上 |
+| `silver_main_15m.csv` | 15 分钟 | 8000 | 2025-10-15 → 2026-09-04 |
+| `silver_main_1h.csv`  | 1 小时  | 2970 | 同 15m |
+| `silver_main_4h.csv`  | 4 小时  | 1075 | 同 15m |
 
-三个周期按相同名义时间跨度对齐：`8000 × 15m = 2000 × 1h = 500 × 4h`。
-8000 是 TqSdk 单个 K 线序列的请求上限。
+每个周期先取满 TqSdk 单序列上限 8000 根，再按 15m 的 [起,止] 纳秒时间戳
+把 1h / 4h 截断到完全相同的日历区间。8000 是 TqSdk 单序列请求上限。
 
 ### CSV 列
 
@@ -56,7 +57,9 @@ python build_continuous.py             # 用缓存离线重算
 ```
 
 输出在 `silver_main_data/adjusted/`，额外带 `contract`（该 bar 的真实合约）
-和 `adj_factor`（复权因子）两列。
+和 `adj_factor`（复权因子）两列。每周期还会生成 `rollover_report_{tf}.csv`
+（换月明细，已入库）与 `rollover_owner_{tf}.csv` / `contract_closes_{tf}.csv`
+（重建缓存，可删，重新 `python build_continuous.py --refresh` 即得）。
 
 构成图（2025-10 ~ 2026-09，共 5 次换月）：
 
