@@ -17,6 +17,9 @@ Fixed-window design (current target):
         1h  : 由 15m 窗口内的 1h bar 数决定
         4h  : 由 15m 窗口内的 4h bar 数决定
 
+    每个周期会丢弃末尾尚未走完的 forming bar（其名义结束时间晚于当前
+    UTC 时间），并做 15m→1h、1h→4h 的跨周期聚合一致性校验后才落盘。
+
 Install:
     python -m pip install -U tqsdk pandas
 
@@ -80,6 +83,9 @@ REQUESTS = {
     "1h":  {"duration_seconds": 60 * 60, "data_length": 10000},
     "4h":  {"duration_seconds": 4 * 60 * 60, "data_length": 10000},
 }
+
+# 1 秒 = 10^9 纳秒，用于把 bar 起点时间换算为名义结束时间
+NS_PER_SECOND = 1_000_000_000
 
 # CSV保留的行情字段
 MARKET_COLUMNS = [
@@ -151,6 +157,89 @@ def _fmt_ns(ns: int) -> str:
             .tz_convert("Asia/Shanghai").strftime("%Y-%m-%d %H:%M:%S"))
 
 
+def drop_unclosed_tail(
+    df: pd.DataFrame,
+    duration_seconds: int,
+    tf: str,
+) -> pd.DataFrame:
+    """
+    丢弃序列末尾尚未走完的 forming bar。
+
+    TqSdk 会把“当前正在形成的那根 K 线”也放进序列，其名义结束时间
+    （bar 起点 + 周期时长）晚于当前 UTC 时间即判定为未完成，必须剔除，
+    否则会被当成一个 volume 异常小、与下一周期同时间戳的假完整 bar。
+    """
+    if len(df) < 2:
+        raise AssertionError(f"[{tf}] insufficient bars")
+
+    now_ns = pd.Timestamp.now(tz="UTC").value
+
+    last_start_ns = int(df.iloc[-1]["datetime_ns"])
+    nominal_end_ns = last_start_ns + duration_seconds * NS_PER_SECOND
+
+    if nominal_end_ns > now_ns:
+        print(f"[{tf}] drop forming bar: {df.iloc[-1]['datetime']}")
+        return df.iloc[:-1].copy()
+
+    return df
+
+
+def validate_aggregation(
+    lower: pd.DataFrame,
+    higher: pd.DataFrame,
+    lower_tf: str,
+    higher_tf: str,
+):
+    """
+    用“高周期实际相邻 timestamp”作为 bucket 边界，验证低周期聚合是否
+    与高周期完全一致。中国期货交易时段不连续，不能用简单 resample。
+
+    对 higher 的第 i 根（i < len-1），取其 [start, next_start) 区间内的
+    lower 子序列，逐字段对比 OHLC / volume / open_oi / close_oi。
+    返回 mismatch 列表（空列表即一致）。
+    """
+    errors = []
+
+    for i in range(len(higher) - 1):
+        h = higher.iloc[i]
+
+        start_ns = int(h["datetime_ns"])
+        end_ns = int(higher.iloc[i + 1]["datetime_ns"])
+
+        sub = lower[
+            (lower["datetime_ns"] >= start_ns)
+            & (lower["datetime_ns"] < end_ns)
+        ]
+
+        if sub.empty:
+            continue
+
+        expected = {
+            "open": float(sub.iloc[0]["open"]),
+            "high": float(sub["high"].max()),
+            "low": float(sub["low"].min()),
+            "close": float(sub.iloc[-1]["close"]),
+            "volume": float(sub["volume"].sum()),
+            "open_oi": float(sub.iloc[0]["open_oi"]),
+            "close_oi": float(sub.iloc[-1]["close_oi"]),
+        }
+
+        for field, exp in expected.items():
+            actual = float(h[field])
+
+            if abs(actual - exp) > 1e-9:
+                errors.append({
+                    "datetime": h["datetime"],
+                    "from": lower_tf,
+                    "to": higher_tf,
+                    "field": field,
+                    "expected": exp,
+                    "actual": actual,
+                })
+
+    return errors
+
+
 def validate(df: pd.DataFrame, tf: str) -> None:
     """Minimal data validation per audit spec. Raises AssertionError on failure."""
     assert len(df) > 0, f"[{tf}] empty frame"
@@ -165,12 +254,18 @@ def validate(df: pd.DataFrame, tf: str) -> None:
     assert (df["low"] <= df[["open", "close"]].min(axis=1)).all(), \
         f"[{tf}] low > min(open, close)"
 
+    # 成交量与持仓量必须非负
+    assert (df["volume"] >= 0).all(), f"[{tf}] negative volume"
+    assert (df["open_oi"] >= 0).all(), f"[{tf}] negative open_oi"
+    assert (df["close_oi"] >= 0).all(), f"[{tf}] negative close_oi"
+
 
 def main() -> None:
     if not TQ_USER or not TQ_PASSWORD:
         print(
-            "\nERROR: Please fill in TQ_USER and TQ_PASSWORD at the top of this script.\n"
-            "快期账户和密码目前是空的，请先填写后再运行。\n",
+            "\nERROR: 未检测到快期账号密码（TQ_USER / TQ_PASSWORD 均为空）。\n"
+            "请通过环境变量，或在脚本同目录的 .env 文件（由 .env.example 复制）中注入，\n"
+            "切勿将凭据写入代码。\n",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -207,30 +302,50 @@ def main() -> None:
 
         print("All requested K-line series are ready.\n")
 
-        # 1) 15m 作为统一对齐窗口
-        clean_15m = prepare_for_csv(series["15m"], "15m")
+        # 1) 每个周期先 prepare，并丢弃未完成尾部 bar，再确定统一对齐窗口
+        prepared = {}
+        for tf, cfg in REQUESTS.items():
+            df = prepare_for_csv(series[tf], tf)
+            df = drop_unclosed_tail(df, cfg["duration_seconds"], tf)
+            prepared[tf] = df
+
+        clean_15m = prepared["15m"]
         win_min = int(clean_15m["datetime_ns"].min())
         win_max = int(clean_15m["datetime_ns"].max())
         print(f"对齐窗口 (以 15m 为准): {_fmt_ns(win_min)} -> {_fmt_ns(win_max)}\n")
 
         frames = {"15m": clean_15m}
-        for timeframe in ("1h", "4h"):
-            clean = prepare_for_csv(series[timeframe], timeframe)
+        for tf in ("1h", "4h"):
+            clean = prepared[tf]
             before = len(clean)
             mask = (clean["datetime_ns"] >= win_min) & (clean["datetime_ns"] <= win_max)
             clean = clean[mask].reset_index(drop=True)
             dropped = before - len(clean)
             print(
-                f"[{timeframe}] 截断到对齐窗口: {before} -> {len(clean)} 根 "
+                f"[{tf}] 截断到对齐窗口: {before} -> {len(clean)} 根 "
                 f"(丢弃窗口外 {dropped} 根)"
             )
-            frames[timeframe] = clean
+            frames[tf] = clean
 
-        # 2) 校验
+        # 2) 单周期内部校验
         print("\nValidating...")
         for tf, df in frames.items():
             validate(df, tf)
-            print(f"  [{tf}] validation PASS ({len(df)} bars)")
+            print(f"  [{tf}] internal validation PASS ({len(df)} bars)")
+
+        # 2b) 跨周期聚合一致性校验（高周期实际相邻 timestamp 作为 bucket 边界）
+        print("\nCross-timeframe aggregation check...")
+        errors_15m_1h = validate_aggregation(frames["15m"], frames["1h"], "15m", "1h")
+        errors_1h_4h = validate_aggregation(frames["1h"], frames["4h"], "1h", "4h")
+        print(f"  15m -> 1h mismatches: {len(errors_15m_1h)}")
+        print(f"  1h  -> 4h mismatches: {len(errors_1h_4h)}")
+        if errors_15m_1h:
+            print("  sample 15m->1h mismatches:", errors_15m_1h[:10])
+        if errors_1h_4h:
+            print("  sample 1h->4h mismatches:", errors_1h_4h[:10])
+        assert not errors_15m_1h, "15m->1h aggregation mismatches found"
+        assert not errors_1h_4h, "1h->4h aggregation mismatches found"
+        print("  cross-timeframe aggregation PASS")
 
         # 3) 写出三份 CSV
         for timeframe, clean_df in frames.items():
