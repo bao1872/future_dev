@@ -1,0 +1,7 @@
+{
+  "scope": "H5 + ALL + gbr, B1, B2, B3 vs B0, per fold",
+  "baseline": "each fold's own TRAIN UP frequency",
+  "no_bootstrap": true,
+  "no_hac": true,
+  "recomputed_through_locked_path": true
+}
