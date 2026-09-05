@@ -1,0 +1,113 @@
+{
+  "purpose": "Out-of-instrument Quantile V2 robustness replication.",
+  "discovery_instrument": "AG",
+  "holdout_instruments": [
+    "CU",
+    "AL",
+    "SN",
+    "I",
+    "SC",
+    "M",
+    "CF"
+  ],
+  "groups": {
+    "ALL_8": [
+      "AG",
+      "CU",
+      "AL",
+      "SN",
+      "I",
+      "SC",
+      "M",
+      "CF"
+    ],
+    "HOLDOUT_7": [
+      "CU",
+      "AL",
+      "SN",
+      "I",
+      "SC",
+      "M",
+      "CF"
+    ],
+    "METAL_HOLDOUT": [
+      "CU",
+      "AL",
+      "SN",
+      "I"
+    ],
+    "DRIVER_DIVERSE_HOLDOUT": [
+      "CU",
+      "I",
+      "SC",
+      "M",
+      "CF"
+    ]
+  },
+  "horizons": [
+    4,
+    8,
+    16
+  ],
+  "quantiles": [
+    0.1,
+    0.5,
+    0.9
+  ],
+  "models": [
+    "linear_qr",
+    "gbr_quantile"
+  ],
+  "feature_sets": {
+    "F1_DIRECTION": [
+      "feat_15m_ret_1",
+      "feat_15m_ret_4",
+      "feat_15m_ret_8",
+      "feat_15m_ret_16",
+      "feat_15m_location_32",
+      "feat_time_bars_since_segment_start",
+      "feat_time_after_long_gap"
+    ],
+    "F2_ACTIVITY": [
+      "feat_15m_ret_1",
+      "feat_15m_ret_4",
+      "feat_15m_ret_8",
+      "feat_15m_ret_16",
+      "feat_15m_location_32",
+      "feat_time_bars_since_segment_start",
+      "feat_time_after_long_gap",
+      "feat_15m_volume_ratio_32",
+      "feat_15m_oi_log_change_4"
+    ],
+    "F3_VOL": [
+      "feat_15m_ret_1",
+      "feat_15m_ret_4",
+      "feat_15m_ret_8",
+      "feat_15m_ret_16",
+      "feat_15m_location_32",
+      "feat_time_bars_since_segment_start",
+      "feat_time_after_long_gap",
+      "feat_15m_volume_ratio_32",
+      "feat_15m_oi_log_change_4",
+      "feat_5m_1h_rv",
+      "feat_5m_rv_rate_ratio_1h_4h"
+    ]
+  },
+  "primary_hypotheses": [
+    "H1_H4_GBR_F1_Q10_SKILL",
+    "H2_H4_GBR_F1_Q90_SKILL",
+    "H3_H4_GBR_F1_INTERVAL_SKILL",
+    "H4_H4_GBR_F1_WIDTH_PATH_MONO",
+    "H5_H8_GBR_F1_Q10_SKILL",
+    "H6_H4_GBR_F2_TO_F3_TAIL_DELTA"
+  ],
+  "model_parameters_changed_from_silver": false,
+  "feature_parameters_changed_from_silver": false,
+  "no_hyperparameter_search": true,
+  "no_backtest": true,
+  "no_pooled_model": true,
+  "no_leave_one_instrument_out": true,
+  "no_smc": true,
+  "no_momentum": true,
+  "no_oracle": true
+}
