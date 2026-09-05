@@ -1,0 +1,298 @@
+{
+  "AG": {
+    "instrument": "AG",
+    "symbol": "KQ.m@SHFE.ag",
+    "source": "reuse_silver_main_data",
+    "status": "PASS",
+    "five_minute": {
+      "rows": 10000,
+      "start": "2026-04-24 23:55:00",
+      "end": "2026-09-05 02:25:00",
+      "path": "silver_main_data/silver_main_5m.csv",
+      "sha256": "787f140d2c46123e62c42c44c25bd5a79d65f31bb1389b8877720bbb5097a864"
+    },
+    "fifteen_minute": {
+      "rows": 10000,
+      "start": "2025-07-23 10:45:00",
+      "end": "2026-09-05 02:15:00",
+      "path": "silver_main_data/silver_main_15m.csv",
+      "sha256": "5ea299926ad3fc4d930033f53956296b46e5057028610f5033f0a66ad2ecef7f"
+    },
+    "aggregation": {
+      "fifteen_bars_total": 10000,
+      "fifteen_bars_with_non_three_5m": 6667,
+      "fifteen_bars_covered_by_5m": 3333,
+      "usable_15m_bars": 3301,
+      "first_15m_index": 6699,
+      "last_15m_index": 9999,
+      "usable_window_start": "2026-04-27 22:45:00",
+      "usable_window_end": "2026-09-05 02:15:00",
+      "five_bars_in_aligned_window": 9903,
+      "expected_five_bars": 9903,
+      "compared_15m_bars": 3301,
+      "count_mismatch": 0,
+      "ohlcv_oi_mismatch": 0,
+      "aggregation_pass": true,
+      "warmup_5m_bars_before_window": 97
+    }
+  },
+  "CU": {
+    "instrument": "CU",
+    "symbol": "KQ.m@SHFE.cu",
+    "source": "downloaded",
+    "status": "PASS",
+    "five_minute": {
+      "rows": 10000,
+      "start": "2026-03-31 00:25:00",
+      "end": "2026-09-05 00:55:00",
+      "path": "research/robustness_data/raw/CU/5m.csv",
+      "sha256": "c1d423f74c43e09491ddd31b74374bd548aa89e74439e45b09972694e1ac14ca"
+    },
+    "fifteen_minute": {
+      "rows": 10000,
+      "start": "2025-05-08 23:30:00",
+      "end": "2026-09-05 00:45:00",
+      "path": "research/robustness_data/raw/CU/15m.csv",
+      "sha256": "f640eda4fead494b197cf8fe8efb3327c5136a776ebb26172f7033ed372e79db"
+    },
+    "aggregation": {
+      "fifteen_bars_total": 10000,
+      "fifteen_bars_with_non_three_5m": 6667,
+      "fifteen_bars_covered_by_5m": 3333,
+      "usable_15m_bars": 3301,
+      "first_15m_index": 6699,
+      "last_15m_index": 9999,
+      "usable_window_start": "2026-04-01 00:45:00",
+      "usable_window_end": "2026-09-05 00:45:00",
+      "five_bars_in_aligned_window": 9903,
+      "expected_five_bars": 9903,
+      "compared_15m_bars": 3301,
+      "count_mismatch": 0,
+      "ohlcv_oi_mismatch": 0,
+      "aggregation_pass": true,
+      "warmup_5m_bars_before_window": 97
+    }
+  },
+  "AL": {
+    "instrument": "AL",
+    "symbol": "KQ.m@SHFE.al",
+    "source": "downloaded",
+    "status": "PASS",
+    "five_minute": {
+      "rows": 10000,
+      "start": "2026-03-31 00:25:00",
+      "end": "2026-09-05 00:55:00",
+      "path": "research/robustness_data/raw/AL/5m.csv",
+      "sha256": "b6bcf9c9080b6b08b4098da8c45168ccec360dece1587f3feefa33baf5e25868"
+    },
+    "fifteen_minute": {
+      "rows": 10000,
+      "start": "2025-05-08 23:30:00",
+      "end": "2026-09-05 00:45:00",
+      "path": "research/robustness_data/raw/AL/15m.csv",
+      "sha256": "437ccd8e6a83578d6c4ca1c0cf5dc591ddcf2b4eb00bd0ecdb5eed334a35ea4e"
+    },
+    "aggregation": {
+      "fifteen_bars_total": 10000,
+      "fifteen_bars_with_non_three_5m": 6667,
+      "fifteen_bars_covered_by_5m": 3333,
+      "usable_15m_bars": 3301,
+      "first_15m_index": 6699,
+      "last_15m_index": 9999,
+      "usable_window_start": "2026-04-01 00:45:00",
+      "usable_window_end": "2026-09-05 00:45:00",
+      "five_bars_in_aligned_window": 9903,
+      "expected_five_bars": 9903,
+      "compared_15m_bars": 3301,
+      "count_mismatch": 0,
+      "ohlcv_oi_mismatch": 0,
+      "aggregation_pass": true,
+      "warmup_5m_bars_before_window": 97
+    }
+  },
+  "SN": {
+    "instrument": "SN",
+    "symbol": "KQ.m@SHFE.sn",
+    "source": "downloaded",
+    "status": "PASS",
+    "five_minute": {
+      "rows": 10000,
+      "start": "2026-03-31 00:25:00",
+      "end": "2026-09-05 00:55:00",
+      "path": "research/robustness_data/raw/SN/5m.csv",
+      "sha256": "0907972082969993c2a8702dd1a1b9a79b85859b6804904eeec1e7a0d66d8ec9"
+    },
+    "fifteen_minute": {
+      "rows": 10000,
+      "start": "2025-05-08 23:30:00",
+      "end": "2026-09-05 00:45:00",
+      "path": "research/robustness_data/raw/SN/15m.csv",
+      "sha256": "098c4b27f3eadb5c69d7695e9e5c201a54c43a8413030092a96538d37db93d2a"
+    },
+    "aggregation": {
+      "fifteen_bars_total": 10000,
+      "fifteen_bars_with_non_three_5m": 6667,
+      "fifteen_bars_covered_by_5m": 3333,
+      "usable_15m_bars": 3301,
+      "first_15m_index": 6699,
+      "last_15m_index": 9999,
+      "usable_window_start": "2026-04-01 00:45:00",
+      "usable_window_end": "2026-09-05 00:45:00",
+      "five_bars_in_aligned_window": 9903,
+      "expected_five_bars": 9903,
+      "compared_15m_bars": 3301,
+      "count_mismatch": 0,
+      "ohlcv_oi_mismatch": 0,
+      "aggregation_pass": true,
+      "warmup_5m_bars_before_window": 97
+    }
+  },
+  "I": {
+    "instrument": "I",
+    "symbol": "KQ.m@DCE.i",
+    "source": "downloaded",
+    "status": "PASS",
+    "five_minute": {
+      "rows": 10000,
+      "start": "2026-01-28 21:10:00",
+      "end": "2026-09-04 22:55:00",
+      "path": "research/robustness_data/raw/I/5m.csv",
+      "sha256": "8785c71abb4b8bbed2a21626630979afa8c6cb2feb37e91ba6d5b72a16974cfb"
+    },
+    "fifteen_minute": {
+      "rows": 10000,
+      "start": "2024-11-18 13:30:00",
+      "end": "2026-09-04 22:45:00",
+      "path": "research/robustness_data/raw/I/15m.csv",
+      "sha256": "17981d209b9476106a16b1c0c2a75e5fe4f47f9a235bc5e2f52dca52141ccfe1"
+    },
+    "aggregation": {
+      "fifteen_bars_total": 10000,
+      "fifteen_bars_with_non_three_5m": 6667,
+      "fifteen_bars_covered_by_5m": 3333,
+      "usable_15m_bars": 3301,
+      "first_15m_index": 6699,
+      "last_15m_index": 9999,
+      "usable_window_start": "2026-01-30 09:30:00",
+      "usable_window_end": "2026-09-04 22:45:00",
+      "five_bars_in_aligned_window": 9903,
+      "expected_five_bars": 9903,
+      "compared_15m_bars": 3301,
+      "count_mismatch": 0,
+      "ohlcv_oi_mismatch": 0,
+      "aggregation_pass": true,
+      "warmup_5m_bars_before_window": 97
+    }
+  },
+  "SC": {
+    "instrument": "SC",
+    "symbol": "KQ.m@INE.sc",
+    "source": "downloaded",
+    "status": "PASS",
+    "five_minute": {
+      "rows": 10000,
+      "start": "2026-04-24 23:55:00",
+      "end": "2026-09-05 02:25:00",
+      "path": "research/robustness_data/raw/SC/5m.csv",
+      "sha256": "752ab42bd055bf412c165bc79d5b313559c9abd1880d329db3ef29d48788eb00"
+    },
+    "fifteen_minute": {
+      "rows": 10000,
+      "start": "2025-07-23 10:45:00",
+      "end": "2026-09-05 02:15:00",
+      "path": "research/robustness_data/raw/SC/15m.csv",
+      "sha256": "a13a908447bffe0e1d567d1a14cfae2f17e849df0e92d5ef09bda33b5404af28"
+    },
+    "aggregation": {
+      "fifteen_bars_total": 10000,
+      "fifteen_bars_with_non_three_5m": 6667,
+      "fifteen_bars_covered_by_5m": 3333,
+      "usable_15m_bars": 3301,
+      "first_15m_index": 6699,
+      "last_15m_index": 9999,
+      "usable_window_start": "2026-04-27 22:45:00",
+      "usable_window_end": "2026-09-05 02:15:00",
+      "five_bars_in_aligned_window": 9903,
+      "expected_five_bars": 9903,
+      "compared_15m_bars": 3301,
+      "count_mismatch": 0,
+      "ohlcv_oi_mismatch": 0,
+      "aggregation_pass": true,
+      "warmup_5m_bars_before_window": 97
+    }
+  },
+  "M": {
+    "instrument": "M",
+    "symbol": "KQ.m@DCE.m",
+    "source": "downloaded",
+    "status": "PASS",
+    "five_minute": {
+      "rows": 10000,
+      "start": "2026-01-28 21:10:00",
+      "end": "2026-09-04 22:55:00",
+      "path": "research/robustness_data/raw/M/5m.csv",
+      "sha256": "61a5b9963d2e9f2eadda318d3b0fc7551d87597022925e0be52fad0f7a3cecb9"
+    },
+    "fifteen_minute": {
+      "rows": 10000,
+      "start": "2024-11-18 13:30:00",
+      "end": "2026-09-04 22:45:00",
+      "path": "research/robustness_data/raw/M/15m.csv",
+      "sha256": "0f5d3a74ecc7432585fc94449a608f88e03603e71e719042855e264e34d6359e"
+    },
+    "aggregation": {
+      "fifteen_bars_total": 10000,
+      "fifteen_bars_with_non_three_5m": 6667,
+      "fifteen_bars_covered_by_5m": 3333,
+      "usable_15m_bars": 3301,
+      "first_15m_index": 6699,
+      "last_15m_index": 9999,
+      "usable_window_start": "2026-01-30 09:30:00",
+      "usable_window_end": "2026-09-04 22:45:00",
+      "five_bars_in_aligned_window": 9903,
+      "expected_five_bars": 9903,
+      "compared_15m_bars": 3301,
+      "count_mismatch": 0,
+      "ohlcv_oi_mismatch": 0,
+      "aggregation_pass": true,
+      "warmup_5m_bars_before_window": 97
+    }
+  },
+  "CF": {
+    "instrument": "CF",
+    "symbol": "KQ.m@CZCE.CF",
+    "source": "downloaded",
+    "status": "PASS",
+    "five_minute": {
+      "rows": 10000,
+      "start": "2026-01-28 21:10:00",
+      "end": "2026-09-04 22:55:00",
+      "path": "research/robustness_data/raw/CF/5m.csv",
+      "sha256": "b12ac2cc1297568db62e23c22312c2f6201dc5db61b7e5e72c2a34d48a733ace"
+    },
+    "fifteen_minute": {
+      "rows": 10000,
+      "start": "2024-11-18 13:30:00",
+      "end": "2026-09-04 22:45:00",
+      "path": "research/robustness_data/raw/CF/15m.csv",
+      "sha256": "4fbb7eca832c1671446f43ca75873f69154b103af3953dec1365805618f595f5"
+    },
+    "aggregation": {
+      "fifteen_bars_total": 10000,
+      "fifteen_bars_with_non_three_5m": 6667,
+      "fifteen_bars_covered_by_5m": 3333,
+      "usable_15m_bars": 3301,
+      "first_15m_index": 6699,
+      "last_15m_index": 9999,
+      "usable_window_start": "2026-01-30 09:30:00",
+      "usable_window_end": "2026-09-04 22:45:00",
+      "five_bars_in_aligned_window": 9903,
+      "expected_five_bars": 9903,
+      "compared_15m_bars": 3301,
+      "count_mismatch": 0,
+      "ohlcv_oi_mismatch": 0,
+      "aggregation_pass": true,
+      "warmup_5m_bars_before_window": 97
+    }
+  }
+}

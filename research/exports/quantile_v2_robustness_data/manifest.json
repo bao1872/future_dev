@@ -1,0 +1,84 @@
+{
+  "purpose": "Compact multi-instrument panels for Quantile V2 robustness replication.",
+  "feature_schema": [
+    "feat_15m_ret_1",
+    "feat_15m_ret_4",
+    "feat_15m_ret_8",
+    "feat_15m_ret_16",
+    "feat_15m_location_32",
+    "feat_time_bars_since_segment_start",
+    "feat_time_after_long_gap",
+    "feat_15m_volume_ratio_32",
+    "feat_15m_oi_log_change_4",
+    "feat_5m_1h_rv",
+    "feat_5m_rv_rate_ratio_1h_4h"
+  ],
+  "horizons": [
+    4,
+    8,
+    16
+  ],
+  "realized_windows_5m": {
+    "1h": 12,
+    "4h": 48
+  },
+  "target_semantics": {
+    "decision": "next observed 15m bar start",
+    "entry_price": "next observed 15m bar open",
+    "exit_price": "close at base index + horizon",
+    "mfe": "evaluation reference only"
+  },
+  "excluded_by_design": [
+    "SMC",
+    "Momentum",
+    "Oracle",
+    "semivariance",
+    "jump",
+    "1h series",
+    "4h series"
+  ],
+  "instrument_notes": "Wall-clock coverage differs per instrument because the 5m serial is capped at 10000 bars. Requirement is comparable observation counts, not identical dates.",
+  "validation": {
+    "status": "PASS",
+    "pass_instrument_count": 8,
+    "pass_instruments": [
+      "AG",
+      "AL",
+      "CF",
+      "CU",
+      "I",
+      "M",
+      "SC",
+      "SN"
+    ],
+    "min_pass_instruments": 6,
+    "required_instruments": [
+      "AG",
+      "CU",
+      "I",
+      "M",
+      "SC"
+    ],
+    "missing_required": [],
+    "identical_feature_schema": true,
+    "model_feature_count": 11,
+    "uses_smc": false,
+    "uses_momentum": false,
+    "uses_oracle": false,
+    "uses_semivariance_or_jump": false,
+    "uses_1h_or_4h_series": false,
+    "min_5m_rows": 9500,
+    "min_panel_rows": 3000,
+    "file_sizes_mb": {
+      "AG_panel.csv": 1.6603,
+      "CU_panel.csv": 1.6646,
+      "AL_panel.csv": 1.6508,
+      "SN_panel.csv": 1.6631,
+      "I_panel.csv": 1.6194,
+      "SC_panel.csv": 1.6528,
+      "M_panel.csv": 1.6387,
+      "CF_panel.csv": 1.6422,
+      "instrument_summary.csv": 0.0021
+    }
+  }
+}

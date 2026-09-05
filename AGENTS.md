@@ -12,6 +12,22 @@ Current research instrument:
 - UI: Streamlit
 - Research data: offline CSV only
 
+Primary development instrument:
+`KQ.m@SHFE.ag`
+
+Offline robustness research may additionally use:
+
+- `KQ.m@SHFE.cu`
+- `KQ.m@SHFE.al`
+- `KQ.m@SHFE.sn`
+- `KQ.m@DCE.i`
+- `KQ.m@INE.sc`
+- `KQ.m@DCE.m`
+- `KQ.m@CZCE.CF`
+
+All remain TqSdk-only.
+This does NOT expand Streamlit/UI/current product scope.
+
 This repository is **not** a production trading system. The current objective is to make strategy research fast, observable, reproducible enough for research, and resistant to silent data / indicator errors.
 
 ---

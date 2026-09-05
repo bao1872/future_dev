@@ -1,0 +1,37 @@
+{
+  "instrument": "AL",
+  "symbol": "KQ.m@SHFE.al",
+  "source": "downloaded",
+  "status": "PASS",
+  "five_minute": {
+    "rows": 10000,
+    "start": "2026-03-31 00:25:00",
+    "end": "2026-09-05 00:55:00",
+    "path": "research/robustness_data/raw/AL/5m.csv",
+    "sha256": "b6bcf9c9080b6b08b4098da8c45168ccec360dece1587f3feefa33baf5e25868"
+  },
+  "fifteen_minute": {
+    "rows": 10000,
+    "start": "2025-05-08 23:30:00",
+    "end": "2026-09-05 00:45:00",
+    "path": "research/robustness_data/raw/AL/15m.csv",
+    "sha256": "437ccd8e6a83578d6c4ca1c0cf5dc591ddcf2b4eb00bd0ecdb5eed334a35ea4e"
+  },
+  "aggregation": {
+    "fifteen_bars_total": 10000,
+    "fifteen_bars_with_non_three_5m": 6667,
+    "fifteen_bars_covered_by_5m": 3333,
+    "usable_15m_bars": 3301,
+    "first_15m_index": 6699,
+    "last_15m_index": 9999,
+    "usable_window_start": "2026-04-01 00:45:00",
+    "usable_window_end": "2026-09-05 00:45:00",
+    "five_bars_in_aligned_window": 9903,
+    "expected_five_bars": 9903,
+    "compared_15m_bars": 3301,
+    "count_mismatch": 0,
+    "ohlcv_oi_mismatch": 0,
+    "aggregation_pass": true,
+    "warmup_5m_bars_before_window": 97
+  }
+}

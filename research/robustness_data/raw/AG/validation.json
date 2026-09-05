@@ -1,0 +1,37 @@
+{
+  "instrument": "AG",
+  "symbol": "KQ.m@SHFE.ag",
+  "source": "reuse_silver_main_data",
+  "status": "PASS",
+  "five_minute": {
+    "rows": 10000,
+    "start": "2026-04-24 23:55:00",
+    "end": "2026-09-05 02:25:00",
+    "path": "silver_main_data/silver_main_5m.csv",
+    "sha256": "787f140d2c46123e62c42c44c25bd5a79d65f31bb1389b8877720bbb5097a864"
+  },
+  "fifteen_minute": {
+    "rows": 10000,
+    "start": "2025-07-23 10:45:00",
+    "end": "2026-09-05 02:15:00",
+    "path": "silver_main_data/silver_main_15m.csv",
+    "sha256": "5ea299926ad3fc4d930033f53956296b46e5057028610f5033f0a66ad2ecef7f"
+  },
+  "aggregation": {
+    "fifteen_bars_total": 10000,
+    "fifteen_bars_with_non_three_5m": 6667,
+    "fifteen_bars_covered_by_5m": 3333,
+    "usable_15m_bars": 3301,
+    "first_15m_index": 6699,
+    "last_15m_index": 9999,
+    "usable_window_start": "2026-04-27 22:45:00",
+    "usable_window_end": "2026-09-05 02:15:00",
+    "five_bars_in_aligned_window": 9903,
+    "expected_five_bars": 9903,
+    "compared_15m_bars": 3301,
+    "count_mismatch": 0,
+    "ohlcv_oi_mismatch": 0,
+    "aggregation_pass": true,
+    "warmup_5m_bars_before_window": 97
+  }
+}

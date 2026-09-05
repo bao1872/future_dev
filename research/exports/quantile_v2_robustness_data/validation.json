@@ -1,0 +1,43 @@
+{
+  "status": "PASS",
+  "pass_instrument_count": 8,
+  "pass_instruments": [
+    "AG",
+    "AL",
+    "CF",
+    "CU",
+    "I",
+    "M",
+    "SC",
+    "SN"
+  ],
+  "min_pass_instruments": 6,
+  "required_instruments": [
+    "AG",
+    "CU",
+    "I",
+    "M",
+    "SC"
+  ],
+  "missing_required": [],
+  "identical_feature_schema": true,
+  "model_feature_count": 11,
+  "uses_smc": false,
+  "uses_momentum": false,
+  "uses_oracle": false,
+  "uses_semivariance_or_jump": false,
+  "uses_1h_or_4h_series": false,
+  "min_5m_rows": 9500,
+  "min_panel_rows": 3000,
+  "file_sizes_mb": {
+    "AG_panel.csv": 1.6603,
+    "CU_panel.csv": 1.6646,
+    "AL_panel.csv": 1.6508,
+    "SN_panel.csv": 1.6631,
+    "I_panel.csv": 1.6194,
+    "SC_panel.csv": 1.6528,
+    "M_panel.csv": 1.6387,
+    "CF_panel.csv": 1.6422,
+    "instrument_summary.csv": 0.0021
+  }
+}
