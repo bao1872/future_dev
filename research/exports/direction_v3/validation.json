@@ -1,0 +1,58 @@
+{
+  "status": "PASS",
+  "instrument_count": 8,
+  "row_count": 512,
+  "delta_row_count": 32,
+  "quantile_state_verification": [
+    {
+      "instrument": "AG",
+      "reference_interval_skill": 0.1218325897735631,
+      "reference_oos_rows": 10381,
+      "regenerated_rows": 10381
+    },
+    {
+      "instrument": "CU",
+      "reference_interval_skill": 0.0674703233859186,
+      "reference_oos_rows": 8714,
+      "regenerated_rows": 8714
+    },
+    {
+      "instrument": "AL",
+      "reference_interval_skill": 0.0870399267534171,
+      "reference_oos_rows": 8714,
+      "regenerated_rows": 8714
+    },
+    {
+      "instrument": "SN",
+      "reference_interval_skill": 0.1039829378435788,
+      "reference_oos_rows": 8714,
+      "regenerated_rows": 8714
+    },
+    {
+      "instrument": "I",
+      "reference_interval_skill": -0.0025337906254869,
+      "reference_oos_rows": 6489,
+      "regenerated_rows": 6489
+    },
+    {
+      "instrument": "SC",
+      "reference_interval_skill": 0.0687828382317886,
+      "reference_oos_rows": 10380,
+      "regenerated_rows": 10380
+    },
+    {
+      "instrument": "M",
+      "reference_interval_skill": 0.0250909561416006,
+      "reference_oos_rows": 6489,
+      "regenerated_rows": 6489
+    },
+    {
+      "instrument": "CF",
+      "reference_interval_skill": 0.0144435072096538,
+      "reference_oos_rows": 6489,
+      "regenerated_rows": 6489
+    }
+  ],
+  "no_tuning": true,
+  "no_pnl": true
+}

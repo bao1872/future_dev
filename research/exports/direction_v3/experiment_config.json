@@ -1,0 +1,94 @@
+{
+  "purpose": "Test whether participation state (volume / OI) adds beyond price path + realized volatility.",
+  "pre_registered_primary": "H5 + ALL + gbr, B3 vs B0",
+  "baseline": "B0 = price + RV, i.e. V2's S1. V2's S2 / S3 are not carried forward because they added nothing.",
+  "feature_blocks": {
+    "B0": [
+      "r5",
+      "r10",
+      "r15",
+      "r30",
+      "RV15",
+      "RV30",
+      "RV60",
+      "rv_acceleration"
+    ],
+    "B1": [
+      "r5",
+      "r10",
+      "r15",
+      "r30",
+      "RV15",
+      "RV30",
+      "RV60",
+      "rv_acceleration",
+      "vol_surprise_5m",
+      "vol_surprise_30m",
+      "vol_surprise_60m",
+      "vol_acceleration"
+    ],
+    "B2": [
+      "r5",
+      "r10",
+      "r15",
+      "r30",
+      "RV15",
+      "RV30",
+      "RV60",
+      "rv_acceleration",
+      "dOI_5m",
+      "dOI_15m",
+      "dOI_30m",
+      "relative_dOI"
+    ],
+    "B3": [
+      "r5",
+      "r10",
+      "r15",
+      "r30",
+      "RV15",
+      "RV30",
+      "RV60",
+      "rv_acceleration",
+      "vol_surprise_5m",
+      "vol_surprise_30m",
+      "vol_surprise_60m",
+      "vol_acceleration",
+      "dOI_5m",
+      "dOI_15m",
+      "dOI_30m",
+      "relative_dOI",
+      "r5_x_vol_surprise",
+      "r5_x_relative_dOI"
+    ]
+  },
+  "volume_relative_only": true,
+  "volume_baseline": "rolling median over the previous 12 continuous bars",
+  "oi_source": "PyTDX position, cross-validated against TqSdk on real contracts",
+  "forbidden_fields_unused": [
+    "zengcang",
+    "nature",
+    "nature_name",
+    "direction",
+    "amount"
+  ],
+  "horizons_bars": {
+    "H5": 1,
+    "H15": 3
+  },
+  "learners": [
+    "gbr",
+    "logistic"
+  ],
+  "primary_learner": "gbr",
+  "fair_comparison": "every block evaluated on the common row set where all B3 features and the target exist",
+  "continuity": "every window continuous in calendar time",
+  "causality": "features end at the last closed bar k = row_id - 1",
+  "no_transaction_data": true,
+  "no_smc": true,
+  "no_dsa": true,
+  "no_momentum": true,
+  "no_cross_market": true,
+  "no_tuning": true,
+  "no_pnl": true
+}
