@@ -41,6 +41,14 @@ SQZ_COLORS = {
 OB_BULL_FILL = "rgba(49,121,245,0.20)"
 OB_BEAR_FILL = "rgba(247,124,128,0.20)"
 
+# Strategy decision UI colours - deliberately NOT the SMC indicator colours.
+STRATEGY_BUY = "#00F6C2"
+STRATEGY_SELL = "#F59E0B"
+
+# Oracle hindsight labels - open symbols keep them visually distinct.
+ORACLE_BUY = "#82A0FF"
+ORACLE_SELL = "#8B5CF6"
+
 # Panji keeps ~20% of the plot width as the structure extension area.
 RIGHT_PAD_RATIO = 0.20
 
@@ -69,6 +77,8 @@ def build_smc_momentum_figure(
     show_equal_levels: bool = True,
     show_trailing: bool = True,
     show_momentum: bool = True,
+    strategy_signals: pd.DataFrame | None = None,
+    oracle_labels_df: pd.DataFrame | None = None,
 ) -> go.Figure:
     """Price + SMC / SQZMOM figure on a continuous bar-index x axis.
 
@@ -291,6 +301,140 @@ def build_smc_momentum_figure(
                 row=1,
                 col=1,
             )
+
+    # --- Strategy A candidate signals + Oracle hindsight labels
+    price_span = float(view["high"].max() - view["low"].min())
+    marker_pad = price_span * 0.018 if price_span > 0 else 1.0
+
+    def _strategy_trace(side: str):
+        if strategy_signals is None or strategy_signals.empty:
+            return
+
+        subset = strategy_signals[strategy_signals["side"] == side].copy()
+
+        if subset.empty:
+            return
+
+        xs = []
+        ys = []
+        hover = []
+
+        for _, sig in subset.iterrows():
+            gx = int(sig["bar_index"])
+            lx = to_local(gx)
+
+            if lx is None:
+                continue
+
+            if side == "BUY":
+                y = float(full["low"].iloc[gx]) - marker_pad
+            else:
+                y = float(full["high"].iloc[gx]) + marker_pad
+
+            reasons = sig["reason"]
+
+            if isinstance(reasons, list):
+                reason_html = "<br>".join(str(x) for x in reasons)
+            else:
+                reason_html = str(reasons)
+
+            hover_text = (
+                f"<b>{side} · {sig['event_type']}</b>"
+                f"<br>Structure: {sig['structure_level']}"
+                f"<br>Signal Bar: {sig['signal_bar_time']}"
+                f"<br>Decision Available: {sig['decision_time']}"
+                f"<br>4H Swing Bias: {sig['higher_swing_bias']}"
+                f"<br>1H Momentum: {sig['momentum_val']} / {sig['momentum_bcolor']}"
+                f"<br><br>{reason_html}"
+            )
+
+            xs.append(lx)
+            ys.append(y)
+            hover.append(hover_text)
+
+        if not xs:
+            return
+
+        fig.add_trace(
+            go.Scatter(
+                x=xs,
+                y=ys,
+                mode="markers",
+                marker=dict(
+                    symbol="triangle-up" if side == "BUY" else "triangle-down",
+                    size=13,
+                    color=STRATEGY_BUY if side == "BUY" else STRATEGY_SELL,
+                    line=dict(width=1, color=CHART_BG),
+                ),
+                text=hover,
+                hovertemplate="%{text}<extra></extra>",
+                name=f"Strategy {side}",
+                showlegend=False,
+            ),
+            row=1,
+            col=1,
+        )
+
+    _strategy_trace("BUY")
+    _strategy_trace("SELL")
+
+    if oracle_labels_df is not None and not oracle_labels_df.empty:
+        for side in ("BUY", "SELL"):
+            subset = oracle_labels_df[
+                oracle_labels_df["oracle_action"] == side
+            ]
+
+            xs = []
+            ys = []
+            hover = []
+
+            for _, row in subset.iterrows():
+                gx = int(row["bar_index"])
+                lx = to_local(gx)
+
+                if lx is None:
+                    continue
+
+                if side == "BUY":
+                    y = float(full["low"].iloc[gx]) - marker_pad * 2.0
+                else:
+                    y = float(full["high"].iloc[gx]) + marker_pad * 2.0
+
+                xs.append(lx)
+                ys.append(y)
+
+                hover.append(
+                    f"<b>ORACLE {side}</b>"
+                    f"<br>HINDSIGHT LABEL"
+                    f"<br>Time: {row['time']}"
+                    f"<br>Close: {float(row['close']):.2f}"
+                    f"<br>Target position: {int(row['oracle_position'])}"
+                )
+
+            if xs:
+                fig.add_trace(
+                    go.Scatter(
+                        x=xs,
+                        y=ys,
+                        mode="markers",
+                        marker=dict(
+                            symbol=(
+                                "triangle-up-open"
+                                if side == "BUY"
+                                else "triangle-down-open"
+                            ),
+                            size=15,
+                            color=ORACLE_BUY if side == "BUY" else ORACLE_SELL,
+                            line=dict(width=2),
+                        ),
+                        text=hover,
+                        hovertemplate="%{text}<extra></extra>",
+                        name=f"Oracle {side}",
+                        showlegend=False,
+                    ),
+                    row=1,
+                    col=1,
+                )
 
     # --- SQZMOM: per-bar canonical bcolor + canonical scolor on the zero line
     if show_momentum:

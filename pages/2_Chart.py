@@ -57,6 +57,20 @@ show_equal_levels = l3.toggle("EQH/EQL", value=True)
 show_trailing = l4.toggle("Strong/Weak", value=True)
 show_momentum = l5.toggle("Momentum", value=True)
 
+st.markdown("**研究信号**")
+
+s1, s2 = st.columns(2)
+show_strategy = s1.toggle("策略A · 4H→1H", value=True)
+show_oracle = s2.toggle("Oracle 最优标签", value=False)
+
+oracle_penalty_bps = st.select_slider(
+    "Oracle 换仓惩罚",
+    options=[5, 10, 20, 30, 50, 80],
+    value=20,
+    format_func=lambda x: f"{x} bp",
+    disabled=not show_oracle,
+)
+
 raw = load_bars(st.session_state.tf)
 full = to_indicator_frame(raw)
 
@@ -106,6 +120,50 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# ---------------------------------------------------------------------------
+# Strategy A candidates (4H trend -> 1H event + momentum)
+# ---------------------------------------------------------------------------
+
+strategy_signals = None
+
+if show_strategy:
+    if st.session_state.tf != "1h":
+        st.caption("策略A的执行周期是1H；当前周期仅显示指标，不显示策略信号。")
+    else:
+        from strategies.smc_momentum_signals import generate_signals
+
+        with st.spinner("Generating Strategy A candidates (4H -> 1H)..."):
+            strategy_signals = generate_signals(
+                higher_4h=to_indicator_frame(load_bars("4h")),
+                lower_1h=full,
+            )
+
+# ---------------------------------------------------------------------------
+# Oracle hindsight labels (close price only, independent of any indicator)
+# ---------------------------------------------------------------------------
+
+oracle_df = None
+oracle_meta = None
+
+if show_oracle:
+    from research.oracle_labels import oracle_labels
+
+    with st.spinner("Solving Oracle hindsight optimum..."):
+        oracle_df, oracle_meta = oracle_labels(
+            full,
+            trade_penalty=oracle_penalty_bps / 10_000.0,
+        )
+
+    st.warning(
+        "Oracle 是使用完整未来价格路径计算的事后最优训练标签，"
+        "包含未来信息，只能用于标签/对照，严禁作为实时策略信号。"
+    )
+    st.caption(
+        f"Oracle penalty: {oracle_penalty_bps} bp · "
+        f"actions: {oracle_meta['action_count']} · "
+        f"turnover units: {oracle_meta['turnover_units']}"
+    )
+
 fig = build_smc_momentum_figure(
     full,
     smc,
@@ -116,6 +174,8 @@ fig = build_smc_momentum_figure(
     show_equal_levels=show_equal_levels,
     show_trailing=show_trailing,
     show_momentum=show_momentum,
+    strategy_signals=strategy_signals,
+    oracle_labels_df=oracle_df,
 )
 
 st.plotly_chart(fig, use_container_width=True)
@@ -128,3 +188,58 @@ st.caption(
     f" · 指标在完整历史上计算，裁剪只发生在绘图阶段 · "
     f"横轴为连续 bar 序列，非日历时间"
 )
+
+# ---------------------------------------------------------------------------
+# Decision evidence
+# ---------------------------------------------------------------------------
+
+if strategy_signals is not None:
+    view_start_pos = max(
+        0,
+        len(full) - (display_bars if display_bars else len(full)),
+    )
+
+    visible_signals = strategy_signals[
+        strategy_signals["bar_index"] >= view_start_pos
+    ]
+
+    with st.expander(f"策略A信号明细 ({len(visible_signals)})"):
+        if visible_signals.empty:
+            st.caption("当前视窗没有满足条件的信号。")
+        else:
+            table = visible_signals[
+                [
+                    "signal_bar_time",
+                    "decision_time",
+                    "side",
+                    "event_type",
+                    "structure_level",
+                    "higher_swing_bias",
+                    "momentum_val",
+                    "momentum_bcolor",
+                    "reason",
+                ]
+            ].copy()
+
+            table["reason"] = table["reason"].apply(
+                lambda x: " | ".join(x) if isinstance(x, list) else str(x)
+            )
+
+            st.dataframe(table, use_container_width=True, hide_index=True)
+
+if oracle_df is not None:
+    with st.expander("Oracle 标签明细"):
+        actions = oracle_df[oracle_df["oracle_action"] != "HOLD"]
+        st.dataframe(
+            actions[
+                [
+                    "time",
+                    "close",
+                    "oracle_action",
+                    "oracle_position",
+                    "oracle_delta",
+                ]
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
