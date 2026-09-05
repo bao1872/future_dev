@@ -1,0 +1,72 @@
+{
+  "purpose": "Test whether quantile distribution geometry carries direction information inside high-opportunity states.",
+  "quantile_source": {
+    "horizon": 4,
+    "feature_set": "F1_VOL",
+    "model": "gbr_quantile",
+    "note": "regenerated through the locked code path, not re-fit and not modified"
+  },
+  "direction_horizons_bars": {
+    "H5": 1,
+    "H15": 3,
+    "H30": 6
+  },
+  "primary_horizon": "H15",
+  "direction_models": {
+    "D0a": [
+      "center"
+    ],
+    "D0b": [
+      "asymmetry"
+    ],
+    "D0c": [
+      "center",
+      "width",
+      "asymmetry"
+    ]
+  },
+  "strata": {
+    "ALL": null,
+    "TOP50": 0.5,
+    "TOP30": 0.7,
+    "TOP20": 0.8
+  },
+  "strata_thresholds": "computed on TRAIN rows per fold only",
+  "learner": "LogisticRegression(penalty=l2, C=1.0, max_iter=2000) + StandardScaler fitted on train",
+  "state_carry": "15m decision state forward-filled onto the 5m execution grid, never backward filled",
+  "target_definition": "entry = open of the decision 5m bar, exit = close of the n-th 5m bar of the window",
+  "nonoverlap_mod": {
+    "H15": 3,
+    "H30": 6
+  },
+  "groups": {
+    "ALL_8": [
+      "AG",
+      "CU",
+      "AL",
+      "SN",
+      "I",
+      "SC",
+      "M",
+      "CF"
+    ],
+    "EX_I_7": [
+      "AG",
+      "CU",
+      "AL",
+      "SN",
+      "SC",
+      "M",
+      "CF"
+    ]
+  },
+  "no_quantile_refit": true,
+  "no_price_path": true,
+  "no_rv": true,
+  "no_volume": true,
+  "no_oi": true,
+  "no_transaction_data": true,
+  "no_gbr": true,
+  "no_tuning": true,
+  "no_pnl": true
+}
