@@ -1,0 +1,177 @@
+{
+  "purpose": "Multi-timeframe market-state research against hindsight Oracle direction labels.",
+  "instrument": "KQ.m@SHFE.ag",
+  "project_mode": "RESEARCH",
+  "oracle_semantics": {
+    "ground_truth": false,
+    "description": "Dynamic-programming hindsight direction reference only.",
+    "positions": {
+      "-1": "SHORT",
+      "0": "FLAT",
+      "1": "LONG"
+    },
+    "future_information": true,
+    "never_use_as_feature": true
+  },
+  "feature_semantics": {
+    "bar_timestamp": "bar start timestamp",
+    "feature_available_at": "next observed bar start; no nominal-duration assumption",
+    "bos_choch_role": "environment descriptors, not trade triggers",
+    "feature_prefix": "feat_",
+    "target_prefix": "target_"
+  },
+  "multitimeframe_alignment": {
+    "15m": "15m current closed bar + latest causally available 1h + latest causally available 4h",
+    "1h": "1h current closed bar + latest causally available 4h",
+    "4h": "4h current closed bar",
+    "rule": "higher source available_at <= base decision_time"
+  },
+  "penalties_bp": [
+    5,
+    10,
+    20,
+    30,
+    50,
+    80,
+    100,
+    150,
+    200,
+    300
+  ],
+  "market_data": {
+    "15m": {
+      "path": "silver_main_data/silver_main_15m.csv",
+      "rows": 10000,
+      "start": "2025-07-23 10:45:00",
+      "end": "2026-09-05 02:15:00",
+      "sha256": "5ea299926ad3fc4d930033f53956296b46e5057028610f5033f0a66ad2ecef7f"
+    },
+    "1h": {
+      "path": "silver_main_data/silver_main_1h.csv",
+      "rows": 2975,
+      "start": "2025-07-23 11:00:00",
+      "end": "2026-09-05 01:00:00",
+      "sha256": "8e808621419d557538db188efa8a38eee8f8f63e1595628e9f1bf1c8e40dbca3"
+    },
+    "4h": {
+      "path": "silver_main_data/silver_main_4h.csv",
+      "rows": 1082,
+      "start": "2025-07-23 12:00:00",
+      "end": "2026-09-04 20:00:00",
+      "sha256": "69e5df5ce49ac836c17532238d3d33a6fc2d80d518718f4d8d80d5a153686500"
+    }
+  },
+  "panel_report": {
+    "15m": {
+      "feature_rows": 10000,
+      "feature_columns": 72,
+      "oracle_rows": 10000,
+      "oracle_columns": 90,
+      "structure_event_count": 616,
+      "first_bar": "2025-07-23 10:45:00",
+      "last_bar": "2026-09-05 02:15:00"
+    },
+    "1h": {
+      "feature_rows": 2975,
+      "feature_columns": 72,
+      "oracle_rows": 2975,
+      "oracle_columns": 90,
+      "structure_event_count": 161,
+      "first_bar": "2025-07-23 11:00:00",
+      "last_bar": "2026-09-05 01:00:00"
+    },
+    "4h": {
+      "feature_rows": 1082,
+      "feature_columns": 72,
+      "oracle_rows": 1082,
+      "oracle_columns": 90,
+      "structure_event_count": 66,
+      "first_bar": "2025-07-23 12:00:00",
+      "last_bar": "2026-09-04 20:00:00"
+    }
+  },
+  "research_panel_rows": {
+    "15m": 9999,
+    "1h": 2974,
+    "4h": 1081
+  },
+  "research_panel_columns": {
+    "15m": 325,
+    "1h": 217,
+    "4h": 109
+  },
+  "file_sizes_mb": {
+    "feature_panel_15m.csv": 7.397,
+    "feature_panel_1h.csv": 2.162,
+    "feature_panel_4h.csv": 0.778,
+    "oracle_panel_15m.csv": 3.262,
+    "oracle_panel_1h.csv": 0.944,
+    "oracle_panel_4h.csv": 0.338,
+    "oracle_regime_summary.csv": 0.005,
+    "research_panel_15m.csv": 26.128,
+    "research_panel_1h.csv": 5.101,
+    "research_panel_4h.csv": 0.899
+  },
+  "files": {
+    "feature_panel_15m.csv": {
+      "rows": 10000,
+      "columns": 72,
+      "bytes": 7756154,
+      "sha256": "9e6d478499903efeaba07efc2bd3dd69abc44747f9f93536073ce3f06346922b"
+    },
+    "feature_panel_1h.csv": {
+      "rows": 2975,
+      "columns": 72,
+      "bytes": 2266511,
+      "sha256": "82b77d20e064ce1244cf90166c53c01b888171c3463b1b3fe262df4358bcaad7"
+    },
+    "feature_panel_4h.csv": {
+      "rows": 1082,
+      "columns": 72,
+      "bytes": 815802,
+      "sha256": "de66619b5e16471923bcf1f874250a373386ae081ed94b28a2662e2df7c7d806"
+    },
+    "oracle_panel_15m.csv": {
+      "rows": 10000,
+      "columns": 90,
+      "bytes": 3420478,
+      "sha256": "4f5584a1231b48202d1c02aad48b810a54a53ac4a35b23c7525ebdd4812d85be"
+    },
+    "oracle_panel_1h.csv": {
+      "rows": 2975,
+      "columns": 90,
+      "bytes": 989848,
+      "sha256": "5c2b176201322f6c39a9c6486cca76ddf5f0111831662233782a351f8ad827bb"
+    },
+    "oracle_panel_4h.csv": {
+      "rows": 1082,
+      "columns": 90,
+      "bytes": 354602,
+      "sha256": "3c8afe13bb9903dcca63318c7a8e6570225cf774066615ff02d87f73fbbc87b7"
+    },
+    "oracle_regime_summary.csv": {
+      "rows": 30,
+      "columns": 22,
+      "bytes": 4917,
+      "sha256": "5152e72c0b72c548a4b10bd78b91b39d18b671882a2fdd5d0bc30fd8b3228674"
+    },
+    "research_panel_15m.csv": {
+      "rows": 9999,
+      "columns": 325,
+      "bytes": 27397623,
+      "sha256": "f8dd2914f3989a25868b2205618b44aabc69181cb0b5c9937da99bb1bcfaa9da"
+    },
+    "research_panel_1h.csv": {
+      "rows": 2974,
+      "columns": 217,
+      "bytes": 5349122,
+      "sha256": "45bb656bc1759c696438df8aa398f61d3c290845b5baa0171063651fe3a216d2"
+    },
+    "research_panel_4h.csv": {
+      "rows": 1081,
+      "columns": 109,
+      "bytes": 942419,
+      "sha256": "5baff03d16bedbf44192186cdf8d47ceea60c7c37d5422a75bbe1ddfaed62d6b"
+    }
+  }
+}
