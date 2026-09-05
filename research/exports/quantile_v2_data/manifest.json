@@ -1,0 +1,101 @@
+{
+  "purpose": "5m realized-state + 15m decision dataset for short-horizon conditional quantile forecasting.",
+  "instrument": "KQ.m@SHFE.ag",
+  "decision_timeframe": "15m",
+  "high_frequency_source": "5m",
+  "window_rebasing": {
+    "reason": "TqSdk 5m serial is hard-capped at 10000 bars (~4.5 months), shorter than the current 15m file (~13.5 months). The 15m research window is re-based onto the range the 5m series can cover with >=96 bars of high-frequency warmup.",
+    "first_15m_index": 6699,
+    "last_15m_index": 9999,
+    "aligned_15m_bars": 3301,
+    "15m_bars_available": 10000
+  },
+  "prediction_horizons": {
+    "4": "1h",
+    "8": "2h",
+    "16": "4h"
+  },
+  "realized_windows_5m": {
+    "12": "1h",
+    "24": "2h",
+    "48": "4h",
+    "96": "8h"
+  },
+  "target_semantics": {
+    "decision": "next observed 15m bar start",
+    "entry_price": "next observed 15m bar open",
+    "exit_price": "close at base index + horizon",
+    "quantile_target": "future raw log return",
+    "mfe_mae": "evaluation reference only",
+    "dp_oracle": "hindsight reference only, never feature"
+  },
+  "feature_semantics": {
+    "SMC": false,
+    "Momentum": false,
+    "BOS_CHoCH": false,
+    "families": [
+      "15m returns / geometry",
+      "15m volume / OI",
+      "5m realized variance",
+      "5m positive / negative semivariance",
+      "5m bipower variation",
+      "5m jump proxy",
+      "5m volume / OI state",
+      "generic session/time state"
+    ]
+  },
+  "sources": {
+    "silver_main_5m.csv": {
+      "rows": 10000,
+      "sha256": "787f140d2c46123e62c42c44c25bd5a79d65f31bb1389b8877720bbb5097a864",
+      "start": "2026-04-24 23:55:00",
+      "end": "2026-09-05 02:25:00"
+    },
+    "silver_main_15m.csv": {
+      "rows": 10000,
+      "rows_used": 3301,
+      "sha256": "5ea299926ad3fc4d930033f53956296b46e5057028610f5033f0a66ad2ecef7f",
+      "start": "2025-07-23 10:45:00",
+      "end": "2026-09-05 02:15:00"
+    }
+  },
+  "outputs": {
+    "quantile_panel_15m.csv": {
+      "rows": 3300,
+      "columns": 122,
+      "sha256": "cbb5837d817ad8030d418a1cdc3c5f97e5c02ee7a30aa1bf60f12ab33675dd4f"
+    },
+    "feature_dictionary.csv": {
+      "rows": 122,
+      "sha256": "64bbb67e80aa820bdce5415f8c6bc35d75d8f103a34f486156fe23a82ba9f013"
+    },
+    "realized_measure_summary.csv": {
+      "rows": 71,
+      "sha256": "d88f2033840412b124fbd56ed8e9b0ca97733ea875b0de3a69c1235323dd82bc"
+    }
+  },
+  "validation": {
+    "panel_rows": 3300,
+    "panel_columns": 122,
+    "feature_count": 97,
+    "realized_feature_count": 71,
+    "aligned_15m_window": {
+      "first_15m_index": 6699,
+      "last_15m_index": 9999,
+      "aligned_15m_bars": 3301,
+      "start": "2026-04-27 22:45:00",
+      "end": "2026-09-05 02:15:00",
+      "base_rows": 3300
+    },
+    "feature_uses_smc": false,
+    "feature_uses_momentum": false,
+    "feature_uses_oracle": false,
+    "five_minute_feature_causality": true,
+    "future_target_valid_rows": {
+      "4": 3297,
+      "8": 3293,
+      "16": 3285
+    },
+    "no_infinity": true
+  }
+}
