@@ -1,0 +1,87 @@
+{
+  "purpose": "Test whether realized volatility state conditions the continuation / reversal relation.",
+  "pre_registered_primary": "H5, ALL observations, S3 vs S0",
+  "primary_criterion": "median AUC / Brier / logloss improvement and positive instrument share; no arbitrary AUC threshold",
+  "architecture": "Direction model trained on ALL rows = WHICH WAY; Quantile width = IS IT WORTH TRADING (payoff gate, not predictability gate)",
+  "horizons_bars": {
+    "H5": 1,
+    "H15": 3
+  },
+  "dropped_horizon": "H30: V1 showed decay and it adds nothing to a 5m-15m cycle",
+  "feature_blocks": {
+    "S0": [
+      "r5",
+      "r10",
+      "r15",
+      "r30"
+    ],
+    "S1": [
+      "r5",
+      "r10",
+      "r15",
+      "r30",
+      "RV15",
+      "RV30",
+      "RV60",
+      "rv_acceleration"
+    ],
+    "S2": [
+      "r5",
+      "r10",
+      "r15",
+      "r30",
+      "RV15",
+      "RV30",
+      "RV60",
+      "rv_acceleration",
+      "RS_up_30",
+      "RS_down_30",
+      "semivar_balance_30"
+    ],
+    "S3": [
+      "r5",
+      "r10",
+      "r15",
+      "r30",
+      "RV15",
+      "RV30",
+      "RV60",
+      "rv_acceleration",
+      "RS_up_30",
+      "RS_down_30",
+      "semivar_balance_30",
+      "r5_x_rv_acc",
+      "r15_x_rv_acc",
+      "r15_x_semivar"
+    ]
+  },
+  "fair_comparison": "all blocks evaluated on the common row set where every S3 feature and the target exist, so blocks differ by features only",
+  "quantile_source": {
+    "horizon": 4,
+    "feature_set": "F1_VOL",
+    "model": "gbr_quantile",
+    "role": "width only, for post-hoc opportunity strata",
+    "refit": false
+  },
+  "continuity": "every target and feature window must be continuous in calendar time",
+  "causality": "features end at the last closed bar k = row_id - 1; the target starts at t using the open of the decision bar",
+  "learners": "fixed L2 logistic; fixed shallow GBR (150 trees, lr 0.03, depth 2, min_samples_leaf 30, subsample 0.8)",
+  "strata": {
+    "ALL": null,
+    "TOP50": 0.5,
+    "TOP30": 0.7,
+    "TOP20": 0.8
+  },
+  "nonoverlap_mod": {
+    "H15": 3
+  },
+  "no_volume": true,
+  "no_oi": true,
+  "no_transaction_data": true,
+  "no_smc": true,
+  "no_dsa": true,
+  "no_momentum": true,
+  "no_cross_market": true,
+  "no_tuning": true,
+  "no_pnl": true
+}
