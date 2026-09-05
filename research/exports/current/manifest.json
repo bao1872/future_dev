@@ -1,0 +1,56 @@
+{
+  "instrument": "KQ.m@SHFE.ag",
+  "strategy": "smc_momentum_4h_1h_v0",
+  "market_data": {
+    "15m": {
+      "path": "silver_main_data/silver_main_15m.csv",
+      "rows": 10000,
+      "start": "2025-07-23 10:45:00",
+      "end": "2026-09-05 02:15:00",
+      "sha256": "5ea299926ad3fc4d930033f53956296b46e5057028610f5033f0a66ad2ecef7f"
+    },
+    "1h": {
+      "path": "silver_main_data/silver_main_1h.csv",
+      "rows": 2975,
+      "start": "2025-07-23 11:00:00",
+      "end": "2026-09-05 01:00:00",
+      "sha256": "8e808621419d557538db188efa8a38eee8f8f63e1595628e9f1bf1c8e40dbca3"
+    },
+    "4h": {
+      "path": "silver_main_data/silver_main_4h.csv",
+      "rows": 1082,
+      "start": "2025-07-23 12:00:00",
+      "end": "2026-09-04 20:00:00",
+      "sha256": "69e5df5ce49ac836c17532238d3d33a6fc2d80d518718f4d8d80d5a153686500"
+    }
+  },
+  "strategy_signal_rows": 63,
+  "oracle_penalties_bp": [
+    5,
+    10,
+    20,
+    30,
+    50,
+    80
+  ],
+  "exports": [
+    "strategy_a_signals.csv",
+    "oracle_labels_1h_5bp.csv",
+    "oracle_labels_1h_10bp.csv",
+    "oracle_labels_1h_20bp.csv",
+    "oracle_labels_1h_30bp.csv",
+    "oracle_labels_1h_50bp.csv",
+    "oracle_labels_1h_80bp.csv",
+    "oracle_summary.csv",
+    "higher_4h_state.csv",
+    "lower_1h_state.csv",
+    "aligned_1h_20bp.csv",
+    "strategy_oracle_distance.csv"
+  ],
+  "semantics": {
+    "oracle_is_hindsight": true,
+    "oracle_action": "sign of position delta; BUY/SELL may include exits",
+    "oracle_entry_side": "BUY only when new position == +1; SELL only when new position == -1",
+    "strategy_signal": "candidate marker only; no position, exit or PnL"
+  }
+}
