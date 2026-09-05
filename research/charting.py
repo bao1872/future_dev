@@ -350,6 +350,10 @@ def build_smc_momentum_figure(
         zerolinecolor=GRID_SOFT,
     )
 
+    # Candlestick automatically enables Plotly's range slider thumbnail.
+    # Disable it: the Panji-style research chart uses the SQZMOM subplot here.
+    fig.update_xaxes(rangeslider_visible=False)
+
     fig.update_yaxes(gridcolor=GRID, zerolinecolor=GRID_SOFT)
 
     fig.update_layout(
