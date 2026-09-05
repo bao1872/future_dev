@@ -1,0 +1,7 @@
+{
+  "status": "PASS",
+  "history_days": 320,
+  "instrument_count": 8,
+  "history_rows": 2560,
+  "roll_event_rows": 81
+}

@@ -1,0 +1,68 @@
+{
+  "purpose": "Validate H4 quantile forecasts against classical benchmarks and robustness tests.",
+  "horizon": 4,
+  "instruments": [
+    "AG",
+    "CU",
+    "AL",
+    "SN",
+    "I",
+    "SC",
+    "M",
+    "CF"
+  ],
+  "scenarios": [
+    "FULL",
+    "NO_ROLL_3D"
+  ],
+  "static_models": {
+    "GBR_F1": [
+      "feat_15m_ret_1",
+      "feat_15m_ret_4",
+      "feat_15m_ret_8",
+      "feat_15m_ret_16",
+      "feat_15m_location_32",
+      "feat_time_bars_since_segment_start",
+      "feat_time_after_long_gap"
+    ],
+    "GBR_F1_VOL": [
+      "feat_15m_ret_1",
+      "feat_15m_ret_4",
+      "feat_15m_ret_8",
+      "feat_15m_ret_16",
+      "feat_15m_location_32",
+      "feat_time_bars_since_segment_start",
+      "feat_time_after_long_gap",
+      "feat_5m_1h_rv",
+      "feat_5m_rv_rate_ratio_1h_4h"
+    ],
+    "RV_ONLY_QR": null
+  },
+  "caviar_model": "CAVIAR_SAV",
+  "quantiles": [
+    0.1,
+    0.5,
+    0.9
+  ],
+  "caviar_quantiles": [
+    0.1,
+    0.9
+  ],
+  "bootstraps": 1000,
+  "block_length": 16,
+  "rng_seed": 20260905,
+  "hac_lag": 3,
+  "dq_lags": 2,
+  "roll_window_days": 3,
+  "min_filtered_train_rows": 600,
+  "min_filtered_test_rows": 150,
+  "caviar_shock": "abs(feat_15m_ret_1)",
+  "no_hyperparameter_search": true,
+  "no_new_learners": true,
+  "no_backtest": true,
+  "no_smc": true,
+  "no_momentum": true,
+  "no_oracle": true,
+  "vectorized": true,
+  "no_per_bar_python_loop": true
+}
