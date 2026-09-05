@@ -8,15 +8,21 @@ from market_data.offline_store import load_bundle
 from research.experiment_store import save_experiment
 from strategies.registry import all_strategies
 
-st.set_page_config(page_title="Strategy Lab · future_dev", layout="wide")
-st.title("Strategy Lab")
-st.caption("Offline strategy research only. Strategies do not access TqSdk.")
+st.title("策略实验")
+st.caption("只在离线行情上验证假设。策略不接触 TqSdk。")
 
 registry = all_strategies()
 if not registry:
-    st.info(
-        "No strategy is registered yet. This is intentional: define a concrete hypothesis, "
-        "copy `strategies/template_strategy.py`, then register it in `strategies/registry.py`."
+    st.info("当前尚未定义交易假设。")
+    st.markdown(
+        """
+预定研究框架：
+
+- **A · 4H → 1H**
+- **B · 1H → 15m**
+
+策略规则将在研究工作台指标验证完成后定义。
+"""
     )
     st.stop()
 
@@ -24,11 +30,13 @@ name = st.selectbox("Strategy", list(registry))
 spec = registry[name]
 st.write(spec.description)
 
-params_text = st.text_area(
-    "Parameters (JSON)",
-    value=json.dumps(spec.default_params, ensure_ascii=False, indent=2),
-    height=180,
-)
+with st.expander("高级参数"):
+    params_text = st.text_area(
+        "Parameters (JSON)",
+        value=json.dumps(spec.default_params, ensure_ascii=False, indent=2),
+        height=180,
+    )
+
 note = st.text_input("Research note", "")
 
 bundle = load_bundle()
@@ -36,8 +44,18 @@ common_start = max(df["datetime"].min() for df in bundle.values())
 common_end = min(df["datetime"].max() for df in bundle.values())
 
 c1, c2 = st.columns(2)
-start = c1.date_input("Start", value=common_start.date(), min_value=common_start.date(), max_value=common_end.date())
-end = c2.date_input("End", value=common_end.date(), min_value=common_start.date(), max_value=common_end.date())
+start = c1.date_input(
+    "Start",
+    value=common_start.date(),
+    min_value=common_start.date(),
+    max_value=common_end.date(),
+)
+end = c2.date_input(
+    "End",
+    value=common_end.date(),
+    min_value=common_start.date(),
+    max_value=common_end.date(),
+)
 
 if st.button("Run strategy", type="primary"):
     try:
