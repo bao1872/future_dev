@@ -1,0 +1,95 @@
+{
+  "status": "PASS",
+  "instrument_count": 8,
+  "horizons": [
+    4,
+    8
+  ],
+  "aggregation_rule": "15m bucket accepted only with exactly 3 consecutive 5m bars",
+  "first_decision_time_by_instrument": {
+    "AG": "2025-01-02 09:15:00",
+    "CU": "2025-01-02 09:15:00",
+    "AL": "2025-01-02 09:15:00",
+    "SN": "2025-01-02 09:15:00",
+    "I": "2025-01-02 09:15:00",
+    "SC": "2025-01-02 09:15:00",
+    "M": "2025-01-02 09:15:00",
+    "CF": "2025-01-02 09:15:00"
+  },
+  "last_decision_time_by_instrument": {
+    "AG": "2026-09-05 02:30:00",
+    "CU": "2026-09-05 01:00:00",
+    "AL": "2026-09-05 01:00:00",
+    "SN": "2026-09-05 01:00:00",
+    "I": "2026-09-04 23:00:00",
+    "SC": "2026-09-05 02:30:00",
+    "M": "2026-09-04 23:00:00",
+    "CF": "2026-09-04 23:00:00"
+  },
+  "by_instrument": {
+    "AG": {
+      "five_minute_bars": 44517,
+      "fifteen_minute_bars": 14839,
+      "aggregation_yield": 1.0,
+      "rows": 14839,
+      "usable_h4": 14835,
+      "usable_h8": 14831
+    },
+    "CU": {
+      "five_minute_bars": 37371,
+      "fifteen_minute_bars": 12457,
+      "aggregation_yield": 1.0,
+      "rows": 12457,
+      "usable_h4": 12453,
+      "usable_h8": 12449
+    },
+    "AL": {
+      "five_minute_bars": 37371,
+      "fifteen_minute_bars": 12457,
+      "aggregation_yield": 1.0,
+      "rows": 12457,
+      "usable_h4": 12453,
+      "usable_h8": 12449
+    },
+    "SN": {
+      "five_minute_bars": 37371,
+      "fifteen_minute_bars": 12457,
+      "aggregation_yield": 1.0,
+      "rows": 12457,
+      "usable_h4": 12453,
+      "usable_h8": 12449
+    },
+    "I": {
+      "five_minute_bars": 27843,
+      "fifteen_minute_bars": 9281,
+      "aggregation_yield": 1.0,
+      "rows": 9281,
+      "usable_h4": 9277,
+      "usable_h8": 9273
+    },
+    "SC": {
+      "five_minute_bars": 44515,
+      "fifteen_minute_bars": 14837,
+      "aggregation_yield": 0.99991,
+      "rows": 14837,
+      "usable_h4": 14833,
+      "usable_h8": 14829
+    },
+    "M": {
+      "five_minute_bars": 27843,
+      "fifteen_minute_bars": 9281,
+      "aggregation_yield": 1.0,
+      "rows": 9281,
+      "usable_h4": 9277,
+      "usable_h8": 9273
+    },
+    "CF": {
+      "five_minute_bars": 27843,
+      "fifteen_minute_bars": 9281,
+      "aggregation_yield": 1.0,
+      "rows": 9281,
+      "usable_h4": 9277,
+      "usable_h8": 9273
+    }
+  }
+}

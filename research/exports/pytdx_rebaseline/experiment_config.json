@@ -1,0 +1,54 @@
+{
+  "purpose": "Reproduce the quantile behaviour on the PyTDX data base.",
+  "source": "PyTDX L8 5m bars, locally aggregated to 15m",
+  "horizons": [
+    4,
+    8
+  ],
+  "primary_horizon": 4,
+  "quantiles": [
+    0.1,
+    0.5,
+    0.9
+  ],
+  "feature_sets": {
+    "F1": [
+      "feat_15m_ret_1",
+      "feat_15m_ret_4",
+      "feat_15m_ret_8",
+      "feat_15m_ret_16",
+      "feat_15m_location_32",
+      "feat_time_bars_since_segment_start",
+      "feat_time_after_long_gap"
+    ],
+    "F1_VOL": [
+      "feat_15m_ret_1",
+      "feat_15m_ret_4",
+      "feat_15m_ret_8",
+      "feat_15m_ret_16",
+      "feat_15m_location_32",
+      "feat_time_bars_since_segment_start",
+      "feat_time_after_long_gap",
+      "feat_5m_1h_rv",
+      "feat_5m_rv_rate_ratio_1h_4h"
+    ]
+  },
+  "models": [
+    "linear_qr",
+    "gbr_quantile"
+  ],
+  "train_fraction": 0.3,
+  "test_fraction": 0.1,
+  "benchmark": "unconditional train-set quantile",
+  "no_hyperparameter_tuning": true,
+  "no_pooled_model": true,
+  "no_leave_one_instrument_out": true,
+  "no_bootstrap": true,
+  "no_hac": true,
+  "no_caviar": true,
+  "no_har": true,
+  "no_transaction_data": true,
+  "no_smc": true,
+  "no_dsa": true,
+  "no_momentum": true
+}

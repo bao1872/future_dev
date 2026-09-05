@@ -372,12 +372,15 @@ def fetch_bars(
     code: str,
     frequency: int = FREQ_5M,
     max_pages: int = 300,
+    not_before=None,
 ) -> pd.DataFrame:
     """Fetch bars page by page until the server stops returning.
 
     Pagination is verified: at 256 pages AGL8 5m returned 179,200
     unique bars reaching back to 2019-10-11. The loop ends when a
-    short or empty page comes back.
+    short or empty page comes back, or when `not_before` has been
+    reached. Pages come back newest-first, so early stopping is
+    safe.
     """
 
     frames = []
@@ -411,6 +414,23 @@ def fetch_bars(
         frames.append(
             df
         )
+
+        if not_before is not None:
+
+            seen = pd.to_datetime(
+                df[
+                    "datetime"
+                ],
+                errors=(
+                    "coerce"
+                ),
+            )
+
+            if (
+                seen.min()
+                <= not_before
+            ):
+                break
 
         if (
             len(df)
@@ -457,8 +477,13 @@ def download_5m_l8(
     *,
     api=None,
     max_pages: int = 300,
+    not_before=None,
 ) -> pd.DataFrame:
     """Download and normalize one L8 5m series.
+
+    `not_before` stops the pagination as soon as the fetched bars
+    reach back far enough, so a 20-month experiment window does not
+    pull the full multi-year history.
 
     Returns a frame carrying the verified bar-time contract plus
     the raw label, and the two trusted payload fields:
@@ -486,6 +511,15 @@ def download_5m_l8(
     if owns_api:
         api = connect()
 
+    cutoff = (
+        pd.Timestamp(
+            not_before
+        )
+        if not_before
+        is not None
+        else None
+    )
+
     try:
 
         raw = fetch_bars(
@@ -498,6 +532,7 @@ def download_5m_l8(
             ],
             FREQ_5M,
             max_pages,
+            not_before=cutoff,
         )
 
     finally:

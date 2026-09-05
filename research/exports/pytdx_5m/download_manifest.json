@@ -1,0 +1,42 @@
+{
+  "AG": {
+    "code": "AGL8",
+    "market": 30,
+    "path": "research/exports/pytdx_5m/AG_5m.csv"
+  },
+  "CU": {
+    "code": "CUL8",
+    "market": 30,
+    "path": "research/exports/pytdx_5m/CU_5m.csv"
+  },
+  "AL": {
+    "code": "ALL8",
+    "market": 30,
+    "path": "research/exports/pytdx_5m/AL_5m.csv"
+  },
+  "SN": {
+    "code": "SNL8",
+    "market": 30,
+    "path": "research/exports/pytdx_5m/SN_5m.csv"
+  },
+  "I": {
+    "code": "IL8",
+    "market": 29,
+    "path": "research/exports/pytdx_5m/I_5m.csv"
+  },
+  "SC": {
+    "code": "SCL8",
+    "market": 30,
+    "path": "research/exports/pytdx_5m/SC_5m.csv"
+  },
+  "M": {
+    "code": "ML8",
+    "market": 29,
+    "path": "research/exports/pytdx_5m/M_5m.csv"
+  },
+  "CF": {
+    "code": "CFL8",
+    "market": 28,
+    "path": "research/exports/pytdx_5m/CF_5m.csv"
+  }
+}

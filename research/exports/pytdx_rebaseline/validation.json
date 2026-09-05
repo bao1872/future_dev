@@ -1,0 +1,9 @@
+{
+  "status": "PASS",
+  "instrument_count": 8,
+  "row_count": 64,
+  "expected_row_count": 64,
+  "no_hyperparameter_tuning": true,
+  "no_pooled_model": true,
+  "no_transaction_data": true
+}

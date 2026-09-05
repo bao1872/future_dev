@@ -1,0 +1,100 @@
+{
+  "status": "PASS",
+  "calendar_start": "2025-01-01",
+  "instrument_count": 8,
+  "failed_instruments": [],
+  "first_bar_start_by_instrument": {
+    "AG": "2025-01-02 09:00:00",
+    "CU": "2025-01-02 09:00:00",
+    "AL": "2025-01-02 09:00:00",
+    "SN": "2025-01-02 09:00:00",
+    "I": "2025-01-02 09:00:00",
+    "SC": "2025-01-02 09:00:00",
+    "M": "2025-01-02 09:00:00",
+    "CF": "2025-01-02 09:00:00"
+  },
+  "last_bar_end_by_instrument": {
+    "AG": "2026-09-05 02:30:00",
+    "CU": "2026-09-05 01:00:00",
+    "AL": "2026-09-05 01:00:00",
+    "SN": "2026-09-05 01:00:00",
+    "I": "2026-09-04 23:00:00",
+    "SC": "2026-09-05 02:30:00",
+    "M": "2026-09-04 23:00:00",
+    "CF": "2026-09-04 23:00:00"
+  },
+  "by_instrument": {
+    "AG": {
+      "status": "PASS",
+      "rows_fetched": 44784,
+      "rows_in_window": 44517,
+      "first_bar_start": "2025-01-02 09:00:00",
+      "last_bar_start": "2026-09-05 02:25:00",
+      "last_bar_end": "2026-09-05 02:30:00",
+      "errors": []
+    },
+    "CU": {
+      "status": "PASS",
+      "rows_fetched": 37788,
+      "rows_in_window": 37371,
+      "first_bar_start": "2025-01-02 09:00:00",
+      "last_bar_start": "2026-09-05 00:55:00",
+      "last_bar_end": "2026-09-05 01:00:00",
+      "errors": []
+    },
+    "AL": {
+      "status": "PASS",
+      "rows_fetched": 37788,
+      "rows_in_window": 37371,
+      "first_bar_start": "2025-01-02 09:00:00",
+      "last_bar_start": "2026-09-05 00:55:00",
+      "last_bar_end": "2026-09-05 01:00:00",
+      "errors": []
+    },
+    "SN": {
+      "status": "PASS",
+      "rows_fetched": 37788,
+      "rows_in_window": 37371,
+      "first_bar_start": "2025-01-02 09:00:00",
+      "last_bar_start": "2026-09-05 00:55:00",
+      "last_bar_end": "2026-09-05 01:00:00",
+      "errors": []
+    },
+    "I": {
+      "status": "PASS",
+      "rows_fetched": 28000,
+      "rows_in_window": 27843,
+      "first_bar_start": "2025-01-02 09:00:00",
+      "last_bar_start": "2026-09-04 22:55:00",
+      "last_bar_end": "2026-09-04 23:00:00",
+      "errors": []
+    },
+    "SC": {
+      "status": "PASS",
+      "rows_fetched": 44782,
+      "rows_in_window": 44515,
+      "first_bar_start": "2025-01-02 09:00:00",
+      "last_bar_start": "2026-09-05 02:25:00",
+      "last_bar_end": "2026-09-05 02:30:00",
+      "errors": []
+    },
+    "M": {
+      "status": "PASS",
+      "rows_fetched": 28000,
+      "rows_in_window": 27843,
+      "first_bar_start": "2025-01-02 09:00:00",
+      "last_bar_start": "2026-09-04 22:55:00",
+      "last_bar_end": "2026-09-04 23:00:00",
+      "errors": []
+    },
+    "CF": {
+      "status": "PASS",
+      "rows_fetched": 28000,
+      "rows_in_window": 27843,
+      "first_bar_start": "2025-01-02 09:00:00",
+      "last_bar_start": "2026-09-04 22:55:00",
+      "last_bar_end": "2026-09-04 23:00:00",
+      "errors": []
+    }
+  }
+}

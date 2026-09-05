@@ -1,0 +1,138 @@
+{
+  "AG": {
+    "path": "research/exports/pytdx_panel/AG_panel.csv",
+    "rows": 14839,
+    "feature_schema": [
+      "feat_15m_ret_1",
+      "feat_15m_ret_4",
+      "feat_15m_ret_8",
+      "feat_15m_ret_16",
+      "feat_15m_location_32",
+      "feat_time_bars_since_segment_start",
+      "feat_time_after_long_gap",
+      "feat_5m_1h_rv",
+      "feat_5m_rv_rate_ratio_1h_4h"
+    ],
+    "first_decision_time": "2025-01-02 09:15:00",
+    "last_decision_time": "2026-09-05 02:30:00"
+  },
+  "CU": {
+    "path": "research/exports/pytdx_panel/CU_panel.csv",
+    "rows": 12457,
+    "feature_schema": [
+      "feat_15m_ret_1",
+      "feat_15m_ret_4",
+      "feat_15m_ret_8",
+      "feat_15m_ret_16",
+      "feat_15m_location_32",
+      "feat_time_bars_since_segment_start",
+      "feat_time_after_long_gap",
+      "feat_5m_1h_rv",
+      "feat_5m_rv_rate_ratio_1h_4h"
+    ],
+    "first_decision_time": "2025-01-02 09:15:00",
+    "last_decision_time": "2026-09-05 01:00:00"
+  },
+  "AL": {
+    "path": "research/exports/pytdx_panel/AL_panel.csv",
+    "rows": 12457,
+    "feature_schema": [
+      "feat_15m_ret_1",
+      "feat_15m_ret_4",
+      "feat_15m_ret_8",
+      "feat_15m_ret_16",
+      "feat_15m_location_32",
+      "feat_time_bars_since_segment_start",
+      "feat_time_after_long_gap",
+      "feat_5m_1h_rv",
+      "feat_5m_rv_rate_ratio_1h_4h"
+    ],
+    "first_decision_time": "2025-01-02 09:15:00",
+    "last_decision_time": "2026-09-05 01:00:00"
+  },
+  "SN": {
+    "path": "research/exports/pytdx_panel/SN_panel.csv",
+    "rows": 12457,
+    "feature_schema": [
+      "feat_15m_ret_1",
+      "feat_15m_ret_4",
+      "feat_15m_ret_8",
+      "feat_15m_ret_16",
+      "feat_15m_location_32",
+      "feat_time_bars_since_segment_start",
+      "feat_time_after_long_gap",
+      "feat_5m_1h_rv",
+      "feat_5m_rv_rate_ratio_1h_4h"
+    ],
+    "first_decision_time": "2025-01-02 09:15:00",
+    "last_decision_time": "2026-09-05 01:00:00"
+  },
+  "I": {
+    "path": "research/exports/pytdx_panel/I_panel.csv",
+    "rows": 9281,
+    "feature_schema": [
+      "feat_15m_ret_1",
+      "feat_15m_ret_4",
+      "feat_15m_ret_8",
+      "feat_15m_ret_16",
+      "feat_15m_location_32",
+      "feat_time_bars_since_segment_start",
+      "feat_time_after_long_gap",
+      "feat_5m_1h_rv",
+      "feat_5m_rv_rate_ratio_1h_4h"
+    ],
+    "first_decision_time": "2025-01-02 09:15:00",
+    "last_decision_time": "2026-09-04 23:00:00"
+  },
+  "SC": {
+    "path": "research/exports/pytdx_panel/SC_panel.csv",
+    "rows": 14837,
+    "feature_schema": [
+      "feat_15m_ret_1",
+      "feat_15m_ret_4",
+      "feat_15m_ret_8",
+      "feat_15m_ret_16",
+      "feat_15m_location_32",
+      "feat_time_bars_since_segment_start",
+      "feat_time_after_long_gap",
+      "feat_5m_1h_rv",
+      "feat_5m_rv_rate_ratio_1h_4h"
+    ],
+    "first_decision_time": "2025-01-02 09:15:00",
+    "last_decision_time": "2026-09-05 02:30:00"
+  },
+  "M": {
+    "path": "research/exports/pytdx_panel/M_panel.csv",
+    "rows": 9281,
+    "feature_schema": [
+      "feat_15m_ret_1",
+      "feat_15m_ret_4",
+      "feat_15m_ret_8",
+      "feat_15m_ret_16",
+      "feat_15m_location_32",
+      "feat_time_bars_since_segment_start",
+      "feat_time_after_long_gap",
+      "feat_5m_1h_rv",
+      "feat_5m_rv_rate_ratio_1h_4h"
+    ],
+    "first_decision_time": "2025-01-02 09:15:00",
+    "last_decision_time": "2026-09-04 23:00:00"
+  },
+  "CF": {
+    "path": "research/exports/pytdx_panel/CF_panel.csv",
+    "rows": 9281,
+    "feature_schema": [
+      "feat_15m_ret_1",
+      "feat_15m_ret_4",
+      "feat_15m_ret_8",
+      "feat_15m_ret_16",
+      "feat_15m_location_32",
+      "feat_time_bars_since_segment_start",
+      "feat_time_after_long_gap",
+      "feat_5m_1h_rv",
+      "feat_5m_rv_rate_ratio_1h_4h"
+    ],
+    "first_decision_time": "2025-01-02 09:15:00",
+    "last_decision_time": "2026-09-04 23:00:00"
+  }
+}
