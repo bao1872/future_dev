@@ -1,0 +1,33 @@
+TQSDK_VISUAL_PROBE
+===================
+version            = 3.10.2
+web_gui            = yes
+draw_line          = yes
+draw_text          = yes
+draw_box           = yes
+direct_png_api     = no
+direct_png_api_name= (none found in installed source)
+
+evidence / API signature:
+  TqApi.__init__ web_gui default = False  (set web_gui=True to enable)
+  draw_line(self, base_k_dataframe: pandas.DataFrame, x1: int, y1: float, x2: int, y2: float, id: Optional[str] = None, board: str = 'MAIN', line_type: str = 'LINE', color: Union[str, int] = 'red', width: int = 1) -> None
+  draw_text(self, base_k_dataframe: pandas.DataFrame, text: str, x: Optional[int] = None, y: Optional[float] = None, id: Optional[str] = None, board: str = 'MAIN', color: Union[str, int] = 'red') -> None
+  draw_box(self, base_k_dataframe: pandas.DataFrame, x1: int, y1: float, x2: int, y2: float, id: Optional[str] = None, board: str = 'MAIN', bg_color: Union[str, int] = 'black', color: Union[str, int] = 'red', width: int = 1) -> None
+
+PNG / export search in installed source:
+  source_dir = /Users/zhenbao/.workbuddy/binaries/python/envs/default/lib/python3.13/site-packages/tqsdk
+  pattern    = png|screenshot|export_image|save_image|to_png
+  NO HITS -> TqSdk 3.10.2 exposes NO direct PNG/export API.
+  Consequence: web_gui is the primary visualization path.
+  No second (matplotlib) indicator renderer is created.
+
+Verified rendering semantics (from tqsdk/api.py):
+  - draw_line/draw_text/draw_box x1/x2 = K-line serial number (positional index).
+  - sub-board is created via serial column suffix: klines['COL.board'] = 'BOARD'.
+  - series style via klines['COL.type'] in {LINE, DOT, DASH, BAR}.
+  - klines['COL.color'] uses ONLY the LAST value of the column
+    (api.py: color = data.get('.color', ['#FF0000'])[-1]),
+    therefore per-bar colouring (canonical bcolor) is NOT renderable
+    by the TqSdk web GUI. The momentum series is drawn with the
+    canonical bcolor of the last bar; full per-bar bcolor is saved
+    to artifacts for inspection.

@@ -1,2 +1,3 @@
-tqsdk
+tqsdk==3.10.2
 pandas
+numpy

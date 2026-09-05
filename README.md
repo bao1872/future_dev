@@ -110,3 +110,76 @@ TqSdk 换月时会把新合约的 `open_oi` 接成旧合约的 `close_oi`，导�
   落盘数据均为已闭合的完整 K 线，可直接用于回测。
 - 历史数据只覆盖到 TqSdk 服务器提供的深度，更早的数据需用本地数据库。
 - 复权因子依赖缓存的归属表；换月后需重新 `--refresh`。
+
+## SMC + Momentum 指标可视化验证
+
+在真实沪银行情上把 Panji canonical **SMC** 与 **SQZMOM / Momentum** 画出来，
+供人工肉眼确认这两个指标在期货上的结构效果。
+
+**本轮只做可视化确认**，不含策略 / 回测 / 下单 / 换月执行 / 参数优化。
+
+```bash
+python visualize_smc_momentum_tqsdk.py --timeframe 15m              # 校验 + 起 TqSdk GUI
+python visualize_smc_momentum_tqsdk.py --timeframe 15m --no-gui     # 只跑校验与产物
+```
+
+支持 `--timeframe 15m|1h|4h`、`--plot-bars`、`--serial-bars`、`--hold-seconds`。
+
+### 设计约束
+
+- 只调用 `panji_indicators.py` 的 canonical 实现：
+  `compute_smc_pine` / `compute_sqzmom_lb` / `build_momentum_history`，
+  全部使用默认参数，不复制、不改写、不「修正」任何算法。
+- **全历史计算，最后才裁图**：指标先在完整序列上算完，裁剪只发生在绘图/报告阶段。
+  否则 swing pivot、BOS/CHoCH、OB 生命周期、squeeze 状态都会失真。
+- BOS/CHoCH 标签画在 `confirmed_index`（市场当时真正可知事件成立的时点），
+  `anchor_index → confirmed_index` 只画结构水平线。
+- OB 只要区间与窗口有 overlap 就画；窗口左侧已创建但仍延伸进来的 OB 不会丢。
+- Momentum 事件（`SQZ_RELEASE` / `ZERO_CROSS_*`）直接消费 canonical event 列表，
+  渲染层不重新扫描 `val`。
+- Swing / Internal bias 面板画 `1 / 0 / -1` 原值，不做平滑、MA、打分。
+
+### 出图前的三道闸
+
+图能画出来不等于指标正确，因此出图前强制跑：
+
+1. **SMC invariants** —— `anchor <= confirmed`、索引在界内、OB 的
+   `enter_index` / `mitigated_index` 时序关系。
+2. **Momentum invariants** —— 序列长度对齐、`SQZ_RELEASE` 要求
+   `sqzOn[i-1] and sqzOff[i]`、零轴穿越方向。
+3. **prefix PIT check** —— 用 `len(df) - 100` 作为 checkpoint，比较
+   full-history 与 prefix-only 的 bias、BOS/CHoCH 事件表、momentum 值，
+   确认无未来函数。
+
+任一 FAIL 即中止，不产出「视觉验证成功」。
+
+### 数据来源声明
+
+`visualization_source = KQ.m@SHFE.ag`（主连连续行情）。
+这是为「观察结构效果」服务的连续价格序列，**不是真实可交易合约**。
+
+### 产物
+
+`artifacts/smc_momentum_preview/`
+
+| 文件 | 说明 |
+| --- | --- |
+| `summary.json` | 本轮统计与三项校验结论 |
+| `tqsdk_visual_probe.txt` | TqSdk 3.10.2 绘图 / 导出能力探测结果 |
+| `silver_15m_smc_momentum.png` | TqSdk web GUI 截图 |
+| `silver_15m_smc_events.csv` | BOS / CHoCH 事件 |
+| `silver_15m_smc_order_blocks.csv` | Order Block 及生命周期 |
+| `silver_15m_smc_state_timeline.csv` | 逐 bar swing / internal bias |
+| `silver_15m_momentum_bars.csv` | 逐 bar momentum val / squeeze 状态 |
+| `prefix_pit_check_15m.json` | PIT 检查明细 |
+
+### TqSdk 绘图能力结论
+
+- `draw_line` / `draw_text` / `draw_box` / `web_gui` 均可用。
+- **不存在**直接的 PNG / export / screenshot API，因此主视觉验证走
+  `web_gui=True` 的本地 web 图形界面；需要静态图时用浏览器截图，
+  不引入第二套（matplotlib）指标渲染器。
+- 附属图板通过 serial 列的 `COL.board` 后缀建立
+  （`SMC_SWING_BIAS` / `SMC_INTERNAL_BIAS` / `MOM`）。
+- TqSdk 的 `COL.color` 只取该列**最后一个值**，因此 momentum 的逐 bar
+  canonical `bcolor` 无法逐根着色，这是 TqSdk 渲染层限制，非 canonical 语义。
