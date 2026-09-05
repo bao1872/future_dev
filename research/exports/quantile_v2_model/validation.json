@@ -1,0 +1,44 @@
+{
+  "status": "PASS",
+  "source_rows": 3300,
+  "feature_set_count": 4,
+  "max_feature_count": 13,
+  "models": [
+    "linear_qr",
+    "gbr_quantile"
+  ],
+  "quantiles": [
+    0.1,
+    0.5,
+    0.9
+  ],
+  "fold_count_by_horizon": {
+    "4": 5,
+    "8": 5,
+    "16": 5
+  },
+  "quantile_metric_rows": 72,
+  "model_summary_rows": 24,
+  "oos_prediction_rows": 54000,
+  "no_random_split": true,
+  "purged_oos": true,
+  "no_hyperparameter_search": true,
+  "no_backtest": true,
+  "no_smc": true,
+  "no_momentum": true,
+  "no_oracle_feature": true,
+  "file_sizes_mb": {
+    "experiment_config.json": 0.002,
+    "quantile_metrics.csv": 0.0116,
+    "oos_predictions.csv": 10.946,
+    "feature_effect_summary.csv": 0.0956,
+    "feature_effects_by_fold.csv": 0.387,
+    "q50_deciles.csv": 0.0256,
+    "width_deciles.csv": 0.0299,
+    "model_summary.csv": 0.0095,
+    "fold_quantile_metrics.csv": 0.0571,
+    "distribution_metrics.csv": 0.007,
+    "fold_distribution_metrics.csv": 0.0197,
+    "feature_set_deltas.csv": 0.0038
+  }
+}

@@ -1,0 +1,83 @@
+{
+  "purpose": "Classical short-horizon conditional quantile forecasting.",
+  "source_panel": "research/exports/quantile_v2_data/quantile_panel_15m.csv",
+  "source_rows": 3300,
+  "horizons": [
+    4,
+    8,
+    16
+  ],
+  "quantiles": [
+    0.1,
+    0.5,
+    0.9
+  ],
+  "models": [
+    "linear_qr",
+    "gbr_quantile"
+  ],
+  "feature_sets": {
+    "F1_DIRECTION": [
+      "feat_15m_ret_1",
+      "feat_15m_ret_4",
+      "feat_15m_ret_8",
+      "feat_15m_ret_16",
+      "feat_15m_location_32",
+      "feat_time_bars_since_segment_start",
+      "feat_time_after_long_gap"
+    ],
+    "F2_ACTIVITY": [
+      "feat_15m_ret_1",
+      "feat_15m_ret_4",
+      "feat_15m_ret_8",
+      "feat_15m_ret_16",
+      "feat_15m_location_32",
+      "feat_time_bars_since_segment_start",
+      "feat_time_after_long_gap",
+      "feat_15m_volume_ratio_32",
+      "feat_15m_oi_log_change_4"
+    ],
+    "F3_VOL": [
+      "feat_15m_ret_1",
+      "feat_15m_ret_4",
+      "feat_15m_ret_8",
+      "feat_15m_ret_16",
+      "feat_15m_location_32",
+      "feat_time_bars_since_segment_start",
+      "feat_time_after_long_gap",
+      "feat_15m_volume_ratio_32",
+      "feat_15m_oi_log_change_4",
+      "feat_5m_1h_rv",
+      "feat_5m_rv_rate_ratio_1h_4h"
+    ],
+    "F4_TAIL": [
+      "feat_15m_ret_1",
+      "feat_15m_ret_4",
+      "feat_15m_ret_8",
+      "feat_15m_ret_16",
+      "feat_15m_location_32",
+      "feat_time_bars_since_segment_start",
+      "feat_time_after_long_gap",
+      "feat_15m_volume_ratio_32",
+      "feat_15m_oi_log_change_4",
+      "feat_5m_1h_rv",
+      "feat_5m_rv_rate_ratio_1h_4h",
+      "feat_5m_4h_neg_semivar_share",
+      "feat_5m_1h_jump_share"
+    ]
+  },
+  "validation": {
+    "type": "purged expanding OOS",
+    "min_train_rows": 1000,
+    "test_rows": 450,
+    "step_rows": 450,
+    "purge": "horizon rows"
+  },
+  "benchmark": "empirical training-sample quantile per fold",
+  "no_hyperparameter_search": true,
+  "no_backtest": true,
+  "no_smc": true,
+  "no_momentum": true,
+  "no_oracle_feature": true,
+  "raw_return_is_primary_target": true
+}
