@@ -1,0 +1,80 @@
+{
+  "purpose": "Purged expanding-OOS descriptive state screening before Quantile V2 model fitting.",
+  "source_panel": "research/exports/quantile_v2_data/quantile_panel_15m.csv",
+  "panel_rows": 3300,
+  "horizons": [
+    4,
+    8,
+    16
+  ],
+  "quantiles_reported": [
+    0.1,
+    0.5,
+    0.9
+  ],
+  "min_train_rows": 1000,
+  "test_rows": 450,
+  "step_rows": 450,
+  "purge": "horizon-sized gap between training and OOS test",
+  "marginal_bins": 5,
+  "pair_bins": 3,
+  "core_features": [
+    "feat_15m_ret_1",
+    "feat_15m_ret_4",
+    "feat_15m_ret_8",
+    "feat_15m_ret_16",
+    "feat_15m_location_32",
+    "feat_15m_volume_ratio_32",
+    "feat_15m_oi_log_change_4",
+    "feat_time_after_long_gap",
+    "feat_time_bars_since_segment_start",
+    "feat_5m_1h_ret_sum",
+    "feat_5m_4h_ret_sum",
+    "feat_5m_1h_rv",
+    "feat_5m_4h_rv",
+    "feat_5m_8h_rv",
+    "feat_5m_rv_rate_ratio_1h_4h",
+    "feat_5m_rv_rate_ratio_4h_8h",
+    "feat_5m_1h_neg_semivar_share",
+    "feat_5m_4h_neg_semivar_share",
+    "feat_5m_1h_jump_share",
+    "feat_5m_4h_jump_share",
+    "feat_5m_4h_gap_sq",
+    "feat_5m_1h_positive_return_share",
+    "feat_5m_1h_max_abs_return"
+  ],
+  "pair_specs": [
+    {
+      "name": "momentum_1h_x_badvol_1h",
+      "x": "feat_5m_1h_ret_sum",
+      "y": "feat_5m_1h_neg_semivar_share"
+    },
+    {
+      "name": "momentum_1h_x_volaccel",
+      "x": "feat_5m_1h_ret_sum",
+      "y": "feat_5m_rv_rate_ratio_1h_4h"
+    },
+    {
+      "name": "jump_1h_x_location_32",
+      "x": "feat_5m_1h_jump_share",
+      "y": "feat_15m_location_32"
+    },
+    {
+      "name": "badvol_1h_x_rv_1h",
+      "x": "feat_5m_1h_neg_semivar_share",
+      "y": "feat_5m_1h_rv"
+    },
+    {
+      "name": "oi_change_x_volume",
+      "x": "feat_15m_oi_log_change_4",
+      "y": "feat_15m_volume_ratio_32"
+    }
+  ],
+  "uses_model": false,
+  "uses_backtest": false,
+  "uses_smc": false,
+  "uses_momentum": false,
+  "uses_oracle_as_feature": false,
+  "statistical_inference_claim": false,
+  "note": "State thresholds are fitted using past training X only. Conditional target quantiles are measured on later purged OOS blocks."
+}
