@@ -20,7 +20,7 @@ def run(data: dict[str, pd.DataFrame], params: dict) -> dict:
 
 策略不得：
 
-- import TqSdk
+- import PyTDX
 - 登录行情源
 - 下载数据
 - 覆盖 `silver_main_data/`

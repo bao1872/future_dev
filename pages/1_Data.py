@@ -4,7 +4,7 @@ from market_data.offline_store import get_market_status, load_bars
 from market_data.validation import validate_current_offline_data
 
 st.title("数据状态")
-st.caption("当前离线行情。TqSdk 只负责下载，页面不会自动刷新或重建连续合约。")
+st.caption("当前离线行情。PyTDX 只负责下载，页面不会自动刷新或重建连续合约。")
 
 status = get_market_status()
 

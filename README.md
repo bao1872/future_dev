@@ -9,24 +9,24 @@
 核心工作流固定为：
 
 ```text
-TqSdk
+PyTDX
   ↓
-拉取并验证行情
+拉取 5m L8 bars 并归一化已验证时间语义
   ↓
 当前有效离线行情（CSV）
   ↓
-Panji canonical indicators
+本地聚合 15m
   ↓
-策略研究 / 参数实验
+离线统计实验 / 策略研究
   ↓
 Streamlit + Plotly
 ```
 
 ### 当前边界
 
-- 固定研究品种：上期所白银主连 `KQ.m@SHFE.ag`
-- 时间周期：`15m / 1h / 4h`
-- TqSdk 只负责行情获取
+- 固定研究品种：上期所白银主连 `AGL8`（PyTDX L8 连续序列）
+- 时间周期：`5m` 源 bar，本地聚合 `15m`
+- PyTDX 只负责行情获取
 - 策略研究只读取离线行情
 - Streamlit 是唯一研究 UI
 - 不做 dataset 版本化，只维护一套当前有效离线行情
@@ -57,7 +57,7 @@ future_dev/
 │   ├── config.py                  # 固定品种 / 周期 / 路径
 │   ├── offline_store.py           # 策略端唯一离线行情读取入口
 │   ├── validation.py              # 离线行情 targeted validation
-│   └── tqsdk_source.py            # TqSdk 刷新入口，委托现有 downloader
+│   └── pytdx_source.py            # 唯一行情获取模块（连接/下载/时间归一化）
 │
 ├── research/
 │   ├── indicator_adapter.py       # canonical 指标薄适配层
@@ -77,9 +77,6 @@ future_dev/
 │
 │   # 以下为现有项目已验证/已有资产，脚手架围绕它们工作：
 ├── panji_indicators.py
-├── download_silver_main_tqsdk.py
-├── build_continuous.py
-├── visualize_smc_momentum_tqsdk.py
 └── silver_main_data/
 ```
 
@@ -93,20 +90,7 @@ future_dev/
 pip install -r requirements.txt
 ```
 
-配置 TqSdk / 快期凭据：
-
-```bash
-cp .env.example .env
-```
-
-然后填写：
-
-```text
-TQ_USER=...
-TQ_PASSWORD=...
-```
-
-`.env` 不进入 Git。
+PyTDX 扩展行情不需要账号凭据。
 
 ---
 
@@ -158,17 +142,20 @@ streamlit run app.py
 python scripts/refresh_data.py
 ```
 
-它委托现有 `download_silver_main_tqsdk.py`。
+获取与校验职责：
 
-现有 downloader 已负责：
+- `market_data/pytdx_source.py` 负责连接、下载 5m L8、归一化 TDX 时间语义
+- `market_data/validation.py` 负责离线结构与跨周期聚合一致性
+- `scripts/check_tdx_data.py` 负责下载后的最小结构检查（时间单调、无重复、OHLC 合法、volume/OI 非负、无未来时间）
 
-- forming bar 剔除
-- 三周期共同闭合窗口
-- timestamp / OHLC / volume / OI sanity
-- 15m -> 1h 聚合一致性
-- 1h -> 4h 聚合一致性
+已固化的 TDX 语义契约见 `AGENTS.md` 3.5b：
 
-策略代码不应该自己调用 TqSdk。
+- TDX bar 标签是**区间结束时刻**
+- `bar_start_time = bar_end_time - period` 是研究索引
+- `availability_time = bar_end_time` 是因果截断、target 可用时刻、跨品种 join 的正确键
+- `trade` = 成交量，`position` = bar 末持仓量
+
+策略代码不应该自己调用 PyTDX。
 
 ---
 
@@ -238,7 +225,7 @@ def run(data: dict[str, pd.DataFrame], params: dict) -> dict:
 
 策略禁止：
 
-- import / login TqSdk
+- import / login PyTDX
 - 下载行情
 - 覆盖原始 CSV
 - 修改 canonical indicator 全局默认值

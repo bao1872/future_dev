@@ -17,9 +17,6 @@ BASE = f"https://raw.githubusercontent.com/bao1872/future_dev/{PINNED_COMMIT}"
 
 CORE_FILES = [
     "panji_indicators.py",
-    "download_silver_main_tqsdk.py",
-    "build_continuous.py",
-    "visualize_smc_momentum_tqsdk.py",
 ]
 
 

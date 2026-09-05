@@ -2,10 +2,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
-SOURCE = "TqSdk"
-SYMBOL = "KQ.m@SHFE.ag"
-DISPLAY_NAME = "SHFE Silver Main Continuous"
+SOURCE = "PyTDX"
+SYMBOL = "AGL8"
+DISPLAY_NAME = "SHFE Silver Main Continuous (PyTDX L8)"
 
+# Bar period in seconds.
+# Layout is replaced by the PyTDX 5m source bar in the rebaseline
+# commit; do not change it here or the offline store breaks before
+# the new dataset exists.
 TIMEFRAMES = {
     "15m": 15 * 60,
     "1h": 60 * 60,

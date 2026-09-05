@@ -4,9 +4,6 @@
   "scaffold_type": "overlay",
   "preserve_existing": [
     "panji_indicators.py",
-    "download_silver_main_tqsdk.py",
-    "build_continuous.py",
-    "visualize_smc_momentum_tqsdk.py",
     "silver_main_data/"
   ],
   "new_management_areas": [

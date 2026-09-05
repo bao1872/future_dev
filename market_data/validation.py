@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from .config import TIMEFRAMES
@@ -57,30 +58,268 @@ def validate_current_offline_data(*, include_cross_tf: bool = True) -> dict[str,
             report["timeframes"][tf] = {"ok": False, "errors": [str(exc)]}
             report["ok"] = False
 
-    if include_cross_tf and all(tf in frames for tf in ("15m", "1h", "4h")):
-        # Reuse the established downloader aggregation semantics rather than creating
-        # a second definition here.
-        try:
-            from download_silver_main_tqsdk import validate_aggregation, REQUESTS
+    pairs = [
+        ("15m", "1h"),
+        ("1h", "4h"),
+    ]
 
-            for lower_tf, higher_tf in (("15m", "1h"), ("1h", "4h")):
-                errors, stats = validate_aggregation(
-                    frames[lower_tf],
-                    frames[higher_tf],
-                    lower_tf,
-                    higher_tf,
-                    REQUESTS[higher_tf]["duration_seconds"],
+    if include_cross_tf:
+        for lower_tf, higher_tf in pairs:
+            if (
+                lower_tf not in frames
+                or higher_tf not in frames
+            ):
+                continue
+
+            key = (
+                f"{lower_tf}->{higher_tf}"
+            )
+
+            try:
+                errors, stats = (
+                    validate_aggregation(
+                        frames[
+                            lower_tf
+                        ],
+                        frames[
+                            higher_tf
+                        ],
+                        lower_tf,
+                        higher_tf,
+                    )
                 )
-                key = f"{lower_tf}->{higher_tf}"
-                report["cross_tf"][key] = {
+
+                report[
+                    "cross_tf"
+                ][
+                    key
+                ] = {
                     "ok": not errors,
                     "stats": stats,
-                    "errors": errors[:20],
+                    "errors": errors[
+                        :20
+                    ],
                 }
+
                 if errors:
-                    report["ok"] = False
-        except Exception as exc:
-            report["cross_tf"]["error"] = str(exc)
-            report["ok"] = False
+                    report[
+                        "ok"
+                    ] = False
+
+            except Exception as exc:
+                report[
+                    "cross_tf"
+                ][key] = {
+                    "ok": False,
+                    "errors": [
+                        str(exc)
+                    ],
+                }
+                report["ok"] = False
 
     return report
+
+
+def validate_aggregation(
+    lower: pd.DataFrame,
+    higher: pd.DataFrame,
+    lower_tf: str,
+    higher_tf: str,
+) -> tuple[list[str], dict]:
+    """Check that `higher` is exactly the aggregation of `lower`.
+
+    Self-contained definition: each higher bar's window is derived by
+    flooring the lower bars' epoch nanoseconds to the higher period,
+    then OHLC / volume / OI are re-aggregated and compared.
+
+    Self-contained so the validation layer has no dependency on
+    any acquisition module.
+    """
+
+    from .config import (
+        TIMEFRAMES,
+    )
+
+    errors: list[str] = []
+
+    period_ns = int(
+        TIMEFRAMES[
+            higher_tf
+        ]
+    ) * 1_000_000_000
+
+    lo = lower.copy()
+    hi = higher.copy()
+
+    lo[
+        "_bucket"
+    ] = (
+        lo[
+            "datetime_ns"
+        ].to_numpy()
+        // period_ns
+    ) * period_ns
+
+    hi[
+        "_bucket"
+    ] = (
+        hi[
+            "datetime_ns"
+        ].to_numpy()
+        // period_ns
+    ) * period_ns
+
+    agg = (
+        lo.groupby(
+            "_bucket"
+        )
+        .agg(
+            agg_open=(
+                "open",
+                "first",
+            ),
+            agg_high=(
+                "high",
+                "max",
+            ),
+            agg_low=(
+                "low",
+                "min",
+            ),
+            agg_close=(
+                "close",
+                "last",
+            ),
+            agg_volume=(
+                "volume",
+                "sum",
+            ),
+            agg_oi=(
+                "close_oi",
+                "last",
+            ),
+            lower_bars=(
+                "close",
+                "size",
+            ),
+        )
+        .reset_index()
+    )
+
+    merged = agg.merge(
+        hi,
+        on="_bucket",
+        how="inner",
+    )
+
+    if merged.empty:
+        return (
+            [
+                f"[{lower_tf}->{higher_tf}] "
+                "no overlapping bars"
+            ],
+            {},
+        )
+
+    stats = {
+        "compared_bars": int(
+            len(
+                merged
+            )
+        ),
+        "lower_bars_per_higher": (
+            float(
+                merged[
+                    "lower_bars"
+                ].median()
+            )
+        ),
+    }
+
+    checks = {
+        "open": (
+            merged[
+                "agg_open"
+            ],
+            merged["open"],
+        ),
+        "high": (
+            merged[
+                "agg_high"
+            ],
+            merged["high"],
+        ),
+        "low": (
+            merged[
+                "agg_low"
+            ],
+            merged["low"],
+        ),
+        "close": (
+            merged[
+                "agg_close"
+            ],
+            merged[
+                "close"
+            ],
+        ),
+        "close_oi": (
+            merged[
+                "agg_oi"
+            ],
+            merged[
+                "close_oi"
+            ],
+        ),
+    }
+
+    for name, (
+        left,
+        right,
+    ) in checks.items():
+
+        rate = float(
+            np.isclose(
+                left,
+                right,
+                rtol=1e-9,
+                atol=1e-9,
+            ).mean()
+        )
+
+        stats[
+            f"{name}_match_rate"
+        ] = rate
+
+        if rate < 1.0:
+            errors.append(
+                f"[{lower_tf}->{higher_tf}] "
+                f"{name} mismatch rate "
+                f"{rate:.6f}"
+            )
+
+    vol_rate = float(
+        np.isclose(
+            merged[
+                "agg_volume"
+            ],
+            merged[
+                "volume"
+            ],
+            rtol=1e-6,
+            atol=1e-6,
+        ).mean()
+    )
+
+    stats[
+        "volume_match_rate"
+    ] = vol_rate
+
+    if vol_rate < 1.0:
+        errors.append(
+            f"[{lower_tf}->{higher_tf}] "
+            f"volume mismatch rate "
+            f"{vol_rate:.6f}"
+        )
+
+    return errors, stats

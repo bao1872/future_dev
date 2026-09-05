@@ -54,7 +54,7 @@ def load_bars(
 ) -> pd.DataFrame:
     """Load the current valid offline market data.
 
-    This is the default research/strategy data entrypoint. It never connects to TqSdk.
+    This is the default research/strategy data entrypoint. It never connects to PyTDX.
     """
     if timeframe not in TIMEFRAMES:
         raise ValueError(f"Unsupported timeframe: {timeframe!r}; expected {list(TIMEFRAMES)}")

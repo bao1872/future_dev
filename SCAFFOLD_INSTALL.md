@@ -9,9 +9,6 @@
 保留现有：
 
 - `panji_indicators.py`
-- `download_silver_main_tqsdk.py`
-- `build_continuous.py`
-- `visualize_smc_momentum_tqsdk.py`
 - `silver_main_data/`
 
 这是最安全的方式：脚手架只增加治理和研究结构，不重写已验证核心。
@@ -42,8 +39,6 @@ python scripts/check_project.py
 然后重新拉取当前离线行情：
 
 ```bash
-cp .env.example .env
-# 填写 TQ_USER / TQ_PASSWORD
 python scripts/refresh_data.py
 ```
 

@@ -12,14 +12,13 @@ Layout
 
   target = future 15m-bar return over horizons 4 / 8 / 16  (1h / 2h / 4h)
 
-This script never imports TqSdk and never touches the network.
+This script never imports a market-data SDK and never touches the network.
 
 Window note
 -----------
-The 5m serial is hard-capped at 10000 bars (~4.5 months), so the 15m
-research window is re-based onto the range that the 5m series can cover
-with full warmup. The exact range comes from
-`5m_download_validation.json` written by download_silver_5m_tqsdk.py.
+The 5m source coverage bounds the 15m research window, which is
+re-based onto the range the 5m series can cover with full warmup.
+The exact range comes from the 5m download validation record.
 
 SMC / Momentum / BOS / CHoCH are deliberately absent.
 The DP Oracle is a hindsight reference column only, never a feature.
@@ -675,9 +674,8 @@ def main() -> None:
     if not DOWNLOAD_VALIDATION.is_file():
         raise RuntimeError(
             "5m_download_validation.json "
-            "missing; run "
-            "download_silver_5m_tqsdk.py "
-            "first"
+            "missing; run the 5m "
+            "download step first"
         )
 
     download_info = json.loads(
@@ -1885,7 +1883,7 @@ def main() -> None:
         ),
 
         "instrument": (
-            "KQ.m@SHFE.ag"
+            "AGL8"
         ),
 
         "decision_timeframe": (
@@ -1898,10 +1896,9 @@ def main() -> None:
 
         "window_rebasing": {
             "reason": (
-                "TqSdk 5m serial is hard-capped "
-                "at 10000 bars (~4.5 months), "
+                "The 5m source coverage is "
                 "shorter than the current 15m "
-                "file (~13.5 months). The 15m "
+                "file. The 15m "
                 "research window is re-based "
                 "onto the range the 5m series "
                 "can cover with >=96 bars of "

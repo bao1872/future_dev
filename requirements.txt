@@ -1,4 +1,7 @@
-tqsdk==3.10.2
+# Customized PyTDX build used by market_data/pytdx_source.py.
+# The extended-market (futures) API is required:
+#   TdxExHq_API.get_instrument_bars / get_markets / get_instrument_info
+pytdx==1.72r2
 pandas
 numpy
 streamlit>=1.36,<2

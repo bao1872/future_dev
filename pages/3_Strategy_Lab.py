@@ -9,7 +9,7 @@ from research.experiment_store import save_experiment
 from strategies.registry import all_strategies
 
 st.title("策略实验")
-st.caption("只在离线行情上验证假设。策略不接触 TqSdk。")
+st.caption("只在离线行情上验证假设。策略不接触 PyTDX。")
 
 registry = all_strategies()
 if not registry:

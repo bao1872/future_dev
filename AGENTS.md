@@ -4,29 +4,44 @@
 
 `future_dev` is an **experimental offline quantitative research project** for a fixed futures instrument.
 
-Current research instrument:
+Current research instruments:
 
-- Source: TqSdk
-- Symbol: `KQ.m@SHFE.ag`
-- Research timeframes: `15m`, `1h`, `4h`
+- **Market-data source: PyTDX 1.72r2 customized build.**
+  No second provider is maintained.
+- Symbol form: PyTDX `*L8` continuous main series
+- Research bar scales: `5m` source bar, `15m` aggregated locally
 - UI: Streamlit
 - Research data: offline CSV only
 
 Primary development instrument:
-`KQ.m@SHFE.ag`
+`AGL8`
 
 Offline robustness research may additionally use:
 
-- `KQ.m@SHFE.cu`
-- `KQ.m@SHFE.al`
-- `KQ.m@SHFE.sn`
-- `KQ.m@DCE.i`
-- `KQ.m@INE.sc`
-- `KQ.m@DCE.m`
-- `KQ.m@CZCE.CF`
+- `CUL8`
+- `ALL8`
+- `SNL8`
+- `IL8`
+- `SCL8`
+- `ML8`
+- `CFL8`
 
-All remain TqSdk-only.
+All remain PyTDX-only.
 This does NOT expand Streamlit/UI/current product scope.
+
+### Source selection is closed
+
+PyTDX has passed targeted semantic validation and has been selected
+by the user. Agents must use it directly for experiments.
+
+Do **not** continue provider comparison, provider abstraction, or
+replacement research unless:
+
+- a concrete data-correctness failure occurs, or
+- the user explicitly requests it.
+
+Data-interface investigation is not an open-ended task. Investigate
+a data source only to remove a concrete, blocking limitation.
 
 This repository is **not** a production trading system. The current objective is to make strategy research fast, observable, reproducible enough for research, and resistant to silent data / indicator errors.
 
@@ -56,10 +71,10 @@ Current mode:
 In RESEARCH mode, prioritize:
 
 1. Data and causal correctness
-2. Preservation of canonical indicator semantics
-3. Fast strategy iteration
-4. Clear visual inspection
-5. Minimal necessary code quality
+2. **Statistical validity**
+3. Fast hypothesis iteration
+4. **Reproducible experiment outputs**
+5. Visual inspection
 
 Production architecture is not a goal.
 
@@ -76,23 +91,28 @@ Do **not** introduce infrastructure merely because it may be useful later.
 - Do not create a separate frontend application.
 - Do not introduce React / Next.js / Dash / Flask UI unless explicitly requested.
 
-### 3.2 TqSdk is a market-data source, not a strategy dependency
+### 3.2 PyTDX is a market-data source, not a strategy dependency
 
-TqSdk belongs only to the market-data acquisition layer.
+PyTDX belongs only to the market-data acquisition layer.
 
 Allowed:
 
-`TqSdk -> download/validate -> offline files -> research/strategy -> Streamlit`
+`PyTDX -> acquire 5m L8 bars -> normalize verified TDX timestamp semantics -> offline CSV -> research/strategy -> Streamlit`
 
 Forbidden:
 
-`strategy -> TqSdk`
+`strategy -> PyTDX`
 
-`backtest -> TqSdk`
+`model -> PyTDX`
 
-`indicator -> TqSdk`
+`indicator -> PyTDX`
 
 A strategy must be runnable when the network is unavailable, as long as valid offline data exists.
+
+The only acquisition module is `market_data/pytdx_source.py`. Do not
+add provider factories, `DataSourceProtocol`, client managers or
+server pools. The server is fixed; if it does not connect, the run
+fails.
 
 ### 3.3 One current offline dataset; no dataset versioning
 
@@ -139,6 +159,72 @@ Without explicit user authorization, do not:
 - replace it with a new implementation
 
 Adapters and visualization code may consume its outputs.
+
+`panji_indicators.py` remains frozen / read-only, but it is
+**currently inactive in the statistical research path unless
+explicitly re-enabled**. Do not delete the file and do not build
+anything new around it.
+
+### 3.5b Validated TDX bar semantics -- data contract
+
+These were verified against the historical transaction stream and
+cross-validated against an independent vendor source on real
+contracts (AG2610 / I2701 / SC2610, one full trading day). Treat
+them as the fixed contract; do not re-derive them.
+
+Time:
+
+    TDX bar label = INTERVAL END
+
+    bar_start_time      = corrected_bar_end_time - period
+    availability_time   = corrected_bar_end_time
+
+`bar_start_time` is the research index, so it matches conventional
+K-line semantics. `availability_time` is the moment a bar's close /
+volume / OI actually become known, so it is the correct key for
+causal joins, purge/embargo cutoffs and target availability.
+
+TDX datetime is partly trading-day based. The night session that
+precedes a trading day carries that trading day's date. Correction
+must use the previous observed trading day from the exchange-level
+trading calendar, never a naive `hour >= 21 -> minus one day`, which
+breaks across weekends and holidays.
+
+Payload fields:
+
+    trade     = bar volume
+    position  = bar-end open interest
+
+Therefore:
+
+    delta OI = position[t] - position[t-1]
+
+Never trust these fields:
+
+    amount        UNUSABLE, protocol decode artifact (~1e-40)
+    zengcang      UNTRUSTED
+    nature        UNTRUSTED
+    nature_name   NOT a current feature
+    direction     NOT a current feature
+
+Historical transaction stream: available and paginates to a true
+end, shares the same underlying tick source as the bars, but it is
+**incomplete in high-activity periods** (roughly 85%-95% of bar
+volume, with the deficit concentrated in the highest-volume
+minutes). It is **not an approved feature source in the current
+experiment phase**.
+
+### 3.5c L8 series role
+
+`*L8` is the current continuous-market research series.
+
+It is a vendor-defined continuous main series. It is **not** treated
+as exact executable-contract history, and it is **not** used for
+contract-roll PnL accounting.
+
+Do not attempt to reverse-engineer the vendor's roll or adjustment
+algorithm. Delisted contracts are not retrievable from PyTDX, so
+historical actual-contract reconstruction is not available.
 
 ### 3.6 Strategy code owns trading hypotheses, not indicator definitions
 
@@ -348,7 +434,7 @@ Where `data` is offline DataFrame data supplied by the research layer.
 
 A strategy must not:
 
-- authenticate to TqSdk
+- authenticate to PyTDX
 - download data
 - write into raw market data
 - modify canonical indicator defaults globally
@@ -364,11 +450,11 @@ Use Git history for code evolution.
 
 The market-data layer has three responsibilities only:
 
-1. Source acquisition (`TqSdk`)
+1. Source acquisition (`PyTDX`)
 2. Offline storage / loading
 3. Validation
 
-Do not build provider factories or generalized multi-provider frameworks before a real second provider exists.
+There is no second provider. Do not build provider factories or generalized multi-provider frameworks.
 
 Do not add a database while CSV is sufficient.
 
@@ -434,10 +520,10 @@ Do not require PR / release / staging workflows in the current phase unless expl
 
 Treat these current repository assets as established components, not invitations to rewrite:
 
-- `download_silver_main_tqsdk.py` - validated TqSdk offline downloader and cross-TF checks
-- `build_continuous.py` - continuous-contract / adjustment research utility; use only when its current data assumptions are valid
-- `panji_indicators.py` - canonical Panji indicator SSOT
-- `visualize_smc_momentum_tqsdk.py` - existing SMC/Momentum visual/PIT validation utility
+- `market_data/pytdx_source.py` - the only acquisition module; holds the validated TDX bar-time contract
+- `market_data/validation.py` - offline structural and cross-timeframe aggregation checks
+- `scripts/check_tdx_data.py` - minimal post-download structural check
+- `panji_indicators.py` - canonical Panji indicator SSOT, frozen and currently inactive
 - `silver_main_data/` - current offline market-data location
 
 New structure should integrate around these assets.
