@@ -80,3 +80,55 @@ def compute_canonical_bundle(df: pd.DataFrame) -> CanonicalBundle:
         momentum=momentum,
         momentum_history=momentum_history,
     )
+
+
+@dataclass
+class SMCMomentumBundle:
+    smc: dict
+    momentum: dict
+    momentum_history: dict
+
+
+def compute_smc_momentum_bundle(
+    df: pd.DataFrame,
+) -> SMCMomentumBundle:
+    """Canonical SMC + SQZMOM only.
+
+    Full offline history must be passed here.
+    Visualization cropping happens after calculation.
+
+    This is a thin entrypoint for the converged SMC + Momentum experiment.
+    It intentionally does not compute DSA. No canonical semantics change:
+    `compute_canonical_bundle()` above is left untouched.
+    """
+    bars = _canonical_frame(df)
+    times = [ts.isoformat() for ts in bars.index]
+
+    smc = compute_smc_pine(
+        bars["open"].astype(float).tolist(),
+        bars["high"].astype(float).tolist(),
+        bars["low"].astype(float).tolist(),
+        bars["close"].astype(float).tolist(),
+        times,
+        params=None,
+        emit_timeline=True,
+    )
+
+    momentum = compute_sqzmom_lb(
+        bars["open"].to_numpy(float),
+        bars["high"].to_numpy(float),
+        bars["low"].to_numpy(float),
+        bars["close"].to_numpy(float),
+    )
+
+    momentum_history = build_momentum_history(
+        momentum,
+        volume_series=bars["volume"].to_numpy(float),
+        times=times,
+    )
+
+    return SMCMomentumBundle(
+        smc=smc,
+        momentum=momentum,
+        momentum_history=momentum_history,
+    )
