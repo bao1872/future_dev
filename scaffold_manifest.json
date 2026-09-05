@@ -1,0 +1,25 @@
+{
+  "project": "future_dev",
+  "mode": "RESEARCH",
+  "scaffold_type": "overlay",
+  "preserve_existing": [
+    "panji_indicators.py",
+    "download_silver_main_tqsdk.py",
+    "build_continuous.py",
+    "visualize_smc_momentum_tqsdk.py",
+    "silver_main_data/"
+  ],
+  "new_management_areas": [
+    "market_data/",
+    "strategies/",
+    "research/",
+    "pages/",
+    "scripts/"
+  ],
+  "no_dataset_versioning": true,
+  "streamlit_only_ui": true,
+  "strategy_offline_only": true,
+  "core_restore_commit": "3ee6010f9a182038bca667e924081162b79b4c0c",
+  "core_files_embedded": false,
+  "install_note": "Overlay onto current repo, or run scripts/restore_core.py after clean replacement."
+}

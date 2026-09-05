@@ -1,3 +1,5 @@
 tqsdk==3.10.2
 pandas
 numpy
+streamlit>=1.32,<2
+plotly>=5.20,<7
