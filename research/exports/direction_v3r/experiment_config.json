@@ -1,0 +1,127 @@
+{
+  "purpose": "Replicate the audited price + RV result on 16 instruments with the V2/V3 defects fixed.",
+  "corrections": [
+    "Brier/logloss baseline is the fold TRAIN UP rate, never OOS labels",
+    "calibration slope removed (was an OLS fit, not logistic calibration)",
+    "volume features rebuilt non-overlapping",
+    "continuity requires n+1 price points for an n-bar return or RV window",
+    "one master sample and one fold set for every block"
+  ],
+  "pre_registered_primary": "Test 1: C1 vs C0, H5 + ALL + gbr + 16 instruments",
+  "blocks": {
+    "C0": [
+      "r5",
+      "r10",
+      "r15",
+      "r30"
+    ],
+    "C1": [
+      "r5",
+      "r10",
+      "r15",
+      "r30",
+      "RV15",
+      "RV30",
+      "RV60",
+      "rv_acceleration"
+    ],
+    "C2": [
+      "r5",
+      "r10",
+      "r15",
+      "r30",
+      "RV15",
+      "RV30",
+      "RV60",
+      "rv_acceleration",
+      "vol_surprise_5m",
+      "vol_acceleration"
+    ],
+    "C3": [
+      "r5",
+      "r10",
+      "r15",
+      "r30",
+      "RV15",
+      "RV30",
+      "RV60",
+      "rv_acceleration",
+      "rel_dOI_5m",
+      "rel_dOI_15m",
+      "rel_dOI_30m"
+    ],
+    "C4": [
+      "r5",
+      "r10",
+      "r15",
+      "r30",
+      "RV15",
+      "RV30",
+      "RV60",
+      "rv_acceleration",
+      "vol_surprise_5m",
+      "vol_acceleration",
+      "rel_dOI_5m",
+      "rel_dOI_15m",
+      "rel_dOI_30m"
+    ]
+  },
+  "horizons_bars": {
+    "H5": 1,
+    "H15": 3
+  },
+  "learners": [
+    "gbr",
+    "logistic"
+  ],
+  "groups": {
+    "ALL_16": [
+      "AG",
+      "AU",
+      "CU",
+      "AL",
+      "SN",
+      "NI",
+      "RB",
+      "I",
+      "SC",
+      "RU",
+      "MA",
+      "TA",
+      "M",
+      "P",
+      "CF",
+      "LC"
+    ],
+    "OLD_8": [
+      "AG",
+      "CU",
+      "AL",
+      "SN",
+      "I",
+      "SC",
+      "M",
+      "CF"
+    ],
+    "NEW_8": [
+      "AU",
+      "NI",
+      "RB",
+      "RU",
+      "MA",
+      "TA",
+      "P",
+      "LC"
+    ]
+  },
+  "quantile": {
+    "horizon": 4,
+    "feature_set": "F1_VOL",
+    "model": "gbr_quantile",
+    "refit": false,
+    "role": "width only, frozen"
+  },
+  "spread_is_fold_local": true,
+  "no_tuning": true,
+  "no_pnl": true
+}
