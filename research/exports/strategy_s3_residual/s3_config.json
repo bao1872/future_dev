@@ -1,0 +1,48 @@
+{
+  "name": "S3-V0 Latent Factor Residual Reversion",
+  "universe": [
+    "AG",
+    "AU",
+    "CU",
+    "AL",
+    "SN",
+    "NI",
+    "RB",
+    "I",
+    "SC",
+    "RU",
+    "MA",
+    "TA",
+    "M",
+    "P",
+    "CF",
+    "LC"
+  ],
+  "n_clusters": 4,
+  "formation_bars": 6,
+  "primary_horizon": "H15",
+  "secondary_horizon": "H5",
+  "train_months": 6,
+  "test_months": 2,
+  "strategies": [
+    "RAW_CONTRARIAN",
+    "RESID_CONTRARIAN",
+    "RESID_MOMENTUM"
+  ],
+  "rules": [
+    "clustering TRAIN only",
+    "PCA TRAIN only",
+    "normalization TRAIN only",
+    "signal after current 5m close",
+    "entry next 5m open",
+    "strict 5m continuity",
+    "same event sample for all 3 strategies",
+    "no Quantile",
+    "no macro",
+    "no volume",
+    "no OI",
+    "no ML",
+    "no parameter tuning"
+  ],
+  "cluster_breadth_positive_cells": "6/14"
+}
