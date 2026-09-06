@@ -1,0 +1,82 @@
+{
+  "experiment": "A1 Reduced-Information HF Predictability Transfer",
+  "paper": "Ait-Sahalia, Fan, Xue, Zhu (Management Science, 2025), How and When Are High-Frequency Stock Returns Predictable?",
+  "replication_status": "NOT an exact replication; historical trades/quotes/LOB are unavailable",
+  "question": [
+    "Do exponentially spaced local price/trading-activity states predict single-instrument H5/H15 futures returns?",
+    "Does nonlinear Random Forest outperform sparse LASSO?"
+  ],
+  "windows_5m_bars": [
+    1,
+    2,
+    4,
+    8,
+    16
+  ],
+  "windows_minutes": [
+    5,
+    10,
+    20,
+    40,
+    80
+  ],
+  "primary_horizon": "15m",
+  "secondary_horizon": "5m",
+  "execution": "signal after current 5m close; entry next 5m open",
+  "models": [
+    "LASSO",
+    "RandomForest"
+  ],
+  "feature_columns": [
+    "past_return_1",
+    "volume_sum_1",
+    "volume_max_1",
+    "price_impact_proxy_1",
+    "return_autocov_1",
+    "abs_return_sum_1",
+    "past_return_2",
+    "volume_sum_2",
+    "volume_max_2",
+    "price_impact_proxy_2",
+    "return_autocov_2",
+    "abs_return_sum_2",
+    "past_return_4",
+    "volume_sum_4",
+    "volume_max_4",
+    "price_impact_proxy_4",
+    "return_autocov_4",
+    "abs_return_sum_4",
+    "past_return_8",
+    "volume_sum_8",
+    "volume_max_8",
+    "price_impact_proxy_8",
+    "return_autocov_8",
+    "abs_return_sum_8",
+    "past_return_16",
+    "volume_sum_16",
+    "volume_max_16",
+    "price_impact_proxy_16",
+    "return_autocov_16",
+    "abs_return_sum_16"
+  ],
+  "important_limitations": [
+    "No historical trades/quotes/order-book data.",
+    "price_impact_proxy is NOT paper Lambda.",
+    "No LOB imbalance.",
+    "No transaction imbalance.",
+    "No quoted/effective spread."
+  ],
+  "forbidden": [
+    "hyperparameter search",
+    "new feature families",
+    "Quantile",
+    "macro",
+    "OI",
+    "LightGBM",
+    "HMM",
+    "SMC",
+    "DSA",
+    "stop-loss",
+    "take-profit"
+  ]
+}
