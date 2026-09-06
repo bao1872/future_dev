@@ -1,0 +1,27 @@
+{
+  "name": "S2 Session Transition V1 (price only)",
+  "depends_on_quantile": false,
+  "quantile_status": "QUARANTINED",
+  "session_detection": "15-minute calendar gaps in 5m bars; >15min gap = transition",
+  "prev_state": [
+    "prev_ret_15m",
+    "prev_ret_30m"
+  ],
+  "targets": {
+    "5m": "next_open_to_5m",
+    "15m": "next_open_to_15m",
+    "30m": "next_open_to_30m"
+  },
+  "binning": "per-instrument full-sample quintiles of previous-session return; bin1=strong down, bin5=strong up (descriptive, not OOS)",
+  "excluded_from_v1": [
+    "OI (L8 position has roll jumps)",
+    "volume surprise (V2)",
+    "models / ML",
+    "fees / slippage"
+  ],
+  "gap_types": {
+    "lunch": "<=240 min",
+    "overnight": "240-1440 min",
+    "long_gap": ">1440 min (weekend/holiday)"
+  }
+}
