@@ -1,0 +1,10 @@
+{
+  "question": "Does the frozen Quantile opportunity edge live in intraday-contiguous targets or in cross-gap (session/overnight) targets?",
+  "model": "unchanged frozen Quantile (build_15m + quantile_state, F1_VOL, H4)",
+  "h4_total_rows": 174438,
+  "h4_cross_gap_rows": 76382,
+  "h4_pct_cross_gap": 0.4378747749916876,
+  "h8_total_rows": 174374,
+  "h8_cross_gap_rows": 139134,
+  "h8_pct_cross_gap": 0.7979056510718341
+}
