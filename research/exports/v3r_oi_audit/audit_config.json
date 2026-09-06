@@ -1,0 +1,14 @@
+{
+  "scope": "largest absolute relative OI changes entering the master sample",
+  "top_n_per_instrument": 20,
+  "fields": [
+    "decision_time",
+    "trading_day",
+    "position_prev",
+    "position_now",
+    "rel_dOI_5m",
+    "session_open_bar"
+  ],
+  "nothing_removed": true,
+  "no_threshold_applied": true
+}

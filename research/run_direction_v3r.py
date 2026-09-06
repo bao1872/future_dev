@@ -845,6 +845,17 @@ def add_features(
     )
 
     # ---- relative OI ----
+    #
+    # rel_dOI_n compares position[k] against position[k-n], so the
+    # endpoints must be linked by a genuine chain of consecutive
+    # bars. diff_window_ok gives the n+1 price-point rule here too.
+    #
+    # This is enforced on the OI feature itself. Previously the OI
+    # series only checked the bars inside its own window, and was
+    # protected in practice by RV60 requiring a longer continuous
+    # history in the master sample. Depending on a different
+    # feature to filter your bad rows is fragile: the OI feature has
+    # to be correct on its own.
 
     for (
         label,
@@ -871,7 +882,7 @@ def add_features(
         )
 
         mask = (
-            span_ok(
+            diff_window_ok(
                 cs,
                 start,
                 n,
@@ -2487,9 +2498,25 @@ def main() -> None:
             "model": (
                 QUANT_MODEL
             ),
-            "refit": False,
+            "model_specification_frozen": (
+                True
+            ),
+            "hyperparameters_frozen": (
+                True
+            ),
+            "oos_models_refit_per_fold": (
+                True
+            ),
+            "note": (
+                "Strict OOS quantile predictions are "
+                "regenerated per fold through the "
+                "locked specification and locked fold "
+                "geometry. The design is frozen; the "
+                "per-fold estimators are refit, as "
+                "walk-forward requires."
+            ),
             "role": (
-                "width only, frozen"
+                "width only"
             ),
         },
         "spread_is_fold_local": True,

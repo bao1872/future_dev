@@ -414,23 +414,26 @@ def drop_incomplete_tail(
     now=None,
     tolerance_minutes: int = 5,
 ) -> pd.DataFrame:
-    """Remove the final trading day when it is not yet complete.
+    """Drop bars whose event time is beyond the causal cutoff.
 
-    The TDX server serves the session it is currently in, so the
-    newest trading day is by construction partial. It can also appear
-    ahead of the local clock, because the server's market date can
-    run ahead of the machine that is downloading.
+    The TDX server serves the session it is currently in, and its
+    market date can run ahead of the machine that is downloading,
+    so the newest bars can carry an event time beyond "now". Those
+    bars are not knowable and must not enter any sample.
 
-    Rule:
+    Removal unit is the BAR, not the trading day.
 
-        rows whose event_datetime is beyond `now` are dropped, and
-        because a partially served day must not be left in the
-        sample, the WHOLE trading day that contained them is
-        removed.
+    This matters because a TDX trading day is not a calendar day.
+    A trading day labelled Monday can contain bars that really
+    happened on Friday evening, Saturday after midnight, and Monday
+    daytime. Deleting the whole trading day because its Monday
+    daytime bar is in the future would also throw away the Friday
+    night bars, which are already complete and already in the past.
 
-    A last trading day that is already complete (for example a
-    Friday close seen on a Sunday) is kept, because it produces no
-    future rows.
+    Data validity and experiment endpoint are separate concerns:
+
+        validity      event_datetime <= now (+ tolerance)
+        endpoint      chosen by the experiment, not here
     """
 
     if df.empty:
@@ -463,22 +466,12 @@ def drop_incomplete_tail(
         ),
     )
 
-    bad_days = set(
-        df.loc[
-            ev > limit,
-            "trading_day",
-        ].dropna()
-    )
-
-    if not bad_days:
-        return df
+    keep = (
+        ev <= limit
+    ) | ev.isna()
 
     out = df[
-        ~df[
-            "trading_day"
-        ].isin(
-            bad_days
-        )
+        keep
     ]
 
     return out.reset_index(
