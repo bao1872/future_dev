@@ -1,0 +1,30 @@
+{
+  "trigger_bars": 6,
+  "confirmation": "close of the bar after the trigger window",
+  "entry": "open of the next bar, never inside the triggering bar",
+  "horizon_bars": {
+    "H5": 1,
+    "H15": 3
+  },
+  "primary_horizon": "H5",
+  "exit": "fixed time, no stop, no target",
+  "contiguous_span_bars": 10,
+  "opportunity": {
+    "source": "frozen strict-OOS quantile width (q90 - q10)",
+    "sets": [
+      "ALL",
+      "TOP30"
+    ],
+    "top_fraction": 0.3,
+    "threshold": "computed inside each fold on TRAIN events only"
+  },
+  "strategies": [
+    "FOLLOW",
+    "FADE"
+  ],
+  "returns": "simple gross returns, no fees, no slippage",
+  "notes": [
+    "LC H5: only 2 folds for n=795",
+    "LC H15: only 2 folds for n=795"
+  ]
+}
