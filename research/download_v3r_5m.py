@@ -54,6 +54,18 @@ CALENDAR_START = (
     "2025-01-01"
 )
 
+# The experiment endpoint belongs to the experiment definition, not
+# to the data source. It is enforced explicitly here.
+#
+# This was previously only implicit: every instrument happened to end
+# at 2026-09-04 15:00 because the old drop_incomplete_tail() deleted
+# the whole trading day containing any future bar. That looked like a
+# designed common window but was a side effect, and it silently moved
+# whenever the download clock or the server state changed.
+CALENDAR_END = (
+    "2026-09-04 15:00:00"
+)
+
 MAX_PAGES = 300
 
 KEEP_COLUMNS = [
@@ -260,6 +272,10 @@ def main() -> None:
         CALENDAR_START
     )
 
+    end_cutoff = pd.Timestamp(
+        CALENDAR_END
+    )
+
     now = pd.Timestamp.now()
 
     api = connect()
@@ -320,6 +336,21 @@ def main() -> None:
                 >= cutoff
             ].copy()
 
+            # Experiment endpoint. Without this the window is
+            # decided by how much the vendor happens to serve.
+            after_start = int(
+                len(
+                    df
+                )
+            )
+
+            df = df[
+                df[
+                    "availability_time"
+                ]
+                <= end_cutoff
+            ].copy()
+
             df = df[
                 KEEP_COLUMNS
             ]
@@ -363,9 +394,20 @@ def main() -> None:
                 "rows_after_tail_drop": (
                     after_tail
                 ),
+                "rows_after_start_cut": (
+                    after_start
+                ),
                 "rows_in_window": int(
                     len(
                         df
+                    )
+                ),
+                "rows_dropped_by_calendar_end": (
+                    after_start
+                    - int(
+                        len(
+                            df
+                        )
                     )
                 ),
                 "first_bar_start": str(
@@ -410,6 +452,9 @@ def main() -> None:
         ),
         "calendar_start": (
             CALENDAR_START
+        ),
+        "calendar_end": (
+            CALENDAR_END
         ),
         "instrument_count": len(
             INSTRUMENTS

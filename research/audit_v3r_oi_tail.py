@@ -288,7 +288,19 @@ def main() -> None:
             ]
         )
 
-        is_session_open = (
+        # Flag for the OI DIFFERENCE WINDOW ONLY.
+        #
+        # rel_dOI_5m compares position[k-1] to position[k]. This is
+        # true when bar k is not adjacent to bar k-1, i.e. when the
+        # difference spans a session gap and is therefore not a
+        # 5-minute change at all.
+        #
+        # It says nothing about whether the DECISION bar itself sits
+        # at a session open. Those are different questions. A
+        # decision at 21:00 can legitimately use a feature bar from
+        # the tail of the previous session, which is not leakage,
+        # only stale last-available state.
+        oi_crosses_gap = (
             gap_before[
                 k
             ]
@@ -317,8 +329,8 @@ def main() -> None:
                 "abs_rel_dOI_5m": np.abs(
                     rel
                 ),
-                "session_open_bar": (
-                    is_session_open
+                "oi_window_crosses_gap": (
+                    oi_crosses_gap
                 ),
             }
         )
@@ -361,21 +373,21 @@ def main() -> None:
                         > 0.05
                     ).sum()
                 ),
-                "top20_session_open_share": (
+                "top20_oi_window_crosses_gap_share": (
                     float(
                         frame
                         .nlargest(
                             TOP_N,
                             "abs_rel_dOI_5m",
                         )[
-                            "session_open_bar"
+                            "oi_window_crosses_gap"
                         ].mean()
                     )
                 ),
-                "all_session_open_share": (
+                "all_oi_window_crosses_gap_share": (
                     float(
                         frame[
-                            "session_open_bar"
+                            "oi_window_crosses_gap"
                         ].mean()
                     )
                 ),
@@ -632,8 +644,19 @@ def main() -> None:
                     "position_prev",
                     "position_now",
                     "rel_dOI_5m",
-                    "session_open_bar",
+                    "oi_window_crosses_gap",
                 ],
+                "flag_semantics": (
+                    "oi_window_crosses_gap refers to "
+                    "the OI difference window "
+                    "(position[k-1] -> position[k]) "
+                    "only, NOT to the decision bar. "
+                    "A zero value means no OI window "
+                    "in the master sample spans a "
+                    "session gap. It does not mean "
+                    "the master sample contains no "
+                    "session-open decision bar."
+                ),
                 "nothing_removed": True,
                 "no_threshold_applied": True,
             },

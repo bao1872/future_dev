@@ -7,8 +7,9 @@
     "position_prev",
     "position_now",
     "rel_dOI_5m",
-    "session_open_bar"
+    "oi_window_crosses_gap"
   ],
+  "flag_semantics": "oi_window_crosses_gap refers to the OI difference window (position[k-1] -> position[k]) only, NOT to the decision bar. A zero value means no OI window in the master sample spans a session gap. It does not mean the master sample contains no session-open decision bar.",
   "nothing_removed": true,
   "no_threshold_applied": true
 }

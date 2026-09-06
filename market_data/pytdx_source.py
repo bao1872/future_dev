@@ -412,9 +412,24 @@ def drop_incomplete_tail(
     df: pd.DataFrame,
     *,
     now=None,
-    tolerance_minutes: int = 5,
+    tolerance_minutes: int = 0,
 ) -> pd.DataFrame:
     """Drop bars whose event time is beyond the causal cutoff.
+
+    The TDX bar label is the END of the interval, so a bar whose
+    event_datetime is at or before "now" is already closed and is
+    knowable. A bar whose event_datetime is after "now" has not
+    finished, so its OHLC is still moving.
+
+    The default tolerance is therefore zero. A positive tolerance
+    would admit a bar that has not closed yet, which is exactly the
+    thing this function exists to prevent. If a machine clock is
+    behind the market clock, that is a clock problem and should be
+    reported as clock skew, not absorbed by a hidden margin.
+
+    Clock skew is reported explicitly rather than tolerated, so a
+    misconfigured clock shows up in the log instead of silently
+    admitting unfinished bars.
 
     The TDX server serves the session it is currently in, and its
     market date can run ahead of the machine that is downloading,
@@ -432,7 +447,7 @@ def drop_incomplete_tail(
 
     Data validity and experiment endpoint are separate concerns:
 
-        validity      event_datetime <= now (+ tolerance)
+        validity      event_datetime <= now
         endpoint      chosen by the experiment, not here
     """
 
@@ -473,6 +488,28 @@ def drop_incomplete_tail(
     out = df[
         keep
     ]
+
+    dropped = int(
+        (
+            ~keep
+        ).sum()
+    )
+
+    if dropped:
+
+        skew = (
+            ev.max()
+            - now
+        )
+
+        print(
+            f"    drop_incomplete_tail: "
+            f"dropped {dropped} bar(s); "
+            f"max event time is "
+            f"{skew} beyond now "
+            f"(clock skew if positive "
+            f"and large)"
+        )
 
     return out.reset_index(
         drop=True

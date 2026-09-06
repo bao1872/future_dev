@@ -1,0 +1,8 @@
+{
+  "calendar_start": "2025-01-01",
+  "calendar_end": "2026-09-04 15:00:00",
+  "instruments": 16,
+  "identical_instruments": 16,
+  "verdict": "IDENTICAL",
+  "note": "Bars after the endpoint exist in a fresh download and are excluded here. They are outside the frozen V3R window and are not new V3R rows."
+}

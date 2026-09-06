@@ -1,4 +1,4 @@
-instrument,n,abs_max,abs_p99,n_above_10pct,n_above_5pct,top20_session_open_share,all_session_open_share
+instrument,n,abs_max,abs_p99,n_above_10pct,n_above_5pct,top20_oi_window_crosses_gap_share,all_oi_window_crosses_gap_share
 AG,17559,0.048399280766898256,0.0075290276630841264,0,0,0.0,0.0
 AU,17559,0.02637771496218985,0.003964270998171688,0,0,0.0,0.0
 CU,12563,0.019331424056883272,0.003892136894836177,0,0,0.0,0.0

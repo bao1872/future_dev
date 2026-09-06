@@ -1,4 +1,4 @@
-instrument,row_id,rank,decision_time,trading_day,position_prev,position_now,abs_position_change,rel_dOI_5m,abs_rel_dOI_5m,session_open_bar
+instrument,row_id,rank,decision_time,trading_day,position_prev,position_now,abs_position_change,rel_dOI_5m,abs_rel_dOI_5m,oi_window_crosses_gap
 AG,28648,1,2026-01-29 23:20:00,2026-01-30,281967.0,268320.0,-13647.0,-0.048399280766898256,0.048399280766898256,False
 AG,26354,2,2025-12-29 14:55:00,2025-12-29,236862.0,229980.0,-6882.0,-0.029054892722344655,0.029054892722344655,False
 AG,27190,3,2026-01-12 22:05:00,2026-01-13,325164.0,318069.0,-7095.0,-0.021819758644868435,0.021819758644868435,False

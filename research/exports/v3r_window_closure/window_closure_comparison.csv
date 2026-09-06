@@ -1,0 +1,17 @@
+instrument,committed_rows,fresh_rows_in_window,rows_equal,committed_first,fresh_first,committed_last,fresh_last,first_equal,last_equal,hash_equal,open_equal,high_equal,low_equal,close_equal,trade_equal,position_equal,rows_after_endpoint_excluded
+AG,44451,44451,True,2025-01-02 09:00:00,2025-01-02 09:00:00,2026-09-04 15:00:00,2026-09-04 15:00:00,True,True,True,True,True,True,True,True,True,66
+AU,44451,44451,True,2025-01-02 09:00:00,2025-01-02 09:00:00,2026-09-04 15:00:00,2026-09-04 15:00:00,True,True,True,True,True,True,True,True,True,66
+CU,37323,37323,True,2025-01-02 09:00:00,2025-01-02 09:00:00,2026-09-04 15:00:00,2026-09-04 15:00:00,True,True,True,True,True,True,True,True,True,48
+AL,37323,37323,True,2025-01-02 09:00:00,2025-01-02 09:00:00,2026-09-04 15:00:00,2026-09-04 15:00:00,True,True,True,True,True,True,True,True,True,48
+SN,37323,37323,True,2025-01-02 09:00:00,2025-01-02 09:00:00,2026-09-04 15:00:00,2026-09-04 15:00:00,True,True,True,True,True,True,True,True,True,48
+NI,37323,37323,True,2025-01-02 09:00:00,2025-01-02 09:00:00,2026-09-04 15:00:00,2026-09-04 15:00:00,True,True,True,True,True,True,True,True,True,48
+RB,27819,27819,True,2025-01-02 09:00:00,2025-01-02 09:00:00,2026-09-04 15:00:00,2026-09-04 15:00:00,True,True,True,True,True,True,True,True,True,24
+I,27819,27819,True,2025-01-02 09:00:00,2025-01-02 09:00:00,2026-09-04 15:00:00,2026-09-04 15:00:00,True,True,True,True,True,True,True,True,True,24
+SC,44449,44449,True,2025-01-02 09:00:00,2025-01-02 09:00:00,2026-09-04 15:00:00,2026-09-04 15:00:00,True,True,True,True,True,True,True,True,True,66
+RU,27819,27819,True,2025-01-02 09:00:00,2025-01-02 09:00:00,2026-09-04 15:00:00,2026-09-04 15:00:00,True,True,True,True,True,True,True,True,True,24
+MA,27819,27819,True,2025-01-02 09:00:00,2025-01-02 09:00:00,2026-09-04 15:00:00,2026-09-04 15:00:00,True,True,True,True,True,True,True,True,True,24
+TA,27819,27819,True,2025-01-02 09:00:00,2025-01-02 09:00:00,2026-09-04 15:00:00,2026-09-04 15:00:00,True,True,True,True,True,True,True,True,True,24
+M,27819,27819,True,2025-01-02 09:00:00,2025-01-02 09:00:00,2026-09-04 15:00:00,2026-09-04 15:00:00,True,True,True,True,True,True,True,True,True,24
+P,27819,27819,True,2025-01-02 09:00:00,2025-01-02 09:00:00,2026-09-04 15:00:00,2026-09-04 15:00:00,True,True,True,True,True,True,True,True,True,24
+CF,27819,27819,True,2025-01-02 09:00:00,2025-01-02 09:00:00,2026-09-04 15:00:00,2026-09-04 15:00:00,True,True,True,True,True,True,True,True,True,24
+LC,18315,18315,True,2025-01-02 09:00:00,2025-01-02 09:00:00,2026-09-04 15:00:00,2026-09-04 15:00:00,True,True,True,True,True,True,True,True,True,0
