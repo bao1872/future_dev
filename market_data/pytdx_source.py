@@ -117,11 +117,18 @@ PAGE_SIZE = 700
 # ============================================================
 
 INSTRUMENTS = {
+    # Precious
     "AG": {
         "market": 30,
         "code": "AGL8",
         "name": "白银主连",
     },
+    "AU": {
+        "market": 30,
+        "code": "AUL8",
+        "name": "黄金主连",
+    },
+    # Non-ferrous
     "CU": {
         "market": 30,
         "code": "CUL8",
@@ -137,25 +144,64 @@ INSTRUMENTS = {
         "code": "SNL8",
         "name": "沪锡主连",
     },
+    "NI": {
+        "market": 30,
+        "code": "NIL8",
+        "name": "沪镍主连",
+    },
+    # Ferrous
+    "RB": {
+        "market": 30,
+        "code": "RBL8",
+        "name": "螺纹主连",
+    },
     "I": {
         "market": 29,
         "code": "IL8",
         "name": "铁矿主连",
     },
+    # Energy / chemical
     "SC": {
         "market": 30,
         "code": "SCL8",
         "name": "原油主连",
     },
+    "RU": {
+        "market": 30,
+        "code": "RUL8",
+        "name": "橡胶主连",
+    },
+    "MA": {
+        "market": 28,
+        "code": "MAL8",
+        "name": "甲醇主连",
+    },
+    "TA": {
+        "market": 28,
+        "code": "TAL8",
+        "name": "PTA主连",
+    },
+    # Agriculture
     "M": {
         "market": 29,
         "code": "ML8",
         "name": "豆粕主连",
     },
+    "P": {
+        "market": 29,
+        "code": "PL8",
+        "name": "棕榈油主连",
+    },
     "CF": {
         "market": 28,
         "code": "CFL8",
         "name": "郑棉主连",
+    },
+    # New energy (GFEX)
+    "LC": {
+        "market": 66,
+        "code": "LCL8",
+        "name": "碳酸锂主连",
     },
 }
 
@@ -358,6 +404,84 @@ def normalize_tdx_bars(
     ]
 
     return x.reset_index(
+        drop=True
+    )
+
+
+def drop_incomplete_tail(
+    df: pd.DataFrame,
+    *,
+    now=None,
+    tolerance_minutes: int = 5,
+) -> pd.DataFrame:
+    """Remove the final trading day when it is not yet complete.
+
+    The TDX server serves the session it is currently in, so the
+    newest trading day is by construction partial. It can also appear
+    ahead of the local clock, because the server's market date can
+    run ahead of the machine that is downloading.
+
+    Rule:
+
+        rows whose event_datetime is beyond `now` are dropped, and
+        because a partially served day must not be left in the
+        sample, the WHOLE trading day that contained them is
+        removed.
+
+    A last trading day that is already complete (for example a
+    Friday close seen on a Sunday) is kept, because it produces no
+    future rows.
+    """
+
+    if df.empty:
+        return df
+
+    now = (
+        pd.Timestamp(
+            now
+        )
+        if now
+        is not None
+        else pd.Timestamp.now()
+    )
+
+    limit = (
+        now
+        + pd.Timedelta(
+            minutes=(
+                tolerance_minutes
+            )
+        )
+    )
+
+    ev = pd.to_datetime(
+        df[
+            "event_datetime"
+        ],
+        errors=(
+            "coerce"
+        ),
+    )
+
+    bad_days = set(
+        df.loc[
+            ev > limit,
+            "trading_day",
+        ].dropna()
+    )
+
+    if not bad_days:
+        return df
+
+    out = df[
+        ~df[
+            "trading_day"
+        ].isin(
+            bad_days
+        )
+    ]
+
+    return out.reset_index(
         drop=True
     )
 
