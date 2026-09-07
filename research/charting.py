@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections import defaultdict
+
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -71,12 +73,14 @@ def build_smc_momentum_figure(
     smc: dict,
     momentum: dict,
     *,
-    display_bars: int | None,
+    display_bars: int | None = None,
+    display_range: tuple[int, int] | None = None,
     show_structure: bool = True,
     show_order_blocks: bool = True,
     show_equal_levels: bool = True,
     show_trailing: bool = True,
     show_momentum: bool = True,
+    show_ob_entered: bool = False,
     strategy_signals: pd.DataFrame | None = None,
     oracle_labels_df: pd.DataFrame | None = None,
 ) -> go.Figure:
@@ -89,12 +93,17 @@ def build_smc_momentum_figure(
 
     Canonical output is consumed as-is: nothing is recomputed here.
     """
-    view = full.tail(display_bars) if display_bars else full.copy()
+    if display_range is not None:
+        s, e = int(display_range[0]), int(display_range[1])
+        view = full.iloc[s:e]
+        start_pos = s
+    else:
+        view = full.tail(display_bars) if display_bars else full.copy()
+        start_pos = len(full) - len(view)
     n = len(view)
     if n == 0:
         raise ValueError("empty view")
 
-    start_pos = len(full) - n
     x = np.arange(n)
 
     rows = 2 if show_momentum else 1
@@ -212,6 +221,58 @@ def build_smc_momentum_figure(
                 row=1,
                 col=1,
             )
+
+    # --- Historical OB_ENTERED lifecycle events (canonical, no re-derived overlap)
+    if show_ob_entered:
+        entered = [
+            ev
+            for ev in smc.get("ob_lifecycle_events", [])
+            if ev.get("type") == "OB_ENTERED" and ev.get("enter_index") is not None
+        ]
+        if entered:
+            groups: dict[int, list[dict]] = defaultdict(list)
+            for ev in entered:
+                groups[int(ev["enter_index"])].append(ev)
+
+            ob_pad = float(view["high"].max() - view["low"].min()) * 0.02 + 1.0
+            xs, ys, hovers, colors = [], [], [], []
+            for ei, evs in groups.items():
+                lx = to_local(ei)
+                if lx is None:
+                    continue
+                bullish = int(evs[0]["bias"]) == 1
+                xs.append(lx)
+                ys.append(float(full["low"].iloc[ei]) - ob_pad)
+                lines = [
+                    f"{'Bullish' if int(e['bias']) == 1 else 'Bearish'} "
+                    f"{'internal' if e['internal'] else 'swing'} OB · "
+                    f"created {e['anchor_time']} (idx {e['anchor_index']}) · "
+                    f"range {float(e['bar_low']):.2f}-{float(e['bar_high']):.2f}"
+                    for e in evs
+                ]
+                hovers.append("<br>".join(lines))
+                colors.append(SMC_BULL if bullish else SMC_BEAR)
+
+            if xs:
+                fig.add_trace(
+                    go.Scatter(
+                        x=xs,
+                        y=ys,
+                        mode="markers",
+                        marker=dict(
+                            symbol="circle",
+                            size=7,
+                            color=colors,
+                            line=dict(width=1, color=CHART_BG),
+                        ),
+                        text=hovers,
+                        hovertemplate="OB_ENTERED<br>%{text}<extra></extra>",
+                        name="OB entered",
+                        showlegend=False,
+                    ),
+                    row=1,
+                    col=1,
+                )
 
     # --- EQH / EQL
     if show_equal_levels:
@@ -510,5 +571,77 @@ def build_smc_momentum_figure(
         margin=dict(l=20, r=80, t=20, b=20),
         bargap=0.05,
     )
+
+    return fig
+
+
+def build_15m_context_figure(
+    five: pd.DataFrame,
+    view_start_time: pd.Timestamp,
+    view_end_time: pd.Timestamp,
+    highlight_time: pd.Timestamp | None,
+) -> go.Figure:
+    """Synchronized 15m context candlestick for the same local time window.
+
+    Source: ``aggregate_15m(five)`` only -- no reimplemented aggregation.
+    Highlights the single 15m candle that *contains* ``highlight_time`` (the
+    selected Oracle 5m event). This is hindsight visual inspection, not a
+    causal feature join; it displays DISPLAY context only.
+    """
+    from research.build_pytdx_panel import aggregate_15m
+
+    fifteen = aggregate_15m(five)
+    fview = fifteen[
+        (fifteen["bar_start_time"] >= view_start_time)
+        & (fifteen["bar_start_time"] <= view_end_time)
+    ].copy()
+
+    fig = go.Figure()
+    if len(fview):
+        fig.add_trace(
+            go.Candlestick(
+                x=fview["bar_start_time"],
+                open=fview["open"],
+                high=fview["high"],
+                low=fview["low"],
+                close=fview["close"],
+                name="15m",
+                increasing_line_color=PRICE_UP,
+                decreasing_line_color=PRICE_DOWN,
+                showlegend=False,
+            )
+        )
+
+        if highlight_time is not None:
+            cont = fview[
+                (fview["bar_start_time"] <= highlight_time)
+                & (fview["bar_end_time"] > highlight_time)
+            ]
+            if len(cont):
+                c = cont.iloc[0]
+                fig.add_vline(
+                    x=c["bar_start_time"],
+                    line=dict(color=TEXT_BRIGHT, width=1.5, dash="solid"),
+                )
+                fig.add_annotation(
+                    x=c["bar_start_time"],
+                    y=float(c["high"]),
+                    text="Oracle 5m event",
+                    showarrow=False,
+                    font=dict(color=TEXT_BRIGHT, size=10),
+                    yshift=10,
+                )
+
+    fig.update_layout(
+        height=240,
+        paper_bgcolor="#0A0F14",
+        plot_bgcolor=CHART_BG,
+        font=dict(color="#98A1B3"),
+        showlegend=False,
+        margin=dict(l=20, r=80, t=20, b=20),
+        xaxis_rangeslider_visible=False,
+    )
+    fig.update_xaxes(gridcolor=GRID, title_text="15m context (containing bar highlighted)")
+    fig.update_yaxes(gridcolor=GRID, zerolinecolor=GRID_SOFT)
 
     return fig
