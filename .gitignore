@@ -35,3 +35,4 @@ env/
 
 # OB Trigger snapshot export (regenerable by research/ob_trigger_snapshot.py)
 research/exports/ob_trigger_smc_v1/
+research/exports/ob_trigger_smc_v2/
