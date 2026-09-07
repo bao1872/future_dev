@@ -32,3 +32,6 @@ env/
 
 # WorkBuddy 本地工作数据（含会话日志，不入库）
 .workbuddy/
+
+# OB Trigger snapshot export (regenerable by research/ob_trigger_snapshot.py)
+research/exports/ob_trigger_smc_v1/
