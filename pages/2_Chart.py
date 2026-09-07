@@ -81,6 +81,45 @@ def _fifteen_5m(raw: pd.DataFrame) -> pd.DataFrame:
 # 5m Oracle 逐bar观察 mode (extension of the existing research workbench)
 # ---------------------------------------------------------------------------
 
+def _oracle_entry_indices(oracle_df: pd.DataFrame) -> list[int]:
+    """Return hindsight Oracle ENTRY bars only.
+
+    Entry semantics:
+    - flat -> long
+    - flat -> short
+    - short -> long
+    - long -> short
+
+    Explicitly NOT entries:
+    - long -> flat
+    - short -> flat
+    """
+
+    pos = oracle_df["oracle_position"].to_numpy(dtype=int)
+
+    entries: list[int] = []
+
+    for t in range(len(pos)):
+        new_pos = int(pos[t])
+        old_pos = int(pos[t - 1]) if t > 0 else 0
+
+        # CRITICAL:
+        # transition into flat is an EXIT, never an entry.
+        if new_pos == 0:
+            continue
+
+        # flat -> position
+        if old_pos == 0:
+            entries.append(t)
+            continue
+
+        # direct flip: long <-> short
+        if np.sign(new_pos) != np.sign(old_pos):
+            entries.append(t)
+
+    return entries
+
+
 def run_oracle_mode() -> None:
     st.title("5m Oracle 逐bar观察")
     st.caption(
@@ -134,30 +173,42 @@ def run_oracle_mode() -> None:
     action_filter = st.sidebar.radio("Oracle action", ["All", "Long", "Short"], index=0)
     window = st.sidebar.selectbox("Context window (±bars)", (20, 50, 100), index=1)
     show_ob_entered = st.sidebar.toggle("Show OB entered", value=True)
-    show_active_ob = st.sidebar.toggle("Show active OB", value=True)
+    show_active_ob = st.sidebar.toggle("Show active OB", value=False)
     show_15m = st.sidebar.toggle("Show 15m context", value=True)
 
-    # Derive Oracle entry events (first bar of each flat->position->flat run,
-    # including flips). Adapter bookkeeping only; Oracle algorithm untouched.
-    pos = oracle_df["oracle_position"].to_numpy()
-    act = oracle_df["oracle_action"].to_numpy()
-    entries: list[int] = []
-    for t in range(len(pos)):
-        if act[t] == "HOLD":
-            continue
-        if t == 0 or pos[t - 1] == 0 or np.sign(pos[t]) != np.sign(pos[t - 1]):
-            entries.append(t)
+    pos = oracle_df["oracle_position"].to_numpy(dtype=int)
+
+    entries = _oracle_entry_indices(oracle_df)
 
     if action_filter == "Long":
-        filt = [t for t in entries if pos[t] == 1]
+        filt = [t for t in entries if int(pos[t]) == 1]
     elif action_filter == "Short":
-        filt = [t for t in entries if pos[t] == -1]
+        filt = [t for t in entries if int(pos[t]) == -1]
     else:
-        filt = entries
+        filt = entries.copy()
+
+    N = len(ind)
+
+    # Require a complete symmetric visual window.
+    # Boundary observations are excluded from this experiment.
+    filt = [
+        t
+        for t in filt
+        if t >= window and (t + window) < N
+    ]
 
     if not filt:
-        st.warning("该筛选下没有 Oracle entry 事件。")
+        st.warning("该筛选下没有可完整观察的 Oracle entry 事件。")
         return
+
+    scope_key = (symbol, int(penalty), action_filter, int(window))
+
+    if st.session_state.get("oracle_scope_key") != scope_key:
+        st.session_state.oracle_scope_key = scope_key
+        st.session_state.oracle_event_pos = 0
+
+    event_pos = int(st.session_state.get("oracle_event_pos", 0))
+    event_pos = min(max(event_pos, 0), len(filt) - 1)
 
     if "oracle_event_pos" not in st.session_state:
         st.session_state.oracle_event_pos = 0
@@ -165,34 +216,53 @@ def run_oracle_mode() -> None:
         st.session_state.oracle_event_pos = len(filt) - 1
 
     c1, c2, c3 = st.columns([1, 2, 1])
-    with c1:
-        if st.button("◀ Previous"):
-            st.session_state.oracle_event_pos = max(0, st.session_state.oracle_event_pos - 1)
-    with c2:
-        st.markdown(f"**Event {st.session_state.oracle_event_pos + 1} / {len(filt)}**")
-    with c3:
-        if st.button("Next ▶"):
-            st.session_state.oracle_event_pos = min(
-                len(filt) - 1, st.session_state.oracle_event_pos + 1
-            )
 
-    e = filt[st.session_state.oracle_event_pos]
-    N = len(ind)
-    start = max(0, e - window)
-    end = min(N, e + window + 1)
+    with c1:
+        if st.button("◀ Previous", key="oracle_previous"):
+            event_pos = max(0, event_pos - 1)
+
+    with c3:
+        if st.button("Next ▶", key="oracle_next"):
+            event_pos = min(len(filt) - 1, event_pos + 1)
+
+    # Commit the final navigation state BEFORE rendering title/chart.
+    st.session_state.oracle_event_pos = event_pos
+
+    with c2:
+        st.markdown(
+            f"<div style='text-align:center'>"
+            f"<b>Event {event_pos + 1} / {len(filt)}</b>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+
+    e = filt[event_pos]
+    start = e - window
+    end = e + window + 1
+
+    visible_entry_df = oracle_df.iloc[filt].copy()
 
     fig = build_smc_momentum_figure(
         ind,
         smc,
         momentum,
         display_range=(start, end),
-        show_structure=True,
+
+        # Oracle discovery V1:
+        # isolate Oracle ENTRY × canonical OB_ENTERED × 15m context.
+        show_structure=False,
         show_order_blocks=show_active_ob,
-        show_equal_levels=True,
-        show_trailing=True,
-        show_momentum=True,
+        show_equal_levels=False,
+        show_trailing=False,
+        show_momentum=False,
+
         show_ob_entered=show_ob_entered,
-        oracle_labels_df=oracle_df,
+
+        # ENTRY rows only — never pass full Oracle actions here.
+        oracle_labels_df=visible_entry_df,
+
+        # Explicit selected event.
+        selected_oracle_bar_index=e,
     )
     st.plotly_chart(fig, use_container_width=True)
 
@@ -206,14 +276,19 @@ def run_oracle_mode() -> None:
     # --- Event Inspector
     st.markdown("### Event Inspector")
     ev_time = ind.index[e]
-    ev_action = act[e]
+    entry_side = "LONG" if int(pos[e]) == 1 else "SHORT"
     col1, col2 = st.columns(2)
     with col1:
-        st.markdown("**Oracle Event**")
+        st.markdown("**Oracle Entry**")
         st.write(f"symbol: `{symbol}`")
         st.write(f"timestamp: `{ev_time}`")
-        st.write(f"oracle_action: `{ev_action}`")
-        st.write(f"oracle_position: `{int(pos[e])}`")
+        st.write(f"entry_side: `{entry_side}`")
+        st.write(f"target_position: `{int(pos[e])}`")
+        st.write(f"bar_index: `{e}`")
+        st.write(
+            f"raw_oracle_action: "
+            f"`{oracle_df.iloc[e]['oracle_action']}`"
+        )
     with col2:
         entered_here = [
             ev

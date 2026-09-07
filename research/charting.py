@@ -83,6 +83,7 @@ def build_smc_momentum_figure(
     show_ob_entered: bool = False,
     strategy_signals: pd.DataFrame | None = None,
     oracle_labels_df: pd.DataFrame | None = None,
+    selected_oracle_bar_index: int | None = None,
 ) -> go.Figure:
     """Price + SMC / SQZMOM figure on a continuous bar-index x axis.
 
@@ -105,6 +106,11 @@ def build_smc_momentum_figure(
         raise ValueError("empty view")
 
     x = np.arange(n)
+
+    # Slice that maps the visible view back into full-history arrays
+    # (momentum). Guards against the display_range off-by bug where
+    # SQZMOM used val[start_pos:] of the wrong length.
+    view_slice = slice(start_pos, start_pos + n)
 
     rows = 2 if show_momentum else 1
     row_heights = [0.76, 0.24] if show_momentum else [1.0]
@@ -230,28 +236,63 @@ def build_smc_momentum_figure(
             if ev.get("type") == "OB_ENTERED" and ev.get("enter_index") is not None
         ]
         if entered:
-            groups: dict[int, list[dict]] = defaultdict(list)
-            for ev in entered:
-                groups[int(ev["enter_index"])].append(ev)
-
             ob_pad = float(view["high"].max() - view["low"].min()) * 0.02 + 1.0
-            xs, ys, hovers, colors = [], [], [], []
-            for ei, evs in groups.items():
+
+            groups: dict[tuple[int, int], list[dict]] = defaultdict(list)
+
+            for ev in entered:
+                key = (
+                    int(ev["enter_index"]),
+                    int(ev["bias"]),
+                )
+                groups[key].append(ev)
+
+            xs = []
+            ys = []
+            hovers = []
+            colors = []
+            symbols = []
+
+            for (ei, bias), evs in groups.items():
                 lx = to_local(ei)
+
                 if lx is None:
                     continue
-                bullish = int(evs[0]["bias"]) == 1
+
+                bullish = bias == 1
+
                 xs.append(lx)
-                ys.append(float(full["low"].iloc[ei]) - ob_pad)
+
+                if bullish:
+                    ys.append(
+                        float(full["low"].iloc[ei]) - ob_pad
+                    )
+                else:
+                    ys.append(
+                        float(full["high"].iloc[ei]) + ob_pad
+                    )
+
                 lines = [
-                    f"{'Bullish' if int(e['bias']) == 1 else 'Bearish'} "
-                    f"{'internal' if e['internal'] else 'swing'} OB · "
-                    f"created {e['anchor_time']} (idx {e['anchor_index']}) · "
-                    f"range {float(e['bar_low']):.2f}-{float(e['bar_high']):.2f}"
+                    (
+                        f"{'Bullish' if int(e['bias']) == 1 else 'Bearish'} "
+                        f"{'internal' if e['internal'] else 'swing'} OB"
+                        f"<br>created {e['anchor_time']}"
+                        f"<br>range "
+                        f"{float(e['bar_low']):.2f}"
+                        f"-{float(e['bar_high']):.2f}"
+                    )
                     for e in evs
                 ]
-                hovers.append("<br>".join(lines))
-                colors.append(SMC_BULL if bullish else SMC_BEAR)
+
+                hovers.append("<br><br>".join(lines))
+
+                colors.append(
+                    SMC_BULL if bullish else SMC_BEAR
+                )
+
+                symbols.append(
+                    "circle" if bullish else "diamond"
+                )
 
             if xs:
                 fig.add_trace(
@@ -260,13 +301,20 @@ def build_smc_momentum_figure(
                         y=ys,
                         mode="markers",
                         marker=dict(
-                            symbol="circle",
-                            size=7,
+                            symbol=symbols,
+                            size=8,
                             color=colors,
-                            line=dict(width=1, color=CHART_BG),
+                            line=dict(
+                                width=1,
+                                color=CHART_BG,
+                            ),
                         ),
                         text=hovers,
-                        hovertemplate="OB_ENTERED<br>%{text}<extra></extra>",
+                        hovertemplate=(
+                            "<b>CANONICAL OB_ENTERED</b>"
+                            "<br>%{text}"
+                            "<extra></extra>"
+                        ),
                         name="OB entered",
                         showlegend=False,
                     ),
@@ -484,13 +532,88 @@ def build_smc_momentum_figure(
                                 if side == "BUY"
                                 else "triangle-down-open"
                             ),
-                            size=15,
+                            size=11,
                             color=ORACLE_BUY if side == "BUY" else ORACLE_SELL,
-                            line=dict(width=2),
+                            opacity=0.38,
+                            line=dict(width=1.5),
                         ),
                         text=hover,
                         hovertemplate="%{text}<extra></extra>",
                         name=f"Oracle {side}",
+                        showlegend=False,
+                    ),
+                    row=1,
+                    col=1,
+                )
+
+    # --- Selected Oracle ENTRY: explicit focal event
+    if (
+        selected_oracle_bar_index is not None
+        and oracle_labels_df is not None
+        and not oracle_labels_df.empty
+    ):
+        gx = int(selected_oracle_bar_index)
+        lx = to_local(gx)
+
+        if lx is not None:
+            selected = oracle_labels_df[
+                oracle_labels_df["bar_index"] == gx
+            ]
+
+            if not selected.empty:
+                selected_row = selected.iloc[0]
+                target_pos = int(selected_row["oracle_position"])
+
+                if target_pos not in (-1, 1):
+                    raise ValueError(
+                        "selected_oracle_bar_index must point to an ENTRY "
+                        f"with non-zero target position; got {target_pos}"
+                    )
+
+                is_long = target_pos == 1
+
+                selected_y = (
+                    float(full["low"].iloc[gx]) - marker_pad * 2.8
+                    if is_long
+                    else float(full["high"].iloc[gx]) + marker_pad * 2.8
+                )
+
+                # Vertical focal line.
+                fig.add_vline(
+                    x=lx,
+                    line_width=1.5,
+                    line_dash="dot",
+                    line_color=TEXT_BRIGHT,
+                    row=1,
+                    col=1,
+                )
+
+                # Large filled marker.
+                fig.add_trace(
+                    go.Scatter(
+                        x=[lx],
+                        y=[selected_y],
+                        mode="markers",
+                        marker=dict(
+                            symbol="triangle-up" if is_long else "triangle-down",
+                            size=20,
+                            color=ORACLE_BUY if is_long else ORACLE_SELL,
+                            line=dict(
+                                width=2,
+                                color=TEXT_BRIGHT,
+                            ),
+                        ),
+                        text=[
+                            (
+                                f"<b>SELECTED ORACLE "
+                                f"{'LONG' if is_long else 'SHORT'} ENTRY</b>"
+                                f"<br>Time: {selected_row['time']}"
+                                f"<br>Close: {float(selected_row['close']):.2f}"
+                                f"<br>Bar index: {gx}"
+                            )
+                        ],
+                        hovertemplate="%{text}<extra></extra>",
+                        name="Selected Oracle Entry",
                         showlegend=False,
                     ),
                     row=1,
@@ -509,11 +632,20 @@ def build_smc_momentum_figure(
         bcolor = np.array(momentum.get("bcolor", []), dtype=object)
         scolor = np.array(momentum.get("scolor", []), dtype=object)
 
+        if len(val[view_slice]) != n:
+            raise ValueError(
+                "momentum display slice length mismatch: "
+                f"{len(val[view_slice])} != {n}"
+            )
+
         fig.add_trace(
             go.Bar(
                 x=x,
-                y=val[start_pos:],
-                marker_color=[MOM_COLORS.get(str(c), "#878B94") for c in bcolor[start_pos:]],
+                y=val[view_slice],
+                marker_color=[
+                    MOM_COLORS.get(str(c), "#878B94")
+                    for c in bcolor[view_slice]
+                ],
                 marker_line_width=0,
                 name="SQZMOM",
                 showlegend=False,
@@ -532,7 +664,10 @@ def build_smc_momentum_figure(
                 marker=dict(
                     symbol="x",
                     size=5,
-                    color=[SQZ_COLORS.get(str(c), "#878B94") for c in scolor[start_pos:]],
+                    color=[
+                        SQZ_COLORS.get(str(c), "#878B94")
+                        for c in scolor[view_slice]
+                    ],
                 ),
                 showlegend=False,
                 hoverinfo="skip",
@@ -581,67 +716,138 @@ def build_15m_context_figure(
     view_end_time: pd.Timestamp,
     highlight_time: pd.Timestamp | None,
 ) -> go.Figure:
-    """Synchronized 15m context candlestick for the same local time window.
+    """15m display context derived only from canonical aggregate_15m().
 
-    Source: ``aggregate_15m(five)`` only -- no reimplemented aggregation.
-    Highlights the single 15m candle that *contains* ``highlight_time`` (the
-    selected Oracle 5m event). This is hindsight visual inspection, not a
-    causal feature join; it displays DISPLAY context only.
+    This is hindsight visual context, not a causal feature join.
+    X axis uses continuous 15m bar sequence, avoiding session/weekend gaps.
     """
+
     from research.build_pytdx_panel import aggregate_15m
 
     fifteen = aggregate_15m(five)
+
+    # OVERLAP semantics:
+    # include any 15m candle whose interval intersects the visible 5m window.
     fview = fifteen[
-        (fifteen["bar_start_time"] >= view_start_time)
+        (fifteen["bar_end_time"] > view_start_time)
         & (fifteen["bar_start_time"] <= view_end_time)
     ].copy()
 
     fig = go.Figure()
-    if len(fview):
-        fig.add_trace(
-            go.Candlestick(
-                x=fview["bar_start_time"],
-                open=fview["open"],
-                high=fview["high"],
-                low=fview["low"],
-                close=fview["close"],
-                name="15m",
-                increasing_line_color=PRICE_UP,
-                decreasing_line_color=PRICE_DOWN,
-                showlegend=False,
-            )
+
+    if fview.empty:
+        fig.update_layout(
+            height=240,
+            paper_bgcolor="#0A0F14",
+            plot_bgcolor=CHART_BG,
+            font=dict(color="#98A1B3"),
+            showlegend=False,
+            margin=dict(l=20, r=80, t=20, b=20),
+        )
+        return fig
+
+    fview = fview.reset_index(drop=True)
+    x = np.arange(len(fview))
+
+    fig.add_trace(
+        go.Candlestick(
+            x=x,
+            open=fview["open"],
+            high=fview["high"],
+            low=fview["low"],
+            close=fview["close"],
+            name="15m",
+            increasing_line_color=PRICE_UP,
+            decreasing_line_color=PRICE_DOWN,
+            showlegend=False,
+        )
+    )
+
+    # Selected 5m event -> containing 15m candle.
+    if highlight_time is not None:
+        mask = (
+            (fview["bar_start_time"] <= highlight_time)
+            & (fview["bar_end_time"] > highlight_time)
         )
 
-        if highlight_time is not None:
-            cont = fview[
-                (fview["bar_start_time"] <= highlight_time)
-                & (fview["bar_end_time"] > highlight_time)
-            ]
-            if len(cont):
-                c = cont.iloc[0]
-                fig.add_vline(
-                    x=c["bar_start_time"],
-                    line=dict(color=TEXT_BRIGHT, width=1.5, dash="solid"),
-                )
-                fig.add_annotation(
-                    x=c["bar_start_time"],
-                    y=float(c["high"]),
-                    text="Oracle 5m event",
-                    showarrow=False,
-                    font=dict(color=TEXT_BRIGHT, size=10),
-                    yshift=10,
-                )
+        hit = np.flatnonzero(mask.to_numpy())
+
+        if len(hit) == 1:
+            hi = int(hit[0])
+
+            fig.add_vrect(
+                x0=hi - 0.46,
+                x1=hi + 0.46,
+                fillcolor="rgba(170,180,200,0.14)",
+                line_width=1.5,
+                line_color=TEXT_BRIGHT,
+                layer="below",
+            )
+
+            fig.add_annotation(
+                x=hi,
+                y=float(fview.iloc[hi]["high"]),
+                text="selected 15m",
+                showarrow=False,
+                font=dict(
+                    color=TEXT_BRIGHT,
+                    size=10,
+                ),
+                yshift=10,
+            )
+
+        elif len(hit) > 1:
+            raise ValueError(
+                "highlight_time mapped to multiple 15m candles"
+            )
+
+    tick_count = min(8, len(fview))
+    tickvals = np.unique(
+        np.linspace(
+            0,
+            len(fview) - 1,
+            tick_count,
+        ).astype(int)
+    )
+
+    ticktext = [
+        pd.Timestamp(
+            fview.iloc[i]["bar_start_time"]
+        ).strftime("%m-%d<br>%H:%M")
+        for i in tickvals
+    ]
+
+    fig.update_xaxes(
+        range=[
+            -0.5,
+            len(fview) - 0.5
+            + len(fview) * RIGHT_PAD_RATIO,
+        ],
+        tickmode="array",
+        tickvals=tickvals,
+        ticktext=ticktext,
+        gridcolor=GRID,
+        rangeslider_visible=False,
+        title_text="15m context",
+    )
+
+    fig.update_yaxes(
+        gridcolor=GRID,
+        zerolinecolor=GRID_SOFT,
+    )
 
     fig.update_layout(
-        height=240,
+        height=280,
         paper_bgcolor="#0A0F14",
         plot_bgcolor=CHART_BG,
         font=dict(color="#98A1B3"),
         showlegend=False,
-        margin=dict(l=20, r=80, t=20, b=20),
-        xaxis_rangeslider_visible=False,
+        margin=dict(
+            l=20,
+            r=80,
+            t=20,
+            b=20,
+        ),
     )
-    fig.update_xaxes(gridcolor=GRID, title_text="15m context (containing bar highlighted)")
-    fig.update_yaxes(gridcolor=GRID, zerolinecolor=GRID_SOFT)
 
     return fig
