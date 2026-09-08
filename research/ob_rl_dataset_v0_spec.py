@@ -35,7 +35,35 @@ from __future__ import annotations
 
 DATASET_VERSION = "ob_rl_dataset_v0"
 
-BASELINE_SHA = "0b0caad7ddba837f4d837c1fbdd990abe28f6167"
+# ------------------------------------------------------------
+# Provenance
+#
+# Two DIFFERENT SHAs must never share one field again:
+#
+#   SOURCE_DATA_BASELINE_SHA   the repository state that defines the
+#                              frozen V3 source data authority.
+#   GATE_B_DATASET_BUILDER_SHA the commit of the builder that actually
+#                              produced the audited Gate-B CSVs.
+#   <runtime> builder_code_sha resolved from `git rev-parse HEAD` at
+#                              run time (never hardcoded, since
+#                              writing a SHA into source would make
+#                              the source self-referential).
+# ------------------------------------------------------------
+
+SOURCE_DATA_BASELINE_SHA = (
+    "0b0caad7ddba837f4d837c1fbdd990abe28f6167"
+)
+
+GATE_B_DATASET_BUILDER_SHA = (
+    "c475239e872246fcee64ca439f7d3d8e550a0c4e"
+)
+
+# Deprecated alias, kept only so older manifests stay readable.
+BASELINE_SHA = SOURCE_DATA_BASELINE_SHA
+
+BASELINE_SHA_SEMANTICS = (
+    "deprecated alias of source_data_baseline_sha"
+)
 
 # ------------------------------------------------------------
 # Timeframes

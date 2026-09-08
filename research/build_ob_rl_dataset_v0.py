@@ -32,6 +32,7 @@ Hard rules
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -41,6 +42,25 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+
+def resolve_git_head() -> str:
+    """Current HEAD at RUN time.
+
+    The builder's own SHA cannot be hardcoded: committing a SHA into
+    source would change the source and thus the SHA.
+    """
+    p = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    sha = p.stdout.strip()
+    if len(sha) != 40:
+        raise RuntimeError(f"invalid git HEAD: {sha!r}")
+    return sha
 
 OUT_ROOT = (
     ROOT
@@ -69,6 +89,9 @@ from research.ob_trigger_snapshot import (  # noqa: E402
 from research.ob_rl_dataset_v0_spec import (  # noqa: E402
     DATASET_VERSION,
     BASELINE_SHA,
+    SOURCE_DATA_BASELINE_SHA,
+    GATE_B_DATASET_BUILDER_SHA,
+    BASELINE_SHA_SEMANTICS,
     VALIDATED_TFS,
     QUARANTINED_TFS,
     STOP_ATR,
@@ -1093,7 +1116,14 @@ def main() -> None:
 
     manifest = {
         "dataset_version": DATASET_VERSION,
+        "source_data_baseline_sha": SOURCE_DATA_BASELINE_SHA,
+        "builder_code_sha": resolve_git_head(),
+        "gate_b_dataset_builder_sha": (
+            GATE_B_DATASET_BUILDER_SHA
+        ),
+        # Deprecated: kept only so old readers still resolve.
         "baseline_sha": BASELINE_SHA,
+        "baseline_sha_semantics": BASELINE_SHA_SEMANTICS,
         "reward_version": REWARD_VERSION,
         "candidates": int(len(candidates)),
         "state_rows": int(len(state)),
