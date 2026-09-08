@@ -272,17 +272,48 @@ def quantile_audit_bin(x) -> str:
 
 def collapse_for_descriptive_rank(
     df: pd.DataFrame,
+    columns: tuple[str, ...],
 ) -> pd.DataFrame:
-    """Descriptive quintiles must be ranked on STATE, not on
-    candidate x action rows.
+    """Collapse candidate x action -> candidate x trade_mode for
+    descriptive (outcome-independent) layering.
 
-    Each (candidate, trade_mode) appears three times (1.5/2.0/2.5R);
-    ranking the expanded frame would triple-count every state.
+    Each (candidate, trade_mode) appears three times (1.5R / 2.0R /
+    2.5R). Ranking the expanded frame would triple-count every state.
+
+    Collapsing by ``drop_duplicates`` alone is unsafe: target-dependent
+    columns (target_fit_*, stop_structure_* differ by construction)
+    would silently keep whichever RR happened to sort first. Columns
+    must therefore be declared explicitly AND proven invariant across
+    the target actions.
     """
-    x = df[df["trade_mode"].astype(str) != "SKIP"]
-    return x.drop_duplicates(
-        subset=["candidate_id", "trade_mode"]
-    ).reset_index(drop=True)
+    ids = ["candidate_id", "trade_mode"]
+
+    x = df[df["trade_mode"].astype(str).ne("SKIP")].copy()
+
+    missing = set(columns) - set(x.columns)
+    if missing:
+        raise RuntimeError(
+            f"rank columns missing: {sorted(missing)}"
+        )
+
+    g = x.groupby(ids, observed=True, dropna=False)
+
+    varying = []
+    for c in columns:
+        n = g[c].nunique(dropna=False)
+        if (n > 1).any():
+            varying.append(c)
+    if varying:
+        raise RuntimeError(
+            "descriptive-rank column varies across target "
+            f"actions: {varying}"
+        )
+
+    return (
+        x[ids + list(columns)]
+        .drop_duplicates(ids)
+        .reset_index(drop=True)
+    )
 
 
 # ------------------------------------------------------------

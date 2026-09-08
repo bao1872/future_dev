@@ -95,6 +95,25 @@ state = pd.DataFrame(
     }
 )
 
+# Action-invariant state (must NOT change across 1.5R / 2.0R / 2.5R).
+# Target-dependent columns (target_fit_*, stop_structure_*) are
+# generated per action block instead.
+base: dict[str, np.ndarray] = {}
+for tf in VALIDATED_TFS:
+    for c in MV.dsa_features(tf):
+        base[c] = RNG.uniform(-2.0, 2.0, N_CAND)
+    base[f"momentum_direction_{tf}"] = RNG.choice(
+        ["expanding", "contracting", "flat"], N_CAND
+    )
+    base[f"momentum_value_rel_{tf}"] = RNG.normal(0, 1, N_CAND)
+    base[f"momentum_delta_rel_{tf}"] = RNG.normal(0, 1, N_CAND)
+    base[f"internal_bias_rel_{tf}"] = RNG.choice(
+        [-1.0, 0.0, 1.0], N_CAND
+    )
+    base[f"swing_bias_rel_{tf}"] = RNG.choice(
+        [-1.0, 0.0, 1.0], N_CAND
+    )
+
 frames = []
 for action in ACTIONS:
     x = state.copy()
@@ -134,19 +153,16 @@ for action in ACTIONS:
                 v = RNG.uniform(0.1, 3.0, len(x))
                 v[no_ob] = np.nan
                 x[c] = np.where(skip_mask, np.nan, v)
-            elif c.endswith("_bias") or c.endswith("_bias_rel"):
-                x[c] = RNG.choice([-1.0, 1.0], len(x))
+            elif c in base:
+                x[c] = base[c]
             else:
                 v = RNG.uniform(0.1, 3.0, len(x))
                 v[no_struct] = np.nan
                 x[c] = np.where(skip_mask, np.nan, v)
         for c in MV.dsa_features(tf):
-            x[c] = RNG.uniform(-2, 2, len(x))
-        x[f"momentum_direction_{tf}"] = RNG.choice(
-            ["expanding", "contracting", "flat"], len(x)
-        )
-        x[f"momentum_value_rel_{tf}"] = RNG.normal(0, 1, len(x))
-        x[f"momentum_delta_rel_{tf}"] = RNG.normal(0, 1, len(x))
+            x[c] = base[c]
+        for c in MV.momentum_features(tf):
+            x[c] = base[c]
         # warehouse-only columns that must NOT reach the model view
         x[f"dsa_raw_regime_strength_{tf}"] = 0.0
         x[f"internal_high_level_{tf}"] = 7100.0
@@ -181,6 +197,8 @@ action.to_csv(OUT / "ob_rl_action_v0.csv", index=False)
 # ============================================================
 # 1) Gate-B hash lock
 # ============================================================
+# NOTE: the audit module imports EXPECTED_GATE_B_FILES by value, so it
+# must be pointed at the synthetic lock explicitly.
 PQ.EXPECTED_GATE_B_FILES = {
     "ob_rl_state_v0.csv": PQ.sha256_file(
         OUT / "ob_rl_state_v0.csv"
@@ -192,6 +210,7 @@ PQ.EXPECTED_GATE_B_FILES = {
         OUT / "dataset_manifest.json"
     ),
 }
+AUD.EXPECTED_GATE_B_FILES = PQ.EXPECTED_GATE_B_FILES
 try:
     PQ.verify_gate_b_files(OUT)
     check("gate-B hash lock passes on matching files", True)
@@ -215,28 +234,118 @@ state.to_csv(OUT / "ob_rl_state_v0.csv", index=False)
 # ============================================================
 PQ.OUT_ROOT = OUT
 PQ.require_pyarrow()
+# synthetic scale
+PQ.EXPECTED_STATE_ROWS = N_CAND
+PQ.EXPECTED_ACTION_ROWS = N_CAND * len(ACTIONS)
 
-state_csv = PQ.write_parquet(
-    OUT / "ob_rl_state_v0.csv", OUT / "ob_rl_state_v0.parquet"
-)
-st_res = PQ.verify_parquet(
-    state_csv,
-    OUT / "ob_rl_state_v0.parquet",
+# --- staged write: nothing final exists before verification ---
+probe = PQ.stage_parquet(
+    OUT / "ob_rl_state_v0.csv",
+    OUT / "probe_state.parquet",
     key_cols=("candidate_id",),
     expected_rows=N_CAND,
 )
-check("parquet roundtrip state exact", st_res["content_exact"])
+check(
+    "staged write creates tmp only (no final artifact)",
+    probe["tmp"].exists() and not probe["final"].exists(),
+)
+check(
+    "staged verification is exact",
+    probe["result"]["content_exact"],
+)
+probe["tmp"].unlink(missing_ok=True)
 
-action_csv = PQ.write_parquet(
-    OUT / "ob_rl_action_v0.csv", OUT / "ob_rl_action_v0.parquet"
+# --- forced mismatch: cardinality ---
+try:
+    PQ.stage_parquet(
+        OUT / "ob_rl_action_v0.csv",
+        OUT / "probe_fail.parquet",
+        key_cols=("candidate_id", "action"),
+        expected_rows=N_CAND * len(ACTIONS) + 1,
+    )
+    check("staged failure raises", False, "no raise")
+except RuntimeError:
+    check("staged failure raises", True)
+check(
+    "failed stage leaves no final and no tmp",
+    not (OUT / "probe_fail.parquet").exists()
+    and not (
+        OUT / ".probe_fail.parquet.tmp"
+    ).exists(),
 )
-ac_res = PQ.verify_parquet(
-    action_csv,
-    OUT / "ob_rl_action_v0.parquet",
-    key_cols=("candidate_id", "action"),
-    expected_rows=N_CAND * len(ACTIONS),
+
+# --- forced mismatch: content ---
+df_state = pd.read_csv(
+    OUT / "ob_rl_state_v0.csv", low_memory=False
 )
-check("parquet roundtrip action exact", ac_res["content_exact"])
+bad = df_state.drop(columns=[df_state.columns[-1]])
+bad_path = OUT / "probe_content.parquet"
+bad.to_parquet(
+    bad_path, engine="pyarrow", compression="zstd", index=False
+)
+try:
+    PQ.verify_parquet(
+        df_state,
+        bad_path,
+        key_cols=("candidate_id",),
+        expected_rows=N_CAND,
+    )
+    check("content mismatch detected", False, "no raise")
+except Exception:
+    check("content mismatch detected", True)
+bad_path.unlink(missing_ok=True)
+
+# --- real staged conversion: both verified, then promoted ---
+receipt = PQ.convert_all(OUT)
+receipt_path = PQ.write_receipt(OUT, receipt)
+check(
+    "both parquet promoted after joint verification",
+    (OUT / "ob_rl_state_v0.parquet").exists()
+    and (OUT / "ob_rl_action_v0.parquet").exists(),
+)
+check(
+    "no staging leftovers after promotion",
+    not (OUT / ".ob_rl_state_v0.parquet.tmp").exists()
+    and not (OUT / ".ob_rl_action_v0.parquet.tmp").exists(),
+)
+check(
+    "parquet roundtrip state exact",
+    receipt["state"]["content_exact"],
+)
+check(
+    "parquet roundtrip action exact",
+    receipt["action"]["content_exact"],
+)
+
+# --- receipt content ---
+check(
+    "receipt records engine/compression",
+    receipt["engine"] == "pyarrow"
+    and receipt["compression"] == "zstd",
+)
+check(
+    "receipt records parity flags for both tables",
+    all(
+        receipt[t][k] is True
+        for t in ("state", "action")
+        for k in ("schema_match", "key_match", "content_exact")
+    ),
+)
+check(
+    "receipt records csv + parquet sha256",
+    all(
+        len(receipt[t]["csv_sha256"]) == 64
+        and len(receipt[t]["parquet_sha256"]) == 64
+        for t in ("state", "action")
+    ),
+)
+check(
+    "receipt records provenance SHAs",
+    receipt["gate_b_dataset_builder_sha"]
+    == "c475239e872246fcee64ca439f7d3d8e550a0c4e"
+    and len(receipt["representation_code_sha"]) == 40,
+)
+check("receipt file exists", receipt_path.exists())
 
 # 3) column order preserved
 pq_state = pd.read_parquet(OUT / "ob_rl_state_v0.parquet")
@@ -380,15 +489,51 @@ check(
     and MV.quantile_audit_bin(0.95) == "Q5"
     and MV.quantile_audit_bin(np.nan) == "UNKNOWN",
 )
-collapsed = MV.collapse_for_descriptive_rank(pq_action)
-check(
-    "descriptive rank collapses to candidate x trade_mode",
-    not collapsed.duplicated(
-        ["candidate_id", "trade_mode"]
-    ).any()
-    and len(collapsed) == N_CAND * 2,
-    len(collapsed),
-)
+for col in (
+    "dsa_vwap_dev_rel_5m",
+    "momentum_value_rel_15m",
+    "internal_bias_rel_1h",
+):
+    c = MV.collapse_for_descriptive_rank(
+        pq_action, (col,)
+    )
+    check(
+        f"collapse action-invariant PASS: {col}",
+        not c.duplicated(
+            ["candidate_id", "trade_mode"]
+        ).any()
+        and len(c) == N_CAND * 2,
+        len(c),
+    )
+
+for col in ("target_fit_swing_5m", "stop_structure_ob_1h"):
+    try:
+        MV.collapse_for_descriptive_rank(
+            pq_action, (col,)
+        )
+        check(
+            f"collapse target-dependent STOP: {col}",
+            False,
+            "no raise",
+        )
+    except RuntimeError as e:
+        check(
+            f"collapse target-dependent STOP: {col}",
+            "varies across target actions" in str(e),
+            str(e)[:90],
+        )
+
+try:
+    MV.collapse_for_descriptive_rank(
+        pq_action, ("does_not_exist",)
+    )
+    check("collapse missing column STOP", False, "no raise")
+except RuntimeError as e:
+    check(
+        "collapse missing column STOP",
+        "rank columns missing" in str(e),
+        str(e)[:90],
+    )
 
 # ============================================================
 # 14) Audit report generation, no strategy ranking
@@ -450,6 +595,77 @@ try:
     check("ranking guard fires", False, "no raise")
 except RuntimeError:
     check("ranking guard fires", True)
+
+# ============================================================
+# 15) Finalized manifest + provenance evidence chain
+# ============================================================
+fm = json.loads((OUT / "dataset_manifest.json").read_text())
+check("manifest rl0_finalized", fm.get("rl0_finalized") is True)
+check(
+    "gate_b original manifest hash preserved",
+    fm.get("gate_b_manifest_sha256_original")
+    == PQ.EXPECTED_GATE_B_FILES["dataset_manifest.json"],
+)
+check(
+    "source_data_baseline_sha recorded",
+    fm.get("source_data_baseline_sha")
+    == "0b0caad7ddba837f4d837c1fbdd990abe28f6167",
+)
+check(
+    "gate_b_dataset_builder_sha recorded",
+    fm.get("gate_b_dataset_builder_sha")
+    == "c475239e872246fcee64ca439f7d3d8e550a0c4e",
+)
+check(
+    "representation_code_sha resolved at runtime",
+    len(str(fm.get("representation_code_sha", ""))) == 40,
+)
+check(
+    "model_view_version recorded",
+    fm.get("model_view_version") == MV.MODEL_VIEW_VERSION,
+)
+check(
+    "parquet parity persisted in manifest",
+    fm["parquet"]["state"]["content_exact"] is True
+    and fm["parquet"]["action"]["content_exact"] is True
+    and fm["parquet"]["state"]["schema_match"] is True
+    and fm["parquet"]["action"]["key_match"] is True,
+)
+
+# audit must not run without a receipt
+backup = (OUT / PQ.RECEIPT_NAME).read_text()
+(OUT / PQ.RECEIPT_NAME).unlink()
+try:
+    AUD.main()
+    check("audit stops without receipt", False, "no raise")
+except RuntimeError as e:
+    check(
+        "audit stops without receipt",
+        "receipt missing" in str(e),
+        str(e)[:90],
+    )
+(OUT / PQ.RECEIPT_NAME).write_text(backup)
+
+# re-running audit recognises the already-finalized manifest
+try:
+    AUD.main()
+    check("audit idempotent after finalization", True)
+except RuntimeError as e:
+    check("audit idempotent after finalization", False, repr(e))
+
+# a manifest that is neither Gate-B nor finalized must STOP
+(OUT / "dataset_manifest.json").write_text(
+    json.dumps({"dataset_version": "tampered"}), encoding="utf-8"
+)
+try:
+    AUD.verify_original_manifest(OUT)
+    check("foreign manifest STOP", False, "no raise")
+except RuntimeError as e:
+    check(
+        "foreign manifest STOP",
+        "neither the audited Gate-B file" in str(e),
+        str(e)[:90],
+    )
 
 # ============================================================
 print("\n========= PHASE RL-0 SYNTHETIC RESULT =========")

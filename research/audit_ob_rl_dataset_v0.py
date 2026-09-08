@@ -27,13 +27,19 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from research.build_ob_rl_dataset_v0 import OUT_ROOT  # noqa: E402
+from research import build_ob_rl_parquet_v0 as PQ  # noqa: E402
 from research.build_ob_rl_parquet_v0 import (  # noqa: E402
     EXPECTED_GATE_B_FILES,
     sha256_file,
 )
+from research.build_ob_rl_dataset_v0 import (  # noqa: E402
+    resolve_git_head,
+)
 from research.ob_rl_dataset_v0_spec import (  # noqa: E402
     VALIDATED_TFS,
     DIAGNOSTIC_HORIZONS,
+    SOURCE_DATA_BASELINE_SHA,
+    GATE_B_DATASET_BUILDER_SHA,
 )
 from research.ob_rl_model_view_v0_spec import (  # noqa: E402
     MODEL_FEATURES_V0,
@@ -98,6 +104,99 @@ def _full_columns(name: str) -> list[str]:
     )
 
 
+def verify_original_manifest(root: Path) -> dict:
+    """The Gate-B manifest is INPUT EVIDENCE, not the final artifact.
+
+    It must be identified as either (a) the audited Gate-B file or
+    (b) an RL-0 finalized manifest that still records that original
+    hash. Anything else is a STOP.
+    """
+    expected = EXPECTED_GATE_B_FILES["dataset_manifest.json"]
+    p = root / "dataset_manifest.json"
+    if not p.exists():
+        raise RuntimeError(f"missing Gate-B manifest: {p}")
+
+    cur = sha256_file(p)
+    if cur == expected:
+        return {
+            "original_intact": True,
+            "already_finalized": False,
+            "sha256_original": expected,
+        }
+
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        raise RuntimeError(
+            "manifest is not the audited Gate-B file and is "
+            "not valid JSON"
+        ) from e
+
+    if data.get("gate_b_manifest_sha256_original") == expected:
+        return {
+            "original_intact": False,
+            "already_finalized": True,
+            "sha256_original": expected,
+        }
+
+    raise RuntimeError(
+        "manifest is neither the audited Gate-B file nor an "
+        "RL-0 finalized manifest"
+    )
+
+
+def read_receipt(root: Path) -> dict:
+    p = root / PQ.RECEIPT_NAME
+    if not p.exists():
+        raise RuntimeError(
+            "parquet conversion receipt missing: exact parity "
+            "cannot be claimed"
+        )
+    return json.loads(p.read_text(encoding="utf-8"))
+
+
+def write_final_manifest(
+    root: Path, *, receipt: dict, extra: dict
+) -> Path:
+    """Regenerate the committed manifest with full provenance."""
+    p = root / "dataset_manifest.json"
+    data = (
+        json.loads(p.read_text(encoding="utf-8"))
+        if p.exists()
+        else {}
+    )
+    data.update(
+        {
+            "source_data_baseline_sha": (
+                SOURCE_DATA_BASELINE_SHA
+            ),
+            "gate_b_dataset_builder_sha": (
+                GATE_B_DATASET_BUILDER_SHA
+            ),
+            "representation_code_sha": resolve_git_head(),
+            "gate_b_manifest_sha256_original": (
+                EXPECTED_GATE_B_FILES["dataset_manifest.json"]
+            ),
+            "model_view_version": MODEL_VIEW_VERSION,
+            "parquet": {
+                "state": receipt.get("state", {}),
+                "action": receipt.get("action", {}),
+            },
+            "rl0_finalized": True,
+        }
+    )
+    data.update(extra)
+
+    tmp = root / ".dataset_manifest.json.tmp"
+    tmp.unlink(missing_ok=True)
+    tmp.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    tmp.replace(p)
+    return p
+
+
 def guard_no_ranking(payload: dict) -> None:
     blob = json.dumps(payload).lower()
     hits = [
@@ -114,6 +213,11 @@ def nan_rate(s: pd.Series) -> float:
 
 
 def main() -> None:
+    # The Gate-B manifest is checked as INPUT EVIDENCE before anything
+    # is regenerated, and the Parquet receipt must already exist.
+    manifest_state = verify_original_manifest(OUT_ROOT)
+    receipt = read_receipt(OUT_ROOT)
+
     state = _read("ob_rl_state_v0")
 
     action_cols = list(
@@ -199,6 +303,31 @@ def main() -> None:
                 "bytes": int(pq.stat().st_size),
                 "sha256": sha256_file(pq),
             }
+
+    storage["gate_b_manifest"] = manifest_state
+    storage["parity"] = {
+        "representation_version": receipt.get(
+            "representation_version"
+        ),
+        "engine": receipt.get("engine"),
+        "compression": receipt.get("compression"),
+        "representation_code_sha": receipt.get(
+            "representation_code_sha"
+        ),
+        **{
+            tag: {
+                k: receipt.get(tag, {}).get(k)
+                for k in (
+                    "schema_match",
+                    "key_match",
+                    "content_exact",
+                    "csv_sha256",
+                    "parquet_sha256",
+                )
+            }
+            for tag in ("state", "action")
+        },
+    }
 
     # ---------------- coverage ----------------
     coverage = {"smc": {}, "active_ob": {}, "dsa": {},
@@ -412,6 +541,15 @@ ablation.
 """
     (OUT_ROOT / "README.md").write_text(
         readme, encoding="utf-8"
+    )
+
+    # Only now -- audit PASSed -- is the committed manifest finalized.
+    write_final_manifest(
+        OUT_ROOT,
+        receipt=receipt,
+        extra={
+            "model_view_feature_count": len(MODEL_FEATURES_V0),
+        },
     )
 
     print("DATASET_AUDIT_DONE", flush=True)

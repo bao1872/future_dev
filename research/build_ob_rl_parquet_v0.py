@@ -18,6 +18,7 @@ reward-based filtering.
 from __future__ import annotations
 
 import hashlib
+import json
 import sys
 from pathlib import Path
 
@@ -27,7 +28,10 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from research.build_ob_rl_dataset_v0 import OUT_ROOT  # noqa: E402
+from research.build_ob_rl_dataset_v0 import (  # noqa: E402
+    OUT_ROOT,
+    resolve_git_head,
+)
 from research.ob_rl_dataset_v0_spec import (  # noqa: E402
     GATE_B_DATASET_BUILDER_SHA,
 )
@@ -115,6 +119,49 @@ def write_parquet(
     return df
 
 
+def stage_parquet(
+    csv_path: Path,
+    final_path: Path,
+    *,
+    key_cols: tuple[str, ...],
+    expected_rows: int,
+) -> dict:
+    """Write to a staging path and verify BEFORE promotion.
+
+    The final artifact must never exist in an unverified state: the
+    audit layer prefers Parquet, so a half-verified Parquet would
+    silently become the source of truth.
+    """
+    tmp = final_path.with_name(f".{final_path.name}.tmp")
+    tmp.unlink(missing_ok=True)
+
+    df = pd.read_csv(csv_path, low_memory=False)
+
+    try:
+        df.to_parquet(
+            tmp,
+            engine="pyarrow",
+            compression="zstd",
+            index=False,
+        )
+        result = verify_parquet(
+            df,
+            tmp,
+            key_cols=key_cols,
+            expected_rows=expected_rows,
+        )
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        raise
+
+    return {
+        "tmp": tmp,
+        "final": final_path,
+        "result": result,
+        "df": df,
+    }
+
+
 def verify_parquet(
     csv_df: pd.DataFrame,
     parquet_path: Path,
@@ -164,44 +211,109 @@ def verify_parquet(
     }
 
 
-def main() -> None:
-    require_pyarrow()
-    root = OUT_ROOT
+RECEIPT_NAME = "parquet_conversion_receipt.json"
 
+REPRESENTATION_VERSION = "RL0_PARQUET_V0"
+
+
+def convert_all(root: Path) -> dict:
+    """Stage and verify BOTH tables, then promote them together.
+
+    Nothing reaches a final path until every table has passed exact
+    parity; a failure leaves no final artifact at all.
+    """
     gate_b_hashes = verify_gate_b_files(root)
 
-    results = {}
-    for name, key_cols, expected in (
+    specs = (
         (
+            "state",
             "ob_rl_state_v0",
             ("candidate_id",),
             EXPECTED_STATE_ROWS,
         ),
         (
+            "action",
             "ob_rl_action_v0",
             ("candidate_id", "action"),
             EXPECTED_ACTION_ROWS,
         ),
-    ):
-        csv_path = root / f"{name}.csv"
-        pq_path = root / f"{name}.parquet"
-        csv_df = write_parquet(csv_path, pq_path)
-        res = verify_parquet(
-            csv_df,
-            pq_path,
-            key_cols=key_cols,
-            expected_rows=expected,
-        )
-        res["csv_bytes"] = csv_path.stat().st_size
-        res["parquet_bytes"] = pq_path.stat().st_size
+    )
+
+    staged = []
+    try:
+        for tag, name, key_cols, expected in specs:
+            csv_path = root / f"{name}.csv"
+            staged.append(
+                (
+                    tag,
+                    csv_path,
+                    stage_parquet(
+                        csv_path,
+                        root / f"{name}.parquet",
+                        key_cols=key_cols,
+                        expected_rows=expected,
+                    ),
+                )
+            )
+
+        # All exact-parity checks passed -> promote together.
+        for _, _, item in staged:
+            item["tmp"].replace(item["final"])
+    except Exception:
+        for _, _, item in staged:
+            item["tmp"].unlink(missing_ok=True)
+        raise
+
+    receipt = {
+        "representation_version": REPRESENTATION_VERSION,
+        "engine": "pyarrow",
+        "compression": "zstd",
+        "gate_b_dataset_builder_sha": (
+            GATE_B_DATASET_BUILDER_SHA
+        ),
+        "representation_code_sha": resolve_git_head(),
+    }
+
+    for tag, csv_path, item in staged:
+        res = dict(item["result"])
+        final_path = item["final"]
+        res["csv_bytes"] = int(csv_path.stat().st_size)
+        res["parquet_bytes"] = int(final_path.stat().st_size)
         res["compression_ratio"] = round(
             res["csv_bytes"] / max(res["parquet_bytes"], 1), 3
         )
-        res["csv_sha256"] = gate_b_hashes[f"{name}.csv"]
-        res["parquet_sha256"] = sha256_file(pq_path)
-        results[name] = res
-        print(name, res, flush=True)
+        res["csv_sha256"] = gate_b_hashes[
+            f"{csv_path.name}"
+        ]
+        res["parquet_sha256"] = sha256_file(final_path)
+        receipt[tag] = res
 
+    return receipt
+
+
+def write_receipt(root: Path, receipt: dict) -> Path:
+    """Receipt exists only after a complete verified promotion."""
+    tmp = root / f".{RECEIPT_NAME}.tmp"
+    tmp.unlink(missing_ok=True)
+    tmp.write_text(
+        json.dumps(receipt, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    final = root / RECEIPT_NAME
+    tmp.replace(final)
+    return final
+
+
+def main() -> None:
+    require_pyarrow()
+    root = OUT_ROOT
+
+    receipt = convert_all(root)
+    path = write_receipt(root, receipt)
+
+    print("parquet receipt", path, flush=True)
+    for tag in ("state", "action"):
+        print(tag, receipt[tag], flush=True)
     print("PARQUET_CONVERT_DONE", flush=True)
 
 
