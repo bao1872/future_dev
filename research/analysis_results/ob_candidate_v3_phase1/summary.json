@@ -1,0 +1,80 @@
+{
+  "schema_version": "ob_candidate_v3_phase1",
+  "parent_sha": "0d3f8cc89e63c42c00e045621d291d6907304a75",
+  "candidates": 21481,
+  "posthoc_audit": {
+    "path_rows": 515544,
+    "expected_rows": 515544,
+    "cardinality_mismatch": false,
+    "bar_index_mismatch": 0,
+    "ohlc_mismatch": 0,
+    "atr_normalized_mismatch": 0,
+    "continuity": {
+      "corrected_step1_gap0_rate": 0.9603835948047111,
+      "corrected_step_ge2_gap5_rate": 0.9546535563278368,
+      "legacy_contiguous_all_rate": 0.0,
+      "continuity_h6_rate": 0.7673292677249662,
+      "continuity_h12_rate": 0.522042735440622,
+      "continuity_h24_rate": 0.19091289977189144
+    },
+    "n_missing_life": 0,
+    "source_ob_state_by_tf": {
+      "5m": {
+        "n": 12939,
+        "active_at_touch": 10899,
+        "mitigated_at_touch": 2040,
+        "cap_evicted_at_touch": 0
+      },
+      "15m": {
+        "n": 6043,
+        "active_at_touch": 5930,
+        "mitigated_at_touch": 113,
+        "cap_evicted_at_touch": 0
+      },
+      "1h": {
+        "n": 2499,
+        "active_at_touch": 2471,
+        "mitigated_at_touch": 28,
+        "cap_evicted_at_touch": 0
+      }
+    },
+    "status": "PASS"
+  },
+  "4h_status": "QUARANTINED",
+  "4h_reason": "epoch 4h buckets contain only 1-3 x 1h components; no validated 4h authority yet",
+  "primary_context_tfs": [
+    "5m",
+    "15m",
+    "1h"
+  ],
+  "quantile_coverage": {
+    "n_with_state": 5179,
+    "n_total": 21481,
+    "rate": 0.241097
+  },
+  "ordering_ambiguity": {
+    "mean_both_hit_rate": 0.008064,
+    "granularity_verdict": "5m sufficient"
+  },
+  "weighting": {
+    "primary": "decision_bar_weighted",
+    "robustness": "event_weighted"
+  },
+  "files": [
+    "ambiguity.csv",
+    "baseline_by_source_tf.csv",
+    "candidate_annotations.csv",
+    "confluence.csv",
+    "dsa_increment.csv",
+    "excursion_by_horizon.csv",
+    "first_retest.csv",
+    "quantile_opportunity.csv",
+    "rr_by_quantile.csv",
+    "rr_by_source_tf.csv",
+    "rr_by_touch_state.csv",
+    "rr_grid.csv",
+    "smc_alignment.csv",
+    "smc_vs_dsa_model.csv",
+    "touch_state.csv"
+  ]
+}
