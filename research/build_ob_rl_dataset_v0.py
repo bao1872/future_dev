@@ -82,8 +82,11 @@ from research.ob_rl_dataset_v0_spec import (  # noqa: E402
     EVENT_FIELDS,
     SMC_BIAS_FIELDS,
     SMC_EVENT_FIELDS,
-    SMC_PIVOT_DISTANCE_MAP,
+    SMC_PIVOT_SPECS,
+    SMC_STRUCTURE_OBJECTS,
+    PIVOT_RELATION_VALUES,
     ACTIVE_OB_TYPES,
+    ACTIVE_OB_METADATA_FIELDS,
     LEVELS_REQUIRED_COLUMNS,
     DSA_FIELDS,
     DSA_RENAMES,
@@ -92,8 +95,10 @@ from research.ob_rl_dataset_v0_spec import (  # noqa: E402
     QUANTILE_FIELDS,
     QUANT_LOW_MAX,
     QUANT_HIGH_MIN,
+    META_FIELDS,
     FORBIDDEN_STATE_PREFIXES,
     FORBIDDEN_STATE_COLUMNS,
+    split_state_columns,
     assert_validated_tf,
     assert_level_vocabulary,
     assert_action_cardinality,
@@ -351,11 +356,95 @@ def quant_state(p) -> str:
     return "MID"
 
 
+def attach_trading_day(
+    candidates: pd.DataFrame,
+    raw_five: dict[str, pd.DataFrame],
+) -> pd.DataFrame:
+    """Exchange trading day from the validated raw 5m bars.
+
+    Never derived from a date string: night sessions belong to the
+    NEXT trading day.
+    """
+    parts = []
+    for symbol, g in candidates.groupby("symbol", sort=False):
+        bars = raw_five[symbol]
+        idx = g["touch_5m_bar_index"].astype(int).to_numpy()
+        if idx.max() >= len(bars):
+            raise RuntimeError(
+                f"{symbol}: touch_5m_bar_index out of range"
+            )
+        x = g.copy()
+        x["trading_day"] = (
+            bars.iloc[idx]["trading_day"].astype(str).to_numpy()
+        )
+        parts.append(x)
+    return pd.concat(parts, ignore_index=True)
+
+
+def audit_context_coverage(
+    candidates: pd.DataFrame,
+    ctx: pd.DataFrame,
+) -> dict:
+    """Every candidate must carry ALL three validated timeframes.
+
+    A missing 15m row would silently become NaN after the pivot while
+    `state == N` still passed, so this is a hard gate.
+    """
+    n = candidates["candidate_id"].astype(str).nunique()
+    expected = n * len(VALIDATED_TFS)
+
+    if len(ctx) != expected:
+        raise RuntimeError(
+            "context cardinality mismatch: "
+            f"{len(ctx)} != {expected}"
+        )
+    if ctx.duplicated(["candidate_id", "context_tf"]).any():
+        raise RuntimeError("duplicate candidate x TF context")
+
+    got = (
+        ctx.groupby("candidate_id")["context_tf"]
+        .agg(lambda x: frozenset(x.astype(str)))
+    )
+    want = frozenset(VALIDATED_TFS)
+    bad = got[got != want]
+    if len(bad):
+        raise RuntimeError(
+            "incomplete multi-TF context: "
+            f"{len(bad)} candidates, e.g. "
+            f"{sorted(bad.index[:3])}"
+        )
+    return {
+        "expected_rows": int(expected),
+        "actual_rows": int(len(ctx)),
+        "incomplete_candidates": 0,
+    }
+
+
+def audit_momentum_coverage(
+    candidates: pd.DataFrame,
+    mom_df: pd.DataFrame,
+) -> dict:
+    n = candidates["candidate_id"].astype(str).nunique()
+    expected = n * len(VALIDATED_TFS)
+    if len(mom_df) != expected:
+        raise RuntimeError(
+            "momentum cardinality mismatch: "
+            f"{len(mom_df)} != {expected}"
+        )
+    if mom_df.duplicated(["candidate_id", "context_tf"]).any():
+        raise RuntimeError("duplicate candidate x TF momentum")
+    return {
+        "expected_rows": int(expected),
+        "actual_rows": int(len(mom_df)),
+    }
+
+
 def build_state(
     candidates: pd.DataFrame,
     context: pd.DataFrame,
     levels: pd.DataFrame,
     momentum_by_tf: dict[tuple[str, str], pd.DataFrame],
+    raw_five: dict[str, pd.DataFrame],
 ) -> tuple[pd.DataFrame, dict]:
     if candidates["candidate_id"].duplicated().any():
         raise RuntimeError("duplicate candidate_id in candidates")
@@ -369,6 +458,7 @@ def build_state(
         raise RuntimeError("quarantined TF leaked into state")
 
     vocab = assert_level_vocabulary(levels)
+    ctx_cov = audit_context_coverage(candidates, ctx)
 
     # --- price / ATR reference at the touch bar ---
     c5 = ctx[ctx["context_tf"].astype(str).eq("5m")]
@@ -400,12 +490,17 @@ def build_state(
             )
         )
     mom_df = pd.concat(mom_frames, ignore_index=True)
+    mom_cov = audit_momentum_coverage(candidates, mom_df)
 
     # --- SMC / DSA pivot to per-TF columns ---
+    # level + distance + RELATION: the high/low NAME does not say
+    # which side of price the pivot is on.
     smc_fields = (
         list(SMC_BIAS_FIELDS)
         + list(SMC_EVENT_FIELDS)
-        + list(SMC_PIVOT_DISTANCE_MAP.keys())
+        + [s[1] for s in SMC_PIVOT_SPECS]
+        + [s[2] for s in SMC_PIVOT_SPECS]
+        + [s[3] for s in SMC_PIVOT_SPECS]
         + list(DSA_FIELDS)
     )
     smc_piv = pivot_tf(ctx, smc_fields)
@@ -443,8 +538,12 @@ def build_state(
         else pd.DataFrame(columns=["candidate_id"])
     )
 
-    # --- assemble ---
-    state = candidates[list(EVENT_FIELDS)].copy()
+    # --- assemble (event + temporal metadata) ---
+    cand = attach_trading_day(candidates, raw_five)
+    state = cand[list(EVENT_FIELDS)].copy()
+    for m in META_FIELDS:
+        if m in cand.columns:
+            state[m] = cand[m].to_numpy()
     state["touch_behavior"] = touch_behavior(state)
 
     for f in QUANTILE_FIELDS:
@@ -471,13 +570,40 @@ def build_state(
     ).to_numpy(float)
 
     for tf in VALIDATED_TFS:
-        for src, dst in SMC_PIVOT_DISTANCE_MAP.items():
-            col = f"{src}_{tf}"
-            if col not in state.columns:
-                raise RuntimeError(f"missing SMC column {col}")
-            state[f"{dst}_{tf}"] = pct_to_exec_atr(
-                state[col], tc, a5
+        # Each structure pivot is stored as
+        #   level + distance(exec ATR) + relation.
+        # Relation is authoritative for forward/backward.
+        for obj, lvl_src, dist_src, rel_src in SMC_PIVOT_SPECS:
+            lcol = f"{lvl_src}_{tf}"
+            dcol = f"{dist_src}_{tf}"
+            rcol = f"{rel_src}_{tf}"
+            for c in (lcol, dcol, rcol):
+                if c not in state.columns:
+                    raise RuntimeError(
+                        f"missing SMC column {c}"
+                    )
+
+            state[f"{obj}_atr_{tf}"] = pct_to_exec_atr(
+                state[dcol], tc, a5
             )
+            state[f"{obj}_level_{tf}"] = state[lcol].to_numpy()
+            state[f"{obj}_relation_{tf}"] = state[rcol].to_numpy()
+
+            obs = set(
+                state[f"{obj}_relation_{tf}"]
+                .dropna()
+                .astype(str)
+                .unique()
+            )
+            bad = obs - set(PIVOT_RELATION_VALUES)
+            if bad:
+                raise RuntimeError(
+                    f"unknown pivot relation {tf}/{obj}: "
+                    f"{sorted(bad)}"
+                )
+
+            state = state.drop(columns=[lcol, dcol, rcol])
+
         for src, dst in DSA_RENAMES.items():
             if src == dst:
                 continue
@@ -496,6 +622,8 @@ def build_state(
         "4h_context_input_rows_seen": quarantined_ctx_input,
         "4h_levels_input_rows_seen": quarantined_lv_input,
         "level_vocabulary": vocab,
+        "context_coverage": ctx_cov,
+        "momentum_coverage": mom_cov,
     }
     return state, info
 
@@ -561,6 +689,68 @@ def directional_pair(
     )
 
 
+def nearest_by_relation(
+    df: pd.DataFrame,
+    *,
+    objects: tuple[str, ...],
+    tf: str,
+    prefix: str,
+) -> None:
+    """Nearest structure IN FRONT of the trade, resolved by RELATION.
+
+    A pivot named "high" is not necessarily above price any more (a
+    broken high sits below). So forward/backward is chosen by matching
+    the recorded relation, never by the high/low name.
+    """
+    td = pd.to_numeric(
+        df["trade_direction"], errors="coerce"
+    ).to_numpy(float)
+
+    forward_side = np.where(
+        td > 0,
+        "above",
+        np.where(td < 0, "below", ""),
+    )
+    backward_side = np.where(
+        td > 0,
+        "below",
+        np.where(td < 0, "above", ""),
+    )
+
+    dist_cols = [f"{obj}_atr_{tf}" for obj in objects]
+    rel_cols = [f"{obj}_relation_{tf}" for obj in objects]
+    for c in dist_cols + rel_cols:
+        if c not in df.columns:
+            raise RuntimeError(
+                f"nearest_by_relation missing column {c}"
+            )
+
+    D = np.column_stack(
+        [
+            pd.to_numeric(df[c], errors="coerce").to_numpy(float)
+            for c in dist_cols
+        ]
+    )
+    R = np.column_stack(
+        [
+            df[c].astype("object").to_numpy()
+            for c in rel_cols
+        ]
+    )
+
+    def side_min(side: np.ndarray) -> np.ndarray:
+        mask = (R == side[:, None]) & np.isfinite(D)
+        out = np.full(len(df), np.nan)
+        any_ok = mask.any(axis=1)
+        if any_ok.any():
+            M = np.where(mask, D, np.inf)
+            out[any_ok] = M[any_ok].min(axis=1)
+        return out
+
+    df[f"forward_{prefix}_atr_{tf}"] = side_min(forward_side)
+    df[f"backward_{prefix}_atr_{tf}"] = side_min(backward_side)
+
+
 def _safe_div(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     ok = np.isfinite(a) & np.isfinite(b) & (b > 0)
     out = np.full(len(a), np.nan)
@@ -572,6 +762,15 @@ def add_action_relative(
     action_df: pd.DataFrame,
 ) -> pd.DataFrame:
     df = action_df
+
+    # Formal RR geometry: target distance = stop x R. V0 stop is
+    # fixed at 1 ATR, so the value is unchanged, but the definition
+    # survives a future stop change.
+    df["target_atr"] = (
+        df["stop_atr"].to_numpy(float)
+        * df["target_R"].to_numpy(float)
+    )
+
     for tf in VALIDATED_TFS:
         assert_validated_tf(tf)
 
@@ -580,20 +779,14 @@ def add_action_relative(
                 df, f"{kind}_bias_{tf}", f"{kind}_bias_rel_{tf}"
             )
 
-        directional_pair(
-            df,
-            high_col=f"internal_high_atr_{tf}",
-            low_col=f"internal_low_atr_{tf}",
-            out_forward=f"forward_internal_atr_{tf}",
-            out_backward=f"backward_internal_atr_{tf}",
-        )
-        directional_pair(
-            df,
-            high_col=f"swing_high_atr_{tf}",
-            low_col=f"swing_low_atr_{tf}",
-            out_forward=f"forward_swing_atr_{tf}",
-            out_backward=f"backward_swing_atr_{tf}",
-        )
+        # Structure distance resolved by RELATION, not by name.
+        for prefix, objects in SMC_STRUCTURE_OBJECTS.items():
+            nearest_by_relation(
+                df, objects=objects, tf=tf, prefix=prefix
+            )
+
+        # Active OB: relation above/below already comes from the
+        # frozen levels geometry, so a direct rotation is correct.
         directional_pair(
             df,
             high_col=f"ob_above_atr_{tf}",
@@ -603,6 +796,31 @@ def add_action_relative(
         )
 
         td = df["trade_direction"].to_numpy(float)
+
+        # Rotate the OB identity with the direction, so that "a bear
+        # swing OB 1.2 ATR ahead" is not flattened into "1.2 ATR".
+        for field in ACTIVE_OB_METADATA_FIELDS:
+            a_col = f"above_ob_{field}_{tf}"
+            b_col = f"below_ob_{field}_{tf}"
+            if a_col not in df.columns:
+                continue
+            a = df[a_col].to_numpy(object)
+            b = df[b_col].to_numpy(object)
+            df[f"forward_active_ob_{field}_{tf}"] = np.where(
+                td > 0, a, np.where(td < 0, b, None)
+            )
+            df[f"backward_active_ob_{field}_{tf}"] = np.where(
+                td > 0, b, np.where(td < 0, a, None)
+            )
+
+        bias_col = f"forward_active_ob_bias_{tf}"
+        if bias_col in df.columns:
+            df[f"forward_active_ob_bias_rel_{tf}"] = (
+                pd.to_numeric(
+                    df[bias_col], errors="coerce"
+                ).to_numpy(float)
+                * td
+            )
         df[f"dsa_alignment_{tf}"] = (
             pd.to_numeric(
                 df[f"dsa_direction_{tf}"], errors="coerce"
@@ -628,20 +846,20 @@ def add_action_relative(
             * td
         )
 
-        tgt = df["target_R"].to_numpy(float)
+        tgt_atr = df["target_atr"].to_numpy(float)
         stp = df["stop_atr"].to_numpy(float)
 
         df[f"target_fit_internal_{tf}"] = _safe_div(
             df[f"forward_internal_atr_{tf}"].to_numpy(float),
-            tgt,
+            tgt_atr,
         )
         df[f"target_fit_swing_{tf}"] = _safe_div(
             df[f"forward_swing_atr_{tf}"].to_numpy(float),
-            tgt,
+            tgt_atr,
         )
         df[f"target_fit_ob_{tf}"] = _safe_div(
             df[f"forward_active_ob_atr_{tf}"].to_numpy(float),
-            tgt,
+            tgt_atr,
         )
 
         df[f"stop_structure_internal_{tf}"] = _safe_div(
@@ -724,15 +942,20 @@ def attach_rewards(
             gross[h][sl] = res
             codes[h][sl] = code
 
+    # Assign once: incremental df[...] inserts fragment the frame and
+    # are slow at the real 150k-row scale.
+    new_cols = {}
     for h in DIAGNOSTIC_HORIZONS:
-        action_df[f"gross_R_h{h}"] = gross[h]
-        action_df[f"exit_code_h{h}"] = codes[h]
-
-    action_df["primary_reward_R"] = action_df[
-        f"gross_R_h{PRIMARY_HORIZON}"
-    ]
-    action_df["reward_version"] = REWARD_VERSION
-    return action_df
+        new_cols[f"gross_R_h{h}"] = gross[h]
+        new_cols[f"exit_code_h{h}"] = codes[h]
+    new_cols["primary_reward_R"] = gross[PRIMARY_HORIZON]
+    new_cols["reward_version"] = np.array(
+        [REWARD_VERSION] * m, dtype=object
+    )
+    return pd.concat(
+        [action_df, pd.DataFrame(new_cols, index=action_df.index)],
+        axis=1,
+    )
 
 
 # ============================================================
@@ -750,6 +973,15 @@ def audit_state_columns(df: pd.DataFrame) -> None:
         raise RuntimeError(
             "future/execution leakage in state: "
             f"prefixed={bad} explicit={leak}"
+        )
+
+
+def assert_meta_excluded(features) -> None:
+    """Time / identity metadata must never be a model feature."""
+    bad = sorted(set(features) & set(META_FIELDS))
+    if bad:
+        raise RuntimeError(
+            f"metadata leaked into state features: {bad}"
         )
 
 
@@ -819,10 +1051,15 @@ def main() -> None:
         )
 
     state, info = build_state(
-        candidates, context, levels, momentum_by_tf
+        candidates, context, levels, momentum_by_tf, raw_five
     )
     audit_state_cardinality(state, candidates)
     audit_state_columns(state)
+
+    meta_cols, feature_cols = split_state_columns(
+        state.columns
+    )
+    assert_meta_excluded(feature_cols)
 
     action_df = expand_actions(state)
     action_df = add_action_relative(action_df)
@@ -876,8 +1113,22 @@ def main() -> None:
             "4h_levels_input_rows_seen"
         ],
         "level_vocabulary": info["level_vocabulary"],
-        "state_columns": list(state.columns),
-        "action_columns": list(action_df.columns),
+        "context_coverage": info["context_coverage"],
+        "momentum_coverage": info["momentum_coverage"],
+        "metadata_columns": meta_cols,
+        "state_feature_columns": feature_cols,
+        "action_columns": [
+            c
+            for c in action_df.columns
+            if c not in meta_cols
+        ],
+        "reward_columns": [
+            c
+            for c in action_df.columns
+            if c.startswith("gross_R_")
+            or c.startswith("exit_code_")
+            or c in ("primary_reward_R", "reward_version")
+        ],
     }
     (OUT_ROOT / "dataset_manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2),

@@ -143,6 +143,47 @@ for kind, hi, lo in (
         and bool(np.isnan(d.loc[2, f"bwd_{kind}"])),
     )
 
+# COUNTEREXAMPLE 1: a pivot NAMED "high" already sits BELOW price and
+# a pivot named "low" sits ABOVE price. Rotation must follow relation,
+# not the high/low name.
+nr = pd.DataFrame(
+    {
+        "trade_direction": [1.0, -1.0, 0.0],
+        "internal_high_atr_5m": [3.0, 3.0, 3.0],
+        "internal_low_atr_5m": [1.0, 1.0, 1.0],
+        "internal_high_relation_5m": ["below"] * 3,
+        "internal_low_relation_5m": ["above"] * 3,
+    }
+)
+BM.nearest_by_relation(
+    nr,
+    objects=("internal_high", "internal_low"),
+    tf="5m",
+    prefix="internal",
+)
+check(
+    "inverted pivot: LONG forward takes the ABOVE pivot (low)",
+    nr.loc[0, "forward_internal_atr_5m"] == 1.0
+    and nr.loc[0, "backward_internal_atr_5m"] == 3.0,
+    (
+        nr.loc[0, "forward_internal_atr_5m"],
+        nr.loc[0, "backward_internal_atr_5m"],
+    ),
+)
+check(
+    "inverted pivot: SHORT forward takes the BELOW pivot (high)",
+    nr.loc[1, "forward_internal_atr_5m"] == 3.0
+    and nr.loc[1, "backward_internal_atr_5m"] == 1.0,
+    (
+        nr.loc[1, "forward_internal_atr_5m"],
+        nr.loc[1, "backward_internal_atr_5m"],
+    ),
+)
+check(
+    "inverted pivot: SKIP -> nan",
+    bool(np.isnan(nr.loc[2, "forward_internal_atr_5m"])),
+)
+
 b = pd.DataFrame(
     {"trade_direction": [1.0, -1.0, 0.0], "bias": [1.0, 1.0, 1.0]}
 )
@@ -357,6 +398,11 @@ def synth_candidates() -> pd.DataFrame:
                     "source_ob_zone_low": 6900.0,
                     "source_ob_zone_high": 7100.0,
                     "source_ob_width_atr5": 1.5,
+                    "touch_time": pd.Timestamp(
+                        "2024-01-02 10:15:00"
+                    )
+                    + pd.Timedelta(minutes=5 * i),
+                    "touch_5m_bar_index": int(i * 3 + 5),
                     "touch_ordinal": int(i % 4) + 1,
                     "is_first_touch": bool(i % 4 == 0),
                     "touch_intrabar_far_edge_breach": breach,
@@ -389,7 +435,14 @@ TF_LEN = {"5m": len(RAW["AG"]), "15m": 96, "1h": 24}
 
 def synth_context() -> pd.DataFrame:
     rows = []
+    idx_of = {
+        cid: k
+        for k, cid in enumerate(
+            CAND["candidate_id"].astype(str).tolist()
+        )
+    }
     for _, c in CAND.iterrows():
+        i_flip = idx_of[str(c["candidate_id"])] in (0, 1)
         for tf in ("5m", "15m", "1h", "4h"):
             r = {
                 "candidate_id": c["candidate_id"],
@@ -413,6 +466,16 @@ def synth_context() -> pd.DataFrame:
                 "current_internal_low_distance_pct": 0.20,
                 "current_swing_high_distance_pct": 0.60,
                 "current_swing_low_distance_pct": 0.40,
+                # NOTE: a pivot NAMED high is not necessarily above.
+                # Candidates 0 and 1 are deliberately inverted.
+                "current_internal_high_relation": "below"
+                if i_flip
+                else "above",
+                "current_internal_low_relation": "above"
+                if i_flip
+                else "below",
+                "current_swing_high_relation": "above",
+                "current_swing_low_relation": "below",
                 "current_internal_high_level": 7100.0,
                 "current_internal_low_level": 6900.0,
                 "current_swing_high_level": 7200.0,
@@ -431,32 +494,21 @@ CTX = synth_context()
 
 def synth_levels() -> pd.DataFrame:
     rows = []
-    ot_pool = [
-        "active_bull_internal_ob",
-        "active_bear_internal_ob",
-        "active_bull_swing_ob",
-        "active_bear_swing_ob",
-        "current_internal_high",
-        "EQH",
-    ]
+    # The FULL frozen vocabulary must be present, because the
+    # vocabulary gate is now an EXACT equality check.
     for _, c in CAND.iterrows():
         for tf in ("5m", "15m", "1h"):
-            for j in range(3):
-                rel = ["above", "below", "overlap"][j]
-                ot = ot_pool[(j + len(c["candidate_id"])) % len(ot_pool)]
+            for j, (ot, sc) in enumerate(
+                SP.FROZEN_LEVEL_VOCABULARY
+            ):
+                rel = ["above", "below", "overlap"][j % 3]
                 rows.append(
                     {
                         "event_id": c["candidate_id"],
                         "symbol": c["symbol"],
                         "timeframe": tf,
                         "object_type": ot,
-                        "structure_class": "internal"
-                        if "internal" in ot
-                        else "swing"
-                        if "swing" in ot
-                        else "equal"
-                        if ot.startswith("EQ")
-                        else "internal",
+                        "structure_class": sc,
                         "bias": 1.0 if j % 2 == 0 else -1.0,
                         "zone_low": 6950.0,
                         "zone_high": 7050.0,
@@ -532,6 +584,7 @@ try:
             for s in SYMBOLS
             for tf in SP.VALIDATED_TFS
         },
+        RAW,
     )
     BM.audit_state_cardinality(state, CAND)
     BM.audit_state_columns(state)
@@ -675,7 +728,9 @@ for tf in SP.VALIDATED_TFS:
 ACTION_RELATIVE_MARKERS = (
     "forward_",
     "backward_",
-    "_rel",
+    # "_rel_" (suffixed) not "_rel": "_relation_" is an ABSOLUTE
+    # property of the pivot, not an action-relative encoding.
+    "_rel_",
     "aligned",
     "opposed",
     "target_fit",
@@ -843,6 +898,218 @@ except RuntimeError:
     check("4h value in output blocked", True)
 
 # ============================================================
+# 10b) Structure pivots: level + distance + relation all present,
+#      and pipeline forward/backward follows RELATION
+# ============================================================
+for tf in SP.VALIDATED_TFS:
+    for obj in ("internal_high", "internal_low",
+                "swing_high", "swing_low"):
+        for suffix in ("level", "atr", "relation"):
+            check(
+                f"state has {obj}_{suffix}_{tf}",
+                f"{obj}_{suffix}_{tf}" in state.columns,
+            )
+
+cid_all = CAND["candidate_id"].astype(str).tolist()
+bias_all = dict(
+    zip(cid_all, CAND["source_ob_bias"].to_numpy(float))
+)
+f_all = action_df[
+    action_df["action"] == "FOLLOW_2.0R"
+].set_index("candidate_id")
+# distance_pct 0.30 (high) -> 1.5 ATR ; 0.20 (low) -> 1.0 ATR
+# Candidates 0 (bull) and 1 (bear) have INVERTED relations:
+#   internal_high = "below", internal_low = "above".
+inv_long = cid_all[0]
+inv_short = cid_all[1]
+norm_long = [
+    c for c in cid_all[2:] if bias_all[c] == 1.0
+]
+norm_short = [
+    c for c in cid_all[2:] if bias_all[c] == -1.0
+]
+
+check(
+    "pipeline: inverted + LONG forward = low pivot (1.0)",
+    abs(
+        float(f_all.loc[inv_long, "forward_internal_atr_5m"])
+        - 1.0
+    )
+    < 1e-9
+    and abs(
+        float(f_all.loc[inv_long, "backward_internal_atr_5m"])
+        - 1.5
+    )
+    < 1e-9,
+    (
+        f_all.loc[inv_long, "forward_internal_atr_5m"],
+        f_all.loc[inv_long, "backward_internal_atr_5m"],
+    ),
+)
+check(
+    "pipeline: inverted + SHORT forward = high pivot (1.5)",
+    abs(
+        float(f_all.loc[inv_short, "forward_internal_atr_5m"])
+        - 1.5
+    )
+    < 1e-9
+    and abs(
+        float(f_all.loc[inv_short, "backward_internal_atr_5m"])
+        - 1.0
+    )
+    < 1e-9,
+    (
+        f_all.loc[inv_short, "forward_internal_atr_5m"],
+        f_all.loc[inv_short, "backward_internal_atr_5m"],
+    ),
+)
+check(
+    "pipeline: normal + LONG forward = high pivot (1.5)",
+    bool(
+        np.allclose(
+            f_all.loc[norm_long, "forward_internal_atr_5m"]
+            .to_numpy(float),
+            1.5,
+        )
+    ),
+    f_all.loc[norm_long, "forward_internal_atr_5m"].tolist(),
+)
+check(
+    "pipeline: normal + SHORT forward = low pivot (1.0)",
+    bool(
+        np.allclose(
+            f_all.loc[norm_short, "forward_internal_atr_5m"]
+            .to_numpy(float),
+            1.0,
+        )
+    ),
+    f_all.loc[norm_short, "forward_internal_atr_5m"].tolist(),
+)
+
+# ============================================================
+# 10c) target_atr semantics
+# ============================================================
+for action in ("FOLLOW_1.5R", "FOLLOW_2.5R", "FADE_2.0R"):
+    sub = action_df[action_df["action"] == action]
+    _, rr = SP.parse_action(action)
+    check(
+        f"target_atr == stop x R for {action}",
+        bool(np.allclose(sub["target_atr"], SP.STOP_ATR * rr)),
+        sub["target_atr"].unique().tolist(),
+    )
+    fw = sub["forward_swing_atr_5m"].to_numpy(float)
+    fit = sub["target_fit_swing_5m"].to_numpy(float)
+    check(
+        f"target_fit uses target_atr for {action}",
+        bool(
+            np.allclose(
+                fit,
+                np.where(np.isfinite(fw), fw / (SP.STOP_ATR * rr), np.nan),
+                equal_nan=True,
+            )
+        ),
+    )
+
+# ============================================================
+# 10d) Active OB metadata rotates with the direction
+# ============================================================
+fo = action_df[action_df["action"] == "FOLLOW_2.0R"]
+fa = action_df[action_df["action"] == "FADE_2.0R"]
+for tf in SP.VALIDATED_TFS:
+    check(
+        f"OB structure_class rotated {tf}",
+        (
+            fo[f"forward_active_ob_structure_class_{tf}"]
+            .astype(str)
+            .tolist()
+            == fo[f"above_ob_structure_class_{tf}"]
+            .astype(str)
+            .tolist()
+        )
+        and (
+            fa[f"forward_active_ob_structure_class_{tf}"]
+            .astype(str)
+            .tolist()
+            == fa[f"below_ob_structure_class_{tf}"]
+            .astype(str)
+            .tolist()
+        ),
+    )
+    # bias_rel = (forward OB bias) x trade_direction. Which side is
+    # "forward" depends on td, not on the FOLLOW/FADE label (a FOLLOW
+    # on a bearish OB is a short, so forward is BELOW).
+    for tag, sub in (("follow", fo), ("fade", fa)):
+        td = sub["trade_direction"].to_numpy(float)
+        above = pd.to_numeric(
+            sub[f"above_ob_bias_{tf}"], errors="coerce"
+        ).to_numpy(float)
+        below = pd.to_numeric(
+            sub[f"below_ob_bias_{tf}"], errors="coerce"
+        ).to_numpy(float)
+        fwd = np.where(td > 0, above, np.where(td < 0, below, np.nan))
+        ok = bool(
+            np.allclose(
+                sub[f"forward_active_ob_bias_rel_{tf}"]
+                .to_numpy(float),
+                fwd * td,
+                equal_nan=True,
+            )
+        )
+        check(f"OB bias_rel {tf} {tag} == forward bias x direction", ok)
+
+# ============================================================
+# 10e) Temporal metadata
+# ============================================================
+meta, feats = SP.split_state_columns(state.columns)
+for m in ("touch_time", "trading_day", "touch_5m_bar_index"):
+    check(f"{m} present in dataset", m in state.columns)
+    check(
+        f"{m} NOT a state feature",
+        m in meta and m not in feats,
+    )
+check(
+    "trading_day comes from raw 5m bars",
+    state["trading_day"].nunique() >= 1
+    and state["trading_day"].astype(str).str.len().min() > 0,
+)
+BM.assert_meta_excluded(feats)
+try:
+    BM.assert_meta_excluded(feats + ["touch_time"])
+    check("meta-in-features blocked", False, "no raise")
+except RuntimeError:
+    check("meta-in-features blocked", True)
+
+# ============================================================
+# 10f) COUNTEREXAMPLE 2: drop one candidate's 15m context
+# ============================================================
+flip_ids = cid_all[:2]
+ctx_broken = CTX[
+    ~(
+        (CTX["candidate_id"].astype(str) == flip_ids[0])
+        & (CTX["context_tf"].astype(str) == "15m")
+    )
+].copy()
+try:
+    BM.build_state(
+        CAND,
+        ctx_broken,
+        LEVELS,
+        {
+            (s, tf): synth_momentum(RAW[s])
+            for s in SYMBOLS
+            for tf in SP.VALIDATED_TFS
+        },
+        RAW,
+    )
+    check("missing 15m context blocked", False, "no raise")
+except RuntimeError as e:
+    check(
+        "missing 15m context blocked",
+        "context" in str(e).lower(),
+        str(e)[:100],
+    )
+
+# ============================================================
 # 11) Levels vocabulary authority
 # ============================================================
 bad_lv = LEVELS.copy()
@@ -854,6 +1121,21 @@ except RuntimeError as e:
     check(
         "unknown level vocabulary blocked",
         "vocabulary drift" in str(e),
+        str(e)[:100],
+    )
+
+# COUNTEREXAMPLE 3: a frozen vocabulary class disappears
+# (e.g. a chunk loader drops it). Missing must STOP, not PASS.
+lv_broken = LEVELS[
+    LEVELS["object_type"].astype(str) != "EQH"
+].copy()
+try:
+    SP.assert_level_vocabulary(lv_broken)
+    check("missing vocabulary blocked", False, "no raise")
+except RuntimeError as e:
+    check(
+        "missing vocabulary blocked",
+        "missing=" in str(e),
         str(e)[:100],
     )
 

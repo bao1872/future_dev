@@ -128,15 +128,38 @@ SMC_EVENT_FIELDS = (
     "last_internal_structure_age",
 )
 
-SMC_PIVOT_FIELDS = (
-    "current_internal_high_level",
-    "current_internal_high_distance_pct",
-    "current_internal_low_level",
-    "current_internal_low_distance_pct",
-    "current_swing_high_level",
-    "current_swing_high_distance_pct",
-    "current_swing_low_level",
-    "current_swing_low_distance_pct",
+# A pivot NAMED "high" is the last internal/swing HIGH. It is NOT
+# guaranteed to still sit above price: once the high is broken the
+# stored pivot can lie below the current price. Therefore the pivot
+# relation is carried explicitly and forward/backward is resolved by
+# RELATION, never by the high/low name.
+#
+# (object, level_src, distance_src, relation_src)
+SMC_PIVOT_SPECS = (
+    (
+        "internal_high",
+        "current_internal_high_level",
+        "current_internal_high_distance_pct",
+        "current_internal_high_relation",
+    ),
+    (
+        "internal_low",
+        "current_internal_low_level",
+        "current_internal_low_distance_pct",
+        "current_internal_low_relation",
+    ),
+    (
+        "swing_high",
+        "current_swing_high_level",
+        "current_swing_high_distance_pct",
+        "current_swing_high_relation",
+    ),
+    (
+        "swing_low",
+        "current_swing_low_level",
+        "current_swing_low_distance_pct",
+        "current_swing_low_relation",
+    ),
 )
 
 # Distance-bearing SMC pivot fields -> exec-ATR names.
@@ -146,6 +169,15 @@ SMC_PIVOT_DISTANCE_MAP = {
     "current_swing_high_distance_pct": "swing_high_atr",
     "current_swing_low_distance_pct": "swing_low_atr",
 }
+
+# Structure families resolved as "nearest by relation".
+SMC_STRUCTURE_OBJECTS = {
+    "internal": ("internal_high", "internal_low"),
+    "swing": ("swing_high", "swing_low"),
+}
+
+# Legal canonical relation values (NaN = pivot unknown, excluded).
+PIVOT_RELATION_VALUES = ("above", "below", "overlap")
 
 # ------------------------------------------------------------
 # Frozen levels vocabulary (OBSERVED on real V3 data)
@@ -188,6 +220,16 @@ LEVELS_REQUIRED_COLUMNS = (
 )
 
 LEVEL_RELATIONS = ("above", "below", "overlap")
+
+# Metadata rotated together with the active-OB distance, so that a
+# forward obstacle can be distinguished as "bearish swing OB at
+# 1.2 ATR" vs "bullish internal OB at 1.2 ATR".
+ACTIVE_OB_METADATA_FIELDS = (
+    "bias",
+    "structure_class",
+    "zone_low",
+    "zone_high",
+)
 
 # ------------------------------------------------------------
 # DSA V0 (two core states only)
@@ -243,12 +285,30 @@ QUANT_HIGH_MIN = 0.70
 # Causality contract
 # ------------------------------------------------------------
 
+# ------------------------------------------------------------
+# Column roles
+#
+# Time is NOT future information: `touch_time` / `trading_day` say
+# WHEN the sample happened. They are required for walk-forward,
+# rolling-origin and trading-day bootstrap, so they MUST be stored.
+# They are metadata: they may never enter the model feature list.
+# ------------------------------------------------------------
+
+META_FIELDS = (
+    "candidate_id",
+    "candidate_group_id",
+    "symbol",
+    "touch_time",
+    "touch_5m_bar_index",
+    "trading_day",
+)
+
 FORBIDDEN_STATE_PREFIXES = (
     "entry_",
     "future_",
-    "reward",
     "gross_R",
     "exit_code",
+    "reward",
 )
 
 # Columns that exist on the raw candidates table but must never be
@@ -259,8 +319,6 @@ FORBIDDEN_STATE_COLUMNS = frozenset(
         "entry_time",
         "entry_next_5m_open",
         "entry_delay_minutes",
-        "touch_bar_start_time",
-        "touch_time",
         "source_confirmed_available_time",
         "quant_state_decision_time",
         "quant_state_age_minutes",
@@ -270,6 +328,16 @@ FORBIDDEN_STATE_COLUMNS = frozenset(
         "quant_q90",
     }
 )
+
+
+def split_state_columns(
+    columns,
+) -> tuple[list[str], list[str]]:
+    """(metadata, state_features). Metadata is time / identity only."""
+    cols = list(columns)
+    meta = [c for c in cols if c in META_FIELDS]
+    feats = [c for c in cols if c not in META_FIELDS]
+    return meta, feats
 
 
 def assert_validated_tf(tf: str) -> None:
@@ -329,17 +397,21 @@ def assert_level_vocabulary(levels) -> dict:
     }
     frozen = set(FROZEN_LEVEL_VOCABULARY)
 
-    unknown = observed - frozen
-    if unknown:
+    # EXACT equality, not just "no extras": a chunk loader that drops
+    # a whole object class must also STOP.
+    missing = frozen - observed
+    extra = observed - frozen
+    if missing or extra:
         raise RuntimeError(
-            "levels vocabulary drift: unknown pairs "
-            f"{sorted(unknown)}"
+            "levels vocabulary drift: "
+            f"missing={sorted(missing)} extra={sorted(extra)}"
         )
 
     return {
         "observed_pairs": len(observed),
         "frozen_pairs": len(frozen),
-        "unknown_pairs": 0,
+        "missing_pairs": 0,
+        "extra_pairs": 0,
         "active_ob_types": sorted(
             {ot for ot, _ in observed} & ACTIVE_OB_TYPES
         ),
