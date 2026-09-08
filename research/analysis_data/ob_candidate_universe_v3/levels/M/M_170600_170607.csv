@@ -1,0 +1,9 @@
+event_id,symbol,trigger_time,timeframe,object_type,structure_class,bias,object_price_center,source_index,confirmed_index,age_bars,zone_low,zone_high,canonical_bar_low,canonical_bar_high,canonical_endpoints_swapped,relation,distance_pct
+M:1h:1:1:2797:2804:7,M,2026-09-03 21:55:00,1h,active_bull_internal_ob,internal,1,3223.5,2767,2773,46,3213.0,3234.0,3213.0,3234.0,False,below,3.8930163447251114
+M:1h:1:1:2797:2804:7,M,2026-09-03 21:55:00,1h,EQH,equal,0,3250.0,2758,2765,54,3250.0,3250.0,,,,below,3.4175334323922733
+M:1h:1:1:2797:2804:7,M,2026-09-03 21:55:00,4h,current_internal_high,internal,0,3251.0,1180,1185,21,3251.0,3251.0,,,,below,3.387815750371471
+M:1h:1:1:2797:2804:7,M,2026-09-03 21:55:00,4h,current_internal_low,internal,0,3213.0,1184,1189,17,3213.0,3213.0,,,,below,4.517087667161961
+M:1h:1:1:2797:2804:7,M,2026-09-03 21:55:00,4h,current_swing_high,swing,0,3073.0,966,1016,190,3073.0,3073.0,,,,below,8.677563150074294
+M:1h:1:1:2797:2804:7,M,2026-09-03 21:55:00,4h,current_swing_low,swing,0,2887.0,1025,1075,131,2887.0,2887.0,,,,below,14.205052005943536
+M:1h:1:1:2797:2804:7,M,2026-09-03 21:55:00,4h,active_bull_internal_ob,internal,1,3225.0,1184,1187,19,3213.0,3237.0,3213.0,3237.0,False,below,3.803863298662704
+M:1h:1:1:2797:2804:7,M,2026-09-03 21:55:00,4h,EQH,equal,0,3097.0,494,509,697,3097.0,3097.0,,,,below,7.964338781575036

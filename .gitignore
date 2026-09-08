@@ -37,3 +37,7 @@ env/
 research/exports/ob_trigger_smc_v1/
 research/exports/ob_trigger_smc_v2/
 research/exports/ob_trigger_execution_v21/
+
+# OB Candidate Universe V3 local export (regenerable by
+# research/build_ob_candidate_universe_v3.py)
+research/exports/ob_candidate_universe_v3/

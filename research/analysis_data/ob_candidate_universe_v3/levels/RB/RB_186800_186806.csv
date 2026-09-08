@@ -1,0 +1,8 @@
+event_id,symbol,trigger_time,timeframe,object_type,structure_class,bias,object_price_center,source_index,confirmed_index,age_bars,zone_low,zone_high,canonical_bar_low,canonical_bar_high,canonical_endpoints_swapped,relation,distance_pct
+RB:1h:1:1:2711:2717:1,RB,2026-08-17 21:35:00,4h,current_swing_high,swing,0,3298.0,960,1010,157,3298.0,3298.0,,,,above,9.896701099633455
+RB:1h:1:1:2711:2717:1,RB,2026-08-17 21:35:00,4h,current_swing_low,swing,0,3083.0,907,957,210,3083.0,3083.0,,,,above,2.7324225258247252
+RB:1h:1:1:2711:2717:1,RB,2026-08-17 21:35:00,4h,active_bear_internal_ob,internal,-1,3081.0,1120,1124,43,3073.0,3089.0,3073.0,3089.0,False,above,2.3992002665778074
+RB:1h:1:1:2711:2717:1,RB,2026-08-17 21:35:00,4h,active_bull_internal_ob,internal,1,2962.5,338,343,824,2953.0,2972.0,2953.0,2972.0,False,below,0.9663445518160613
+RB:1h:1:1:2711:2717:1,RB,2026-08-17 21:35:00,4h,active_bull_swing_ob,swing,1,2930.0,287,385,782,2912.0,2948.0,2912.0,2948.0,False,below,1.7660779740086638
+RB:1h:1:1:2711:2717:1,RB,2026-08-17 21:35:00,4h,EQL,equal,0,3020.0,610,617,550,3020.0,3020.0,,,,above,0.6331222925691435
+RB:1h:1:1:2711:2717:1,RB,2026-08-17 21:35:00,4h,EQH,equal,0,2988.0,283,294,873,2988.0,2988.0,,,,below,0.433188937020993

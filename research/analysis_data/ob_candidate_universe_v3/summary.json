@@ -1,0 +1,497 @@
+{
+  "schema_version": "ob_candidate_universe_v3",
+  "parent_sha": "fa6f12822199585b7667ea925342056bdb002fbf",
+  "totals": {
+    "candidates": 21481,
+    "context_rows": 85924,
+    "levels_full_rows": 3962264,
+    "path_rows": 515544
+  },
+  "candidates_by_symbol_tf": {
+    "AG": {
+      "5m": 3966,
+      "15m": 1704,
+      "1h": 695
+    },
+    "CU": {
+      "5m": 3361,
+      "15m": 1638,
+      "1h": 633
+    },
+    "RB": {
+      "5m": 2853,
+      "15m": 1403,
+      "1h": 595
+    },
+    "M": {
+      "5m": 2759,
+      "15m": 1298,
+      "1h": 576
+    }
+  },
+  "first_vs_retest": {
+    "AG": {
+      "first_touch": 3084,
+      "retest": 3281
+    },
+    "CU": {
+      "first_touch": 2512,
+      "retest": 3120
+    },
+    "RB": {
+      "first_touch": 1885,
+      "retest": 2966
+    },
+    "M": {
+      "first_touch": 1847,
+      "retest": 2786
+    }
+  },
+  "group_confluence": {
+    "AG": {
+      "only_5m": 2459,
+      "only_15m": 726,
+      "only_1h": 404,
+      "5m_15m": 625,
+      "5m_1h": 68,
+      "15m_1h": 59,
+      "5m_15m_1h": 117
+    },
+    "CU": {
+      "only_5m": 2093,
+      "only_15m": 792,
+      "only_1h": 360,
+      "5m_15m": 538,
+      "5m_1h": 94,
+      "15m_1h": 42,
+      "5m_15m_1h": 113
+    },
+    "RB": {
+      "only_5m": 1752,
+      "only_15m": 623,
+      "only_1h": 303,
+      "5m_15m": 447,
+      "5m_1h": 70,
+      "15m_1h": 84,
+      "5m_15m_1h": 83
+    },
+    "M": {
+      "only_5m": 1693,
+      "only_15m": 584,
+      "only_1h": 295,
+      "5m_15m": 433,
+      "5m_1h": 80,
+      "15m_1h": 68,
+      "5m_15m_1h": 96
+    }
+  },
+  "touch_state": {
+    "AG": {
+      "no_far_edge_breach": 5213,
+      "intrabar_breach_reclaim": 565,
+      "close_beyond_far_edge": 587
+    },
+    "CU": {
+      "no_far_edge_breach": 4825,
+      "intrabar_breach_reclaim": 400,
+      "close_beyond_far_edge": 407
+    },
+    "RB": {
+      "no_far_edge_breach": 4416,
+      "intrabar_breach_reclaim": 216,
+      "close_beyond_far_edge": 219
+    },
+    "M": {
+      "no_far_edge_breach": 4162,
+      "intrabar_breach_reclaim": 216,
+      "close_beyond_far_edge": 255
+    }
+  },
+  "internal_vs_swing": {
+    "AG": {
+      "internal": 5638,
+      "swing": 727
+    },
+    "CU": {
+      "internal": 5111,
+      "swing": 521
+    },
+    "RB": {
+      "internal": 4185,
+      "swing": 666
+    },
+    "M": {
+      "internal": 4142,
+      "swing": 491
+    }
+  },
+  "bull_vs_bear": {
+    "AG": {
+      "bull": 3398,
+      "bear": 2967
+    },
+    "CU": {
+      "bull": 2976,
+      "bear": 2656
+    },
+    "RB": {
+      "bull": 2384,
+      "bear": 2467
+    },
+    "M": {
+      "bull": 2283,
+      "bear": 2350
+    }
+  },
+  "candidate_4h_count": 0,
+  "four_hour_component_distribution": {
+    "AG": {
+      "3": 1199,
+      "2": 407
+    },
+    "CU": {
+      "3": 803,
+      "2": 407,
+      "1": 396
+    },
+    "RB": {
+      "2": 803,
+      "3": 407
+    },
+    "M": {
+      "2": 803,
+      "3": 407
+    }
+  },
+  "four_hour_lag_distribution": {
+    "AG": {
+      "mean": 547.4579439252336,
+      "frac_complete_240": 0.0
+    },
+    "CU": {
+      "mean": 547.4579439252336,
+      "frac_complete_240": 0.0
+    },
+    "RB": {
+      "mean": 726.7741935483871,
+      "frac_complete_240": 0.0
+    },
+    "M": {
+      "mean": 726.7741935483871,
+      "frac_complete_240": 0.0
+    }
+  },
+  "dsa": {
+    "source_repo": "bao1872/market_dev",
+    "source_sha": "8686b803c53c3a423badb80491fbd21f06879fbb",
+    "source_paths": [
+      "backend/app/strategy/selectors/dsa_selector.py",
+      "backend/app/strategy_assets/algorithms/features/dynamic_swing_anchored_vwap.py",
+      "backend/app/strategy_assets/algorithms/features/atr_rope_event_factor_lab_v4.py"
+    ],
+    "consumed_via": "future_dev/panji_indicators.py",
+    "note": "panji_indicators.py is the frozen, declared-canonical (AGENTS.md) 1:1 extraction of the market_dev DSA sources; its dynamic_swing_anchored_vwap kernel is byte-identical to the current market_dev kernel (verified at market_dev SHA 8686b803). DSA math is NOT redefined in future_dev."
+  },
+  "dsa_parity_alignment_mismatch": 0,
+  "atr_recurrence_mismatch": 0,
+  "quantile": {
+    "model_spec": "gbr_quantile (GradientBoostingRegressor loss=quantile)",
+    "feature_set": "F1_VOL",
+    "horizon": 4,
+    "quantiles": [
+      0.1,
+      0.5,
+      0.9
+    ],
+    "reused_from": [
+      "research/fit_quantile_v2_models.py:make_model",
+      "research/run_quantile_rebaseline.py:FEATURE_SETS,maker_folds",
+      "research/build_pytdx_panel.py:aggregate_15m,build_features,build_targets"
+    ],
+    "continuity": "strict_target_contiguous: base..base+horizon must be exactly 15-min apart (stricter than old Q-Audit)",
+    "role": "opportunity / future-volatility-room variable only; no direction",
+    "percentile_rule": "width_percentile_train computed from CURRENT fold train width distribution; never a global rank over OOS"
+  },
+  "quantile_diagnostics": {
+    "AG": {
+      "contiguous_target_rate": 0.5634743875278396,
+      "oos_states": 5847,
+      "crossing_rate": 0.0,
+      "interval_coverage_80": 0.7053189669916197,
+      "width_absret_spearman": 0.4379082208521655,
+      "width_pathrange_spearman": 0.7545231593726108,
+      "top30_bottom30_absret_ratio": 3.1433129130911586
+    },
+    "CU": {
+      "contiguous_target_rate": 0.48010610079575594,
+      "oos_states": 4185,
+      "crossing_rate": 0.0,
+      "interval_coverage_80": 0.7586618876941458,
+      "width_absret_spearman": 0.35749304034804935,
+      "width_pathrange_spearman": 0.6572807144114656,
+      "top30_bottom30_absret_ratio": 2.767451214592927
+    },
+    "RB": {
+      "contiguous_target_rate": 0.302491103202847,
+      "oos_states": 1964,
+      "crossing_rate": 0.0,
+      "interval_coverage_80": 0.8385947046843177,
+      "width_absret_spearman": 0.1369881860769916,
+      "width_pathrange_spearman": 0.2902426058525881,
+      "top30_bottom30_absret_ratio": 1.370774808184702
+    },
+    "M": {
+      "contiguous_target_rate": 0.302491103202847,
+      "oos_states": 1964,
+      "crossing_rate": 0.0,
+      "interval_coverage_80": 0.7739307535641547,
+      "width_absret_spearman": 0.12529983200108238,
+      "width_pathrange_spearman": 0.27233406490400924,
+      "top30_bottom30_absret_ratio": 1.5216762423311647
+    }
+  },
+  "quantile_global_rank_leakage": 0,
+  "quantile_backward_fill": 0,
+  "quantile_beyond_15m_validity": 0,
+  "path_alignment_mismatch": 0,
+  "future_b24_available_rate": {
+    "AG": 1.0,
+    "CU": 1.0,
+    "RB": 1.0,
+    "M": 1.0
+  },
+  "generated_tp_sl_pnl_fields": 0,
+  "git_data": {
+    "candidates_chunks": {
+      "AG": 32,
+      "CU": 29,
+      "RB": 25,
+      "M": 24
+    },
+    "max_chunk_bytes": 342267,
+    "chunks_gt_800kb": 0
+  },
+  "by_symbol": [
+    {
+      "symbol": "AG",
+      "candidates": 6365,
+      "counts_by_tf": {
+        "5m": 3966,
+        "15m": 1704,
+        "1h": 695
+      },
+      "first_touch": 3084,
+      "retest": 3281,
+      "internal": 5638,
+      "swing": 727,
+      "bull": 3398,
+      "bear": 2967,
+      "group_confluence": {
+        "only_5m": 2459,
+        "only_15m": 726,
+        "only_1h": 404,
+        "5m_15m": 625,
+        "5m_1h": 68,
+        "15m_1h": 59,
+        "5m_15m_1h": 117
+      },
+      "touch_state": {
+        "no_far_edge_breach": 5213,
+        "intrabar_breach_reclaim": 565,
+        "close_beyond_far_edge": 587
+      },
+      "b24_available": 6365,
+      "parity_5m": {
+        "expected": 2140,
+        "projected": 2140,
+        "missing": 0,
+        "extra": 0,
+        "mismatches": 0,
+        "non_swapped_spatial_raw_mismatch": 0
+      },
+      "quantile_diagnostics": {
+        "contiguous_target_rate": 0.5634743875278396,
+        "oos_states": 5847,
+        "crossing_rate": 0.0,
+        "interval_coverage_80": 0.7053189669916197,
+        "width_absret_spearman": 0.4379082208521655,
+        "width_pathrange_spearman": 0.7545231593726108,
+        "top30_bottom30_absret_ratio": 3.1433129130911586
+      },
+      "4h_component_1h_count": {
+        "3": 1199,
+        "2": 407
+      },
+      "4h_lag_minutes_summary": {
+        "mean": 547.4579439252336,
+        "frac_complete_240": 0.0
+      }
+    },
+    {
+      "symbol": "CU",
+      "candidates": 5632,
+      "counts_by_tf": {
+        "5m": 3361,
+        "15m": 1638,
+        "1h": 633
+      },
+      "first_touch": 2512,
+      "retest": 3120,
+      "internal": 5111,
+      "swing": 521,
+      "bull": 2976,
+      "bear": 2656,
+      "group_confluence": {
+        "only_5m": 2093,
+        "only_15m": 792,
+        "only_1h": 360,
+        "5m_15m": 538,
+        "5m_1h": 94,
+        "15m_1h": 42,
+        "5m_15m_1h": 113
+      },
+      "touch_state": {
+        "no_far_edge_breach": 4825,
+        "intrabar_breach_reclaim": 400,
+        "close_beyond_far_edge": 407
+      },
+      "b24_available": 5632,
+      "parity_5m": {
+        "expected": 1722,
+        "projected": 1722,
+        "missing": 0,
+        "extra": 0,
+        "mismatches": 0,
+        "non_swapped_spatial_raw_mismatch": 0
+      },
+      "quantile_diagnostics": {
+        "contiguous_target_rate": 0.48010610079575594,
+        "oos_states": 4185,
+        "crossing_rate": 0.0,
+        "interval_coverage_80": 0.7586618876941458,
+        "width_absret_spearman": 0.35749304034804935,
+        "width_pathrange_spearman": 0.6572807144114656,
+        "top30_bottom30_absret_ratio": 2.767451214592927
+      },
+      "4h_component_1h_count": {
+        "3": 803,
+        "2": 407,
+        "1": 396
+      },
+      "4h_lag_minutes_summary": {
+        "mean": 547.4579439252336,
+        "frac_complete_240": 0.0
+      }
+    },
+    {
+      "symbol": "RB",
+      "candidates": 4851,
+      "counts_by_tf": {
+        "5m": 2853,
+        "15m": 1403,
+        "1h": 595
+      },
+      "first_touch": 1885,
+      "retest": 2966,
+      "internal": 4185,
+      "swing": 666,
+      "bull": 2384,
+      "bear": 2467,
+      "group_confluence": {
+        "only_5m": 1752,
+        "only_15m": 623,
+        "only_1h": 303,
+        "5m_15m": 447,
+        "5m_1h": 70,
+        "15m_1h": 84,
+        "5m_15m_1h": 83
+      },
+      "touch_state": {
+        "no_far_edge_breach": 4416,
+        "intrabar_breach_reclaim": 216,
+        "close_beyond_far_edge": 219
+      },
+      "b24_available": 4851,
+      "parity_5m": {
+        "expected": 1265,
+        "projected": 1265,
+        "missing": 0,
+        "extra": 0,
+        "mismatches": 0,
+        "non_swapped_spatial_raw_mismatch": 0
+      },
+      "quantile_diagnostics": {
+        "contiguous_target_rate": 0.302491103202847,
+        "oos_states": 1964,
+        "crossing_rate": 0.0,
+        "interval_coverage_80": 0.8385947046843177,
+        "width_absret_spearman": 0.1369881860769916,
+        "width_pathrange_spearman": 0.2902426058525881,
+        "top30_bottom30_absret_ratio": 1.370774808184702
+      },
+      "4h_component_1h_count": {
+        "2": 803,
+        "3": 407
+      },
+      "4h_lag_minutes_summary": {
+        "mean": 726.7741935483871,
+        "frac_complete_240": 0.0
+      }
+    },
+    {
+      "symbol": "M",
+      "candidates": 4633,
+      "counts_by_tf": {
+        "5m": 2759,
+        "15m": 1298,
+        "1h": 576
+      },
+      "first_touch": 1847,
+      "retest": 2786,
+      "internal": 4142,
+      "swing": 491,
+      "bull": 2283,
+      "bear": 2350,
+      "group_confluence": {
+        "only_5m": 1693,
+        "only_15m": 584,
+        "only_1h": 295,
+        "5m_15m": 433,
+        "5m_1h": 80,
+        "15m_1h": 68,
+        "5m_15m_1h": 96
+      },
+      "touch_state": {
+        "no_far_edge_breach": 4162,
+        "intrabar_breach_reclaim": 216,
+        "close_beyond_far_edge": 255
+      },
+      "b24_available": 4633,
+      "parity_5m": {
+        "expected": 1244,
+        "projected": 1244,
+        "missing": 0,
+        "extra": 0,
+        "mismatches": 0,
+        "non_swapped_spatial_raw_mismatch": 0
+      },
+      "quantile_diagnostics": {
+        "contiguous_target_rate": 0.302491103202847,
+        "oos_states": 1964,
+        "crossing_rate": 0.0,
+        "interval_coverage_80": 0.7739307535641547,
+        "width_absret_spearman": 0.12529983200108238,
+        "width_pathrange_spearman": 0.27233406490400924,
+        "top30_bottom30_absret_ratio": 1.5216762423311647
+      },
+      "4h_component_1h_count": {
+        "2": 803,
+        "3": 407
+      },
+      "4h_lag_minutes_summary": {
+        "mean": 726.7741935483871,
+        "frac_complete_240": 0.0
+      }
+    }
+  ]
+}
