@@ -1,0 +1,47 @@
+{
+  "experiment": "ob_q_relationship_v1",
+  "git_head": "02424edc156036e3a4d817683680629fe54c64f6",
+  "model_view_version": "ob_rl_model_view_v0",
+  "model_feature_count": 62,
+  "validated_timeframes": [
+    "5m",
+    "15m",
+    "1h"
+  ],
+  "reward": "gross_R_h12",
+  "split_method": "chronological_trading_day_70_30",
+  "split_day": "2026-03-12T00:00:00",
+  "all_candidate_count": 21481,
+  "complete_h12_candidate_count": 11214,
+  "partial_h12_candidate_count": 0,
+  "zero_h12_candidate_count": 10267,
+  "train_candidate_count": 7729,
+  "test_candidate_count": 3485,
+  "train_action_rows": 46374,
+  "test_action_rows": 20910,
+  "catboost_version": "1.2.10",
+  "catboost_params": {
+    "iterations": 400,
+    "depth": 6,
+    "learning_rate": 0.05,
+    "l2_leaf_reg": 5.0,
+    "random_seed": 20260908,
+    "random_strength": 0.0,
+    "bootstrap_type": "No",
+    "one_hot_max_size": 32
+  },
+  "model_feature_counts": {
+    "ACTION_LABEL_ONLY": 2,
+    "EVENT_ACTION": 9,
+    "FULL": 62,
+    "FULL_NO_SMC": 26,
+    "FULL_NO_DSA": 56,
+    "FULL_NO_MOMENTUM": 53,
+    "FULL_NO_QUANTILE": 60
+  },
+  "global_train_best_action": {
+    "trade_mode": "FOLLOW",
+    "target_R": 1.5,
+    "train_mean_R": 0.02221209977258802
+  }
+}
