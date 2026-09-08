@@ -82,6 +82,9 @@ from research.analyze_ob_candidate_v3_phase1 import (  # noqa: E402
 from research.indicator_adapter import (  # noqa: E402
     compute_smc_momentum_bundle,
 )
+from research.dsa_adapter import (  # noqa: E402
+    compute_dsa_canonical,
+)
 from research.build_pytdx_panel import aggregate_15m  # noqa: E402
 from research.ob_trigger_snapshot import (  # noqa: E402
     aggregate_1h_from_15m,
@@ -190,6 +193,213 @@ def attach_momentum(
             x[c] = mm[c].to_numpy()
         parts.append(x)
     return pd.concat(parts, ignore_index=True)
+
+
+def build_dsa_frame(
+    bars: pd.DataFrame,
+) -> pd.DataFrame:
+    """Canonical causal DSA for one timeframe.
+
+    DSA authority for the RL dataset is rebuilt from frozen bars at
+    DATASET BUILD TIME.
+
+    The DSA columns stored inside frozen V3 context are historical
+    artifacts from an older canonical DSA SHA and are NOT reused.
+    """
+
+    dsa = compute_dsa_canonical(
+        bars
+    )
+
+    required = {
+        "bar_index",
+        *DSA_FIELDS,
+    }
+
+    missing = (
+        required
+        - set(dsa.columns)
+    )
+
+    if missing:
+        raise RuntimeError(
+            "canonical DSA missing: "
+            f"{sorted(missing)}"
+        )
+
+    expected_index = np.arange(
+        len(bars),
+        dtype=int,
+    )
+
+    got_index = (
+        pd.to_numeric(
+            dsa["bar_index"],
+            errors="raise",
+        )
+        .to_numpy(int)
+    )
+
+    if not np.array_equal(
+        got_index,
+        expected_index,
+    ):
+        raise RuntimeError(
+            "canonical DSA bar alignment failed"
+        )
+
+    return dsa[
+        [
+            "bar_index",
+            *DSA_FIELDS,
+        ]
+    ].copy()
+
+
+def attach_dsa(
+    ctx: pd.DataFrame,
+    dsa_by_tf: dict[str, pd.DataFrame],
+) -> pd.DataFrame:
+    """Attach canonical rebuilt DSA to candidate context bars."""
+
+    parts = []
+
+    for tf, g in ctx.groupby(
+        "context_tf",
+        sort=False,
+    ):
+        tf = str(tf)
+
+        assert_validated_tf(tf)
+
+        dsa = (
+            dsa_by_tf[tf]
+            .set_index(
+                "bar_index"
+            )
+        )
+
+        idx = (
+            g["bar_index"]
+            .astype(int)
+            .to_numpy()
+        )
+
+        missing = ~np.isin(
+            idx,
+            dsa.index.to_numpy(int),
+        )
+
+        if missing.any():
+            raise RuntimeError(
+                f"{tf}: "
+                f"{int(missing.sum())} "
+                "context bars missing rebuilt DSA"
+            )
+
+        x = g[
+            [
+                "candidate_id",
+                "symbol",
+                "context_tf",
+                "bar_index",
+            ]
+        ].copy()
+
+        dd = dsa.loc[idx]
+
+        for field in DSA_FIELDS:
+            x[field] = (
+                dd[field]
+                .to_numpy()
+            )
+
+        parts.append(x)
+
+    return pd.concat(
+        parts,
+        ignore_index=True,
+    )
+
+
+def audit_dsa_coverage(
+    candidates: pd.DataFrame,
+    dsa_df: pd.DataFrame,
+) -> dict:
+    """Every candidate must have rebuilt DSA on all validated TFs."""
+
+    n = (
+        candidates[
+            "candidate_id"
+        ]
+        .astype(str)
+        .nunique()
+    )
+
+    expected = (
+        n
+        * len(VALIDATED_TFS)
+    )
+
+    if len(dsa_df) != expected:
+        raise RuntimeError(
+            "rebuilt DSA cardinality mismatch: "
+            f"{len(dsa_df)} != {expected}"
+        )
+
+    if dsa_df.duplicated(
+        [
+            "candidate_id",
+            "context_tf",
+        ]
+    ).any():
+        raise RuntimeError(
+            "duplicate candidate x TF rebuilt DSA"
+        )
+
+    got = (
+        dsa_df
+        .groupby(
+            "candidate_id"
+        )["context_tf"]
+        .agg(
+            lambda x:
+                frozenset(
+                    x.astype(str)
+                )
+        )
+    )
+
+    want = frozenset(
+        VALIDATED_TFS
+    )
+
+    bad = got[
+        got != want
+    ]
+
+    if len(bad):
+        raise RuntimeError(
+            "incomplete rebuilt DSA context: "
+            f"{len(bad)} candidates"
+        )
+
+    return {
+        "authority":
+            (
+                "recomputed_from_frozen_bars_"
+                "via_compute_dsa_canonical"
+            ),
+
+        "expected_rows":
+            int(expected),
+
+        "actual_rows":
+            int(len(dsa_df)),
+
+        "incomplete_candidates":
+            0,
+    }
 
 
 # ============================================================
@@ -606,6 +816,7 @@ def build_state(
     context: pd.DataFrame,
     levels: pd.DataFrame,
     momentum_by_tf: dict[tuple[str, str], pd.DataFrame],
+    dsa_by_tf: dict[tuple[str, str], pd.DataFrame],
     raw_five: dict[str, pd.DataFrame],
 ) -> tuple[pd.DataFrame, dict]:
     if candidates["candidate_id"].duplicated().any():
@@ -618,6 +829,38 @@ def build_state(
     ctx = context[tf_series.isin(VALIDATED_TFS)].copy()
     if ctx["context_tf"].astype(str).isin(QUARANTINED_TFS).any():
         raise RuntimeError("quarantined TF leaked into state")
+
+    # ------------------------------------------------------------
+    # Frozen V3 context contains DSA calculated under an older
+    # canonical source SHA.
+    #
+    # Those columns are explicitly NOT an authority for the rebuilt
+    # RL dataset.
+    # ------------------------------------------------------------
+
+    frozen_dsa_columns = [
+        c
+        for c in DSA_FIELDS
+        if c in ctx.columns
+    ]
+
+    missing_frozen_dsa = (
+        set(DSA_FIELDS)
+        - set(frozen_dsa_columns)
+    )
+
+    if missing_frozen_dsa:
+        raise RuntimeError(
+            "expected frozen V3 DSA columns "
+            "not found: "
+            f"{sorted(missing_frozen_dsa)}"
+        )
+
+    ctx = ctx.drop(
+        columns=list(
+            DSA_FIELDS
+        )
+    )
 
     vocab = assert_level_vocabulary(levels)
     ctx_cov = audit_context_coverage(candidates, ctx)
@@ -654,18 +897,78 @@ def build_state(
     mom_df = pd.concat(mom_frames, ignore_index=True)
     mom_cov = audit_momentum_coverage(candidates, mom_df)
 
-    # --- SMC / DSA pivot to per-TF columns ---
+    # ------------------------------------------------------------
+    # Canonical DSA rebuilt from frozen bars.
+    # Never consume frozen V3 DSA values.
+    # ------------------------------------------------------------
+
+    dsa_frames = []
+
+    for symbol, g in ctx.groupby(
+        "symbol",
+        sort=False,
+    ):
+
+        dsa = {
+            tf:
+                dsa_by_tf[
+                    (
+                        symbol,
+                        tf,
+                    )
+                ]
+
+            for tf
+            in VALIDATED_TFS
+        }
+
+        dsa_frames.append(
+            attach_dsa(
+                g[
+                    [
+                        "candidate_id",
+                        "symbol",
+                        "context_tf",
+                        "bar_index",
+                    ]
+                ],
+                dsa,
+            )
+        )
+
+
+    dsa_df = pd.concat(
+        dsa_frames,
+        ignore_index=True,
+    )
+
+
+    dsa_cov = (
+        audit_dsa_coverage(
+            candidates,
+            dsa_df,
+        )
+    )
+
+    # --- SMC pivot to per-TF columns ---
     # level + distance + RELATION: the high/low NAME does not say
     # which side of price the pivot is on.
+    # DSA is rebuilt separately below and is NOT pivoted from ctx.
     smc_fields = (
         list(SMC_BIAS_FIELDS)
         + list(SMC_EVENT_FIELDS)
         + [s[1] for s in SMC_PIVOT_SPECS]
         + [s[2] for s in SMC_PIVOT_SPECS]
         + [s[3] for s in SMC_PIVOT_SPECS]
-        + list(DSA_FIELDS)
     )
     smc_piv = pivot_tf(ctx, smc_fields)
+
+    dsa_piv = pivot_tf(
+        dsa_df,
+        list(
+            DSA_FIELDS
+        ),
+    )
 
     mom_piv = pivot_tf(mom_df, list(MOMENTUM_FIELDS))
 
@@ -718,6 +1021,7 @@ def build_state(
     ]
 
     state = state.merge(smc_piv, on="candidate_id", how="left")
+    state = state.merge(dsa_piv, on="candidate_id", how="left")
     state = state.merge(mom_piv, on="candidate_id", how="left")
     if len(ob_piv.columns) > 1:
         state = state.merge(ob_piv, on="candidate_id", how="left")
@@ -792,6 +1096,10 @@ def build_state(
         "level_vocabulary": vocab,
         "context_coverage": ctx_cov,
         "momentum_coverage": mom_cov,
+        "dsa_coverage": dsa_cov,
+        "frozen_v3_dsa_columns_ignored": list(
+            DSA_FIELDS
+        ),
         "dsa_confirmation_gate": dsa_confirmation_gate,
     }
     return state, info
@@ -1046,6 +1354,66 @@ def add_action_relative(
     return df
 
 
+def audit_confirmed_dsa_action_gate(
+    action_df: pd.DataFrame,
+) -> dict:
+    """Hard gate: action table must never expose dsa_vwap_dev_rel
+    for an unconfirmed DSA regime (direction != +/-1)."""
+
+    audit = {}
+
+    for tf in VALIDATED_TFS:
+
+        direction = pd.to_numeric(
+            action_df[
+                f"dsa_direction_{tf}"
+            ],
+            errors="coerce",
+        )
+
+        rel = pd.to_numeric(
+            action_df[
+                f"dsa_vwap_dev_rel_{tf}"
+            ],
+            errors="coerce",
+        )
+
+        confirmed = (
+            direction.abs()
+            == 1
+        )
+
+        bad = (
+            (~confirmed)
+            & rel.notna()
+        )
+
+        if bad.any():
+            raise RuntimeError(
+                f"{tf}: "
+                f"{int(bad.sum())} "
+                "unconfirmed rows leaked "
+                "dsa_vwap_dev_rel"
+            )
+
+        audit[tf] = {
+            "action_rows":
+                int(
+                    len(action_df)
+                ),
+
+            "unconfirmed_rows":
+                int(
+                    (~confirmed).sum()
+                ),
+
+            "unconfirmed_rel_nonnull":
+                0,
+        }
+
+    return audit
+
+
 # ============================================================
 # Reward (reuses the validated Phase-1 simulator)
 # ============================================================
@@ -1198,29 +1566,92 @@ def main() -> None:
     symbols = sorted(candidates["symbol"].unique().tolist())
     raw_five = {s: load_raw_five(s) for s in symbols}
 
-    momentum_by_tf: dict[tuple[str, str], pd.DataFrame] = {}
+    momentum_by_tf: dict[
+        tuple[str, str],
+        pd.DataFrame,
+    ] = {}
+
+    dsa_by_tf: dict[
+        tuple[str, str],
+        pd.DataFrame,
+    ] = {}
+
+
     for s in symbols:
+
         five = raw_five[s]
+
         fifteen = (
-            aggregate_15m(five)
-            .sort_values("bar_start_time")
-            .reset_index(drop=True)
-        )
-        one_hour = (
-            aggregate_1h_from_15m(fifteen)
-            .sort_values("bar_start_time")
-            .reset_index(drop=True)
-        )
-        momentum_by_tf[(s, "5m")] = build_momentum_frame(five)
-        momentum_by_tf[(s, "15m")] = build_momentum_frame(
-            fifteen
-        )
-        momentum_by_tf[(s, "1h")] = build_momentum_frame(
-            one_hour
+            aggregate_15m(
+                five
+            )
+            .sort_values(
+                "bar_start_time"
+            )
+            .reset_index(
+                drop=True
+            )
         )
 
+        one_hour = (
+            aggregate_1h_from_15m(
+                fifteen
+            )
+            .sort_values(
+                "bar_start_time"
+            )
+            .reset_index(
+                drop=True
+            )
+        )
+
+        bars_by_tf = {
+            "5m":
+                five,
+
+            "15m":
+                fifteen,
+
+            "1h":
+                one_hour,
+        }
+
+        for tf in VALIDATED_TFS:
+
+            bars = bars_by_tf[
+                tf
+            ]
+
+            momentum_by_tf[
+                (
+                    s,
+                    tf,
+                )
+            ] = (
+                build_momentum_frame(
+                    bars
+                )
+            )
+
+            dsa_by_tf[
+                (
+                    s,
+                    tf,
+                )
+            ] = (
+                build_dsa_frame(
+                    bars
+                )
+            )
+
+
     state, info = build_state(
-        candidates, context, levels, momentum_by_tf, raw_five
+        candidates,
+        context,
+        levels,
+        momentum_by_tf,
+        dsa_by_tf,
+        raw_five,
     )
     audit_state_cardinality(state, candidates)
     audit_state_columns(state)
@@ -1232,6 +1663,13 @@ def main() -> None:
 
     action_df = expand_actions(state)
     action_df = add_action_relative(action_df)
+
+    dsa_action_gate = (
+        audit_confirmed_dsa_action_gate(
+            action_df
+        )
+    )
+
     action_df = attach_rewards(action_df, candidates, path)
 
     assert_action_cardinality(len(state), action_df)
@@ -1291,7 +1729,12 @@ def main() -> None:
         "level_vocabulary": info["level_vocabulary"],
         "context_coverage": info["context_coverage"],
         "momentum_coverage": info["momentum_coverage"],
+        "dsa_coverage": info["dsa_coverage"],
+        "frozen_v3_dsa_columns_ignored": info[
+            "frozen_v3_dsa_columns_ignored"
+        ],
         "dsa_confirmation_gate": info["dsa_confirmation_gate"],
+        "dsa_action_confirmation_gate": dsa_action_gate,
         "metadata_columns": meta_cols,
         "state_feature_columns": feature_cols,
         "action_columns": [
