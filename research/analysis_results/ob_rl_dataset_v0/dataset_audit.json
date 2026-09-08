@@ -1,0 +1,351 @@
+{
+  "dataset": {
+    "state_rows": 21481,
+    "state_columns": 137,
+    "action_rows": 150367,
+    "action_columns_universe": 232,
+    "state_key": {
+      "candidate_id_unique": 21481,
+      "candidate_id_duplicates": 0
+    },
+    "action_key": {
+      "(candidate_id, action)_duplicates": 0
+    },
+    "symbol_counts": {
+      "AG": 6365,
+      "CU": 5632,
+      "RB": 4851,
+      "M": 4633
+    },
+    "source_tf_counts": {
+      "5m": 12939,
+      "15m": 6043,
+      "1h": 2499
+    },
+    "action_counts": {
+      "SKIP": 21481,
+      "FOLLOW_1.5R": 21481,
+      "FOLLOW_2.0R": 21481,
+      "FOLLOW_2.5R": 21481,
+      "FADE_1.5R": 21481,
+      "FADE_2.0R": 21481,
+      "FADE_2.5R": 21481
+    }
+  },
+  "storage": {
+    "gate_b_expected": {
+      "ob_rl_state_v0.csv": "4cb1c775eebc595e8c9f72787e30a482070584a7fd8c0aaafa8953974313ab35",
+      "ob_rl_action_v0.csv": "df8ed3c84db582c88ba49ae90a164c9d630ff274a1823b8c559b4ca12ca99422",
+      "dataset_manifest.json": "fbd139ce644ff48628ac66e6964c9b55e5a98c884305b0cb93078acc1b9de967"
+    },
+    "gate_b_actual": {
+      "ob_rl_state_v0.csv": "4cb1c775eebc595e8c9f72787e30a482070584a7fd8c0aaafa8953974313ab35",
+      "ob_rl_action_v0.csv": "df8ed3c84db582c88ba49ae90a164c9d630ff274a1823b8c559b4ca12ca99422",
+      "dataset_manifest.json": "fbd139ce644ff48628ac66e6964c9b55e5a98c884305b0cb93078acc1b9de967"
+    },
+    "parquet": {
+      "ob_rl_state_v0": {
+        "bytes": 5840982,
+        "sha256": "2ad59e269a1a47fbba1d833e0e2cae3f36214791672360cafc5a400f99411c23"
+      },
+      "ob_rl_action_v0": {
+        "bytes": 33285158,
+        "sha256": "44488a9e52f441d3deb8f2b8c3e50da6a610faa1339a6de5d32160f05cef7063"
+      }
+    },
+    "gate_b_manifest": {
+      "original_intact": true,
+      "already_finalized": false,
+      "sha256_original": "fbd139ce644ff48628ac66e6964c9b55e5a98c884305b0cb93078acc1b9de967"
+    },
+    "parity": {
+      "representation_version": "RL0_PARQUET_V0",
+      "engine": "pyarrow",
+      "compression": "zstd",
+      "representation_code_sha": "b2e0f954fbd6c61fab60e6c6bfe209dd5c14f7ec",
+      "state": {
+        "schema_match": true,
+        "key_match": true,
+        "content_exact": true,
+        "csv_sha256": "4cb1c775eebc595e8c9f72787e30a482070584a7fd8c0aaafa8953974313ab35",
+        "parquet_sha256": "2ad59e269a1a47fbba1d833e0e2cae3f36214791672360cafc5a400f99411c23"
+      },
+      "action": {
+        "schema_match": true,
+        "key_match": true,
+        "content_exact": true,
+        "csv_sha256": "df8ed3c84db582c88ba49ae90a164c9d630ff274a1823b8c559b4ca12ca99422",
+        "parquet_sha256": "44488a9e52f441d3deb8f2b8c3e50da6a610faa1339a6de5d32160f05cef7063"
+      }
+    }
+  },
+  "coverage": {
+    "smc": {
+      "5m": {
+        "target_fit_internal_nan_rate": 0.29277,
+        "target_fit_swing_nan_rate": 0.220614,
+        "target_fit_ob_nan_rate": 0.014548,
+        "stop_structure_internal_nan_rate": 0.29277,
+        "stop_structure_swing_nan_rate": 0.220614,
+        "stop_structure_ob_nan_rate": 0.014548
+      },
+      "15m": {
+        "target_fit_internal_nan_rate": 0.254132,
+        "target_fit_swing_nan_rate": 0.213049,
+        "target_fit_ob_nan_rate": 0.036311,
+        "stop_structure_internal_nan_rate": 0.254132,
+        "stop_structure_swing_nan_rate": 0.213049,
+        "stop_structure_ob_nan_rate": 0.036311
+      },
+      "1h": {
+        "target_fit_internal_nan_rate": 0.218193,
+        "target_fit_swing_nan_rate": 0.218379,
+        "target_fit_ob_nan_rate": 0.088869,
+        "stop_structure_internal_nan_rate": 0.218193,
+        "stop_structure_swing_nan_rate": 0.218379,
+        "stop_structure_ob_nan_rate": 0.088869
+      }
+    },
+    "active_ob": {
+      "5m": {
+        "forward_structure_class_nan_rate": 0.014548,
+        "backward_structure_class_nan_rate": 0.014548,
+        "categorical_missing_token": "NO_OB"
+      },
+      "15m": {
+        "forward_structure_class_nan_rate": 0.036311,
+        "backward_structure_class_nan_rate": 0.036311,
+        "categorical_missing_token": "NO_OB"
+      },
+      "1h": {
+        "forward_structure_class_nan_rate": 0.088869,
+        "backward_structure_class_nan_rate": 0.088869,
+        "categorical_missing_token": "NO_OB"
+      }
+    },
+    "dsa": {
+      "5m": {
+        "dsa_alignment_nan_rate": 0.0,
+        "dsa_vwap_dev_rel_nan_rate": 0.0
+      },
+      "15m": {
+        "dsa_alignment_nan_rate": 0.0,
+        "dsa_vwap_dev_rel_nan_rate": 0.0
+      },
+      "1h": {
+        "dsa_alignment_nan_rate": 0.0,
+        "dsa_vwap_dev_rel_nan_rate": 0.0
+      }
+    },
+    "momentum": {
+      "5m": {
+        "momentum_direction_nan_rate": 0.000186,
+        "momentum_value_rel_nan_rate": 0.000186,
+        "momentum_delta_rel_nan_rate": 0.000186
+      },
+      "15m": {
+        "momentum_direction_nan_rate": 0.000652,
+        "momentum_value_rel_nan_rate": 0.000652,
+        "momentum_delta_rel_nan_rate": 0.000838
+      },
+      "1h": {
+        "momentum_direction_nan_rate": 0.004702,
+        "momentum_value_rel_nan_rate": 0.004702,
+        "momentum_delta_rel_nan_rate": 0.004841
+      }
+    },
+    "quantile": {
+      "counts": {
+        "UNKNOWN": 16302,
+        "HIGH": 2409,
+        "MID": 1859,
+        "LOW": 911
+      },
+      "known": 5179,
+      "unknown": 16302,
+      "known_coverage_pct": 24.11,
+      "note": "UNKNOWN preserved; not imputed, not re-ranked"
+    }
+  },
+  "reward_integrity": {
+    "coverage": {
+      "H6": {
+        "non_skip_rows": 128886,
+        "finite": 98898,
+        "finite_pct": 76.73
+      },
+      "H12": {
+        "non_skip_rows": 128886,
+        "finite": 67284,
+        "finite_pct": 52.2
+      },
+      "H24": {
+        "non_skip_rows": 128886,
+        "finite": 24606,
+        "finite_pct": 19.09
+      }
+    },
+    "exit_codes": {
+      "H6": {
+        "INSUFFICIENT": 24,
+        "NONCONTIG": 29964,
+        "GAP_STOP": 57,
+        "GAP_TARGET": 35,
+        "BOTH": 133,
+        "STOP": 46747,
+        "TARGET": 17794,
+        "TIMEOUT": 34132
+      },
+      "H12": {
+        "INSUFFICIENT": 30,
+        "NONCONTIG": 61572,
+        "GAP_STOP": 58,
+        "GAP_TARGET": 32,
+        "BOTH": 107,
+        "STOP": 38239,
+        "TARGET": 17472,
+        "TIMEOUT": 11376
+      },
+      "H24": {
+        "INSUFFICIENT": 60,
+        "NONCONTIG": 104220,
+        "GAP_STOP": 53,
+        "GAP_TARGET": 15,
+        "BOTH": 45,
+        "STOP": 15264,
+        "TARGET": 7516,
+        "TIMEOUT": 1713
+      }
+    },
+    "skip": {
+      "rows": 21481,
+      "gross_R_all_zero": true,
+      "exit_code_all_minus_one": true
+    }
+  },
+  "model_view": {
+    "model_view_version": "ob_rl_model_view_v0",
+    "model_feature_count": 62,
+    "categorical": [
+      "source_tf",
+      "source_ob_structure",
+      "touch_behavior",
+      "quant_state",
+      "trade_mode",
+      "trade_direction",
+      "momentum_direction_5m",
+      "momentum_direction_15m",
+      "momentum_direction_1h",
+      "forward_active_ob_structure_class_5m",
+      "forward_active_ob_structure_class_15m",
+      "forward_active_ob_structure_class_1h",
+      "backward_active_ob_structure_class_5m",
+      "backward_active_ob_structure_class_15m",
+      "backward_active_ob_structure_class_1h"
+    ],
+    "continuous": [
+      "source_ob_bias",
+      "source_ob_width_atr5",
+      "touch_ordinal",
+      "internal_bias_rel_5m",
+      "swing_bias_rel_5m",
+      "target_fit_internal_5m",
+      "target_fit_swing_5m",
+      "target_fit_ob_5m",
+      "stop_structure_internal_5m",
+      "stop_structure_swing_5m",
+      "stop_structure_ob_5m",
+      "forward_active_ob_bias_rel_5m",
+      "backward_active_ob_bias_5m",
+      "internal_bias_rel_15m",
+      "swing_bias_rel_15m",
+      "target_fit_internal_15m",
+      "target_fit_swing_15m",
+      "target_fit_ob_15m",
+      "stop_structure_internal_15m",
+      "stop_structure_swing_15m",
+      "stop_structure_ob_15m",
+      "forward_active_ob_bias_rel_15m",
+      "backward_active_ob_bias_15m",
+      "internal_bias_rel_1h",
+      "swing_bias_rel_1h",
+      "target_fit_internal_1h",
+      "target_fit_swing_1h",
+      "target_fit_ob_1h",
+      "stop_structure_internal_1h",
+      "stop_structure_swing_1h",
+      "stop_structure_ob_1h",
+      "forward_active_ob_bias_rel_1h",
+      "backward_active_ob_bias_1h",
+      "dsa_alignment_5m",
+      "dsa_vwap_dev_rel_5m",
+      "dsa_alignment_15m",
+      "dsa_vwap_dev_rel_15m",
+      "dsa_alignment_1h",
+      "dsa_vwap_dev_rel_1h",
+      "momentum_value_rel_5m",
+      "momentum_delta_rel_5m",
+      "momentum_value_rel_15m",
+      "momentum_delta_rel_15m",
+      "momentum_value_rel_1h",
+      "momentum_delta_rel_1h",
+      "quant_width_percentile_train",
+      "target_R"
+    ],
+    "meta": [
+      "candidate_id",
+      "candidate_group_id",
+      "symbol",
+      "touch_time",
+      "touch_5m_bar_index",
+      "trading_day"
+    ],
+    "weight": [
+      "decision_weight"
+    ],
+    "action": [
+      "action",
+      "trade_mode",
+      "trade_direction",
+      "target_R",
+      "stop_atr",
+      "target_atr"
+    ],
+    "reward": [
+      "gross_R_h6",
+      "gross_R_h12",
+      "gross_R_h24",
+      "exit_code_h6",
+      "exit_code_h12",
+      "exit_code_h24",
+      "primary_reward_R",
+      "reward_version"
+    ],
+    "categorical_missing_contract": {
+      "forward_active_ob_structure_class": "NO_OB",
+      "backward_active_ob_structure_class": "NO_OB"
+    },
+    "warehouse_only_families": [
+      "absolute pivot prices (internal/swing high/low level)",
+      "absolute OB zone prices (zone_low / zone_high)",
+      "all 70 dsa_raw_* fields",
+      "last BOS / CHoCH structure type, bias and age",
+      "group confluence flags",
+      "quantile q10 / q50 / q90 / crossed / top30",
+      "raw OHLC and volume / OI",
+      "raw forward / backward ATR distances (recoverable from fit)",
+      "future outcome diagnostics"
+    ],
+    "audit": {
+      "model_view_version": "ob_rl_model_view_v0",
+      "model_feature_count": 62,
+      "categorical_count": 15,
+      "continuous_count": 47,
+      "meta_leakage": 0,
+      "reward_leakage": 0,
+      "weight_leakage": 0,
+      "quarantined_tf_features": 0,
+      "warehouse_only_violations": 0
+    }
+  }
+}

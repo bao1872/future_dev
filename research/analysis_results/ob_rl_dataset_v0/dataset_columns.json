@@ -1,0 +1,1246 @@
+{
+  "role_map": {
+    "candidate_id": "META",
+    "candidate_group_id": "META",
+    "symbol": "META",
+    "touch_time": "META",
+    "touch_5m_bar_index": "META",
+    "trading_day": "META",
+    "decision_weight": "WEIGHT",
+    "source_tf": "MODEL_FEATURE",
+    "source_ob_structure": "MODEL_FEATURE",
+    "source_ob_bias": "MODEL_FEATURE",
+    "source_ob_width_atr5": "MODEL_FEATURE",
+    "touch_behavior": "MODEL_FEATURE",
+    "touch_ordinal": "MODEL_FEATURE",
+    "internal_bias_rel_5m": "MODEL_FEATURE",
+    "swing_bias_rel_5m": "MODEL_FEATURE",
+    "target_fit_internal_5m": "MODEL_FEATURE",
+    "target_fit_swing_5m": "MODEL_FEATURE",
+    "target_fit_ob_5m": "MODEL_FEATURE",
+    "stop_structure_internal_5m": "MODEL_FEATURE",
+    "stop_structure_swing_5m": "MODEL_FEATURE",
+    "stop_structure_ob_5m": "MODEL_FEATURE",
+    "forward_active_ob_bias_rel_5m": "MODEL_FEATURE",
+    "forward_active_ob_structure_class_5m": "MODEL_FEATURE",
+    "backward_active_ob_bias_5m": "MODEL_FEATURE",
+    "backward_active_ob_structure_class_5m": "MODEL_FEATURE",
+    "internal_bias_rel_15m": "MODEL_FEATURE",
+    "swing_bias_rel_15m": "MODEL_FEATURE",
+    "target_fit_internal_15m": "MODEL_FEATURE",
+    "target_fit_swing_15m": "MODEL_FEATURE",
+    "target_fit_ob_15m": "MODEL_FEATURE",
+    "stop_structure_internal_15m": "MODEL_FEATURE",
+    "stop_structure_swing_15m": "MODEL_FEATURE",
+    "stop_structure_ob_15m": "MODEL_FEATURE",
+    "forward_active_ob_bias_rel_15m": "MODEL_FEATURE",
+    "forward_active_ob_structure_class_15m": "MODEL_FEATURE",
+    "backward_active_ob_bias_15m": "MODEL_FEATURE",
+    "backward_active_ob_structure_class_15m": "MODEL_FEATURE",
+    "internal_bias_rel_1h": "MODEL_FEATURE",
+    "swing_bias_rel_1h": "MODEL_FEATURE",
+    "target_fit_internal_1h": "MODEL_FEATURE",
+    "target_fit_swing_1h": "MODEL_FEATURE",
+    "target_fit_ob_1h": "MODEL_FEATURE",
+    "stop_structure_internal_1h": "MODEL_FEATURE",
+    "stop_structure_swing_1h": "MODEL_FEATURE",
+    "stop_structure_ob_1h": "MODEL_FEATURE",
+    "forward_active_ob_bias_rel_1h": "MODEL_FEATURE",
+    "forward_active_ob_structure_class_1h": "MODEL_FEATURE",
+    "backward_active_ob_bias_1h": "MODEL_FEATURE",
+    "backward_active_ob_structure_class_1h": "MODEL_FEATURE",
+    "dsa_alignment_5m": "MODEL_FEATURE",
+    "dsa_vwap_dev_rel_5m": "MODEL_FEATURE",
+    "dsa_alignment_15m": "MODEL_FEATURE",
+    "dsa_vwap_dev_rel_15m": "MODEL_FEATURE",
+    "dsa_alignment_1h": "MODEL_FEATURE",
+    "dsa_vwap_dev_rel_1h": "MODEL_FEATURE",
+    "momentum_direction_5m": "MODEL_FEATURE",
+    "momentum_value_rel_5m": "MODEL_FEATURE",
+    "momentum_delta_rel_5m": "MODEL_FEATURE",
+    "momentum_direction_15m": "MODEL_FEATURE",
+    "momentum_value_rel_15m": "MODEL_FEATURE",
+    "momentum_delta_rel_15m": "MODEL_FEATURE",
+    "momentum_direction_1h": "MODEL_FEATURE",
+    "momentum_value_rel_1h": "MODEL_FEATURE",
+    "momentum_delta_rel_1h": "MODEL_FEATURE",
+    "quant_state": "MODEL_FEATURE",
+    "quant_width_percentile_train": "MODEL_FEATURE",
+    "trade_mode": "MODEL_FEATURE",
+    "trade_direction": "MODEL_FEATURE",
+    "target_R": "MODEL_FEATURE",
+    "action": "ACTION",
+    "stop_atr": "ACTION",
+    "target_atr": "ACTION",
+    "gross_R_h6": "REWARD",
+    "gross_R_h12": "REWARD",
+    "gross_R_h24": "REWARD",
+    "exit_code_h6": "REWARD",
+    "exit_code_h12": "REWARD",
+    "exit_code_h24": "REWARD",
+    "primary_reward_R": "REWARD",
+    "reward_version": "REWARD"
+  },
+  "columns": [
+    {
+      "name": "candidate_id",
+      "role": "META",
+      "in_model_view": false
+    },
+    {
+      "name": "candidate_group_id",
+      "role": "META",
+      "in_model_view": false
+    },
+    {
+      "name": "symbol",
+      "role": "META",
+      "in_model_view": false
+    },
+    {
+      "name": "source_tf",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "source_ob_internal",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "source_ob_structure",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "source_ob_bias",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "source_ob_zone_low",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "source_ob_zone_high",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "source_ob_width_atr5",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "touch_ordinal",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "is_first_touch",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "touch_intrabar_far_edge_breach",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "touch_close_beyond_far_edge",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "touch_reclaimed_by_close",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "group_candidate_count",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "group_has_5m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "group_has_15m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "group_has_1h",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "touch_time",
+      "role": "META",
+      "in_model_view": false
+    },
+    {
+      "name": "touch_5m_bar_index",
+      "role": "META",
+      "in_model_view": false
+    },
+    {
+      "name": "trading_day",
+      "role": "META",
+      "in_model_view": false
+    },
+    {
+      "name": "touch_behavior",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "quant_width",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "quant_width_percentile_train",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "quant_top30_train",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "quant_crossed",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "quant_state",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "swing_bias_15m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "swing_bias_1h",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "swing_bias_5m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "internal_bias_15m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "internal_bias_1h",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "internal_bias_5m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "last_swing_structure_type_15m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "last_swing_structure_type_1h",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "last_swing_structure_type_5m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "last_swing_structure_bias_15m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "last_swing_structure_bias_1h",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "last_swing_structure_bias_5m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "last_swing_structure_age_15m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "last_swing_structure_age_1h",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "last_swing_structure_age_5m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "last_internal_structure_type_15m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "last_internal_structure_type_1h",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "last_internal_structure_type_5m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "last_internal_structure_bias_15m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "last_internal_structure_bias_1h",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "last_internal_structure_bias_5m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "last_internal_structure_age_15m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "last_internal_structure_age_1h",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "last_internal_structure_age_5m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "dsa_direction_15m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "dsa_direction_1h",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "dsa_direction_5m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "dsa_raw_dsa_vwap_dev_pct_15m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "dsa_raw_dsa_vwap_dev_pct_1h",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "dsa_raw_dsa_vwap_dev_pct_5m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "momentum_direction_15m",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "momentum_direction_1h",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "momentum_direction_5m",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "sqzmom_val_15m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "sqzmom_val_1h",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "sqzmom_val_5m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "sqzmom_delta_15m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "sqzmom_delta_1h",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "sqzmom_delta_5m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "above_ob_bias_15m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "above_ob_bias_1h",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "above_ob_bias_5m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "above_ob_structure_class_15m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "above_ob_structure_class_1h",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "above_ob_structure_class_5m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "above_ob_zone_low_15m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "above_ob_zone_low_1h",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "above_ob_zone_low_5m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "above_ob_zone_high_15m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "above_ob_zone_high_1h",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "above_ob_zone_high_5m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "below_ob_bias_15m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "below_ob_bias_1h",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "below_ob_bias_5m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "below_ob_structure_class_15m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "below_ob_structure_class_1h",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "below_ob_structure_class_5m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "below_ob_zone_low_15m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "below_ob_zone_low_1h",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "below_ob_zone_low_5m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "below_ob_zone_high_15m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "below_ob_zone_high_1h",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "below_ob_zone_high_5m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "ob_above_atr_15m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "ob_above_atr_1h",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "ob_above_atr_5m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "ob_below_atr_15m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "ob_below_atr_1h",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "ob_below_atr_5m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "internal_high_atr_5m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "internal_high_level_5m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "internal_high_relation_5m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "internal_low_atr_5m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "internal_low_level_5m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "internal_low_relation_5m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "swing_high_atr_5m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "swing_high_level_5m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "swing_high_relation_5m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "swing_low_atr_5m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "swing_low_level_5m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "swing_low_relation_5m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "dsa_vwap_dev_pct_5m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "internal_high_atr_15m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "internal_high_level_15m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "internal_high_relation_15m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "internal_low_atr_15m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "internal_low_level_15m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "internal_low_relation_15m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "swing_high_atr_15m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "swing_high_level_15m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "swing_high_relation_15m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "swing_low_atr_15m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "swing_low_level_15m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "swing_low_relation_15m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "dsa_vwap_dev_pct_15m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "internal_high_atr_1h",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "internal_high_level_1h",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "internal_high_relation_1h",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "internal_low_atr_1h",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "internal_low_level_1h",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "internal_low_relation_1h",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "swing_high_atr_1h",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "swing_high_level_1h",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "swing_high_relation_1h",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "swing_low_atr_1h",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "swing_low_level_1h",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "swing_low_relation_1h",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "dsa_vwap_dev_pct_1h",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "decision_weight",
+      "role": "WEIGHT",
+      "in_model_view": false
+    },
+    {
+      "name": "action",
+      "role": "ACTION",
+      "in_model_view": false
+    },
+    {
+      "name": "trade_mode",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "trade_direction",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "stop_atr",
+      "role": "ACTION",
+      "in_model_view": false
+    },
+    {
+      "name": "target_R",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "target_atr",
+      "role": "ACTION",
+      "in_model_view": false
+    },
+    {
+      "name": "internal_bias_rel_5m",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "swing_bias_rel_5m",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "forward_internal_atr_5m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "backward_internal_atr_5m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "forward_swing_atr_5m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "backward_swing_atr_5m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "forward_active_ob_atr_5m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "backward_active_ob_atr_5m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "forward_active_ob_bias_5m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "backward_active_ob_bias_5m",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "forward_active_ob_structure_class_5m",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "backward_active_ob_structure_class_5m",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "forward_active_ob_zone_low_5m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "backward_active_ob_zone_low_5m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "forward_active_ob_zone_high_5m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "backward_active_ob_zone_high_5m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "forward_active_ob_bias_rel_5m",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "dsa_alignment_5m",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "dsa_vwap_dev_rel_5m",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "momentum_value_rel_5m",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "momentum_delta_rel_5m",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "target_fit_internal_5m",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "target_fit_swing_5m",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "target_fit_ob_5m",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "stop_structure_internal_5m",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "stop_structure_swing_5m",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "stop_structure_ob_5m",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "internal_bias_rel_15m",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "swing_bias_rel_15m",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "forward_internal_atr_15m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "backward_internal_atr_15m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "forward_swing_atr_15m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "backward_swing_atr_15m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "forward_active_ob_atr_15m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "backward_active_ob_atr_15m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "forward_active_ob_bias_15m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "backward_active_ob_bias_15m",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "forward_active_ob_structure_class_15m",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "backward_active_ob_structure_class_15m",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "forward_active_ob_zone_low_15m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "backward_active_ob_zone_low_15m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "forward_active_ob_zone_high_15m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "backward_active_ob_zone_high_15m",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "forward_active_ob_bias_rel_15m",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "dsa_alignment_15m",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "dsa_vwap_dev_rel_15m",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "momentum_value_rel_15m",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "momentum_delta_rel_15m",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "target_fit_internal_15m",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "target_fit_swing_15m",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "target_fit_ob_15m",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "stop_structure_internal_15m",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "stop_structure_swing_15m",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "stop_structure_ob_15m",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "internal_bias_rel_1h",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "swing_bias_rel_1h",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "forward_internal_atr_1h",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "backward_internal_atr_1h",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "forward_swing_atr_1h",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "backward_swing_atr_1h",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "forward_active_ob_atr_1h",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "backward_active_ob_atr_1h",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "forward_active_ob_bias_1h",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "backward_active_ob_bias_1h",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "forward_active_ob_structure_class_1h",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "backward_active_ob_structure_class_1h",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "forward_active_ob_zone_low_1h",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "backward_active_ob_zone_low_1h",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "forward_active_ob_zone_high_1h",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "backward_active_ob_zone_high_1h",
+      "role": "WAREHOUSE_ONLY",
+      "in_model_view": false
+    },
+    {
+      "name": "forward_active_ob_bias_rel_1h",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "dsa_alignment_1h",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "dsa_vwap_dev_rel_1h",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "momentum_value_rel_1h",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "momentum_delta_rel_1h",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "target_fit_internal_1h",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "target_fit_swing_1h",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "target_fit_ob_1h",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "stop_structure_internal_1h",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "stop_structure_swing_1h",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "stop_structure_ob_1h",
+      "role": "MODEL_FEATURE",
+      "in_model_view": true
+    },
+    {
+      "name": "gross_R_h6",
+      "role": "REWARD",
+      "in_model_view": false
+    },
+    {
+      "name": "exit_code_h6",
+      "role": "REWARD",
+      "in_model_view": false
+    },
+    {
+      "name": "gross_R_h12",
+      "role": "REWARD",
+      "in_model_view": false
+    },
+    {
+      "name": "exit_code_h12",
+      "role": "REWARD",
+      "in_model_view": false
+    },
+    {
+      "name": "gross_R_h24",
+      "role": "REWARD",
+      "in_model_view": false
+    },
+    {
+      "name": "exit_code_h24",
+      "role": "REWARD",
+      "in_model_view": false
+    },
+    {
+      "name": "primary_reward_R",
+      "role": "REWARD",
+      "in_model_view": false
+    },
+    {
+      "name": "reward_version",
+      "role": "REWARD",
+      "in_model_view": false
+    }
+  ]
+}
