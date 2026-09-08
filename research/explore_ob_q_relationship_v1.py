@@ -1940,13 +1940,13 @@ model_metrics.to_csv(
     index=False,
 )
 
-policy_metrics.to_csv(
+policy.to_csv(
     OUT
     / "policy_metrics.csv",
     index=False,
 )
 
-ablation_metrics.to_csv(
+ablation.to_csv(
     OUT
     / "ablation_metrics.csv",
     index=False,
