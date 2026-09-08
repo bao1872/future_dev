@@ -155,10 +155,115 @@ def read_receipt(root: Path) -> dict:
     return json.loads(p.read_text(encoding="utf-8"))
 
 
+def verify_receipt(root: Path, receipt: dict) -> dict:
+    """A receipt is EVIDENCE, not TRUTH. Re-verify it against disk.
+
+    Without this, a receipt could still claim ``content_exact = true``
+    after the Parquet it describes was modified or corrupted, and the
+    committed manifest would inherit that claim.
+    """
+    if (
+        receipt.get("representation_version")
+        != PQ.REPRESENTATION_VERSION
+    ):
+        raise RuntimeError("representation version drift")
+    if receipt.get("engine") != "pyarrow":
+        raise RuntimeError("unexpected parquet engine")
+    if receipt.get("compression") != "zstd":
+        raise RuntimeError("unexpected parquet compression")
+    if (
+        receipt.get("gate_b_dataset_builder_sha")
+        != GATE_B_DATASET_BUILDER_SHA
+    ):
+        raise RuntimeError("Gate-B builder SHA drift")
+
+    specs = (
+        ("state", "ob_rl_state_v0", PQ.EXPECTED_STATE_ROWS),
+        (
+            "action",
+            "ob_rl_action_v0",
+            PQ.EXPECTED_ACTION_ROWS,
+        ),
+    )
+
+    result: dict = {}
+    for tag, name, expected_rows in specs:
+        r = receipt.get(tag)
+        if not isinstance(r, dict):
+            raise RuntimeError(
+                f"missing receipt section {tag}"
+            )
+
+        for flag in (
+            "schema_match",
+            "key_match",
+            "content_exact",
+        ):
+            if r.get(flag) is not True:
+                raise RuntimeError(
+                    f"{tag} parity flag {flag} != true"
+                )
+
+        csv_path = root / f"{name}.csv"
+        pq_path = root / f"{name}.parquet"
+        if not csv_path.exists():
+            raise RuntimeError(f"missing CSV {csv_path}")
+        if not pq_path.exists():
+            raise RuntimeError(f"missing parquet {pq_path}")
+
+        expected_csv_sha = EXPECTED_GATE_B_FILES[
+            f"{name}.csv"
+        ]
+        actual_csv_sha = sha256_file(csv_path)
+        if (
+            r.get("csv_sha256") != expected_csv_sha
+            or actual_csv_sha != expected_csv_sha
+        ):
+            raise RuntimeError(f"{tag} CSV provenance drift")
+
+        actual_pq_sha = sha256_file(pq_path)
+        if r.get("parquet_sha256") != actual_pq_sha:
+            raise RuntimeError(
+                f"{tag} parquet hash does not match receipt"
+            )
+
+        if r.get("rows") != expected_rows:
+            raise RuntimeError(f"{tag} receipt row drift")
+
+        result[tag] = {
+            "rows": int(r["rows"]),
+            "columns": int(r["columns"]),
+            "csv_sha256": actual_csv_sha,
+            "parquet_sha256": actual_pq_sha,
+            "schema_match": True,
+            "key_match": True,
+            "content_exact": True,
+        }
+
+    return result
+
+
 def write_final_manifest(
-    root: Path, *, receipt: dict, extra: dict
+    root: Path,
+    *,
+    receipt: dict,
+    verified_receipt: dict,
+    extra: dict,
 ) -> Path:
-    """Regenerate the committed manifest with full provenance."""
+    """Regenerate the committed manifest with full provenance.
+
+    ``representation_code_sha`` is the SHA that PRODUCED the Parquet
+    (taken from the receipt); ``audit_code_sha`` is the SHA running
+    this audit. The contract requires them to be the same commit.
+    """
+    rep_sha = receipt.get("representation_code_sha")
+    audit_sha = resolve_git_head()
+    if rep_sha != audit_sha:
+        raise RuntimeError(
+            "representation/audit HEAD drift: "
+            f"parquet built by {rep_sha}, audit by {audit_sha}"
+        )
+
     p = root / "dataset_manifest.json"
     data = (
         json.loads(p.read_text(encoding="utf-8"))
@@ -173,14 +278,15 @@ def write_final_manifest(
             "gate_b_dataset_builder_sha": (
                 GATE_B_DATASET_BUILDER_SHA
             ),
-            "representation_code_sha": resolve_git_head(),
+            "representation_code_sha": rep_sha,
+            "audit_code_sha": audit_sha,
             "gate_b_manifest_sha256_original": (
                 EXPECTED_GATE_B_FILES["dataset_manifest.json"]
             ),
             "model_view_version": MODEL_VIEW_VERSION,
             "parquet": {
-                "state": receipt.get("state", {}),
-                "action": receipt.get("action", {}),
+                "state": verified_receipt["state"],
+                "action": verified_receipt["action"],
             },
             "rl0_finalized": True,
         }
@@ -217,6 +323,8 @@ def main() -> None:
     # is regenerated, and the Parquet receipt must already exist.
     manifest_state = verify_original_manifest(OUT_ROOT)
     receipt = read_receipt(OUT_ROOT)
+    # Only the VERIFIED receipt may feed the audit and the manifest.
+    verified_receipt = verify_receipt(OUT_ROOT, receipt)
 
     state = _read("ob_rl_state_v0")
 
@@ -316,7 +424,7 @@ def main() -> None:
         ),
         **{
             tag: {
-                k: receipt.get(tag, {}).get(k)
+                k: verified_receipt[tag].get(k)
                 for k in (
                     "schema_match",
                     "key_match",
@@ -547,6 +655,7 @@ ablation.
     write_final_manifest(
         OUT_ROOT,
         receipt=receipt,
+        verified_receipt=verified_receipt,
         extra={
             "model_view_feature_count": len(MODEL_FEATURES_V0),
         },

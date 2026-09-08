@@ -14,6 +14,7 @@ NO real Gate-B CSV is read. Run with:
 
 from __future__ import annotations
 
+import copy
 import json
 import shutil
 import sys
@@ -99,9 +100,33 @@ state = pd.DataFrame(
 # Target-dependent columns (target_fit_*, stop_structure_*) are
 # generated per action block instead.
 base: dict[str, np.ndarray] = {}
+no_ob_state = np.arange(N_CAND) % 7 == 0
+no_struct_state = np.arange(N_CAND) % 11 == 0
+
 for tf in VALIDATED_TFS:
     for c in MV.dsa_features(tf):
         base[c] = RNG.uniform(-2.0, 2.0, N_CAND)
+    # stop_structure_* = backward structure / stop_atr, and V0 stop is
+    # fixed at 1 ATR -> invariant across 1.5R / 2.0R / 2.5R.
+    for k in ("internal", "swing"):
+        v = RNG.uniform(0.1, 3.0, N_CAND)
+        v[no_struct_state] = np.nan
+        base[f"stop_structure_{k}_{tf}"] = v
+    v = RNG.uniform(0.1, 3.0, N_CAND)
+    v[no_ob_state] = np.nan
+    base[f"stop_structure_ob_{tf}"] = v
+    for c in (
+        f"forward_active_ob_bias_rel_{tf}",
+        f"backward_active_ob_bias_{tf}",
+    ):
+        b = RNG.choice([-1.0, 1.0], N_CAND)
+        base[c] = np.where(no_ob_state, np.nan, b)
+    for c in (
+        f"forward_active_ob_structure_class_{tf}",
+        f"backward_active_ob_structure_class_{tf}",
+    ):
+        sc = RNG.choice(["internal", "swing"], N_CAND)
+        base[c] = np.where(no_ob_state, None, sc)
     base[f"momentum_direction_{tf}"] = RNG.choice(
         ["expanding", "contracting", "flat"], N_CAND
     )
@@ -141,24 +166,14 @@ for action in ACTIONS:
 
     for tf in VALIDATED_TFS:
         for c in MV.smc_features(tf):
-            if c.endswith("structure_class"):
-                x[c] = np.where(
-                    no_ob,
-                    None,
-                    RNG.choice(["internal", "swing"], len(x)),
-                )
-            elif "_ob_" in c:
-                # numeric OB geometry: NaN whenever there is no OB.
-                # Must NEVER be 0 (NO_OB != distance 0).
+            if c.startswith("target_fit_"):
+                # target-dependent: differs across 1.5R / 2.0R / 2.5R
                 v = RNG.uniform(0.1, 3.0, len(x))
-                v[no_ob] = np.nan
+                v[no_ob if "_ob_" in c else no_struct] = np.nan
                 x[c] = np.where(skip_mask, np.nan, v)
-            elif c in base:
-                x[c] = base[c]
             else:
-                v = RNG.uniform(0.1, 3.0, len(x))
-                v[no_struct] = np.nan
-                x[c] = np.where(skip_mask, np.nan, v)
+                # action-invariant (V0 stop fixed at 1 ATR)
+                x[c] = np.where(skip_mask, np.nan, base[c])
         for c in MV.dsa_features(tf):
             x[c] = base[c]
         for c in MV.momentum_features(tf):
@@ -347,6 +362,101 @@ check(
 )
 check("receipt file exists", receipt_path.exists())
 
+# --- pre-existing final artifact must block conversion ---
+try:
+    PQ.convert_all(OUT)
+    check("pre-existing final blocks conversion", False, "no raise")
+except RuntimeError as e:
+    check(
+        "pre-existing final blocks conversion",
+        "already exists before conversion" in str(e),
+        str(e)[:90],
+    )
+
+# --- partial promotion failure rolls back EVERYTHING ---
+t1 = OUT / "rb_t1.parquet"
+t1.write_bytes(b"x")
+f1 = OUT / "rb_f1.parquet"
+t2 = OUT / "rb_t2.parquet"
+t2.write_bytes(b"x")
+f2 = OUT / "rb_f2_dir"
+f2.mkdir(exist_ok=True)
+try:
+    PQ.promote_all(
+        [{"tmp": t1, "final": f1}, {"tmp": t2, "final": f2}]
+    )
+    check("partial promote failure raises", False, "no raise")
+except Exception:
+    check("partial promote failure raises", True)
+check(
+    "rollback removes already-promoted final",
+    not f1.exists(),
+)
+check(
+    "rollback removes both tmp files",
+    not t1.exists() and not t2.exists(),
+)
+shutil.rmtree(f2, ignore_errors=True)
+
+# ============================================================
+# 2b) Receipt must be VERIFIED, not trusted
+# ============================================================
+verified = AUD.verify_receipt(OUT, receipt)
+check(
+    "verify_receipt passes on intact files",
+    verified["state"]["content_exact"] is True
+    and verified["action"]["content_exact"] is True,
+)
+
+orig_bytes = (OUT / "ob_rl_state_v0.parquet").read_bytes()
+(OUT / "ob_rl_state_v0.parquet").write_bytes(orig_bytes + b"x")
+try:
+    AUD.verify_receipt(OUT, receipt)
+    check("tampered parquet stops audit", False, "no raise")
+except RuntimeError as e:
+    check(
+        "tampered parquet stops audit",
+        "does not match receipt" in str(e),
+        str(e)[:90],
+    )
+(OUT / "ob_rl_state_v0.parquet").write_bytes(orig_bytes)
+
+bad_flag = copy.deepcopy(receipt)
+bad_flag["state"]["content_exact"] = False
+try:
+    AUD.verify_receipt(OUT, bad_flag)
+    check("false parity flag stops audit", False, "no raise")
+except RuntimeError as e:
+    check(
+        "false parity flag stops audit",
+        "parity flag" in str(e),
+        str(e)[:90],
+    )
+
+bad_rows = copy.deepcopy(receipt)
+bad_rows["action"]["rows"] = receipt["action"]["rows"] + 1
+try:
+    AUD.verify_receipt(OUT, bad_rows)
+    check("receipt row drift stops audit", False, "no raise")
+except RuntimeError as e:
+    check(
+        "receipt row drift stops audit",
+        "receipt row drift" in str(e),
+        str(e)[:90],
+    )
+
+bad_ver = copy.deepcopy(receipt)
+bad_ver["representation_version"] = "SOMETHING_ELSE"
+try:
+    AUD.verify_receipt(OUT, bad_ver)
+    check("representation version drift stops", False, "no raise")
+except RuntimeError as e:
+    check(
+        "representation version drift stops",
+        "version drift" in str(e),
+        str(e)[:90],
+    )
+
 # 3) column order preserved
 pq_state = pd.read_parquet(OUT / "ob_rl_state_v0.parquet")
 check(
@@ -493,6 +603,9 @@ for col in (
     "dsa_vwap_dev_rel_5m",
     "momentum_value_rel_15m",
     "internal_bias_rel_1h",
+    # V0 stop is fixed at 1 ATR -> invariant across RR
+    "stop_structure_ob_1h",
+    "stop_structure_internal_5m",
 ):
     c = MV.collapse_for_descriptive_rank(
         pq_action, (col,)
@@ -506,7 +619,7 @@ for col in (
         len(c),
     )
 
-for col in ("target_fit_swing_5m", "stop_structure_ob_1h"):
+for col in ("target_fit_swing_5m", "target_R"):
     try:
         MV.collapse_for_descriptive_rank(
             pq_action, (col,)
@@ -617,9 +730,33 @@ check(
     == "c475239e872246fcee64ca439f7d3d8e550a0c4e",
 )
 check(
-    "representation_code_sha resolved at runtime",
-    len(str(fm.get("representation_code_sha", ""))) == 40,
+    "representation_code_sha comes from the receipt",
+    fm.get("representation_code_sha")
+    == receipt["representation_code_sha"],
 )
+check(
+    "audit_code_sha recorded and equals representation SHA",
+    len(str(fm.get("audit_code_sha", ""))) == 40
+    and fm.get("audit_code_sha")
+    == fm.get("representation_code_sha"),
+)
+
+drifted = copy.deepcopy(receipt)
+drifted["representation_code_sha"] = "0" * 40
+try:
+    AUD.write_final_manifest(
+        OUT,
+        receipt=drifted,
+        verified_receipt=verified,
+        extra={},
+    )
+    check("representation/audit HEAD drift stops", False, "no raise")
+except RuntimeError as e:
+    check(
+        "representation/audit HEAD drift stops",
+        "HEAD drift" in str(e),
+        str(e)[:90],
+    )
 check(
     "model_view_version recorded",
     fm.get("model_view_version") == MV.MODEL_VIEW_VERSION,

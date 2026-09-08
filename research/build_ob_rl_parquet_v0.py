@@ -216,6 +216,27 @@ RECEIPT_NAME = "parquet_conversion_receipt.json"
 REPRESENTATION_VERSION = "RL0_PARQUET_V0"
 
 
+def promote_all(staged: list[dict]) -> list[Path]:
+    """Promote every staged file, or roll EVERYTHING back.
+
+    A partial promotion (state promoted, action failed) would leave a
+    final artifact behind while the conversion as a whole failed, so
+    already-promoted finals are removed too.
+    """
+    promoted: list[Path] = []
+    try:
+        for item in staged:
+            item["tmp"].replace(item["final"])
+            promoted.append(item["final"])
+    except Exception:
+        for item in staged:
+            item["tmp"].unlink(missing_ok=True)
+        for p in promoted:
+            p.unlink(missing_ok=True)
+        raise
+    return promoted
+
+
 def convert_all(root: Path) -> dict:
     """Stage and verify BOTH tables, then promote them together.
 
@@ -239,6 +260,18 @@ def convert_all(root: Path) -> dict:
         ),
     )
 
+    # Refuse to run over an existing final artifact: promotion must
+    # start from a clean state so rollback is always unambiguous.
+    existing = [
+        root / f"{name}.parquet" for _, name, _, _ in specs
+    ]
+    present = [p for p in existing if p.exists()]
+    if present:
+        raise RuntimeError(
+            "final parquet already exists before conversion: "
+            f"{[p.name for p in present]}"
+        )
+
     staged = []
     try:
         for tag, name, key_cols, expected in specs:
@@ -257,8 +290,7 @@ def convert_all(root: Path) -> dict:
             )
 
         # All exact-parity checks passed -> promote together.
-        for _, _, item in staged:
-            item["tmp"].replace(item["final"])
+        promote_all([item for _, _, item in staged])
     except Exception:
         for _, _, item in staged:
             item["tmp"].unlink(missing_ok=True)

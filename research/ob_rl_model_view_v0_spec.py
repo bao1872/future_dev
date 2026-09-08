@@ -280,11 +280,18 @@ def collapse_for_descriptive_rank(
     Each (candidate, trade_mode) appears three times (1.5R / 2.0R /
     2.5R). Ranking the expanded frame would triple-count every state.
 
-    Collapsing by ``drop_duplicates`` alone is unsafe: target-dependent
-    columns (target_fit_*, stop_structure_* differ by construction)
-    would silently keep whichever RR happened to sort first. Columns
-    must therefore be declared explicitly AND proven invariant across
-    the target actions.
+    Collapsing by ``drop_duplicates`` alone is unsafe: it would
+    silently keep whichever RR happened to sort first. Columns must
+    therefore be declared explicitly AND proven invariant across the
+    target actions.
+
+    Which columns are allowed to vary:
+      * ``target_fit_*`` = forward structure / target_atr, so it DOES
+        vary across 1.5R / 2.0R / 2.5R -> must not be ranked on a
+        collapsed frame.
+      * ``stop_structure_*`` = backward structure / stop_atr, and
+        V0 stop is fixed at 1 ATR -> INVARIANT across RR while
+        STOP_ATR is fixed. It is rankable on the collapsed frame.
     """
     ids = ["candidate_id", "trade_mode"]
 
