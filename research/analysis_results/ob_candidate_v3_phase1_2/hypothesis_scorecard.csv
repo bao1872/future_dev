@@ -1,0 +1,8 @@
+hypothesis,n,mean_R,ci025,ci975,p_gt_0,symbols_positive,parameter_stable,time_stable,single_dominant,verdict
+H1 only15,1261,0.076473,-0.005761,0.162802,0.968,4,True,True,False,PASS
+H2 DSA environment,277,0.123369,-0.059336,0.298886,0.911,4,True,True,False,PASS
+H3 SMCxDSA,111,0.053995,-0.218206,0.294561,0.65,4,True,True,False,PROMISING
+H4A 5m failure fade,805,0.123212,-0.009944,0.255264,0.963,3,True,True,False,PASS
+H4B 15m break follow,263,0.069354,-0.127708,0.291109,0.74,3,True,True,False,PROMISING
+H5 spatial room,2915,0.053177,-0.003134,0.115686,0.969,4,True,True,False,PASS
+H6 quantile conditional,329,0.092284,-0.054929,0.259961,0.888,3,True,True,False,PROMISING

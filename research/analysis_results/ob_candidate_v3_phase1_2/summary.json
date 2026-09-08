@@ -1,0 +1,41 @@
+{
+  "schema_version": "ob_candidate_v3_phase1_2",
+  "parent_sha": "fa9fc6951e63c4d9d01089e7db99d7915ddbf38d",
+  "candidates": 21481,
+  "trading_days": 407,
+  "primary": {
+    "stop_atr": 1.0,
+    "target_r": 2.0,
+    "horizon": 12,
+    "direction": "follow",
+    "policy": "conservative"
+  },
+  "h1_parameter_positive_cells": "9/9",
+  "dominance": {
+    "ALL": {
+      "max_single_day_share": 0.004172,
+      "max_single_segment_share": 0.002119
+    },
+    "only15": {
+      "max_single_day_share": 0.007339,
+      "max_single_segment_share": 0.004404
+    },
+    "H4A_5m_closebeyond_fade": {
+      "max_single_day_share": 0.010953,
+      "max_single_segment_share": 0.009028
+    },
+    "H4B_15m_closebeyond_follow": {
+      "max_single_day_share": 0.025024,
+      "max_single_segment_share": 0.017664
+    }
+  },
+  "spatial_columns_used": [
+    "nearest_above_distance_pct",
+    "nearest_below_distance_pct"
+  ],
+  "confirm": {
+    "v3_changed": 0,
+    "phase1_changed": 0,
+    "phase1_1_changed": 0
+  }
+}
