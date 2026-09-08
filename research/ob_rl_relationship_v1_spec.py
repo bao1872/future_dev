@@ -95,8 +95,8 @@ STOP_STRUCTURE_STATES = (
     "STRUCTURE_AT_OR_BEYOND_STOP",
 )
 STOP_STRUCTURE_CONTRAST = (
-    "STRUCTURE_AT_OR_BEYOND_STOP",
     "STRUCTURE_INSIDE_STOP",
+    "STRUCTURE_AT_OR_BEYOND_STOP",
 )
 
 MISSING_LEVEL = "NO_LEVEL"
@@ -210,6 +210,26 @@ def smc_registry() -> tuple[tuple, ...]:
     return tuple(rows)
 
 
+def smc_fit_bin_registry() -> tuple[tuple, ...]:
+    rows = []
+    for tf in VALIDATED_TFS:
+        for kind, missing in (
+            ("internal", MISSING_LEVEL),
+            ("swing", MISSING_LEVEL),
+            ("ob", MISSING_OB),
+        ):
+            feature = f"target_fit_{kind}_{tf}"
+            rows.append(
+                (
+                    "SMC_TARGET_FIT_BIN",
+                    feature,
+                    tf,
+                    missing,
+                )
+            )
+    return tuple(rows)
+
+
 # ------------------------------------------------------------
 # State mappers
 # ------------------------------------------------------------
@@ -276,6 +296,17 @@ def fit_bin_label(x) -> str:
         if lo <= v < hi:
             return label
     return "NO_LEVEL"
+
+
+def derived_state_col(
+    feature: str,
+    state_kind: str,
+) -> str:
+    return f"__rl1_{state_kind}__{feature}"
+
+
+def fit_bin_state_col(feature: str) -> str:
+    return f"__rl1_target_fit_bin__{feature}"
 
 
 # ------------------------------------------------------------

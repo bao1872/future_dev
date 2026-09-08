@@ -160,6 +160,14 @@ check(
     len(reg) == 3 * (2 + 3 + 3 + 1),
     len(reg),
 )
+check(
+    "stop contrast direction",
+    SP.STOP_STRUCTURE_CONTRAST
+    == (
+        "STRUCTURE_INSIDE_STOP",
+        "STRUCTURE_AT_OR_BEYOND_STOP",
+    ),
+)
 
 # ============================================================
 # 4) Synthetic action warehouse
@@ -357,6 +365,27 @@ pa = pd.read_csv(OUT / "paired_action_contrasts.csv")
 pr = pd.read_csv(OUT / "paired_rr_contrasts.csv")
 smc = pd.read_csv(OUT / "smc_cells.csv")
 smc_c = pd.read_csv(OUT / "smc_contrasts.csv")
+
+# --- #9 raw preserved + fit bins descriptive ---
+_trades = action[action["trade_mode"] != "SKIP"]
+raw_before = _trades["target_fit_swing_15m"].copy()
+derived = AR.add_smc_states(_trades)
+check(
+    "raw target fit preserved",
+    np.allclose(
+        raw_before.to_numpy(float),
+        derived["target_fit_swing_15m"].to_numpy(float),
+        equal_nan=True,
+    ),
+)
+check(
+    "fit bins appear",
+    "SMC_TARGET_FIT_BIN" in set(smc["analysis_family"]),
+)
+check(
+    "fit bins descriptive only",
+    "SMC_TARGET_FIT_BIN" not in set(smc_c["analysis_family"]),
+)
 
 # --- decision_weight preserved (not renormalised) ---
 trades = action[action["trade_mode"] != "SKIP"]
@@ -593,6 +622,95 @@ check(
 check(
     "some cells reach OK CI status",
     (smc_c["ci_status"] == SP.CI_OK).sum() > 0,
+)
+
+# --- #9 paired bootstrap directly on delta_R ---
+toy = pd.DataFrame(
+    {
+        AR.DAY_COL: ["d1", "d1", "d2", "d2"],
+        AR.WEIGHT_COL: [1, 1, 1, 1],
+        "delta_R": [1, 1, -1, -1],
+    }
+)
+check(
+    "paired point estimate = 0",
+    abs(
+        AR.weighted_mean(
+            toy["delta_R"], toy[AR.WEIGHT_COL]
+        )
+    )
+    < 1e-12,
+    AR.weighted_mean(toy["delta_R"], toy[AR.WEIGHT_COL]),
+)
+
+det = pd.DataFrame(
+    {
+        AR.DAY_COL: [f"d{i % 25}" for i in range(300)],
+        AR.WEIGHT_COL: np.ones(300),
+        "delta_R": RNG.normal(0, 1, 300),
+    }
+)
+ci1 = AR.cluster_bootstrap_paired_delta(det)
+ci2 = AR.cluster_bootstrap_paired_delta(det)
+check(
+    "paired bootstrap deterministic",
+    ci1 == ci2 and ci1[2] > 0,
+    (ci1, ci2),
+)
+
+# trade-mode contamination: delta_R already encodes FOLLOW-FADE,
+# the raw FADE reward must never enter the bootstrap.
+contam = pd.DataFrame(
+    {
+        AR.DAY_COL: [f"d{i % 25}" for i in range(250)],
+        AR.WEIGHT_COL: np.ones(250),
+        "delta_R": np.ones(250),
+        "gross_R_h12_fade": np.full(250, -10.0),
+    }
+)
+cic = AR.cluster_bootstrap_paired_delta(
+    contam[[AR.DAY_COL, AR.WEIGHT_COL, "delta_R"]]
+)
+check(
+    "paired bootstrap ignores FADE raw (-10)",
+    cic[2] > 0 and cic[0] <= 1.0 <= cic[1],
+    cic,
+)
+
+# --- #9 independent arm trading-day gate ---
+A = pd.DataFrame(
+    {
+        AR.REWARD_COL: RNG.normal(0, 1, 200),
+        AR.WEIGHT_COL: np.ones(200),
+        AR.DAY_COL: [f"ad{i % 5}" for i in range(200)],
+    }
+)
+B = pd.DataFrame(
+    {
+        AR.REWARD_COL: RNG.normal(0, 1, 200),
+        AR.WEIGHT_COL: np.ones(200),
+        AR.DAY_COL: [f"bd{i % 25}" for i in range(200)],
+    }
+)
+lo, hi, reps = AR.cluster_bootstrap_delta(A, B)
+check(
+    "independent arm day gate LOW_SUPPORT",
+    np.isnan(lo) and np.isnan(hi) and reps == 0,
+    (lo, hi, reps),
+)
+
+# --- #9 finite support: n_high/n_low counts only finite reward ---
+_many = pd.DataFrame(
+    {
+        "gross_R_h12": [np.nan] * 80
+        + list(RNG.normal(0, 1, 120)),
+        AR.WEIGHT_COL: np.ones(200),
+        AR.DAY_COL: [f"d{i % 25}" for i in range(200)],
+    }
+)
+check(
+    "finite support counts only finite reward",
+    len(AR._arm(_many, 12)) == 120,
 )
 
 # --- guard against ranking language ---

@@ -73,6 +73,10 @@ from research.ob_rl_relationship_v1_spec import (  # noqa: E402
     CONTRAST_COLUMNS,
     PAIRED_COLUMNS,
     smc_registry,
+    smc_fit_bin_registry,
+    derived_state_col,
+    fit_bin_state_col,
+    fit_bin_label,
     bias_state,
     target_fit_state,
     stop_structure_state,
@@ -297,12 +301,18 @@ def cluster_bootstrap_delta(
     Rows are never resampled independently: the same trading-day index
     is drawn for both arms, so the counterfactual pairing survives.
     """
+    days_a = a[DAY_COL].astype(str).nunique()
+    days_b = b[DAY_COL].astype(str).nunique()
+    if (
+        days_a < MIN_TRADING_DAYS_FOR_CI
+        or days_b < MIN_TRADING_DAYS_FOR_CI
+    ):
+        return np.nan, np.nan, 0
+
     days = sorted(
         set(a[DAY_COL].astype(str))
         | set(b[DAY_COL].astype(str))
     )
-    if len(days) < MIN_TRADING_DAYS_FOR_CI:
-        return np.nan, np.nan, 0
 
     A = _daily_sums(a, days)
     B = _daily_sums(b, days)
@@ -328,6 +338,74 @@ def cluster_bootstrap_delta(
 
     lo, hi = np.quantile(out, BOOTSTRAP_CI)
     return float(lo), float(hi), len(out)
+
+
+def cluster_bootstrap_paired_delta(
+    pair_df: pd.DataFrame,
+    *,
+    reps: int = BOOTSTRAP_REPS,
+    seed: int = BOOTSTRAP_SEED,
+):
+    """Trading-day cluster bootstrap of paired delta_R.
+
+    The counterfactual pair already exists row-by-row (same candidate,
+    FOLLOW vs FADE, or adjacent RR). We bootstrap the SAME row's
+    ``delta_R`` by trading day, so no arm is ever reconstructed and a
+    trade_mode can never leak into the other arm's CI.
+    """
+    x = pair_df[
+        [DAY_COL, WEIGHT_COL, "delta_R"]
+    ].copy()
+    x["delta_R"] = pd.to_numeric(
+        x["delta_R"], errors="coerce"
+    )
+    x[WEIGHT_COL] = pd.to_numeric(
+        x[WEIGHT_COL], errors="coerce"
+    )
+    ok = (
+        np.isfinite(x["delta_R"])
+        & np.isfinite(x[WEIGHT_COL])
+        & (x[WEIGHT_COL] > 0)
+    )
+    x = x.loc[ok].copy()
+
+    n_days = x[DAY_COL].nunique()
+    if (
+        len(x) < MIN_VALID_ROWS_FOR_CI
+        or n_days < MIN_TRADING_DAYS_FOR_CI
+    ):
+        return np.nan, np.nan, 0
+
+    x["w_delta"] = x[WEIGHT_COL] * x["delta_R"]
+
+    daily = (
+        x.groupby(DAY_COL)
+        .agg(
+            sw=(WEIGHT_COL, "sum"),
+            swd=("w_delta", "sum"),
+        )
+        .sort_index()
+    )
+
+    sw = daily["sw"].to_numpy(float)
+    swd = daily["swd"].to_numpy(float)
+
+    rng = np.random.default_rng(seed)
+    n = len(daily)
+
+    boot = []
+    for _ in range(reps):
+        idx = rng.integers(0, n, size=n)
+        total_w = sw[idx].sum()
+        if total_w <= 0:
+            continue
+        boot.append(swd[idx].sum() / total_w)
+
+    if not boot:
+        return np.nan, np.nan, 0
+
+    lo, hi = np.quantile(boot, BOOTSTRAP_CI)
+    return float(lo), float(hi), len(boot)
 
 
 def _arm(g: pd.DataFrame, horizon: int) -> pd.DataFrame:
@@ -516,7 +594,13 @@ def _summarize_pairs(
     arm_hi=None,
     rc=None,
 ) -> pd.DataFrame:
-    """Pair-level delta distribution + trading-day cluster CI."""
+    """Pair-level delta distribution + trading-day cluster CI.
+
+    The counterfactual delta_R already exists per row, so the CI is
+    bootstrapped directly on delta_R by trading day. The old arm
+    reconstruction (FOLLOW / FADE / adjacent RR rebuilt separately) is
+    gone: a trade_mode can never leak across arms.
+    """
     w_col = _pair_col(pair, WEIGHT_COL)
     d_col = _pair_col(pair, DAY_COL)
 
@@ -574,46 +658,13 @@ def _summarize_pairs(
             ):
                 row[name] = float(q)
 
-            if arm_lo is not None and arm_hi is not None:
-                sub_lo = arm_lo[
-                    arm_lo["candidate_id"]
-                    .astype(str)
-                    .isin(g["candidate_id"].astype(str))
-                ]
-                sub_hi = arm_hi[
-                    arm_hi["candidate_id"]
-                    .astype(str)
-                    .isin(g["candidate_id"].astype(str))
-                ]
-                a_arm = _arm(sub_hi, horizon)
-                b_arm = _arm(sub_lo, horizon)
-            else:
-                follow = pd.DataFrame(
-                    {
-                        REWARD_COL: pd.to_numeric(
-                            g[f"{rc}_follow"], errors="coerce"
-                        ),
-                        WEIGHT_COL: w,
-                        DAY_COL: g[DAY_COL].astype(str),
-                    }
-                ).dropna(subset=[REWARD_COL])
-                fade = pd.DataFrame(
-                    {
-                        REWARD_COL: pd.to_numeric(
-                            g[f"{rc}_fade"], errors="coerce"
-                        ),
-                        WEIGHT_COL: w,
-                        DAY_COL: g[DAY_COL].astype(str),
-                    }
-                ).dropna(subset=[REWARD_COL])
-                a_arm, b_arm = follow, fade
-
             if (
-                len(a_arm) >= MIN_VALID_ROWS_FOR_CI
-                and len(b_arm) >= MIN_VALID_ROWS_FOR_CI
+                len(g) >= MIN_VALID_ROWS_FOR_CI
+                and g[DAY_COL].nunique()
+                >= MIN_TRADING_DAYS_FOR_CI
             ):
-                lo, hi, reps = cluster_bootstrap_delta(
-                    a_arm, b_arm
+                lo, hi, reps = cluster_bootstrap_paired_delta(
+                    g[[DAY_COL, WEIGHT_COL, "delta_R"]]
                 )
                 row["ci_low"] = lo
                 row["ci_high"] = hi
@@ -643,6 +694,12 @@ def _summarize_pairs(
 # ============================================================
 
 def add_smc_states(df: pd.DataFrame) -> pd.DataFrame:
+    """Add derived state columns WITHOUT touching raw continuous SMC.
+
+    Raw numeric features (e.g. ``target_fit_swing_15m``) are preserved
+    exactly so later continuous-relationship analysis still has the
+    original values. Derived labels live in ``__rl1_*`` columns.
+    """
     out = df.copy()
     for (
         family,
@@ -653,17 +710,29 @@ def add_smc_states(df: pd.DataFrame) -> pd.DataFrame:
         kind,
     ) in smc_registry():
         assert_no_quarantined_tf(tf)
+
+        state_col = derived_state_col(feature, kind)
+
         if kind == "bias":
-            out[feature] = [
+            out[state_col] = [
                 bias_state(v) for v in out[feature]
             ]
         elif kind == "target_fit":
-            out[feature] = [
+            out[state_col] = [
                 target_fit_state(v, missing_label=missing_label)
                 for v in out[feature]
             ]
+            bin_col = fit_bin_state_col(feature)
+            out[bin_col] = [
+                (
+                    missing_label
+                    if pd.isna(v)
+                    else fit_bin_label(v)
+                )
+                for v in out[feature]
+            ]
         elif kind == "stop_structure":
-            out[feature] = [
+            out[state_col] = [
                 stop_structure_state(
                     v, missing_label=missing_label
                 )
@@ -674,7 +743,7 @@ def add_smc_states(df: pd.DataFrame) -> pd.DataFrame:
                 f"forward_active_ob_structure_class_{tf}"
             ]
             br = out[f"forward_active_ob_bias_rel_{tf}"]
-            out[feature] = [
+            out[state_col] = [
                 forward_ob_state(a, b)
                 for a, b in zip(sc, br)
             ]
@@ -697,20 +766,21 @@ def build_smc_cells(
     ) in smc_registry():
         for h in SMC_DISCOVERY_HORIZONS:
             for view, vcols in SMC_VIEWS.items():
+                state_col = derived_state_col(feature, kind)
                 cells = summarize_cells(
                     df,
                     group_cols=list(vcols)
                     + [
                         "trade_mode",
                         "target_R",
-                        feature,
+                        state_col,
                     ],
                     horizon=h,
                 )
                 if cells.empty:
                     continue
                 cells = cells.rename(
-                    columns={feature: "state"}
+                    columns={state_col: "state"}
                 )
                 frames.append(
                     finalize_cells(
@@ -724,6 +794,58 @@ def build_smc_cells(
                         },
                     )
                 )
+    if not frames:
+        return pd.DataFrame(columns=list(CELL_COLUMNS))
+    return pd.concat(frames, ignore_index=True)
+
+
+def build_smc_fit_bin_cells(
+    df: pd.DataFrame,
+) -> pd.DataFrame:
+    """Descriptive-only fixed target-fit bins.
+
+    These are NOT contrasts: they describe the payoff distribution across
+    fixed, pre-registered buckets (<0.5 / 0.5-1 / 1-1.5 / 1.5-2 / >=2),
+    so they live in ``smc_cells.csv`` but never in ``smc_contrasts.csv``.
+    """
+    frames = []
+    for (
+        family,
+        feature,
+        tf,
+        _missing,
+    ) in smc_fit_bin_registry():
+        state_col = fit_bin_state_col(feature)
+
+        for view, vcols in SMC_VIEWS.items():
+            cells = summarize_cells(
+                df,
+                group_cols=list(vcols)
+                + [
+                    "trade_mode",
+                    "target_R",
+                    state_col,
+                ],
+                horizon=PRIMARY_HORIZON,
+            )
+            if cells.empty:
+                continue
+            cells = cells.rename(
+                columns={state_col: "state"}
+            )
+            frames.append(
+                finalize_cells(
+                    cells,
+                    {
+                        "analysis_family": family,
+                        "feature": feature,
+                        "env_tf": tf,
+                        "state_definition": "target_fit_fixed_bin",
+                        "view": view,
+                    },
+                )
+            )
+
     if not frames:
         return pd.DataFrame(columns=list(CELL_COLUMNS))
     return pd.concat(frames, ignore_index=True)
@@ -744,6 +866,7 @@ def build_smc_contrasts(
         if contrast is None:
             continue
         hi_state, lo_state = contrast
+        state_col = derived_state_col(feature, kind)
 
         for view, vcols in SMC_VIEWS.items():
             gcols = list(vcols) + ["trade_mode", "target_R"]
@@ -754,8 +877,11 @@ def build_smc_contrasts(
                     keys = (keys,)
                 base = dict(zip(gcols, keys))
 
-                a = g[g[feature].astype(str) == hi_state]
-                b = g[g[feature].astype(str) == lo_state]
+                a = g[g[state_col].astype(str).eq(hi_state)]
+                b = g[g[state_col].astype(str).eq(lo_state)]
+
+                arm_a = _arm(a, horizon)
+                arm_b = _arm(b, horizon)
 
                 row = dict(base)
                 row.update(
@@ -769,13 +895,10 @@ def build_smc_contrasts(
                         "contrast": f"{hi_state}_minus_{lo_state}",
                         "state_high": hi_state,
                         "state_low": lo_state,
-                        "n_high": int(len(a)),
-                        "n_low": int(len(b)),
+                        "n_high": int(len(arm_a)),
+                        "n_low": int(len(arm_b)),
                     }
                 )
-
-                arm_a = _arm(a, horizon)
-                arm_b = _arm(b, horizon)
                 if len(arm_a) == 0 or len(arm_b) == 0:
                     row["delta_mean_R"] = np.nan
                     row["ci_low"] = np.nan
@@ -913,6 +1036,10 @@ def main() -> None:
     paired_action = build_paired_action(trades)
     paired_rr = build_paired_rr(trades)
     smc_cells = build_smc_cells(trades)
+    fit_bin_cells = build_smc_fit_bin_cells(trades)
+    smc_cells = pd.concat(
+        [smc_cells, fit_bin_cells], ignore_index=True
+    )
     smc_contrasts = build_smc_contrasts(trades)
 
     baseline.to_csv(
