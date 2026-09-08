@@ -1,0 +1,1000 @@
+{
+  "schema_version": "ob_trigger_execution_v21",
+  "base_dataset": {
+    "version": "ob_trigger_smc_v2",
+    "git_sha": "a0c0d6ceaf4b35ce25688845c68728bd67b933a9"
+  },
+  "totals": {
+    "v2_event_rows": 6371,
+    "supplement_rows": 6371
+  },
+  "event_parity": {
+    "missing_v2_event_id": 0,
+    "extra_event_id": 0,
+    "duplicate_event_id": 0
+  },
+  "dsa": {
+    "source_repo": "bao1872/market_dev",
+    "source_sha": "8686b803c53c3a423badb80491fbd21f06879fbb",
+    "source_paths": [
+      "backend/app/strategy/selectors/dsa_selector.py",
+      "backend/app/strategy_assets/algorithms/features/dynamic_swing_anchored_vwap.py",
+      "backend/app/strategy_assets/algorithms/features/atr_rope_event_factor_lab_v4.py"
+    ],
+    "consumed_via": "future_dev/panji_indicators.py",
+    "note": "panji_indicators.py is the frozen, declared-canonical (AGENTS.md) 1:1 extraction of the market_dev DSA sources above; its dynamic_swing_anchored_vwap kernel is byte-identical to the current market_dev kernel (verified at market_dev SHA 8686b803). DSA math is NOT redefined in future_dev.",
+    "parity_target": "adapter output == panji_indicators.compute_dsa_history"
+  },
+  "dsa_canonical_parity_mismatch": 0,
+  "atr_recurrence_mismatch": 0,
+  "atr_valid_by_symbol_tf": {
+    "AG": {
+      "5m": 2140,
+      "15m": 2139,
+      "1h": 2136
+    },
+    "CU": {
+      "5m": 1722,
+      "15m": 1722,
+      "1h": 1720
+    },
+    "RB": {
+      "5m": 1265,
+      "15m": 1264,
+      "1h": 1261
+    },
+    "M": {
+      "5m": 1244,
+      "15m": 1243,
+      "1h": 1240
+    }
+  },
+  "next_open_alignment_mismatch": 0,
+  "path_alignment_mismatch": 0,
+  "atr_normalized_path_mismatch": 0,
+  "entry_delay_gt_5m_rate": {
+    "AG": 0.026636,
+    "CU": 0.037166,
+    "RB": 0.056917,
+    "M": 0.043408
+  },
+  "entry_delay_gt_5m_count": {
+    "AG": 57,
+    "CU": 64,
+    "RB": 72,
+    "M": 54
+  },
+  "future_b24_available_rate": {
+    "AG": 0.999533,
+    "CU": 0.999419,
+    "RB": 0.998419,
+    "M": 1.0
+  },
+  "future_b24_available_count": {
+    "AG": 2139,
+    "CU": 1721,
+    "RB": 1263,
+    "M": 1244
+  },
+  "dsa_direction_distribution": {
+    "AG": {
+      "5m": {
+        "0": 1260,
+        "1": 522,
+        "-1": 358
+      },
+      "15m": {
+        "0": 1146,
+        "1": 612,
+        "-1": 382
+      },
+      "1h": {
+        "0": 1201,
+        "1": 680,
+        "-1": 259
+      }
+    },
+    "CU": {
+      "5m": {
+        "0": 1045,
+        "1": 396,
+        "-1": 281
+      },
+      "15m": {
+        "0": 965,
+        "1": 469,
+        "-1": 288
+      },
+      "1h": {
+        "0": 947,
+        "1": 617,
+        "-1": 158
+      }
+    },
+    "RB": {
+      "5m": {
+        "0": 766,
+        "-1": 264,
+        "1": 235
+      },
+      "15m": {
+        "0": 737,
+        "-1": 270,
+        "1": 258
+      },
+      "1h": {
+        "0": 713,
+        "-1": 342,
+        "1": 210
+      }
+    },
+    "M": {
+      "5m": {
+        "0": 753,
+        "1": 276,
+        "-1": 215
+      },
+      "15m": {
+        "0": 683,
+        "1": 312,
+        "-1": 249
+      },
+      "1h": {
+        "0": 670,
+        "1": 335,
+        "-1": 239
+      }
+    }
+  },
+  "smc_trigger_vs_dsa_direction": {
+    "AG": {
+      "5m": {
+        "-1/-1": 139,
+        "-1/0": 574,
+        "-1/1": 261,
+        "1/-1": 219,
+        "1/0": 686,
+        "1/1": 261
+      },
+      "15m": {
+        "-1/-1": 190,
+        "-1/0": 520,
+        "-1/1": 264,
+        "1/-1": 192,
+        "1/0": 626,
+        "1/1": 348
+      },
+      "1h": {
+        "-1/-1": 138,
+        "-1/0": 543,
+        "-1/1": 293,
+        "1/-1": 121,
+        "1/0": 658,
+        "1/1": 387
+      }
+    },
+    "CU": {
+      "5m": {
+        "-1/-1": 101,
+        "-1/0": 504,
+        "-1/1": 220,
+        "1/-1": 180,
+        "1/0": 541,
+        "1/1": 176
+      },
+      "15m": {
+        "-1/-1": 155,
+        "-1/0": 468,
+        "-1/1": 202,
+        "1/-1": 133,
+        "1/0": 497,
+        "1/1": 267
+      },
+      "1h": {
+        "-1/-1": 75,
+        "-1/0": 476,
+        "-1/1": 274,
+        "1/-1": 83,
+        "1/0": 471,
+        "1/1": 343
+      }
+    },
+    "RB": {
+      "5m": {
+        "-1/-1": 114,
+        "-1/0": 408,
+        "-1/1": 131,
+        "1/-1": 150,
+        "1/0": 358,
+        "1/1": 104
+      },
+      "15m": {
+        "-1/-1": 147,
+        "-1/0": 372,
+        "-1/1": 134,
+        "1/-1": 123,
+        "1/0": 365,
+        "1/1": 124
+      },
+      "1h": {
+        "-1/-1": 198,
+        "-1/0": 357,
+        "-1/1": 98,
+        "1/-1": 144,
+        "1/0": 356,
+        "1/1": 112
+      }
+    },
+    "M": {
+      "5m": {
+        "-1/-1": 106,
+        "-1/0": 368,
+        "-1/1": 149,
+        "1/-1": 109,
+        "1/0": 385,
+        "1/1": 127
+      },
+      "15m": {
+        "-1/-1": 129,
+        "-1/0": 348,
+        "-1/1": 146,
+        "1/-1": 120,
+        "1/0": 335,
+        "1/1": 166
+      },
+      "1h": {
+        "-1/-1": 128,
+        "-1/0": 330,
+        "-1/1": 165,
+        "1/-1": 111,
+        "1/0": 340,
+        "1/1": 170
+      }
+    }
+  },
+  "audit_counts": {
+    "atr_recurrence_checked": {
+      "AG": {
+        "5m": 1000
+      },
+      "CU": {
+        "5m": 1000
+      },
+      "RB": {
+        "5m": 1000
+      },
+      "M": {
+        "5m": 1000
+      }
+    },
+    "dsa_parity_checked": {
+      "AG": 44451,
+      "CU": 37323,
+      "RB": 27819,
+      "M": 27819
+    },
+    "path_alignment_checked": {
+      "AG": 1000,
+      "CU": 1000,
+      "RB": 1000,
+      "M": 1000
+    },
+    "normalized_path_checked": {
+      "AG": 1000,
+      "CU": 1000,
+      "RB": 1000,
+      "M": 1000
+    }
+  },
+  "git_data": {
+    "chunks_by_symbol": {
+      "AG": 22,
+      "CU": 18,
+      "RB": 13,
+      "M": 13
+    },
+    "max_chunk_bytes": 831658,
+    "chunks_gt_900kb": 0
+  },
+  "generated_tp_sl_pnl_fields": 0,
+  "by_symbol": [
+    {
+      "symbol": "AG",
+      "events": 2140,
+      "atr5_valid": 2140,
+      "atr15_valid": 2139,
+      "atr1h_valid": 2136,
+      "entry_valid": 2140,
+      "entry_delay_gt_5m": 57,
+      "b24_available": 2139,
+      "dsa_direction_distribution": {
+        "5m": {
+          "0": 1260,
+          "1": 522,
+          "-1": 358
+        },
+        "15m": {
+          "0": 1146,
+          "1": 612,
+          "-1": 382
+        },
+        "1h": {
+          "0": 1201,
+          "1": 680,
+          "-1": 259
+        }
+      },
+      "smc_vs_dsa_direction": {
+        "5m": {
+          "-1/-1": 139,
+          "-1/0": 574,
+          "-1/1": 261,
+          "1/-1": 219,
+          "1/0": 686,
+          "1/1": 261
+        },
+        "15m": {
+          "-1/-1": 190,
+          "-1/0": 520,
+          "-1/1": 264,
+          "1/-1": 192,
+          "1/0": 626,
+          "1/1": 348
+        },
+        "1h": {
+          "-1/-1": 138,
+          "-1/0": 543,
+          "-1/1": 293,
+          "1/-1": 121,
+          "1/0": 658,
+          "1/1": 387
+        }
+      }
+    },
+    {
+      "symbol": "CU",
+      "events": 1722,
+      "atr5_valid": 1722,
+      "atr15_valid": 1722,
+      "atr1h_valid": 1720,
+      "entry_valid": 1722,
+      "entry_delay_gt_5m": 64,
+      "b24_available": 1721,
+      "dsa_direction_distribution": {
+        "5m": {
+          "0": 1045,
+          "1": 396,
+          "-1": 281
+        },
+        "15m": {
+          "0": 965,
+          "1": 469,
+          "-1": 288
+        },
+        "1h": {
+          "0": 947,
+          "1": 617,
+          "-1": 158
+        }
+      },
+      "smc_vs_dsa_direction": {
+        "5m": {
+          "-1/-1": 101,
+          "-1/0": 504,
+          "-1/1": 220,
+          "1/-1": 180,
+          "1/0": 541,
+          "1/1": 176
+        },
+        "15m": {
+          "-1/-1": 155,
+          "-1/0": 468,
+          "-1/1": 202,
+          "1/-1": 133,
+          "1/0": 497,
+          "1/1": 267
+        },
+        "1h": {
+          "-1/-1": 75,
+          "-1/0": 476,
+          "-1/1": 274,
+          "1/-1": 83,
+          "1/0": 471,
+          "1/1": 343
+        }
+      }
+    },
+    {
+      "symbol": "RB",
+      "events": 1265,
+      "atr5_valid": 1265,
+      "atr15_valid": 1264,
+      "atr1h_valid": 1261,
+      "entry_valid": 1265,
+      "entry_delay_gt_5m": 72,
+      "b24_available": 1263,
+      "dsa_direction_distribution": {
+        "5m": {
+          "0": 766,
+          "-1": 264,
+          "1": 235
+        },
+        "15m": {
+          "0": 737,
+          "-1": 270,
+          "1": 258
+        },
+        "1h": {
+          "0": 713,
+          "-1": 342,
+          "1": 210
+        }
+      },
+      "smc_vs_dsa_direction": {
+        "5m": {
+          "-1/-1": 114,
+          "-1/0": 408,
+          "-1/1": 131,
+          "1/-1": 150,
+          "1/0": 358,
+          "1/1": 104
+        },
+        "15m": {
+          "-1/-1": 147,
+          "-1/0": 372,
+          "-1/1": 134,
+          "1/-1": 123,
+          "1/0": 365,
+          "1/1": 124
+        },
+        "1h": {
+          "-1/-1": 198,
+          "-1/0": 357,
+          "-1/1": 98,
+          "1/-1": 144,
+          "1/0": 356,
+          "1/1": 112
+        }
+      }
+    },
+    {
+      "symbol": "M",
+      "events": 1244,
+      "atr5_valid": 1244,
+      "atr15_valid": 1243,
+      "atr1h_valid": 1240,
+      "entry_valid": 1244,
+      "entry_delay_gt_5m": 54,
+      "b24_available": 1244,
+      "dsa_direction_distribution": {
+        "5m": {
+          "0": 753,
+          "1": 276,
+          "-1": 215
+        },
+        "15m": {
+          "0": 683,
+          "1": 312,
+          "-1": 249
+        },
+        "1h": {
+          "0": 670,
+          "1": 335,
+          "-1": 239
+        }
+      },
+      "smc_vs_dsa_direction": {
+        "5m": {
+          "-1/-1": 106,
+          "-1/0": 368,
+          "-1/1": 149,
+          "1/-1": 109,
+          "1/0": 385,
+          "1/1": 127
+        },
+        "15m": {
+          "-1/-1": 129,
+          "-1/0": 348,
+          "-1/1": 146,
+          "1/-1": 120,
+          "1/0": 335,
+          "1/1": 166
+        },
+        "1h": {
+          "-1/-1": 128,
+          "-1/0": 330,
+          "-1/1": 165,
+          "1/-1": 111,
+          "1/0": 340,
+          "1/1": 170
+        }
+      }
+    }
+  ],
+  "chunk_manifests": [
+    {
+      "symbol": "AG",
+      "chunks": [
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/AG/AG_0000_0099.csv",
+          "row_start": 0,
+          "row_end": 99,
+          "rows": 100,
+          "bytes": 691986
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/AG/AG_0100_0199.csv",
+          "row_start": 100,
+          "row_end": 199,
+          "rows": 100,
+          "bytes": 704461
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/AG/AG_0200_0299.csv",
+          "row_start": 200,
+          "row_end": 299,
+          "rows": 100,
+          "bytes": 729102
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/AG/AG_0300_0399.csv",
+          "row_start": 300,
+          "row_end": 399,
+          "rows": 100,
+          "bytes": 705153
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/AG/AG_0400_0499.csv",
+          "row_start": 400,
+          "row_end": 499,
+          "rows": 100,
+          "bytes": 704327
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/AG/AG_0500_0599.csv",
+          "row_start": 500,
+          "row_end": 599,
+          "rows": 100,
+          "bytes": 800641
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/AG/AG_0600_0699.csv",
+          "row_start": 600,
+          "row_end": 699,
+          "rows": 100,
+          "bytes": 813648
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/AG/AG_0700_0799.csv",
+          "row_start": 700,
+          "row_end": 799,
+          "rows": 100,
+          "bytes": 803582
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/AG/AG_0800_0899.csv",
+          "row_start": 800,
+          "row_end": 899,
+          "rows": 100,
+          "bytes": 811161
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/AG/AG_0900_0999.csv",
+          "row_start": 900,
+          "row_end": 999,
+          "rows": 100,
+          "bytes": 823425
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/AG/AG_1000_1099.csv",
+          "row_start": 1000,
+          "row_end": 1099,
+          "rows": 100,
+          "bytes": 822070
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/AG/AG_1100_1199.csv",
+          "row_start": 1100,
+          "row_end": 1199,
+          "rows": 100,
+          "bytes": 831658
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/AG/AG_1200_1299.csv",
+          "row_start": 1200,
+          "row_end": 1299,
+          "rows": 100,
+          "bytes": 765090
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/AG/AG_1300_1399.csv",
+          "row_start": 1300,
+          "row_end": 1399,
+          "rows": 100,
+          "bytes": 722802
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/AG/AG_1400_1499.csv",
+          "row_start": 1400,
+          "row_end": 1499,
+          "rows": 100,
+          "bytes": 721427
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/AG/AG_1500_1599.csv",
+          "row_start": 1500,
+          "row_end": 1599,
+          "rows": 100,
+          "bytes": 736135
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/AG/AG_1600_1699.csv",
+          "row_start": 1600,
+          "row_end": 1699,
+          "rows": 100,
+          "bytes": 723092
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/AG/AG_1700_1799.csv",
+          "row_start": 1700,
+          "row_end": 1799,
+          "rows": 100,
+          "bytes": 734868
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/AG/AG_1800_1899.csv",
+          "row_start": 1800,
+          "row_end": 1899,
+          "rows": 100,
+          "bytes": 815568
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/AG/AG_1900_1999.csv",
+          "row_start": 1900,
+          "row_end": 1999,
+          "rows": 100,
+          "bytes": 827383
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/AG/AG_2000_2099.csv",
+          "row_start": 2000,
+          "row_end": 2099,
+          "rows": 100,
+          "bytes": 810052
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/AG/AG_2100_2139.csv",
+          "row_start": 2100,
+          "row_end": 2139,
+          "rows": 40,
+          "bytes": 319788
+        }
+      ]
+    },
+    {
+      "symbol": "CU",
+      "chunks": [
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/CU/CU_0000_0099.csv",
+          "row_start": 0,
+          "row_end": 99,
+          "rows": 100,
+          "bytes": 703741
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/CU/CU_0100_0199.csv",
+          "row_start": 100,
+          "row_end": 199,
+          "rows": 100,
+          "bytes": 712501
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/CU/CU_0200_0299.csv",
+          "row_start": 200,
+          "row_end": 299,
+          "rows": 100,
+          "bytes": 711925
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/CU/CU_0300_0399.csv",
+          "row_start": 300,
+          "row_end": 399,
+          "rows": 100,
+          "bytes": 709024
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/CU/CU_0400_0499.csv",
+          "row_start": 400,
+          "row_end": 499,
+          "rows": 100,
+          "bytes": 716813
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/CU/CU_0500_0599.csv",
+          "row_start": 500,
+          "row_end": 599,
+          "rows": 100,
+          "bytes": 710140
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/CU/CU_0600_0699.csv",
+          "row_start": 600,
+          "row_end": 699,
+          "rows": 100,
+          "bytes": 709559
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/CU/CU_0700_0799.csv",
+          "row_start": 700,
+          "row_end": 799,
+          "rows": 100,
+          "bytes": 715098
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/CU/CU_0800_0899.csv",
+          "row_start": 800,
+          "row_end": 899,
+          "rows": 100,
+          "bytes": 717342
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/CU/CU_0900_0999.csv",
+          "row_start": 900,
+          "row_end": 999,
+          "rows": 100,
+          "bytes": 724843
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/CU/CU_1000_1099.csv",
+          "row_start": 1000,
+          "row_end": 1099,
+          "rows": 100,
+          "bytes": 732987
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/CU/CU_1100_1199.csv",
+          "row_start": 1100,
+          "row_end": 1199,
+          "rows": 100,
+          "bytes": 729926
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/CU/CU_1200_1299.csv",
+          "row_start": 1200,
+          "row_end": 1299,
+          "rows": 100,
+          "bytes": 726734
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/CU/CU_1300_1399.csv",
+          "row_start": 1300,
+          "row_end": 1399,
+          "rows": 100,
+          "bytes": 728659
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/CU/CU_1400_1499.csv",
+          "row_start": 1400,
+          "row_end": 1499,
+          "rows": 100,
+          "bytes": 731126
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/CU/CU_1500_1599.csv",
+          "row_start": 1500,
+          "row_end": 1599,
+          "rows": 100,
+          "bytes": 728666
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/CU/CU_1600_1699.csv",
+          "row_start": 1600,
+          "row_end": 1699,
+          "rows": 100,
+          "bytes": 730153
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/CU/CU_1700_1721.csv",
+          "row_start": 1700,
+          "row_end": 1721,
+          "rows": 22,
+          "bytes": 168521
+        }
+      ]
+    },
+    {
+      "symbol": "RB",
+      "chunks": [
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/RB/RB_0000_0099.csv",
+          "row_start": 0,
+          "row_end": 99,
+          "rows": 100,
+          "bytes": 698321
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/RB/RB_0100_0199.csv",
+          "row_start": 100,
+          "row_end": 199,
+          "rows": 100,
+          "bytes": 705172
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/RB/RB_0200_0299.csv",
+          "row_start": 200,
+          "row_end": 299,
+          "rows": 100,
+          "bytes": 704447
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/RB/RB_0300_0399.csv",
+          "row_start": 300,
+          "row_end": 399,
+          "rows": 100,
+          "bytes": 690926
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/RB/RB_0400_0499.csv",
+          "row_start": 400,
+          "row_end": 499,
+          "rows": 100,
+          "bytes": 698892
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/RB/RB_0500_0599.csv",
+          "row_start": 500,
+          "row_end": 599,
+          "rows": 100,
+          "bytes": 706196
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/RB/RB_0600_0699.csv",
+          "row_start": 600,
+          "row_end": 699,
+          "rows": 100,
+          "bytes": 701583
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/RB/RB_0700_0799.csv",
+          "row_start": 700,
+          "row_end": 799,
+          "rows": 100,
+          "bytes": 699758
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/RB/RB_0800_0899.csv",
+          "row_start": 800,
+          "row_end": 899,
+          "rows": 100,
+          "bytes": 700729
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/RB/RB_0900_0999.csv",
+          "row_start": 900,
+          "row_end": 999,
+          "rows": 100,
+          "bytes": 699817
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/RB/RB_1000_1099.csv",
+          "row_start": 1000,
+          "row_end": 1099,
+          "rows": 100,
+          "bytes": 699667
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/RB/RB_1100_1199.csv",
+          "row_start": 1100,
+          "row_end": 1199,
+          "rows": 100,
+          "bytes": 697085
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/RB/RB_1200_1264.csv",
+          "row_start": 1200,
+          "row_end": 1264,
+          "rows": 65,
+          "bytes": 456569
+        }
+      ]
+    },
+    {
+      "symbol": "M",
+      "chunks": [
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/M/M_0000_0099.csv",
+          "row_start": 0,
+          "row_end": 99,
+          "rows": 100,
+          "bytes": 694711
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/M/M_0100_0199.csv",
+          "row_start": 100,
+          "row_end": 199,
+          "rows": 100,
+          "bytes": 693682
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/M/M_0200_0299.csv",
+          "row_start": 200,
+          "row_end": 299,
+          "rows": 100,
+          "bytes": 692834
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/M/M_0300_0399.csv",
+          "row_start": 300,
+          "row_end": 399,
+          "rows": 100,
+          "bytes": 689228
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/M/M_0400_0499.csv",
+          "row_start": 400,
+          "row_end": 499,
+          "rows": 100,
+          "bytes": 694056
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/M/M_0500_0599.csv",
+          "row_start": 500,
+          "row_end": 599,
+          "rows": 100,
+          "bytes": 695458
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/M/M_0600_0699.csv",
+          "row_start": 600,
+          "row_end": 699,
+          "rows": 100,
+          "bytes": 697346
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/M/M_0700_0799.csv",
+          "row_start": 700,
+          "row_end": 799,
+          "rows": 100,
+          "bytes": 692076
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/M/M_0800_0899.csv",
+          "row_start": 800,
+          "row_end": 899,
+          "rows": 100,
+          "bytes": 700942
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/M/M_0900_0999.csv",
+          "row_start": 900,
+          "row_end": 999,
+          "rows": 100,
+          "bytes": 699820
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/M/M_1000_1099.csv",
+          "row_start": 1000,
+          "row_end": 1099,
+          "rows": 100,
+          "bytes": 705336
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/M/M_1100_1199.csv",
+          "row_start": 1100,
+          "row_end": 1199,
+          "rows": 100,
+          "bytes": 694070
+        },
+        {
+          "file": "research/analysis_data/ob_trigger_execution_v21/M/M_1200_1243.csv",
+          "row_start": 1200,
+          "row_end": 1243,
+          "rows": 44,
+          "bytes": 316497
+        }
+      ]
+    }
+  ],
+  "dsa_exported_field_count": 213,
+  "column_count": 572
+}
