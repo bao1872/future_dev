@@ -73,12 +73,14 @@ from research.environment_atlas_spec import (  # noqa: E402
     QUARANTINED_TFS,
     HORIZONS,
     DIST_BINS,
+    density_field,
     MOMENTUM_STATE_FIELDS,
     MOMENTUM_JOIN_FIELD,
     MOMENTUM_SIGN_FIELD,
     EXPECTED_DSA_RAW_FIELDS,
     DSA_ENV_FIELDS,
     STRUCTURE_FIELDS,
+    ACTIVE_OB_COUNT_FIELDS,
     CURRENT_PIVOT_FIELDS,
     OVERLAP_FIELDS,
     NEAREST_FIELDS,
@@ -342,7 +344,7 @@ def summarize_level_side(
         f"{side}_nearest_structure_class": None,
     }
     for b in DIST_BINS:
-        out[f"{side}_count_within_{b:g}atr"] = 0
+        out[density_field(side, b)] = 0
     for b in LEVEL_TYPE_BUCKETS:
         out[f"{side}_{b}_count"] = 0
         out[f"{side}_nearest_{b}_exec_atr"] = np.nan
@@ -368,7 +370,7 @@ def summarize_level_side(
             x["structure_class"].to_numpy()[j]
         )
         for b in DIST_BINS:
-            out[f"{side}_count_within_{b:g}atr"] = int(
+            out[density_field(side, b)] = int(
                 (de[ok] <= b).sum()
             )
 
@@ -453,17 +455,18 @@ def build_candidate_env_tf(
     if ctx["context_tf"].astype(str).isin(QUARANTINED_TFS).any():
         raise RuntimeError("quarantined TF leaked into output")
 
-    # DSA raw parity with the committed V3 schema.
-    dsa_raw_cols = sorted(
+    # DSA raw parity with the committed V3 schema -- EXACT equality.
+    # A newly appearing dsa_raw_* field is just as much a contract
+    # break as a missing one, so "expected - actual" is not enough.
+    actual_dsa = set(
         c for c in ctx.columns if c.startswith("dsa_raw_")
     )
-    missing_dsa = sorted(
-        set(EXPECTED_DSA_RAW_FIELDS) - set(dsa_raw_cols)
-    )
-    if missing_dsa:
+    expected_dsa = set(EXPECTED_DSA_RAW_FIELDS)
+    if actual_dsa != expected_dsa:
         raise RuntimeError(
-            "DSA raw schema drift, missing: "
-            f"{missing_dsa[:8]}"
+            "DSA raw schema drift: "
+            f"missing={sorted(expected_dsa - actual_dsa)} "
+            f"extra={sorted(actual_dsa - expected_dsa)}"
         )
 
     wanted = (
@@ -472,7 +475,8 @@ def build_candidate_env_tf(
         | set(OVERLAP_FIELDS)
         | set(NEAREST_FIELDS)
         | set(DSA_ENV_FIELDS)
-        | {"atr14"}
+        | set(ACTIVE_OB_COUNT_FIELDS)
+        | {"atr14", "close"}
     )
     cols = [c for c in ctx.columns if c in wanted]
 
@@ -492,6 +496,20 @@ def build_candidate_env_tf(
     # it must run BEFORE any rename of that column.
     env = attach_momentum(env, momentum_by_tf)
     env = add_momentum_sign(env)
+
+    # ATR must be comparable across symbols and price levels, so the
+    # environment carries ATR / price, not ATR alone.
+    atr = pd.to_numeric(
+        env["atr14"], errors="coerce"
+    ).to_numpy(float)
+    close = pd.to_numeric(
+        env["close"], errors="coerce"
+    ).to_numpy(float)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        atr_pct = np.where(
+            (close > 0) & np.isfinite(close), atr / close, np.nan
+        )
+    env["atr_pct"] = atr_pct
 
     env = env.rename(columns={"bar_index": "context_bar_index"})
 
@@ -592,6 +610,11 @@ def build_candidate_level_map(
             row.update(summarize_level_side(g2, side=side))
         ov = g2[g2["relation"].astype(str).eq("overlap")]
         row["overlap_object_count"] = int(len(ov))
+        row["overlap_active_ob_count"] = int(
+            (
+                ov["level_type"].astype(str).eq("active_ob")
+            ).sum()
+        )
         rows.append(row)
 
     grid = full_candidate_tf_grid(candidates)
@@ -619,6 +642,61 @@ def build_candidate_level_map(
         ),
     }
     return out, join_proof, vocab, quar
+
+
+def assert_cardinality(
+    candidates: pd.DataFrame,
+    env_tf: pd.DataFrame,
+    level_map: pd.DataFrame,
+    outcomes: pd.DataFrame,
+) -> dict:
+    """Cheap hard gates that synthetic data satisfies trivially but
+    real data must be forced to satisfy.
+
+        env_tf    == candidates x 3 validated TFs
+        level_map == candidates x 3 validated TFs
+        outcomes  == candidates (unique)
+    """
+    n = int(candidates["candidate_id"].nunique())
+    if candidates["candidate_id"].duplicated().any():
+        raise RuntimeError("duplicate candidate_id in candidates")
+
+    expected_tf_rows = n * len(VALIDATED_TFS)
+
+    if len(env_tf) != expected_tf_rows:
+        raise RuntimeError(
+            "environment cardinality mismatch: "
+            f"{len(env_tf)} != {expected_tf_rows}"
+        )
+    if env_tf.duplicated(["candidate_id", "context_tf"]).any():
+        raise RuntimeError(
+            "duplicate candidate x TF environment row"
+        )
+    if len(level_map) != expected_tf_rows:
+        raise RuntimeError(
+            "level map cardinality mismatch: "
+            f"{len(level_map)} != {expected_tf_rows}"
+        )
+    if level_map.duplicated(["candidate_id", "context_tf"]).any():
+        raise RuntimeError(
+            "duplicate candidate x TF level map row"
+        )
+    if len(outcomes) != n:
+        raise RuntimeError(
+            "outcome cardinality mismatch: "
+            f"{len(outcomes)} != {n}"
+        )
+    if outcomes["candidate_id"].duplicated().any():
+        raise RuntimeError("duplicate candidate_id in outcomes")
+
+    return {
+        "candidates": n,
+        "expected_tf_rows": expected_tf_rows,
+        "env_tf_rows": int(len(env_tf)),
+        "level_map_rows": int(len(level_map)),
+        "outcomes_rows": int(len(outcomes)),
+        "duplicate_keys": 0,
+    }
 
 
 def build_candidate_outcomes(
@@ -759,6 +837,10 @@ def main() -> None:
     )
     outcomes = build_candidate_outcomes(candidates, path)
 
+    cardinality = assert_cardinality(
+        candidates, env_tf, level_map, outcomes
+    )
+
     env_tf.to_csv(
         ATLAS_ROOT / "candidate_env_tf.csv", index=False
     )
@@ -787,6 +869,8 @@ def main() -> None:
             + quar_lv["4h_output_rows"]
         ),
         "dsa_raw_parity": dsa_counts,
+        "cardinality": cardinality,
+        "atr_pct_carried": bool("atr_pct" in env_tf.columns),
         "levels_join_proof": join_proof,
         "level_vocabulary": vocab,
         "source_owners": SOURCE_OWNERS,

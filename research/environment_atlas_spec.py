@@ -82,6 +82,11 @@ HORIZON_LABELS = {
 
 DIST_BINS = (0.5, 1.0, 2.0, 3.0)
 
+
+def density_field(side: str, bin_atr: float) -> str:
+    """Level-map column for 'objects within N ATR' on one side."""
+    return f"{side}_count_within_{bin_atr:g}atr"
+
 # ------------------------------------------------------------
 # Cell sample-size gates.
 #
@@ -99,6 +104,42 @@ ROBUST_TRADING_DAYS = 40
 STATUS_INSUFFICIENT = "INSUFFICIENT"
 STATUS_EXPLORATORY = "EXPLORATORY"
 STATUS_ROBUST = "ROBUST"
+
+# ------------------------------------------------------------
+# Descriptive environment layering.
+#
+# Continuous environment variables are layered by their OWN
+# distribution (quintiles), never by a hand-picked threshold. This is
+# a DESCRIPTIVE split made before any payoff is inspected; it is not a
+# strategy parameter and must never be tuned against an outcome.
+# ------------------------------------------------------------
+
+DESCRIPTIVE_Q_BINS = (
+    float("-inf"),
+    0.20,
+    0.40,
+    0.60,
+    0.80,
+    float("inf"),
+)
+
+DESCRIPTIVE_Q_LABELS = ("Q1", "Q2", "Q3", "Q4", "Q5")
+
+# Ranked WITHIN (symbol, source_tf, trade_mode) so that a quintile
+# always means "high for this generator and this trade mode".
+DESCRIPTIVE_Q_GROUP = ("symbol", "source_tf", "trade_mode")
+
+# Projection kinds:
+#   categorical  carried verbatim (string / bool state)
+#   raw_q        numeric -> descriptive quintile
+#   signed       numeric x trade_direction -> descriptive quintile
+#   signed_cat   numeric x trade_direction -> kept as-is (relative dir)
+PROJECTION_KINDS = (
+    "categorical",
+    "raw_q",
+    "signed",
+    "signed_cat",
+)
 
 # ------------------------------------------------------------
 # Canonical Momentum (SQZMOM).
@@ -357,6 +398,172 @@ LEVEL_TYPE_BUCKETS = (
 )
 
 # ------------------------------------------------------------
+# Pre-registered ENVIRONMENT PROJECTIONS.
+#
+# The mother table carries the complete raw environment. The Atlas
+# studies a PRE-REGISTERED projection of it, fixed BEFORE any payoff
+# is inspected. This is deliberately NOT a cartesian product of all
+# 70 dsa_raw_* fields, and deliberately NOT reduced to
+# "direction + sign + nearest room".
+#
+# Each projection is (facet_suffix, env_column_suffix, kind).
+# ------------------------------------------------------------
+
+ACTIVE_OB_COUNT_FIELDS = (
+    "active_bull_internal_ob_count",
+    "active_bear_internal_ob_count",
+    "active_bull_swing_ob_count",
+    "active_bear_swing_ob_count",
+)
+
+# --- DSA running-state projections ---------------------------
+
+DSA_PIVOT_FIELDS = (
+    "dsa_raw_regime_strength",
+    "dsa_raw_dsa_dir_bars",
+    "dsa_raw_trend_transition",
+    "dsa_raw_offset_percentile",
+    "dsa_raw_dsa_vwap_dev_pct",
+    "dsa_raw_segment_direction",
+    "dsa_raw_segment_slope",
+    "dsa_raw_segment_bars",
+    "dsa_raw_touch_rope",
+    "dsa_raw_touch_vwap",
+    "dsa_raw_rope_dir1_pct",
+    "dsa_raw_rope_dir0_pct",
+    "dsa_raw_rope_dir_neg1_pct",
+)
+
+DSA_PROJECTIONS = (
+    ("regime_strength", "dsa_raw_regime_strength", "signed"),
+    ("regime_age", "dsa_raw_dsa_dir_bars", "raw_q"),
+    ("transition", "dsa_raw_trend_transition", "categorical"),
+    ("offset_percentile", "dsa_raw_offset_percentile", "raw_q"),
+    ("vwap_deviation", "dsa_raw_dsa_vwap_dev_pct", "signed"),
+    (
+        "segment_direction",
+        "dsa_raw_segment_direction",
+        "signed_cat",
+    ),
+    ("segment_slope", "dsa_raw_segment_slope", "signed"),
+    ("segment_bars", "dsa_raw_segment_bars", "raw_q"),
+    ("touch_rope", "dsa_raw_touch_rope", "categorical"),
+    ("touch_vwap", "dsa_raw_touch_vwap", "categorical"),
+    ("rope_dir1_pct", "dsa_raw_rope_dir1_pct", "raw_q"),
+    ("rope_dir0_pct", "dsa_raw_rope_dir0_pct", "raw_q"),
+    ("rope_dir_neg1_pct", "dsa_raw_rope_dir_neg1_pct", "raw_q"),
+)
+
+# --- Momentum projections -------------------------------------
+#
+# Canonical STRINGS (volatility_phase / momentum_direction /
+# momentum_change) are studied as-is and are never multiplied.
+# ------------------------------------------------------------
+
+MOMENTUM_PIVOT_FIELDS = (
+    "momentum_sqzmom_delta",
+    "momentum_release_volume_ratio",
+    "momentum_squeeze_period_volume_mean",
+)
+
+MOMENTUM_TF_PROJECTIONS = (
+    ("sqzmom_delta", "momentum_sqzmom_delta", "signed"),
+    (
+        "release_volume_ratio",
+        "momentum_release_volume_ratio",
+        "raw_q",
+    ),
+    (
+        "squeeze_volume_mean",
+        "momentum_squeeze_period_volume_mean",
+        "raw_q",
+    ),
+)
+
+# --- Structure projections ------------------------------------
+
+STRUCTURE_PIVOT_FIELDS = (
+    "last_internal_structure_type",
+    "last_internal_structure_bias",
+    "last_internal_structure_age",
+    "last_swing_structure_type",
+    "last_swing_structure_bias",
+    "last_swing_structure_age",
+)
+
+STRUCTURE_PROJECTIONS = (
+    (
+        "internal_structure_type",
+        "last_internal_structure_type",
+        "categorical",
+    ),
+    (
+        "internal_structure_bias",
+        "last_internal_structure_bias",
+        "signed_cat",
+    ),
+    (
+        "internal_structure_age",
+        "last_internal_structure_age",
+        "raw_q",
+    ),
+    (
+        "swing_structure_type",
+        "last_swing_structure_type",
+        "categorical",
+    ),
+    (
+        "swing_structure_bias",
+        "last_swing_structure_bias",
+        "signed_cat",
+    ),
+    (
+        "swing_structure_age",
+        "last_swing_structure_age",
+        "raw_q",
+    ),
+)
+
+# --- Volatility projections -----------------------------------
+#
+# atr_pct = atr14 / close, derived in the builder so that ATR is
+# comparable across symbols and price levels.
+# ------------------------------------------------------------
+
+VOLATILITY_ENV_FIELD = "atr_pct"
+
+VOLATILITY_PROJECTIONS = (
+    ("atr_pct", VOLATILITY_ENV_FIELD, "raw_q"),
+)
+
+# --- Quantile projections -------------------------------------
+
+QUANTILE_FACET_FIELDS = (
+    "quant_bin",
+    "quant_width_percentile_train",
+    "quant_top30_train",
+    "quant_crossed",
+)
+
+# Full environment columns pivoted candidate x timeframe.
+ENV_PIVOT_FIELDS = (
+    (
+        "dsa_direction",
+        "internal_bias",
+        "swing_bias",
+        "momentum_sqzmom_sign",
+        "momentum_momentum_direction",
+        "momentum_momentum_change",
+        "momentum_volatility_phase",
+        VOLATILITY_ENV_FIELD,
+    )
+    + DSA_PIVOT_FIELDS
+    + MOMENTUM_PIVOT_FIELDS
+    + STRUCTURE_PIVOT_FIELDS
+    + ACTIVE_OB_COUNT_FIELDS
+)
+
+# ------------------------------------------------------------
 # Pre-registered Level-2 interactions.
 #
 # A full cartesian product over all families is FORBIDDEN.
@@ -382,6 +589,86 @@ LEVEL2_TF_EXPANDED = frozenset(
     {("DSA", "LEVELS"), ("MOMENTUM", "LEVELS"),
      ("TOUCH", "LEVELS"), ("QUANTILE", "LEVELS")}
 )
+
+# ------------------------------------------------------------
+# Level-2 state axes -- EXPLICIT, never guessed.
+#
+# NO column name may be derived by string concatenation such as
+# f"{a.lower()}_joint_rel": the four LEVELS pairs use four different
+# real column names, and a guessed name produced silent no-op
+# facets. Every registered pair MUST appear in exactly one map.
+# ------------------------------------------------------------
+
+LEVEL2_STATE_AXIS = {
+    ("DSA", "MOMENTUM"): (
+        "dsa_joint_rel",
+        "momentum_rel_joint",
+    ),
+    ("SMC", "DSA"): (
+        "smc_internal_joint_rel",
+        "dsa_joint_rel",
+    ),
+    ("SMC", "MOMENTUM"): (
+        "smc_internal_joint_rel",
+        "momentum_rel_joint",
+    ),
+    ("TOUCH", "DSA"): (
+        "touch_behavior",
+        "dsa_joint_rel",
+    ),
+    ("TOUCH", "MOMENTUM"): (
+        "touch_behavior",
+        "momentum_rel_joint",
+    ),
+    ("QUANTILE", "MOMENTUM"): (
+        "quant_bin",
+        "momentum_rel_joint",
+    ),
+}
+
+# LEVELS side of a TF-expanded pair uses the pair's OWN state column.
+LEVEL2_LEVEL_STATE_AXIS = {
+    ("DSA", "LEVELS"): "dsa_joint_rel",
+    ("MOMENTUM", "LEVELS"): "momentum_rel_joint",
+    ("TOUCH", "LEVELS"): "touch_behavior",
+    ("QUANTILE", "LEVELS"): "quant_bin",
+}
+
+
+def assert_level2_registry() -> None:
+    """The registry IS the test surface. Registry and runner cannot
+    silently drift apart, because the runner has no fallback."""
+    declared = set(LEVEL2_INTERACTIONS)
+    plain = set(LEVEL2_STATE_AXIS)
+    expanded = set(LEVEL2_LEVEL_STATE_AXIS)
+
+    if LEVEL2_TF_EXPANDED != expanded:
+        raise RuntimeError(
+            "LEVEL2_TF_EXPANDED != LEVEL2_LEVEL_STATE_AXIS keys: "
+            f"{sorted(LEVEL2_TF_EXPANDED ^ expanded)}"
+        )
+    if expanded - declared:
+        raise RuntimeError(
+            "expanded pairs not registered: "
+            f"{sorted(expanded - declared)}"
+        )
+    if plain & expanded:
+        raise RuntimeError(
+            "pair registered in both axis maps: "
+            f"{sorted(plain & expanded)}"
+        )
+    uncovered = declared - plain - expanded
+    if uncovered:
+        raise RuntimeError(
+            "registered Level-2 pair has no state axis: "
+            f"{sorted(uncovered)}"
+        )
+    orphan = (plain | expanded) - declared
+    if orphan:
+        raise RuntimeError(
+            "state axis defined for unregistered pair: "
+            f"{sorted(orphan)}"
+        )
 
 # ------------------------------------------------------------
 # Source owners
