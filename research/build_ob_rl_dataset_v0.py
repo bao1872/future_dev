@@ -462,6 +462,145 @@ def audit_momentum_coverage(
     }
 
 
+def apply_confirmed_dsa_gate(
+    state: pd.DataFrame,
+) -> tuple[pd.DataFrame, dict]:
+    """Gate model-facing DSA VWAP state by confirmed regime.
+
+    Contract:
+        dsa_direction == +1 / -1
+            -> confirmed DSA regime
+            -> VWAP deviation may be exposed
+
+        dsa_direction == 0 / NaN
+            -> unconfirmed
+            -> model-facing VWAP deviation MUST be NaN
+
+    Raw warehouse DSA fields are deliberately left untouched.
+    """
+
+    audit = {}
+
+    for tf in VALIDATED_TFS:
+        assert_validated_tf(tf)
+
+        direction_col = (
+            f"dsa_direction_{tf}"
+        )
+
+        dev_col = (
+            f"dsa_vwap_dev_pct_{tf}"
+        )
+
+        if direction_col not in state.columns:
+            raise RuntimeError(
+                f"missing {direction_col}"
+            )
+
+        if dev_col not in state.columns:
+            raise RuntimeError(
+                f"missing {dev_col}"
+            )
+
+        direction = pd.to_numeric(
+            state[direction_col],
+            errors="coerce",
+        )
+
+        illegal = (
+            direction.notna()
+            & ~direction.isin(
+                [-1, 0, 1]
+            )
+        )
+
+        if illegal.any():
+            bad = sorted(
+                direction[
+                    illegal
+                ]
+                .unique()
+                .tolist()
+            )
+
+            raise RuntimeError(
+                f"{tf}: illegal confirmed "
+                f"DSA direction values: {bad}"
+            )
+
+        confirmed = (
+            direction.abs()
+            == 1
+        )
+
+        dev_before = pd.to_numeric(
+            state[dev_col],
+            errors="coerce",
+        )
+
+        provisional_with_dev = (
+            (~confirmed)
+            & dev_before.notna()
+        )
+
+        # MODEL-FACING correction.
+        #
+        # Do NOT modify raw dsa_raw_* warehouse fields.
+        state.loc[
+            ~confirmed,
+            dev_col,
+        ] = np.nan
+
+        dev_after = pd.to_numeric(
+            state[dev_col],
+            errors="coerce",
+        )
+
+        leak_after_gate = (
+            (~confirmed)
+            & dev_after.notna()
+        )
+
+        if leak_after_gate.any():
+            raise RuntimeError(
+                f"{tf}: unconfirmed DSA VWAP "
+                "survived confirmation gate"
+            )
+
+        audit[tf] = {
+            "rows":
+                int(len(state)),
+
+            "confirmed_rows":
+                int(
+                    confirmed.sum()
+                ),
+
+            "unconfirmed_rows":
+                int(
+                    (~confirmed).sum()
+                ),
+
+            "provisional_dev_rows_masked":
+                int(
+                    provisional_with_dev.sum()
+                ),
+
+            "confirmed_dev_rows":
+                int(
+                    (
+                        confirmed
+                        & dev_after.notna()
+                    ).sum()
+                ),
+        }
+
+    return (
+        state,
+        audit,
+    )
+
+
 def build_state(
     candidates: pd.DataFrame,
     context: pd.DataFrame,
@@ -634,6 +773,12 @@ def build_state(
             if col in state.columns:
                 state[f"{dst}_{tf}"] = state[col]
 
+    state, dsa_confirmation_gate = (
+        apply_confirmed_dsa_gate(
+            state
+        )
+    )
+
     state["decision_weight"] = (
         1.0
         / pd.to_numeric(
@@ -647,6 +792,7 @@ def build_state(
         "level_vocabulary": vocab,
         "context_coverage": ctx_cov,
         "momentum_coverage": mom_cov,
+        "dsa_confirmation_gate": dsa_confirmation_gate,
     }
     return state, info
 
@@ -1145,6 +1291,7 @@ def main() -> None:
         "level_vocabulary": info["level_vocabulary"],
         "context_coverage": info["context_coverage"],
         "momentum_coverage": info["momentum_coverage"],
+        "dsa_confirmation_gate": info["dsa_confirmation_gate"],
         "metadata_columns": meta_cols,
         "state_feature_columns": feature_cols,
         "action_columns": [

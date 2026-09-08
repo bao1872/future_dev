@@ -1,7 +1,7 @@
 """Panji canonical indicator calculation bundle (standalone).
 
 Extracted from bao1872/market_dev branch dev at commit:
-    4902f8ab4fc65024e2259afe90ebcbc8b9d319f1
+    557bbf4adca010fac9e354da7948691b795f4e31
 
 Calculation owners copied/inlined:
 - dynamic_swing_anchored_vwap.py  (DSA VWAP kernel)
@@ -583,35 +583,203 @@ def _remove_dsa_lookahead(
     dir_series: pd.Series,
     cfg: DSAConfig | None = None,
 ) -> tuple[pd.Series, pd.Series]:
-    dir_vals = dir_series.fillna(0).astype(int)
-    flip_mask = dir_vals != dir_vals.shift(1)
-    flip_mask.iloc[0] = False
-    flip_indices = daily_df.index[flip_mask].tolist()
+    """Remove historical DSA repaint from full-history calculation.
+
+    dynamic_swing_anchored_vwap() legitimately detects a direction
+    flip at bar T using information available at T, but at that point
+    it rewrites VWAP values from the new anchor through T.
+
+    Those rewritten values are valid for visualization after T, but
+    they are NOT the values that were available historically at bars
+    before T.
+
+    Important:
+    corrections must be applied from the LATEST flip backwards.
+
+    If flips are processed oldest -> newest, a later truncated
+    calculation already contains the repaint created by earlier flips
+    and can re-introduce that historical lookahead.
+
+    Reverse chronological processing gives each historical region the
+    value that was actually available at that time.
+    """
+    dir_vals = (
+        dir_series
+        .fillna(0)
+        .astype(int)
+    )
+
+    flip_mask = (
+        dir_vals
+        != dir_vals.shift(1)
+    )
+
+    if len(flip_mask):
+        flip_mask.iloc[0] = False
+
+    flip_indices = (
+        daily_df.index[
+            flip_mask
+        ]
+        .tolist()
+    )
+
     if not flip_indices:
-        return vwap_series, dir_series
+        return (
+            vwap_series,
+            dir_series,
+        )
+
     if cfg is None:
         cfg = DSAConfig()
-    vwap_corrected = vwap_series.copy()
-    dir_corrected = dir_series.copy()
-    for flip_idx in flip_indices:
-        loc = daily_df.index.get_loc(flip_idx)
+
+    vwap_corrected = (
+        vwap_series.copy()
+    )
+
+    dir_corrected = (
+        dir_series.copy()
+    )
+
+    # CRITICAL:
+    # newest -> oldest.
+    #
+    # A later prefix contains earlier flips.
+    # Therefore the earlier historical region must be corrected LAST.
+    for flip_idx in reversed(
+        flip_indices
+    ):
+        loc = daily_df.index.get_loc(
+            flip_idx
+        )
+
         if loc < 2:
             continue
-        truncated_df = daily_df.iloc[:loc]
+
+        # Information set immediately BEFORE the flip.
+        # This is what bars < T could actually have known.
+        truncated_df = (
+            daily_df.iloc[:loc]
+        )
+
         try:
-            vwap_trunc, dir_trunc, _, _ = dynamic_swing_anchored_vwap(truncated_df, cfg)
+            (
+                vwap_trunc,
+                dir_trunc,
+                _,
+                _,
+            ) = (
+                dynamic_swing_anchored_vwap(
+                    truncated_df,
+                    cfg,
+                )
+            )
+
         except Exception as exc:
-            logger.debug("截断 DSA 计算异常 flip_idx=%s: %s", flip_idx, exc)
+            logger.debug(
+                "截断 DSA 计算异常 "
+                "flip_idx=%s: %s",
+                flip_idx,
+                exc,
+            )
             continue
-        common_idx = vwap_trunc.index.intersection(vwap_corrected.index)
-        trunc_vals = vwap_trunc.loc[common_idx].astype(float)
-        corrected_vals = vwap_corrected.loc[common_idx].astype(float)
-        valid_mask = trunc_vals.notna() & corrected_vals.notna()
-        diff_mask = (trunc_vals[valid_mask] - corrected_vals[valid_mask]).abs() > 0.001
-        replace_idx = diff_mask[diff_mask].index
-        vwap_corrected.loc[replace_idx] = trunc_vals.loc[replace_idx]
-        dir_corrected.loc[replace_idx] = dir_trunc.loc[replace_idx]
-    return vwap_corrected, dir_corrected
+
+        common_idx = (
+            vwap_trunc.index
+            .intersection(
+                vwap_corrected.index
+            )
+        )
+
+        if len(common_idx) == 0:
+            continue
+
+        trunc_v = (
+            vwap_trunc.loc[
+                common_idx
+            ]
+            .astype(float)
+            .to_numpy()
+        )
+
+        corrected_v = (
+            vwap_corrected.loc[
+                common_idx
+            ]
+            .astype(float)
+            .to_numpy()
+        )
+
+        trunc_d = (
+            pd.to_numeric(
+                dir_trunc.loc[
+                    common_idx
+                ],
+                errors="coerce",
+            )
+            .to_numpy(float)
+        )
+
+        corrected_d = (
+            pd.to_numeric(
+                dir_corrected.loc[
+                    common_idx
+                ],
+                errors="coerce",
+            )
+            .to_numpy(float)
+        )
+
+        vwap_same = np.isclose(
+            trunc_v,
+            corrected_v,
+            rtol=0.0,
+            atol=1e-12,
+            equal_nan=True,
+        )
+
+        dir_same = np.isclose(
+            trunc_d,
+            corrected_d,
+            rtol=0.0,
+            atol=0.0,
+            equal_nan=True,
+        )
+
+        replace_mask = ~(
+            vwap_same
+            & dir_same
+        )
+
+        if not replace_mask.any():
+            continue
+
+        replace_idx = (
+            common_idx[
+                replace_mask
+            ]
+        )
+
+        vwap_corrected.loc[
+            replace_idx
+        ] = (
+            vwap_trunc.loc[
+                replace_idx
+            ]
+        )
+
+        dir_corrected.loc[
+            replace_idx
+        ] = (
+            dir_trunc.loc[
+                replace_idx
+            ]
+        )
+
+    return (
+        vwap_corrected,
+        dir_corrected,
+    )
 
 
 def _safe_float(val: Any) -> float | None:

@@ -260,17 +260,34 @@ ACTIVE_OB_METADATA_FIELDS = (
 )
 
 # ------------------------------------------------------------
-# DSA V0 (two core states only)
+# DSA V0
 # ------------------------------------------------------------
-
+#
+# dsa_direction is the CONFIRMED canonical regime:
+#
+#     +1 confirmed bullish
+#      0 unconfirmed / neutral
+#     -1 confirmed bearish
+#
+# dsa_vwap_dev_pct is a MODEL-FACING state only while
+# dsa_direction is confirmed (+1/-1).
+#
+# When dsa_direction == 0, model-facing dsa_vwap_dev_pct MUST
+# be NaN. The raw provisional canonical dsa_raw_* warehouse
+# fields may remain available for audit, but they may not be
+# promoted into model-facing action state.
+#
 DSA_FIELDS = (
     "dsa_direction",
     "dsa_raw_dsa_vwap_dev_pct",
 )
 
 DSA_RENAMES = {
-    "dsa_direction": "dsa_direction",
-    "dsa_raw_dsa_vwap_dev_pct": "dsa_vwap_dev_pct",
+    "dsa_direction":
+        "dsa_direction",
+
+    "dsa_raw_dsa_vwap_dev_pct":
+        "dsa_vwap_dev_pct",
 }
 
 # ------------------------------------------------------------

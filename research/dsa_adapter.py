@@ -4,7 +4,7 @@ Source repo:
     bao1872/market_dev
 
 Source SHA (current HEAD at time of authoring):
-    8686b803c53c3a423badb80491fbd21f06879fbb
+    557bbf4adca010fac9e354da7948691b795f4e31
 
 Source paths (canonical DSA SSOT in market_dev):
     backend/app/strategy/selectors/dsa_selector.py
@@ -23,7 +23,7 @@ consumed 1:1 from ``future_dev/panji_indicators.py`` (imported below), which
 is the frozen, declared-canonical (AGENTS.md) 1:1 extraction of the
 market_dev DSA sources cited above. The ``dynamic_swing_anchored_vwap`` kernel
 in ``panji_indicators`` is byte-identical to the current market_dev kernel
-(verified by source inspection at market_dev SHA 8686b80).
+(verified by source inspection at market_dev SHA 557bbf4a).
 
 This module only:
   * prepares the input frame to the canonical contract (OHLCV + amount),
