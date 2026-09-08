@@ -54,10 +54,8 @@ EVENT_FAMILY = (
     "TOUCH_BEHAVIOR",
 )
 
-# Only these timeframes have a validated aggregation authority.
 VALIDATED_TFS = ("5m", "15m", "1h")
 
-# 4h is hard-quarantined. See FOUR_HOUR_AUTHORITY below.
 QUARANTINED_TFS = ("4h",)
 
 # ------------------------------------------------------------
@@ -85,7 +83,10 @@ HORIZON_LABELS = {
 DIST_BINS = (0.5, 1.0, 2.0, 3.0)
 
 # ------------------------------------------------------------
-# Cell sample-size gates
+# Cell sample-size gates.
+#
+# Gates are evaluated PER HORIZON on the horizon's VALID sample, never
+# on the cell total (H24 strict-continuity coverage is ~19%).
 # ------------------------------------------------------------
 
 MIN_RAW_N = 50
@@ -100,11 +101,15 @@ STATUS_EXPLORATORY = "EXPLORATORY"
 STATUS_ROBUST = "ROBUST"
 
 # ------------------------------------------------------------
-# Canonical Momentum (SQZMOM) state fields.
+# Canonical Momentum (SQZMOM).
 #
-# These are exactly the keys emitted by the canonical
-# build_momentum_history()["daily_state"] in panji_indicators.py.
-# They are consumed, never recomputed.
+# Source owner: panji_indicators.compute_sqzmom_lb +
+# build_momentum_history, reached via
+# research.indicator_adapter.compute_smc_momentum_bundle.
+#
+# momentum_direction / momentum_change / volatility_phase are CANONICAL
+# STRINGS. They are carried verbatim and are NEVER cast to float and
+# never multiplied by a trade direction.
 # ------------------------------------------------------------
 
 MOMENTUM_STATE_FIELDS = (
@@ -117,57 +122,125 @@ MOMENTUM_STATE_FIELDS = (
     "release_volume_ratio",
 )
 
+MOMENTUM_CANONICAL_STRING_FIELDS = (
+    "volatility_phase",
+    "momentum_direction",
+    "momentum_change",
+)
+
+MOMENTUM_DIRECTION_VALUES = (
+    "expanding",
+    "contracting",
+    "flat",
+)
+
+MOMENTUM_CHANGE_VALUES = (
+    "enhancing",
+    "weakening",
+    "flat",
+)
+
+# Explicit numeric derivation used for directional combination:
+#   sqzmom_val > 0 -> +1 (expanding)
+#   sqzmom_val < 0 -> -1 (contracting)
+#   sqzmom_val = 0 ->  0 (flat)
+MOMENTUM_SIGN_FIELD = "momentum_sqzmom_sign"
+
+# attach_momentum() carries canonical states with a "momentum_" prefix,
+# so the canonical string columns on candidate_env_tf are these names.
+# They are strings and must never be float-cast.
+MOMENTUM_CARRIED_STRING_FIELDS = (
+    "momentum_volatility_phase",
+    "momentum_momentum_direction",
+    "momentum_momentum_change",
+)
+
 MOMENTUM_JOIN_FIELD = "bar_index"
 
 # ------------------------------------------------------------
-# DSA raw environment fields carried into the atlas.
+# DSA raw environment - EXACT frozen schema.
 #
-# IMPORTANT: DSA is used here as a RUNNING-REGIME environment, not as
-# three additive direction variables. The joint multi-TF state matters,
-# so the full raw environment is retained per timeframe.
+# This is the full dsa_raw_* column set committed by V3 (read from
+# research/analysis_data/ob_candidate_universe_v3/schema.json).
+# It is NOT a hand-picked subset. The builder asserts exact parity at
+# runtime so the environment mother table cannot silently drop fields.
 # ------------------------------------------------------------
 
-DSA_ENV_FIELDS = (
-    "dsa_direction",
-    "dsa_raw_regime_value",
-    "dsa_raw_regime_strength",
+EXPECTED_DSA_RAW_FIELDS = (
+    "dsa_raw_avg_amount_20d",
+    "dsa_raw_change_pct",
+    "dsa_raw_cross_down_count",
+    "dsa_raw_cross_up_count",
+    "dsa_raw_current_segment_amount_mean",
+    "dsa_raw_current_segment_amount_sum",
+    "dsa_raw_current_segment_volume_mean",
+    "dsa_raw_current_segment_volume_sum",
+    "dsa_raw_current_vs_prev_amount_mean_ratio",
+    "dsa_raw_current_vs_prev_amount_ratio",
+    "dsa_raw_current_vs_prev_volume_mean_ratio",
+    "dsa_raw_current_vs_prev_volume_ratio",
     "dsa_raw_dsa_dir_bars",
-    "dsa_raw_trend_transition",
-    "dsa_raw_offset_rate",
-    "dsa_raw_offset_mean",
-    "dsa_raw_offset_std",
-    "dsa_raw_offset_percentile",
-    "dsa_raw_offset_variance_rate",
-    "dsa_raw_vwap_ret_avg",
-    "dsa_raw_vwap_ret_total",
-    "dsa_raw_vwap_ret_5",
-    "dsa_raw_vwap_ret_10",
-    "dsa_raw_vwap_ret_20",
     "dsa_raw_dsa_vwap",
     "dsa_raw_dsa_vwap_dev_pct",
-    "dsa_raw_change_pct",
-    "dsa_raw_vol_zscore",
-    "dsa_raw_segment_id",
-    "dsa_raw_segment_direction",
+    "dsa_raw_last_cross_down_date",
+    "dsa_raw_last_cross_down_price",
+    "dsa_raw_last_cross_up_date",
+    "dsa_raw_last_cross_up_price",
+    "dsa_raw_offset_mean",
+    "dsa_raw_offset_percentile",
+    "dsa_raw_offset_rate",
+    "dsa_raw_offset_std",
+    "dsa_raw_offset_variance_rate",
+    "dsa_raw_prev_segment_amount_mean",
+    "dsa_raw_prev_segment_amount_sum",
+    "dsa_raw_prev_segment_bars",
+    "dsa_raw_prev_segment_change_pct",
+    "dsa_raw_prev_segment_direction",
+    "dsa_raw_prev_segment_end_bar_index",
+    "dsa_raw_prev_segment_end_price",
+    "dsa_raw_prev_segment_end_time",
+    "dsa_raw_prev_segment_id",
+    "dsa_raw_prev_segment_slope",
+    "dsa_raw_prev_segment_start_bar_index",
+    "dsa_raw_prev_segment_start_price",
+    "dsa_raw_prev_segment_start_time",
+    "dsa_raw_prev_segment_volume_mean",
+    "dsa_raw_prev_segment_volume_sum",
+    "dsa_raw_regime_strength",
+    "dsa_raw_regime_value",
+    "dsa_raw_rope_cross_down_count",
+    "dsa_raw_rope_cross_down_date",
+    "dsa_raw_rope_cross_down_price",
+    "dsa_raw_rope_cross_up_count",
+    "dsa_raw_rope_cross_up_date",
+    "dsa_raw_rope_cross_up_price",
+    "dsa_raw_rope_dir0_pct",
+    "dsa_raw_rope_dir1_pct",
+    "dsa_raw_rope_dir_neg1_pct",
     "dsa_raw_segment_bars",
     "dsa_raw_segment_change_pct",
+    "dsa_raw_segment_direction",
+    "dsa_raw_segment_end_bar_index",
+    "dsa_raw_segment_end_price",
+    "dsa_raw_segment_end_time",
+    "dsa_raw_segment_id",
     "dsa_raw_segment_slope",
-    "dsa_raw_prev_segment_id",
-    "dsa_raw_prev_segment_direction",
-    "dsa_raw_prev_segment_bars",
-    "dsa_raw_prev_segment_slope",
-    "dsa_raw_current_vs_prev_volume_mean_ratio",
-    "dsa_raw_current_vs_prev_amount_mean_ratio",
-    "dsa_raw_rope_dir1_pct",
-    "dsa_raw_rope_dir0_pct",
-    "dsa_raw_rope_dir_neg1_pct",
+    "dsa_raw_segment_start_bar_index",
+    "dsa_raw_segment_start_price",
+    "dsa_raw_segment_start_time",
     "dsa_raw_touch_rope",
     "dsa_raw_touch_vwap",
-    "dsa_raw_cross_up_count",
-    "dsa_raw_cross_down_count",
-    "dsa_raw_rope_cross_up_count",
-    "dsa_raw_rope_cross_down_count",
+    "dsa_raw_trend_transition",
+    "dsa_raw_vol_zscore",
+    "dsa_raw_vwap_ret_10",
+    "dsa_raw_vwap_ret_20",
+    "dsa_raw_vwap_ret_5",
+    "dsa_raw_vwap_ret_avg",
+    "dsa_raw_vwap_ret_total",
 )
+
+# Carried into candidate_env_tf = direction + ALL raw fields.
+DSA_ENV_FIELDS = ("dsa_direction",) + EXPECTED_DSA_RAW_FIELDS
 
 # ------------------------------------------------------------
 # Structural environment fields (per timeframe)
@@ -245,9 +318,10 @@ NEAREST_FIELDS = (
 # ------------------------------------------------------------
 # Levels schema (as committed by V3).
 #
-# NOTE the primary key is `event_id`, NOT `candidate_id`.
-# The mapping must be PROVEN at runtime (see
-# build_ob_environment_atlas_v1.resolve_level_join_key).
+# The primary key is `event_id`, NOT `candidate_id`; the mapping is
+# PROVEN at runtime. `relation` and `distance_pct` are the committed
+# touch-time zone-edge geometry and are used as-is: distances are NOT
+# recomputed from object center and NOT measured from the next open.
 # ------------------------------------------------------------
 
 LEVELS_COLUMNS = (
@@ -273,22 +347,21 @@ LEVELS_COLUMNS = (
 
 LEVELS_RELATIONS = ("above", "below", "overlap")
 
-# Object-type buckets used for pressure/support density.
-# Actual enumerations are VERIFIED against real levels data; this is
-# only the classification vocabulary, never assumed silently.
+# Type identity for pressure/support. There is deliberately NO silent
+# "other" bucket: an unmapped object type must STOP the build.
 LEVEL_TYPE_BUCKETS = (
     "active_ob",
     "internal_pivot",
     "swing_pivot",
     "equal_level",
-    "other",
 )
 
 # ------------------------------------------------------------
 # Pre-registered Level-2 interactions.
 #
 # A full cartesian product over all families is FORBIDDEN.
-# Only these pairs are analysed.
+# LEVELS pairs are expanded per timeframe (5m / 15m / 1h) so TF
+# identity is never collapsed into a single min().
 # ------------------------------------------------------------
 
 LEVEL2_INTERACTIONS = (
@@ -302,6 +375,12 @@ LEVEL2_INTERACTIONS = (
     ("TOUCH", "LEVELS"),
     ("QUANTILE", "MOMENTUM"),
     ("QUANTILE", "LEVELS"),
+)
+
+# Pairs whose LEVELS side is expanded per timeframe.
+LEVEL2_TF_EXPANDED = frozenset(
+    {("DSA", "LEVELS"), ("MOMENTUM", "LEVELS"),
+     ("TOUCH", "LEVELS"), ("QUANTILE", "LEVELS")}
 )
 
 # ------------------------------------------------------------
@@ -328,7 +407,8 @@ SOURCE_OWNERS = {
         ),
         "note": (
             "level_records emitted per (candidate, context_tf); "
-            "primary key event_id"
+            "primary key event_id; relation/distance_pct are the "
+            "committed touch-close zone-edge geometry"
         ),
     },
     "DSA": {
@@ -362,7 +442,7 @@ SOURCE_OWNERS = {
         "note": (
             "SQZMOM is NOT reimplemented anywhere in the atlas; "
             "momentum_history['daily_state'] is the source-owner "
-            "return structure"
+            "return structure; direction/change/phase are strings"
         ),
     },
     "QUANTILE": {

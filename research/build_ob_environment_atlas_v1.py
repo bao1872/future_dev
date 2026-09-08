@@ -13,16 +13,23 @@ Hard rules
 ----------
 * Momentum is consumed from the canonical source owner
   (``research.indicator_adapter.compute_smc_momentum_bundle``).
-  SQZMOM is never reimplemented.
+  SQZMOM is never reimplemented. Canonical string states
+  (momentum_direction / momentum_change / volatility_phase) are carried
+  verbatim; a separate numeric ``momentum_sqzmom_sign`` is derived
+  explicitly for directional combination.
 * Momentum is joined on the *already causally completed* context bar
-  index, so there is no lookahead.
+  index (``bar_index``), and missing bars raise.
 * The levels primary key is ``event_id``; its mapping to
   ``candidate_id`` is PROVEN at runtime, never assumed.
-* Pressure/support keeps timeframe identity: no collapse to a single
-  "forward room" number. Nearest object AND multi-bin density AND
-  object-type breakdown are all retained.
-* Distances are stored in BOTH execution ATR (5m) and TF-local ATR.
-* 4h is quarantined and never enters any atlas table.
+* Pressure/support uses the COMMITTED touch-time zone-edge geometry:
+  ``relation`` + ``distance_pct``, ATR-normalised against the 5m
+  touch-bar close. Distances are NOT recomputed from object center and
+  NOT measured from the next 5m open.
+* A candidate x timeframe with no structural object is EXPLICIT (counts
+  zero, nearest NaN) -- "no pressure/support" is itself an environment.
+* All dsa_raw_* fields are carried (exact parity with committed V3
+  schema, asserted at runtime).
+* 4h is quarantined: input rows are counted, output rows are asserted 0.
 * No best / rank / optimize / select logic exists in this module.
 """
 
@@ -68,6 +75,8 @@ from research.environment_atlas_spec import (  # noqa: E402
     DIST_BINS,
     MOMENTUM_STATE_FIELDS,
     MOMENTUM_JOIN_FIELD,
+    MOMENTUM_SIGN_FIELD,
+    EXPECTED_DSA_RAW_FIELDS,
     DSA_ENV_FIELDS,
     STRUCTURE_FIELDS,
     CURRENT_PIVOT_FIELDS,
@@ -90,12 +99,7 @@ def _to_canonical_frame(bars: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_momentum_frame(bars: pd.DataFrame) -> pd.DataFrame:
-    """Canonical SQZMOM momentum history for a timeframe.
-
-    Source owner: panji_indicators.compute_sqzmom_lb +
-    build_momentum_history, reached through
-    research.indicator_adapter.compute_smc_momentum_bundle.
-    """
+    """Canonical SQZMOM momentum history for a timeframe."""
     bundle = compute_smc_momentum_bundle(
         _to_canonical_frame(bars)
     )
@@ -119,33 +123,57 @@ def attach_momentum(
     env_tf: pd.DataFrame,
     momentum_by_tf: dict[str, pd.DataFrame],
 ) -> pd.DataFrame:
-    """Join canonical momentum onto the causally-completed context bar."""
+    """Join canonical momentum onto the causally-completed context bar.
+
+    Uses the real context ``bar_index``. A missing momentum bar is a
+    hard error (reindex-based NaN checks are not reliable).
+    """
     parts = []
     for tf, g in env_tf.groupby("context_tf", sort=False):
         assert_validated_tf(tf)
         mom = momentum_by_tf[tf].set_index(MOMENTUM_JOIN_FIELD)
-        idx = g["bar_index"].astype(int)
+        idx = g["bar_index"].astype(int).to_numpy()
+
+        missing = ~np.isin(idx, mom.index.to_numpy(int))
+        if missing.any():
+            raise RuntimeError(
+                f"{tf}: {int(missing.sum())} context bars "
+                "missing momentum"
+            )
+
+        m = mom.loc[idx]
         x = g.copy()
-        m = mom.reindex(idx.to_numpy())
-        if m.index.isna().any():
-            raise RuntimeError(f"{tf}: missing momentum rows")
         for c in MOMENTUM_STATE_FIELDS:
             x[f"momentum_{c}"] = m[c].to_numpy()
         parts.append(x)
     return pd.concat(parts, ignore_index=True)
 
 
+def add_momentum_sign(env_tf: pd.DataFrame) -> pd.DataFrame:
+    """Derive numeric SQZMOM sign from canonical sqzmom_val.
+
+    sqzmom_val > 0 -> +1 (expanding)
+    sqzmom_val < 0 -> -1 (contracting)
+    sqzmom_val = 0 ->  0 (flat)
+
+    Canonical string fields are left untouched.
+    """
+    out = env_tf.copy()
+    v = pd.to_numeric(
+        out.get("momentum_sqzmom_val"), errors="coerce"
+    ).to_numpy(float)
+    sign = np.full(len(out), np.nan)
+    ok = np.isfinite(v)
+    sign[ok] = np.sign(v[ok])
+    out[MOMENTUM_SIGN_FIELD] = sign
+    return out
+
+
 def resolve_level_join_key(
     candidates: pd.DataFrame,
     levels: pd.DataFrame,
 ) -> dict:
-    """PROVE the mapping between candidate_id and levels event_id.
-
-    Never inferred silently. Three independent checks:
-      1. every event_id exists as a candidate_id;
-      2. symbol agrees;
-      3. levels trigger_time equals that candidate's touch_time.
-    """
+    """PROVE the mapping between candidate_id and levels event_id."""
     ev = levels["event_id"].astype(str)
     cd = candidates["candidate_id"].astype(str)
 
@@ -159,9 +187,7 @@ def resolve_level_join_key(
     cmap = candidates.set_index("candidate_id")
 
     sym_lv = levels["symbol"].astype(str).to_numpy()
-    sym_cd = (
-        cmap.loc[ev.to_numpy(), "symbol"].astype(str).to_numpy()
-    )
+    sym_cd = cmap.loc[ev.to_numpy(), "symbol"].astype(str).to_numpy()
     sym_mismatch = int((sym_lv != sym_cd).sum())
 
     tt_lv = pd.to_datetime(levels["trigger_time"]).to_numpy(
@@ -176,7 +202,7 @@ def resolve_level_join_key(
         raise RuntimeError(
             "levels join key proof failed: "
             f"symbol_mismatch={sym_mismatch} "
-            f"time_mismatch={time_mismatch}"
+            f"trigger_time_mismatch={time_mismatch}"
         )
 
     return {
@@ -194,9 +220,7 @@ def resolve_level_join_key(
 
 
 def distance_exec_atr(
-    object_price: float,
-    price: float,
-    atr5: float,
+    object_price: float, price: float, atr5: float
 ) -> float:
     if not np.isfinite(atr5) or atr5 <= 0:
         return np.nan
@@ -204,9 +228,7 @@ def distance_exec_atr(
 
 
 def distance_tf_atr(
-    object_price: float,
-    price: float,
-    atr_tf: float,
+    object_price: float, price: float, atr_tf: float
 ) -> float:
     if not np.isfinite(atr_tf) or atr_tf <= 0:
         return np.nan
@@ -214,8 +236,7 @@ def distance_tf_atr(
 
 
 def classify_level_type(
-    object_type: object,
-    structure_class: object,
+    object_type: object, structure_class: object
 ) -> str:
     ot = "" if object_type is None else str(object_type)
     sc = "" if structure_class is None else str(structure_class)
@@ -234,11 +255,15 @@ def classify_level_type(
 def verify_level_vocabulary(levels: pd.DataFrame) -> dict:
     """Verify classification vocabulary against REAL levels data.
 
-    Unknown (object_type, structure_class) pairs are counted rather
-    than silently dropped.
+    Unmapped pairs are reported with examples; the caller must STOP.
     """
     if levels.empty:
-        return {"pairs": 0, "unknown_pairs": 0, "buckets": {}}
+        return {
+            "pairs": 0,
+            "unknown_pairs": 0,
+            "unknown_examples": [],
+            "buckets": {},
+        }
     pairs = (
         levels[["object_type", "structure_class"]]
         .fillna("")
@@ -246,27 +271,64 @@ def verify_level_vocabulary(levels: pd.DataFrame) -> dict:
         .drop_duplicates()
     )
     buckets: dict[str, int] = {}
-    unknown = 0
+    unknown_pairs = 0
+    unknown_examples: list[str] = []
     for ot, sc in pairs.itertuples(index=False):
         b = classify_level_type(ot, sc)
         buckets[b] = buckets.get(b, 0) + 1
-        if b == "other" and LEVEL_TYPE_BUCKETS:
-            unknown += 1
+        if b == "other":
+            unknown_pairs += 1
+            unknown_examples.append(f"{ot}/{sc}")
     return {
         "pairs": int(len(pairs)),
-        "unknown_pairs": int(unknown),
+        "unknown_pairs": int(unknown_pairs),
+        "unknown_examples": unknown_examples[:20],
         "buckets": buckets,
     }
+
+
+def normalize_level_distance(
+    levels: pd.DataFrame,
+    *,
+    touch_close: float,
+    atr5: float,
+    atr_tf: float,
+) -> pd.DataFrame:
+    """ATR-normalise the COMMITTED touch-time zone-edge distance.
+
+    Uses ``distance_pct`` (calculated by the V3 source owner from
+    relation_to_price(zone_low, zone_high, trigger_close)). The price
+    reference is the 5m touch-bar CLOSE, never the next open, and the
+    geometry is the zone edge, never the object center.
+    """
+    x = levels.copy()
+    pct = pd.to_numeric(
+        x["distance_pct"], errors="coerce"
+    ).to_numpy(float)
+    abs_distance = pct / 100.0 * touch_close
+
+    if np.isfinite(atr5) and atr5 > 0:
+        x["distance_exec_atr"] = abs_distance / atr5
+    else:
+        x["distance_exec_atr"] = np.nan
+
+    if np.isfinite(atr_tf) and atr_tf > 0:
+        x["distance_tf_atr"] = abs_distance / atr_tf
+    else:
+        x["distance_tf_atr"] = np.nan
+    return x
 
 
 def summarize_level_side(
     levels: pd.DataFrame,
     *,
-    price: float,
-    atr5: float,
-    atr_tf: float,
     side: str,
 ) -> dict:
+    """Pressure/support summary for one side.
+
+    Expects ``distance_exec_atr`` / ``distance_tf_atr`` / ``level_type``
+    already present (see normalize_level_distance).
+    """
     assert side in ("above", "below")
 
     rel = levels["relation"].astype(str)
@@ -283,62 +345,71 @@ def summarize_level_side(
         out[f"{side}_count_within_{b:g}atr"] = 0
     for b in LEVEL_TYPE_BUCKETS:
         out[f"{side}_{b}_count"] = 0
+        out[f"{side}_nearest_{b}_exec_atr"] = np.nan
+    out[f"{side}_active_bull_ob_count"] = 0
+    out[f"{side}_active_bear_ob_count"] = 0
 
     if x.empty:
         return out
 
-    center = x["object_price_center"].to_numpy(float)
-    d_exec = np.abs(center - price) / atr5 if (
-        np.isfinite(atr5) and atr5 > 0
-    ) else np.full(len(x), np.nan)
-    d_tf = np.abs(center - price) / atr_tf if (
-        np.isfinite(atr_tf) and atr_tf > 0
-    ) else np.full(len(x), np.nan)
-    x = x.assign(
-        distance_exec_atr=d_exec,
-        distance_tf_atr=d_tf,
-    )
-
-    types = [
-        classify_level_type(o, s)
-        for o, s in zip(
-            x["object_type"], x["structure_class"]
-        )
-    ]
-    x = x.assign(level_type=types)
-
-    j = int(np.nanargmin(x["distance_exec_atr"].to_numpy(float)))
-    out[f"{side}_nearest_exec_atr"] = float(
-        x["distance_exec_atr"].to_numpy(float)[j]
-    )
-    out[f"{side}_nearest_tf_atr"] = float(
-        x["distance_tf_atr"].to_numpy(float)[j]
-    )
-    out[f"{side}_nearest_type"] = str(
-        x["object_type"].to_numpy()[j]
-    )
-    out[f"{side}_nearest_structure_class"] = str(
-        x["structure_class"].to_numpy()[j]
-    )
-
     de = x["distance_exec_atr"].to_numpy(float)
     ok = np.isfinite(de)
-    for b in DIST_BINS:
-        out[f"{side}_count_within_{b:g}atr"] = int(
-            (de[ok] <= b).sum()
+
+    if ok.any():
+        j = int(np.nanargmin(de))
+        out[f"{side}_nearest_exec_atr"] = float(de[j])
+        out[f"{side}_nearest_tf_atr"] = float(
+            x["distance_tf_atr"].to_numpy(float)[j]
         )
+        out[f"{side}_nearest_type"] = str(
+            x["object_type"].to_numpy()[j]
+        )
+        out[f"{side}_nearest_structure_class"] = str(
+            x["structure_class"].to_numpy()[j]
+        )
+        for b in DIST_BINS:
+            out[f"{side}_count_within_{b:g}atr"] = int(
+                (de[ok] <= b).sum()
+            )
+
+    ltypes = x["level_type"].astype(str).to_numpy()
     for b in LEVEL_TYPE_BUCKETS:
-        out[f"{side}_{b}_count"] = int(
-            (np.asarray(types) == b).sum()
+        m = ltypes == b
+        out[f"{side}_{b}_count"] = int(m.sum())
+        if m.any():
+            sub = de[m]
+            sub = sub[np.isfinite(sub)]
+            if len(sub):
+                out[f"{side}_nearest_{b}_exec_atr"] = float(
+                    sub.min()
+                )
+
+    am = ltypes == "active_ob"
+    if am.any():
+        bz = pd.to_numeric(x["bias"], errors="coerce").to_numpy(
+            float
+        )
+        out[f"{side}_active_bull_ob_count"] = int(
+            (am & (bz == 1)).sum()
+        )
+        out[f"{side}_active_bear_ob_count"] = int(
+            (am & (bz == -1)).sum()
         )
     return out
 
 
+def full_candidate_tf_grid(
+    candidates: pd.DataFrame,
+) -> pd.DataFrame:
+    """Every candidate x validated timeframe, so that 'no levels' is
+    represented explicitly instead of vanishing."""
+    ids = candidates[["candidate_id"]].drop_duplicates()
+    tfs = pd.DataFrame({"context_tf": list(VALIDATED_TFS)})
+    return ids.merge(tfs, how="cross")
+
+
 def path_excursion(
-    g: pd.DataFrame,
-    *,
-    direction: int,
-    horizon: int,
+    g: pd.DataFrame, *, direction: int, horizon: int
 ) -> dict | None:
     x = g[g["step"] <= horizon].sort_values("step")
     if len(x) != horizon:
@@ -367,16 +438,33 @@ def path_excursion(
 # ============================================================
 
 def build_candidate_env_tf(
-    candidates: pd.DataFrame,
     context: pd.DataFrame,
     momentum_by_tf: dict[str, pd.DataFrame],
-) -> pd.DataFrame:
-    ctx = context.copy()
-    ctx = ctx[
-        ctx["context_tf"].astype(str).isin(VALIDATED_TFS)
-    ].copy()
-    if (ctx["context_tf"].astype(str).isin(QUARANTINED_TFS)).any():
-        raise RuntimeError("quarantined 4h entered environment table")
+) -> tuple[pd.DataFrame, dict]:
+    tf_series = context["context_tf"].astype(str)
+
+    # 4h quarantine: count what was SEEN, then exclude.
+    quarantined_input_rows = int(
+        tf_series.isin(QUARANTINED_TFS).sum()
+    )
+
+    ctx = context[tf_series.isin(VALIDATED_TFS)].copy()
+
+    if ctx["context_tf"].astype(str).isin(QUARANTINED_TFS).any():
+        raise RuntimeError("quarantined TF leaked into output")
+
+    # DSA raw parity with the committed V3 schema.
+    dsa_raw_cols = sorted(
+        c for c in ctx.columns if c.startswith("dsa_raw_")
+    )
+    missing_dsa = sorted(
+        set(EXPECTED_DSA_RAW_FIELDS) - set(dsa_raw_cols)
+    )
+    if missing_dsa:
+        raise RuntimeError(
+            "DSA raw schema drift, missing: "
+            f"{missing_dsa[:8]}"
+        )
 
     wanted = (
         set(STRUCTURE_FIELDS)
@@ -387,50 +475,69 @@ def build_candidate_env_tf(
         | {"atr14"}
     )
     cols = [c for c in ctx.columns if c in wanted]
+
     env = ctx[
-        ["candidate_id", "symbol", "context_tf", "bar_index", "bar_end", "lag_minutes"]
+        [
+            "candidate_id",
+            "symbol",
+            "context_tf",
+            "bar_index",
+            "bar_end",
+            "lag_minutes",
+        ]
         + cols
     ].copy()
 
-    env = env.rename(
-        columns={"bar_index": "context_bar_index"}
-    )
+    # IMPORTANT: momentum joins on the canonical context bar_index, so
+    # it must run BEFORE any rename of that column.
     env = attach_momentum(env, momentum_by_tf)
-    return env
+    env = add_momentum_sign(env)
+
+    env = env.rename(columns={"bar_index": "context_bar_index"})
+
+    info = {
+        "4h_input_rows_seen": quarantined_input_rows,
+        "4h_output_rows": int(
+            env["context_tf"].astype(str)
+            .isin(QUARANTINED_TFS).sum()
+        ),
+        "dsa_raw_expected": len(EXPECTED_DSA_RAW_FIELDS),
+        "dsa_raw_carried": len(
+            [c for c in env.columns if c.startswith("dsa_raw_")]
+        ),
+    }
+    return env, info
 
 
 def build_candidate_level_map(
     candidates: pd.DataFrame,
     levels: pd.DataFrame,
     context: pd.DataFrame,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, dict, dict, dict]:
     join_proof = resolve_level_join_key(candidates, levels)
     vocab = verify_level_vocabulary(levels)
 
-    lv = levels[
-        levels["timeframe"].astype(str).isin(VALIDATED_TFS)
-    ].copy()
-    if (lv["timeframe"].astype(str).isin(QUARANTINED_TFS)).any():
-        raise RuntimeError("quarantined 4h entered level map")
-
-    # atr per (candidate, tf) from the context snapshot
-    a = context[
-        context["context_tf"].astype(str).isin(VALIDATED_TFS)
-    ][["candidate_id", "context_tf", "atr14"]].copy()
-    atr_map = {
-        (c, t): v
-        for c, t, v in zip(
-            a["candidate_id"].astype(str),
-            a["context_tf"].astype(str),
-            a["atr14"].to_numpy(float),
+    # Unmapped structural vocabulary => STOP, never silently "other".
+    if vocab["unknown_pairs"] != 0:
+        raise RuntimeError(
+            "unmapped level vocabulary: "
+            f"{vocab['unknown_examples']}"
         )
-    }
 
-    price_map = dict(
-        zip(
-            candidates["candidate_id"].astype(str),
-            candidates["entry_next_5m_open"].to_numpy(float),
-        )
+    tf_series = levels["timeframe"].astype(str)
+    quarantined_input_rows = int(
+        tf_series.isin(QUARANTINED_TFS).sum()
+    )
+    lv = levels[tf_series.isin(VALIDATED_TFS)].copy()
+    if lv["timeframe"].astype(str).isin(QUARANTINED_TFS).any():
+        raise RuntimeError("quarantined TF leaked into level map")
+
+    # touch_close: 5m context bar close (NOT the next open).
+    c5 = context[context["context_tf"].astype(str).eq("5m")]
+    touch_close_map = (
+        c5.set_index("candidate_id")["close"]
+        .apply(pd.to_numeric, errors="coerce")
+        .to_dict()
     )
     atr5_map = dict(
         zip(
@@ -439,6 +546,20 @@ def build_candidate_level_map(
         )
     )
 
+    a = context[
+        context["context_tf"].astype(str).isin(VALIDATED_TFS)
+    ][["candidate_id", "context_tf", "atr14"]].copy()
+    atr_map = {
+        (c, t): v
+        for c, t, v in zip(
+            a["candidate_id"].astype(str),
+            a["context_tf"].astype(str),
+            pd.to_numeric(a["atr14"], errors="coerce").to_numpy(
+                float
+            ),
+        )
+    }
+
     rows = []
     for (cid, tf), g in lv.groupby(
         ["event_id", "timeframe"], sort=False
@@ -446,31 +567,58 @@ def build_candidate_level_map(
         cid = str(cid)
         tf = str(tf)
         assert_validated_tf(tf)
-        price = price_map.get(cid, np.nan)
-        atr5 = atr5_map.get(cid, np.nan)
-        atr_tf = atr_map.get((cid, tf), np.nan)
+
+        g2 = normalize_level_distance(
+            g,
+            touch_close=touch_close_map.get(cid, np.nan),
+            atr5=atr5_map.get(cid, np.nan),
+            atr_tf=atr_map.get((cid, tf), np.nan),
+        )
+        g2 = g2.assign(
+            level_type=[
+                classify_level_type(o, s)
+                for o, s in zip(
+                    g2["object_type"], g2["structure_class"]
+                )
+            ]
+        )
 
         row = {
             "candidate_id": cid,
             "context_tf": tf,
-            "level_object_count": int(len(g)),
+            "level_object_count": int(len(g2)),
         }
         for side in ("above", "below"):
-            row.update(
-                summarize_level_side(
-                    g,
-                    price=price,
-                    atr5=atr5,
-                    atr_tf=atr_tf,
-                    side=side,
-                )
-            )
-        ov = g[g["relation"].astype(str).eq("overlap")]
+            row.update(summarize_level_side(g2, side=side))
+        ov = g2[g2["relation"].astype(str).eq("overlap")]
         row["overlap_object_count"] = int(len(ov))
         rows.append(row)
 
-    out = pd.DataFrame(rows)
-    return out, join_proof, vocab
+    grid = full_candidate_tf_grid(candidates)
+    out = grid.merge(
+        pd.DataFrame(rows),
+        on=["candidate_id", "context_tf"],
+        how="left",
+        validate="one_to_one",
+    )
+
+    # Explicit zero for all counts; nearest distances stay NaN.
+    count_cols = [
+        c for c in out.columns if c.endswith("_count")
+    ]
+    for c in count_cols:
+        out[c] = pd.to_numeric(
+            out[c], errors="coerce"
+        ).fillna(0).astype(int)
+
+    quar = {
+        "4h_input_rows_seen": quarantined_input_rows,
+        "4h_output_rows": int(
+            out["context_tf"].astype(str)
+            .isin(QUARANTINED_TFS).sum()
+        ),
+    }
+    return out, join_proof, vocab, quar
 
 
 def build_candidate_outcomes(
@@ -555,7 +703,7 @@ def main() -> None:
         parts.append(x)
     candidates = pd.concat(parts, ignore_index=True)
 
-    momentum_by_tf = {}
+    momentum_by_tf: dict[tuple[str, str], pd.DataFrame] = {}
     for s in symbols:
         five = raw_five[s]
         fifteen = (
@@ -569,33 +717,45 @@ def main() -> None:
             .reset_index(drop=True)
         )
         momentum_by_tf[(s, "5m")] = build_momentum_frame(five)
-        momentum_by_tf[(s, "15m")] = build_momentum_frame(fifteen)
-        momentum_by_tf[(s, "1h")] = build_momentum_frame(one_hour)
+        momentum_by_tf[(s, "15m")] = build_momentum_frame(
+            fifteen
+        )
+        momentum_by_tf[(s, "1h")] = build_momentum_frame(
+            one_hour
+        )
 
     env_frames = []
+    env_quar = {"4h_input_rows_seen": 0, "4h_output_rows": 0}
+    dsa_counts: dict = {}
     for s in symbols:
+        ids = set(
+            candidates.loc[
+                candidates["symbol"] == s, "candidate_id"
+            ].astype(str)
+        )
         sub = context[
-            context["candidate_id"].isin(
-                set(
-                    candidates.loc[
-                        candidates["symbol"] == s,
-                        "candidate_id",
-                    ]
-                )
-            )
+            context["candidate_id"].astype(str).isin(ids)
         ]
         mom = {
             tf: momentum_by_tf[(s, tf)] for tf in VALIDATED_TFS
         }
-        env_frames.append(
-            build_candidate_env_tf(
-                candidates[candidates["symbol"] == s], sub, mom
-            )
-        )
+        e, info = build_candidate_env_tf(sub, mom)
+        env_frames.append(e)
+        env_quar["4h_input_rows_seen"] += info[
+            "4h_input_rows_seen"
+        ]
+        env_quar["4h_output_rows"] += info["4h_output_rows"]
+        dsa_counts[s] = {
+            "expected": info["dsa_raw_expected"],
+            "carried": info["dsa_raw_carried"],
+        }
+
     env_tf = pd.concat(env_frames, ignore_index=True)
 
-    level_map, join_proof, vocab = build_candidate_level_map(
-        candidates, levels, context
+    level_map, join_proof, vocab, quar_lv = (
+        build_candidate_level_map(
+            candidates, levels, context
+        )
     )
     outcomes = build_candidate_outcomes(candidates, path)
 
@@ -618,6 +778,15 @@ def main() -> None:
         "outcomes_rows": int(len(outcomes)),
         "timeframes": list(VALIDATED_TFS),
         "quarantined": list(QUARANTINED_TFS),
+        "4h_input_rows_seen": (
+            env_quar["4h_input_rows_seen"]
+            + quar_lv["4h_input_rows_seen"]
+        ),
+        "4h_output_rows": (
+            env_quar["4h_output_rows"]
+            + quar_lv["4h_output_rows"]
+        ),
+        "dsa_raw_parity": dsa_counts,
         "levels_join_proof": join_proof,
         "level_vocabulary": vocab,
         "source_owners": SOURCE_OWNERS,
