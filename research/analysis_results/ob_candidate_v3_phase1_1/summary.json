@@ -1,0 +1,48 @@
+{
+  "schema_version": "ob_candidate_v3_phase1_1",
+  "parent_sha": "f84a3045dee89619a433ec99b4a2916d2435bcaa",
+  "candidates": 21481,
+  "trading_days": 407,
+  "weighting": {
+    "primary": "decision_bar_weighted",
+    "all_rates_weighted": true,
+    "event_kept_as_robustness": true
+  },
+  "ambiguity": {
+    "max_both_hit_rate": 0.097239,
+    "configs_gt_2pct": 14,
+    "configs_gt_10pct": 0,
+    "total_configs": 180,
+    "note": "per-configuration gate; primary grid must use 5m_OK configs only"
+  },
+  "source_tf": {
+    "15m_symbols_positive": 3,
+    "15m_contribution_shares": {
+      "AG": 0.274209,
+      "CU": 0.280479,
+      "RB": 0.229606,
+      "M": 0.215706
+    }
+  },
+  "quantile": {
+    "coverage_n": 5179,
+    "coverage_rate": 0.241097,
+    "cells": 324,
+    "fraction_delta_gt_0": 0.611111,
+    "fraction_delta_gt_0_by_symbol": {
+      "AG": 0.777778,
+      "CU": 0.666667,
+      "RB": 0.440476,
+      "M": 0.583333
+    },
+    "symbols_with_majority_positive": 3,
+    "pass": true
+  },
+  "dsa": {
+    "rows": 40
+  },
+  "confirm": {
+    "v3_changed": 0,
+    "phase1_changed": 0
+  }
+}
