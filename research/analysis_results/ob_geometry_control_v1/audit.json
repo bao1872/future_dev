@@ -1,0 +1,127 @@
+{
+  "experiment": "ob_geometry_control_v1",
+  "git_head": "59b002fc9c884f639076ab86eeee6c06ccb66499",
+  "candidate_count": 21481,
+  "eligible_candidates": 20013,
+  "geometry_definition": "directional touch-close distance to source-OB far edge / touch ATR5",
+  "geometry_cutpoint_source": "eligible discovery candidates only; outcome-blind quartiles",
+  "geometry_cutpoints": [
+    1.0259594517720272,
+    1.5833300746432397,
+    2.372042054895153
+  ],
+  "geometry_strata": [
+    "G1_NEAREST",
+    "G2",
+    "G3",
+    "G4_FARTHEST"
+  ],
+  "targets": [
+    {
+      "factor": "source_tf",
+      "bucket": "5m",
+      "expected_sign": 1
+    },
+    {
+      "factor": "source_tf",
+      "bucket": "15m",
+      "expected_sign": -1
+    },
+    {
+      "factor": "source_tf",
+      "bucket": "1h",
+      "expected_sign": -1
+    },
+    {
+      "factor": "touch_bin",
+      "bucket": "1",
+      "expected_sign": 1
+    },
+    {
+      "factor": "touch_bin",
+      "bucket": "4+",
+      "expected_sign": -1
+    },
+    {
+      "factor": "ob_width_bucket",
+      "bucket": "MEDIUM_0.5_1.0",
+      "expected_sign": 1
+    },
+    {
+      "factor": "ob_width_bucket",
+      "bucket": "WIDE_GT_1.0",
+      "expected_sign": -1
+    }
+  ],
+  "split_method": "whole_trading_day_70_30",
+  "split_day": "2026-03-11T00:00:00",
+  "horizons": [
+    6,
+    12,
+    24
+  ],
+  "primary_horizon": 12,
+  "thresholds": {
+    "min_discovery_n": 200,
+    "min_validation_n": 100,
+    "min_discovery_stratum_n": 50,
+    "min_validation_stratum_n": 30,
+    "min_adjusted_strata": 3,
+    "min_adjusted_coverage": 0.7,
+    "min_discovery_adj_delta_pp": 5.0,
+    "min_validation_adj_delta_p": 3.0,
+    "min_symbol_n": 30,
+    "min_symbol_stratum_n": 8,
+    "min_symbol_strata": 2,
+    "min_symbol_coverage": 0.5,
+    "min_symbols_same_sign": 3
+  },
+  "geometry_h12": {
+    "discovery": {
+      "rates": {
+        "G1_NEAREST": 0.5750575166211722,
+        "G2": 0.3633326806492854,
+        "G3": 0.2266629352434778,
+        "G4_FARTHEST": 0.11282197683497301
+      },
+      "monotonic_decreasing": true,
+      "nearest_minus_farthest_pp": 46.22355397861992
+    },
+    "validation": {
+      "rates": {
+        "G1_NEAREST": 0.5943365179624341,
+        "G2": 0.3945731464019343,
+        "G3": 0.23487069431510457,
+        "G4_FARTHEST": 0.08473415774713303
+      },
+      "monotonic_decreasing": true,
+      "nearest_minus_farthest_pp": 50.960236021530115
+    }
+  },
+  "geometry_profile_rows": 24,
+  "adjusted_relationship_rows": 42,
+  "stratum_rows": 168,
+  "symbol_rows": 84,
+  "screen_rows": 7,
+  "all_action_metric_rows": 84,
+  "selected_policy_rows": 7,
+  "selected_policy_curve_rows": 2849,
+  "selected_policy_symbol_rows": 28,
+  "trading_metrics": {
+    "reward": "GROSS_R_H12_ONLY",
+    "costs": "NO_COMMISSION_NO_SLIPPAGE",
+    "action_selection": "max Discovery expectancy_R among six frozen trade actions; same action frozen for Validation",
+    "trade_actions": [
+      "FOLLOW_1.5R",
+      "FOLLOW_2.0R",
+      "FOLLOW_2.5R",
+      "FADE_1.5R",
+      "FADE_2.0R",
+      "FADE_2.5R"
+    ],
+    "min_discovery_action_trades": 200,
+    "equity_curve": "normalized daily weighted-mean R; zero on split trading days with no analyzed trade",
+    "sharpe": "mean(daily_R)/std(daily_R)*sqrt(252), including zero-trade days",
+    "strategy_claim": "no qualitative strategy verdict without Validation win rate, realized payoff ratio, expectancy_R and sample size"
+  }
+}
