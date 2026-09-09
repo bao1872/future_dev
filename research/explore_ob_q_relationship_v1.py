@@ -1304,833 +1304,837 @@ def summarize_policy(
 
 
 # ============================================================
-# Global train-action-mean baseline
-# ============================================================
+def main() -> None:
+    # Global train-action-mean baseline
+    # ============================================================
 
-train_action_means = []
+    train_action_means = []
 
-for (
-    mode,
-    rr,
-), g in train.groupby(
-    [
-        "trade_mode",
-        "target_R",
-    ],
-    observed=True,
-):
-
-    train_action_means.append(
-        {
-            "trade_mode":
-                str(mode),
-
-            "target_R":
-                float(rr),
-
-            "train_mean_R":
-                weighted_mean(
-                    g[
-                        REWARD
-                    ],
-                    g[
-                        WEIGHT
-                    ],
-                ),
-        }
-    )
-
-
-train_action_means = (
-    pd.DataFrame(
-        train_action_means
-    )
-    .sort_values(
-        "train_mean_R",
-        ascending=False,
-    )
-    .reset_index(
-        drop=True
-    )
-)
-
-best_global = (
-    train_action_means.iloc[0]
-)
-
-global_mode = str(
-    best_global[
-        "trade_mode"
-    ]
-)
-
-global_rr = float(
-    best_global[
-        "target_R"
-    ]
-)
-
-global_mean_q = float(
-    best_global[
-        "train_mean_R"
-    ]
-)
-
-
-# Build global baseline test selection.
-test_candidates = (
-    test[
+    for (
+        mode,
+        rr,
+    ), g in train.groupby(
         [
-            "candidate_id",
-            "symbol",
-            "source_tf",
-            "trading_day",
-            WEIGHT,
-        ]
-    ]
-    .drop_duplicates(
-        "candidate_id"
+            "trade_mode",
+            "target_R",
+        ],
+        observed=True,
+    ):
+
+        train_action_means.append(
+            {
+                "trade_mode":
+                    str(mode),
+
+                "target_R":
+                    float(rr),
+
+                "train_mean_R":
+                    weighted_mean(
+                        g[
+                            REWARD
+                        ],
+                        g[
+                            WEIGHT
+                        ],
+                    ),
+            }
+        )
+
+
+    train_action_means = (
+        pd.DataFrame(
+            train_action_means
+        )
+        .sort_values(
+            "train_mean_R",
+            ascending=False,
+        )
+        .reset_index(
+            drop=True
+        )
     )
-)
 
+    best_global = (
+        train_action_means.iloc[0]
+    )
 
-global_action_rows = test[
-    (
-        test[
+    global_mode = str(
+        best_global[
             "trade_mode"
         ]
-        .astype(str)
-        == global_mode
     )
-    &
-    np.isclose(
-        test[
+
+    global_rr = float(
+        best_global[
             "target_R"
+        ]
+    )
+
+    global_mean_q = float(
+        best_global[
+            "train_mean_R"
+        ]
+    )
+
+
+    # Build global baseline test selection.
+    test_candidates = (
+        test[
+            [
+                "candidate_id",
+                "symbol",
+                "source_tf",
+                "trading_day",
+                WEIGHT,
+            ]
+        ]
+        .drop_duplicates(
+            "candidate_id"
+        )
+    )
+
+
+    global_action_rows = test[
+        (
+            test[
+                "trade_mode"
+            ]
+            .astype(str)
+            == global_mode
+        )
+        &
+        np.isclose(
+            test[
+                "target_R"
+            ],
+            global_rr,
+        )
+    ][
+        [
+            "candidate_id",
+            "trade_mode",
+            "target_R",
+            REWARD,
+        ]
+    ]
+
+
+    global_selected = (
+        test_candidates
+        .merge(
+            global_action_rows,
+            on="candidate_id",
+            validate="one_to_one",
+        )
+    )
+
+
+    global_selected[
+        "traded"
+    ] = (
+        global_mean_q
+        > 0
+    )
+
+    global_selected[
+        "selected_R"
+    ] = np.where(
+        global_selected[
+            "traded"
         ],
-        global_rr,
+        global_selected[
+            REWARD
+        ],
+        0.0,
     )
-][
-    [
-        "candidate_id",
-        "trade_mode",
-        "target_R",
-        REWARD,
-    ]
-]
 
-
-global_selected = (
-    test_candidates
-    .merge(
-        global_action_rows,
-        on="candidate_id",
-        validate="one_to_one",
+    global_selected[
+        "selected_action"
+    ] = np.where(
+        global_selected[
+            "traded"
+        ],
+        action_label(
+            global_mode,
+            global_rr,
+        ),
+        "SKIP",
     )
-)
 
 
-global_selected[
-    "traded"
-] = (
-    global_mean_q
-    > 0
-)
-
-global_selected[
-    "selected_R"
-] = np.where(
-    global_selected[
-        "traded"
-    ],
-    global_selected[
-        REWARD
-    ],
-    0.0,
-)
-
-global_selected[
-    "selected_action"
-] = np.where(
-    global_selected[
-        "traded"
-    ],
-    action_label(
-        global_mode,
-        global_rr,
-    ),
-    "SKIP",
-)
-
-
-test_oracle = (
-    test.groupby(
-        "candidate_id",
-        observed=True,
-    )[REWARD]
-    .max()
-    .clip(
-        lower=0.0
+    test_oracle = (
+        test.groupby(
+            "candidate_id",
+            observed=True,
+        )[REWARD]
+        .max()
+        .clip(
+            lower=0.0
+        )
     )
-)
 
 
-global_selected[
-    "oracle_R"
-] = (
-    global_selected[
-        "candidate_id"
-    ]
-    .map(
-        test_oracle
-    )
-)
-
-global_selected[
-    "regret_R"
-] = (
     global_selected[
         "oracle_R"
-    ]
-    - global_selected[
-        "selected_R"
-    ]
-)
-
-global_selected[
-    "model"
-] = (
-    "GLOBAL_ACTION_MEAN"
-)
-
-
-# ============================================================
-# Fit all probes
-# ============================================================
-
-models = {}
-predictions = {}
-model_metric_rows = []
-selection_frames = {}
-
-
-for (
-    name,
-    features,
-) in MODEL_SPECS.items():
-
-    print(
-        "FIT",
-        name,
-        "features=",
-        len(features),
-    )
-
-    model, pred, metrics = (
-        fit_probe(
-            name,
-            features,
+    ] = (
+        global_selected[
+            "candidate_id"
+        ]
+        .map(
+            test_oracle
         )
     )
 
-    models[
-        name
-    ] = model
-
-    predictions[
-        name
-    ] = pred
-
-    model_metric_rows.append(
-        metrics
+    global_selected[
+        "regret_R"
+    ] = (
+        global_selected[
+            "oracle_R"
+        ]
+        - global_selected[
+            "selected_R"
+        ]
     )
+
+    global_selected[
+        "model"
+    ] = (
+        "GLOBAL_ACTION_MEAN"
+    )
+
+
+    # ============================================================
+    # Fit all probes
+    # ============================================================
+
+    models = {}
+    predictions = {}
+    model_metric_rows = []
+    selection_frames = {}
+
+
+    for (
+        name,
+        features,
+    ) in MODEL_SPECS.items():
+
+        print(
+            "FIT",
+            name,
+            "features=",
+            len(features),
+        )
+
+        model, pred, metrics = (
+            fit_probe(
+                name,
+                features,
+            )
+        )
+
+        models[
+            name
+        ] = model
+
+        predictions[
+            name
+        ] = pred
+
+        model_metric_rows.append(
+            metrics
+        )
+
+        selection_frames[
+            name
+        ] = (
+            policy_from_predictions(
+                pred,
+                name,
+            )
+        )
+
 
     selection_frames[
-        name
-    ] = (
-        policy_from_predictions(
-            pred,
-            name,
-        )
-    )
+        "GLOBAL_ACTION_MEAN"
+    ] = global_selected
 
 
-selection_frames[
-    "GLOBAL_ACTION_MEAN"
-] = global_selected
+    # ============================================================
+    # Policy summaries
+    # ============================================================
 
+    policy_rows = []
 
-# ============================================================
-# Policy summaries
-# ============================================================
-
-policy_rows = []
-
-
-for (
-    name,
-    selected,
-) in selection_frames.items():
-
-    policy_rows.append(
-        summarize_policy(
-            selected,
-            model_name=name,
-            scope="ALL",
-            scope_value="ALL",
-        )
-    )
 
     for (
-        symbol,
-        g,
-    ) in selected.groupby(
-        "symbol",
-        observed=True,
-    ):
+        name,
+        selected,
+    ) in selection_frames.items():
 
         policy_rows.append(
             summarize_policy(
-                g,
+                selected,
                 model_name=name,
-                scope="SYMBOL",
-                scope_value=str(
-                    symbol
-                ),
+                scope="ALL",
+                scope_value="ALL",
             )
         )
 
-    for (
-        source_tf,
-        g,
-    ) in selected.groupby(
-        "source_tf",
-        observed=True,
-    ):
+        for (
+            symbol,
+            g,
+        ) in selected.groupby(
+            "symbol",
+            observed=True,
+        ):
 
-        policy_rows.append(
-            summarize_policy(
-                g,
-                model_name=name,
-                scope="SOURCE_TF",
-                scope_value=str(
-                    source_tf
-                ),
+            policy_rows.append(
+                summarize_policy(
+                    g,
+                    model_name=name,
+                    scope="SYMBOL",
+                    scope_value=str(
+                        symbol
+                    ),
+                )
             )
-        )
+
+        for (
+            source_tf,
+            g,
+        ) in selected.groupby(
+            "source_tf",
+            observed=True,
+        ):
+
+            policy_rows.append(
+                summarize_policy(
+                    g,
+                    model_name=name,
+                    scope="SOURCE_TF",
+                    scope_value=str(
+                        source_tf
+                    ),
+                )
+            )
 
 
-policy = pd.DataFrame(
-    policy_rows
-)
-
-
-# ============================================================
-# Ablation summary
-# ============================================================
-
-model_metrics = pd.DataFrame(
-    model_metric_rows
-)
-
-
-all_policy = policy[
-    (
-        policy[
-            "scope"
-        ]
-        == "ALL"
+    policy = pd.DataFrame(
+        policy_rows
     )
-].copy()
 
 
-full_q = float(
-    model_metrics.loc[
-        model_metrics[
-            "model"
-        ]
-        == "FULL",
-        "weighted_q_rmse",
-    ].iloc[0]
-)
+    # ============================================================
+    # Ablation summary
+    # ============================================================
+
+    model_metrics = pd.DataFrame(
+        model_metric_rows
+    )
 
 
-full_policy_r = float(
-    all_policy.loc[
-        all_policy[
-            "model"
-        ]
-        == "FULL",
-        "weighted_selected_R",
-    ].iloc[0]
-)
+    all_policy = policy[
+        (
+            policy[
+                "scope"
+            ]
+            == "ALL"
+        )
+    ].copy()
 
 
-ablation_rows = []
-
-
-for name in MODEL_SPECS:
-
-    row_q = (
-        model_metrics[
+    full_q = float(
+        model_metrics.loc[
             model_metrics[
                 "model"
             ]
-            == name
-        ]
-        .iloc[0]
+            == "FULL",
+            "weighted_q_rmse",
+        ].iloc[0]
     )
 
-    row_p = (
-        all_policy[
+
+    full_policy_r = float(
+        all_policy.loc[
             all_policy[
                 "model"
             ]
-            == name
+            == "FULL",
+            "weighted_selected_R",
+        ].iloc[0]
+    )
+
+
+    ablation_rows = []
+
+
+    for name in MODEL_SPECS:
+
+        row_q = (
+            model_metrics[
+                model_metrics[
+                    "model"
+                ]
+                == name
+            ]
+            .iloc[0]
+        )
+
+        row_p = (
+            all_policy[
+                all_policy[
+                    "model"
+                ]
+                == name
+            ]
+            .iloc[0]
+        )
+
+        ablation_rows.append(
+            {
+                "model":
+                    name,
+
+                "weighted_q_rmse":
+                    float(
+                        row_q[
+                            "weighted_q_rmse"
+                        ]
+                    ),
+
+                "q_rmse_minus_full":
+                    float(
+                        row_q[
+                            "weighted_q_rmse"
+                        ]
+                        - full_q
+                    ),
+
+                "weighted_selected_R":
+                    float(
+                        row_p[
+                            "weighted_selected_R"
+                        ]
+                    ),
+
+                "selected_R_minus_full":
+                    float(
+                        row_p[
+                            "weighted_selected_R"
+                        ]
+                        - full_policy_r
+                    ),
+            }
+        )
+
+
+    ablation = pd.DataFrame(
+        ablation_rows
+    )
+
+
+    # ============================================================
+    # Full-model feature importance
+    #
+    # Exploratory only.
+    # Ablation is the more important evidence.
+    # ============================================================
+
+    def feature_family(
+        feature: str,
+    ) -> str:
+
+        if feature in EVENT_FEATURES:
+            return "EVENT"
+
+        if feature in SMC_FEATURES:
+            return "SMC"
+
+        if feature in DSA_FEATURES:
+            return "DSA"
+
+        if feature in MOMENTUM_FEATURES:
+            return "MOMENTUM"
+
+        if feature in QUANTILE_FEATURES:
+            return "QUANTILE"
+
+        if feature in ACTION_FEATURES:
+            return "ACTION"
+
+        return "OTHER"
+
+
+    def feature_tf(
+        feature: str,
+    ) -> str:
+
+        for tf in VALIDATED_TFS:
+
+            if feature.endswith(
+                f"_{tf}"
+            ):
+                return tf
+
+        return "NA"
+
+
+    full_model = models[
+        "FULL"
+    ]
+
+
+    importance = (
+        pd.DataFrame(
+            {
+                "feature":
+                    list(
+                        MODEL_SPECS[
+                            "FULL"
+                        ]
+                    ),
+
+                "importance":
+                    full_model
+                    .get_feature_importance(),
+            }
+        )
+    )
+
+
+    importance[
+        "family"
+    ] = (
+        importance[
+            "feature"
         ]
-        .iloc[0]
+        .map(
+            feature_family
+        )
     )
 
-    ablation_rows.append(
-        {
-            "model":
-                name,
-
-            "weighted_q_rmse":
-                float(
-                    row_q[
-                        "weighted_q_rmse"
-                    ]
-                ),
-
-            "q_rmse_minus_full":
-                float(
-                    row_q[
-                        "weighted_q_rmse"
-                    ]
-                    - full_q
-                ),
-
-            "weighted_selected_R":
-                float(
-                    row_p[
-                        "weighted_selected_R"
-                    ]
-                ),
-
-            "selected_R_minus_full":
-                float(
-                    row_p[
-                        "weighted_selected_R"
-                    ]
-                    - full_policy_r
-                ),
-        }
-    )
-
-
-ablation = pd.DataFrame(
-    ablation_rows
-)
-
-
-# ============================================================
-# Full-model feature importance
-#
-# Exploratory only.
-# Ablation is the more important evidence.
-# ============================================================
-
-def feature_family(
-    feature: str,
-) -> str:
-
-    if feature in EVENT_FEATURES:
-        return "EVENT"
-
-    if feature in SMC_FEATURES:
-        return "SMC"
-
-    if feature in DSA_FEATURES:
-        return "DSA"
-
-    if feature in MOMENTUM_FEATURES:
-        return "MOMENTUM"
-
-    if feature in QUANTILE_FEATURES:
-        return "QUANTILE"
-
-    if feature in ACTION_FEATURES:
-        return "ACTION"
-
-    return "OTHER"
-
-
-def feature_tf(
-    feature: str,
-) -> str:
-
-    for tf in VALIDATED_TFS:
-
-        if feature.endswith(
-            f"_{tf}"
-        ):
-            return tf
-
-    return "NA"
-
-
-full_model = models[
-    "FULL"
-]
-
-
-importance = (
-    pd.DataFrame(
-        {
-            "feature":
-                list(
-                    MODEL_SPECS[
-                        "FULL"
-                    ]
-                ),
-
-            "importance":
-                full_model
-                .get_feature_importance(),
-        }
-    )
-)
-
-
-importance[
-    "family"
-] = (
     importance[
-        "feature"
-    ]
-    .map(
-        feature_family
+        "timeframe"
+    ] = (
+        importance[
+            "feature"
+        ]
+        .map(
+            feature_tf
+        )
     )
-)
 
-importance[
-    "timeframe"
-] = (
-    importance[
-        "feature"
-    ]
-    .map(
-        feature_tf
+
+    importance = (
+        importance
+        .sort_values(
+            "importance",
+            ascending=False,
+        )
+        .reset_index(
+            drop=True
+        )
     )
-)
 
 
-importance = (
-    importance
-    .sort_values(
-        "importance",
-        ascending=False,
+    importance_family_tf = (
+        importance.groupby(
+            [
+                "family",
+                "timeframe",
+            ],
+            as_index=False,
+            observed=True,
+        )["importance"]
+        .sum()
+        .sort_values(
+            "importance",
+            ascending=False,
+        )
     )
-    .reset_index(
-        drop=True
-    )
-)
 
 
-importance_family_tf = (
-    importance.groupby(
-        [
-            "family",
-            "timeframe",
-        ],
-        as_index=False,
-        observed=True,
-    )["importance"]
-    .sum()
-    .sort_values(
-        "importance",
-        ascending=False,
-    )
-)
+    # ============================================================
+    # Full-model Q calibration
+    #
+    # If predicted Q is informative, realized R should generally
+    # increase as predicted-Q bucket increases.
+    # ============================================================
+
+    full_pred = predictions[
+        "FULL"
+    ].copy()
 
 
-# ============================================================
-# Full-model Q calibration
-#
-# If predicted Q is informative, realized R should generally
-# increase as predicted-Q bucket increases.
-# ============================================================
-
-full_pred = predictions[
-    "FULL"
-].copy()
-
-
-full_pred[
-    "q_bucket"
-] = pd.qcut(
     full_pred[
-        "pred_q"
-    ],
-    q=10,
-    labels=False,
-    duplicates="drop",
-)
-
-
-q_rows = []
-
-
-for (
-    bucket,
-    g,
-) in full_pred.groupby(
-    "q_bucket",
-    observed=True,
-):
-
-    q_rows.append(
-        {
-            "q_bucket":
-                int(bucket),
-
-            "action_rows":
-                len(g),
-
-            "weighted_mean_pred_q":
-                weighted_mean(
-                    g[
-                        "pred_q"
-                    ],
-                    g[
-                        WEIGHT
-                    ],
-                ),
-
-            "weighted_mean_realized_R":
-                weighted_mean(
-                    g[
-                        REWARD
-                    ],
-                    g[
-                        WEIGHT
-                    ],
-                ),
-        }
-    )
-
-
-q_calibration = (
-    pd.DataFrame(
-        q_rows
-    )
-    .sort_values(
         "q_bucket"
-    )
-)
-
-
-# ============================================================
-# Persist small results only
-# ============================================================
-
-model_metrics.to_csv(
-    OUT
-    / "model_metrics.csv",
-    index=False,
-)
-
-policy.to_csv(
-    OUT
-    / "policy_metrics.csv",
-    index=False,
-)
-
-ablation.to_csv(
-    OUT
-    / "ablation_metrics.csv",
-    index=False,
-)
-
-importance.to_csv(
-    OUT
-    / "full_feature_importance.csv",
-    index=False,
-)
-
-importance_family_tf.to_csv(
-    OUT
-    / "full_importance_family_tf.csv",
-    index=False,
-)
-
-q_calibration.to_csv(
-    OUT
-    / "full_q_calibration.csv",
-    index=False,
-)
-
-train_action_means.to_csv(
-    OUT
-    / "train_action_means.csv",
-    index=False,
-)
-
-
-audit = {
-    "experiment":
-        "ob_q_relationship_v1",
-
-    "git_head":
-        git_head(),
-
-    "model_view_version":
-        MODEL_VIEW_VERSION,
-
-    "model_feature_count":
-        len(
-            MODEL_FEATURES_V0
-        ),
-
-    "validated_timeframes":
-        list(
-            VALIDATED_TFS
-        ),
-
-    "reward":
-        REWARD,
-
-    "split_method":
-        "chronological_trading_day_70_30",
-
-    "split_day":
-        split_day.isoformat(),
-
-    "all_candidate_count":
-        int(
-            reward_support.size
-        ),
-
-    "complete_h12_candidate_count":
-        int(
-            len(
-                complete_ids
-            )
-        ),
-
-    "partial_h12_candidate_count":
-        partial_candidates,
-
-    "zero_h12_candidate_count":
-        zero_reward_candidates,
-
-    "train_candidate_count":
-        int(
-            train[
-                "candidate_id"
-            ]
-            .nunique()
-        ),
-
-    "test_candidate_count":
-        int(
-            test[
-                "candidate_id"
-            ]
-            .nunique()
-        ),
-
-    "train_action_rows":
-        int(
-            len(
-                train
-            )
-        ),
-
-    "test_action_rows":
-        int(
-            len(
-                test
-            )
-        ),
-
-    "catboost_version":
-        catboost.__version__,
-
-    "catboost_params": {
-        "iterations":
-            400,
-
-        "depth":
-            6,
-
-        "learning_rate":
-            0.05,
-
-        "l2_leaf_reg":
-            5.0,
-
-        "random_seed":
-            SEED,
-
-        "random_strength":
-            0.0,
-
-        "bootstrap_type":
-            "No",
-
-        "one_hot_max_size":
-            32,
-    },
-
-    "model_feature_counts": {
-        name:
-            len(features)
-
-        for (
-            name,
-            features,
-        ) in MODEL_SPECS.items()
-    },
-
-    "global_train_best_action": {
-        "trade_mode":
-            global_mode,
-
-        "target_R":
-            global_rr,
-
-        "train_mean_R":
-            global_mean_q,
-    },
-}
-
-
-with (
-    OUT
-    / "audit.json"
-).open(
-    "w",
-    encoding="utf-8",
-) as f:
-
-    json.dump(
-        audit,
-        f,
-        indent=2,
-        ensure_ascii=False,
+    ] = pd.qcut(
+        full_pred[
+            "pred_q"
+        ],
+        q=10,
+        labels=False,
+        duplicates="drop",
     )
 
 
-print()
-print(
-    "OB_Q_RELATIONSHIP_V1_DONE"
-)
+    q_rows = []
 
-print(
-    json.dumps(
-        audit,
-        indent=2,
-        ensure_ascii=False,
+
+    for (
+        bucket,
+        g,
+    ) in full_pred.groupby(
+        "q_bucket",
+        observed=True,
+    ):
+
+        q_rows.append(
+            {
+                "q_bucket":
+                    int(bucket),
+
+                "action_rows":
+                    len(g),
+
+                "weighted_mean_pred_q":
+                    weighted_mean(
+                        g[
+                            "pred_q"
+                        ],
+                        g[
+                            WEIGHT
+                        ],
+                    ),
+
+                "weighted_mean_realized_R":
+                    weighted_mean(
+                        g[
+                            REWARD
+                        ],
+                        g[
+                            WEIGHT
+                        ],
+                    ),
+            }
+        )
+
+
+    q_calibration = (
+        pd.DataFrame(
+            q_rows
+        )
+        .sort_values(
+            "q_bucket"
+        )
     )
-)
+
+
+    # ============================================================
+    # Persist small results only
+    # ============================================================
+
+    model_metrics.to_csv(
+        OUT
+        / "model_metrics.csv",
+        index=False,
+    )
+
+    policy.to_csv(
+        OUT
+        / "policy_metrics.csv",
+        index=False,
+    )
+
+    ablation.to_csv(
+        OUT
+        / "ablation_metrics.csv",
+        index=False,
+    )
+
+    importance.to_csv(
+        OUT
+        / "full_feature_importance.csv",
+        index=False,
+    )
+
+    importance_family_tf.to_csv(
+        OUT
+        / "full_importance_family_tf.csv",
+        index=False,
+    )
+
+    q_calibration.to_csv(
+        OUT
+        / "full_q_calibration.csv",
+        index=False,
+    )
+
+    train_action_means.to_csv(
+        OUT
+        / "train_action_means.csv",
+        index=False,
+    )
+
+
+    audit = {
+        "experiment":
+            "ob_q_relationship_v1",
+
+        "git_head":
+            git_head(),
+
+        "model_view_version":
+            MODEL_VIEW_VERSION,
+
+        "model_feature_count":
+            len(
+                MODEL_FEATURES_V0
+            ),
+
+        "validated_timeframes":
+            list(
+                VALIDATED_TFS
+            ),
+
+        "reward":
+            REWARD,
+
+        "split_method":
+            "chronological_trading_day_70_30",
+
+        "split_day":
+            split_day.isoformat(),
+
+        "all_candidate_count":
+            int(
+                reward_support.size
+            ),
+
+        "complete_h12_candidate_count":
+            int(
+                len(
+                    complete_ids
+                )
+            ),
+
+        "partial_h12_candidate_count":
+            partial_candidates,
+
+        "zero_h12_candidate_count":
+            zero_reward_candidates,
+
+        "train_candidate_count":
+            int(
+                train[
+                    "candidate_id"
+                ]
+                .nunique()
+            ),
+
+        "test_candidate_count":
+            int(
+                test[
+                    "candidate_id"
+                ]
+                .nunique()
+            ),
+
+        "train_action_rows":
+            int(
+                len(
+                    train
+                )
+            ),
+
+        "test_action_rows":
+            int(
+                len(
+                    test
+                )
+            ),
+
+        "catboost_version":
+            catboost.__version__,
+
+        "catboost_params": {
+            "iterations":
+                400,
+
+            "depth":
+                6,
+
+            "learning_rate":
+                0.05,
+
+            "l2_leaf_reg":
+                5.0,
+
+            "random_seed":
+                SEED,
+
+            "random_strength":
+                0.0,
+
+            "bootstrap_type":
+                "No",
+
+            "one_hot_max_size":
+                32,
+        },
+
+        "model_feature_counts": {
+            name:
+                len(features)
+
+            for (
+                name,
+                features,
+            ) in MODEL_SPECS.items()
+        },
+
+        "global_train_best_action": {
+            "trade_mode":
+                global_mode,
+
+            "target_R":
+                global_rr,
+
+            "train_mean_R":
+                global_mean_q,
+        },
+    }
+
+
+    with (
+        OUT
+        / "audit.json"
+    ).open(
+        "w",
+        encoding="utf-8",
+    ) as f:
+
+        json.dump(
+            audit,
+            f,
+            indent=2,
+            ensure_ascii=False,
+        )
+
+
+    print()
+    print(
+        "OB_Q_RELATIONSHIP_V1_DONE"
+    )
+
+    print(
+        json.dumps(
+            audit,
+            indent=2,
+            ensure_ascii=False,
+        )
+    )
+
+if __name__ == "__main__":
+    main()
