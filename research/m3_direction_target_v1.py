@@ -59,18 +59,22 @@ FADE_COLS = [a for a in A6 if a.startswith("FADE")]
 TARGETS = {"1.5R": 0, "2.0R": 1, "2.5R": 2}   # 方向内偏移
 
 
-def perf(realized, day):
+def perf(realized, day, traded):
+    """统一口径：夏普/回撤用每日机会集等权曲线；交易次数按是否执行统计。"""
     daily = (
         pd.Series(realized, index=day).groupby(level=0).mean().sort_index()
     )
     cm = curve_metrics(daily)
-    nz = realized[realized != 0]
+    tr = np.asarray(traded, dtype=bool)
+    rtr = np.asarray(realized, dtype=float)[tr]
     return dict(
-        累计收益=float(cm["累计收益"]),
+        opportunity_curve_cumulative_R=float(cm["累计收益"]),
         夏普率=float(cm["夏普率"]),
         最大回撤=float(cm["最大回撤"]),
-        利润因子=float(m2._pf(nz)),
-        交易次数=int((realized != 0).sum()),
+        利润因子=float(m2._pf(rtr)),
+        交易次数=int(tr.sum()),
+        trade_total_R=round(float(rtr.sum()), 4),
+        平均交易R=round(float(rtr.mean()), 6) if len(rtr) else None,
     )
 
 
@@ -200,7 +204,8 @@ def main():
 
     main_rows, fold_rows, sym_rows = [], [], []
     for (sname,), g in long.groupby(["策略"]):
-        p = perf(g["realized"].to_numpy(), g["day"].to_numpy())
+        p = perf(g["realized"].to_numpy(), g["day"].to_numpy(),
+                 g["traded"].to_numpy())
         main_rows.append(dict(
             策略=sname,
             方向=g["方向"].iloc[0], 目标=g["目标"].iloc[0], **p,
@@ -211,10 +216,12 @@ def main():
         ))
         for f, gg in g.groupby("折"):
             fold_rows.append(dict(策略=sname, 折=f"F{f}", **perf(
-                gg["realized"].to_numpy(), gg["day"].to_numpy())))
+                gg["realized"].to_numpy(), gg["day"].to_numpy(),
+                gg["traded"].to_numpy())))
         for s, gg in g.groupby("symbol"):
             sym_rows.append(dict(策略=sname, 品种=s, **perf(
-                gg["realized"].to_numpy(), gg["day"].to_numpy())))
+                gg["realized"].to_numpy(), gg["day"].to_numpy(),
+                gg["traded"].to_numpy())))
 
     main_df = pd.DataFrame(main_rows)
     fold_df = pd.DataFrame(fold_rows)

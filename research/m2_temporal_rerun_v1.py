@@ -56,20 +56,26 @@ TARGET_NAMES = ("1.5R", "2.0R", "2.5R")
 
 
 def perf(g):
-    """滚动测试表现（与 M2 口径一致：按日等权平均后算曲线）。"""
+    """滚动测试表现（每日机会集等权曲线）。"""
     realized = g["realized"].to_numpy(float)
+    traded = g["traded"].to_numpy(bool)
     daily = (
         pd.Series(realized, index=g["day"].to_numpy())
         .groupby(level=0).mean().sort_index()
     )
     cm = curve_metrics(daily)
-    nz = realized[realized != 0]
+    tr = np.asarray(traded, dtype=bool)
+    rtr = np.asarray(realized, dtype=float)[tr]
     return dict(
-        累计收益=float(cm["累计收益"]),
+        # 主指标：每日机会集等权曲线
+        opportunity_curve_cumulative_R=float(cm["累计收益"]),
         夏普率=float(cm["夏普率"]),
         最大回撤=float(cm["最大回撤"]),
-        利润因子=float(m2._pf(nz)),
-        交易次数=int((realized != 0).sum()),
+        利润因子=float(m2._pf(rtr)),
+        # 交易次数 = 实际执行交易的事件数（收益为 0 仍计入）
+        交易次数=int(tr.sum()),
+        trade_total_R=round(float(rtr.sum()), 4),
+        平均交易R=round(float(rtr.mean()), 6) if len(rtr) else None,
     )
 
 

@@ -81,16 +81,22 @@ FORCED = {"GAP_STOP", "GAP_TARGET"}
 MODELS = ("线性", "LightGBM", "XGBoost")
 
 
-def perf(realized, day):
+def perf(realized, day, traded):
+    """统一口径：夏普/回撤用每日机会集等权曲线；交易次数按是否执行统计。"""
     daily = pd.Series(realized, index=day).groupby(level=0).mean().sort_index()
     cm = curve_metrics(daily)
-    nz = realized[realized != 0]
+    tr = np.asarray(traded, dtype=bool)
+    rtr = np.asarray(realized, dtype=float)[tr]
     return dict(
-        累计收益=float(cm["累计收益"]),
+        # 主指标：每日机会集等权曲线
+        opportunity_curve_cumulative_R=float(cm["累计收益"]),
         夏普率=float(cm["夏普率"]),
         最大回撤=float(cm["最大回撤"]),
-        利润因子=float(m2._pf(nz)),
-        交易次数=int(len(realized)),
+        利润因子=float(m2._pf(rtr)),
+        # 交易次数 = 实际执行交易的事件数（收益为 0 仍计入）
+        交易次数=int(tr.sum()),
+        trade_total_R=round(float(rtr.sum()), 4),
+        平均交易R=round(float(rtr.mean()), 6) if len(rtr) else None,
     )
 
 
@@ -143,13 +149,18 @@ def main():
         c = FOLD_COVERAGE[int(f)]
         cutoff = np.quantile(sel["event_score"].to_numpy(), 1 - c)
         traded = te["event_score"].to_numpy() > cutoff
-        sub = te[traded].copy()
+        # 保留【全部】测试事件并标记是否交易，未交易在机会集曲线中记 0
+        sub = te.copy()
+        sub["traded"] = traded
         sub["action"] = np.where(
             sub["is_follow"].to_numpy(), f"FOLLOW_{TARGET}", f"FADE_{TARGET}"
         )
-        entry.append(sub[["candidate_id", "symbol", "day", "fold", "action"]])
+        entry.append(sub[
+            ["candidate_id", "symbol", "day", "fold", "action", "traded"]
+        ])
     entry = pd.concat(entry, ignore_index=True)
-    print(f"[RL] entry trades={len(entry)}", flush=True)
+    print(f"[RL] test events={len(entry)}, traded={int(entry['traded'].sum())}",
+          flush=True)
 
     # ---------- 事件 → 折（按交易日，严格先切分再展开轨迹）----------
     D = m2.load_base()
@@ -240,8 +251,10 @@ def main():
 
         # ---- 测试段评估 ----
         ent_f = entry[entry["fold"] == fi]
+        # 只对实际交易事件做轨迹模拟；未交易在机会集曲线中记 0
+        tr_ent = ent_f[ent_f["traded"]]
         te_ep = traj.merge(
-            ent_f[["candidate_id", "action"]],
+            tr_ent[["candidate_id", "action"]],
             on="candidate_id", how="inner",
         )
         te_ep = te_ep[te_ep["initial_action"] == te_ep["action"]]
@@ -249,14 +262,24 @@ def main():
         print(f"[RL] F{fi}: test episodes={te_ep['candidate_id'].nunique()}",
               flush=True)
 
-        sym_of = te_ep.groupby("candidate_id")["symbol"].first()
-        day_of = te_ep.groupby("candidate_id")["trading_day"].first()
+        # 评估基准 = 该折【全部】测试事件（未交易记 0），保证与 M2/M3 同一
+        # 每日机会集等权口径；只对实际交易事件做轨迹模拟。
+        full = ent_f.reset_index(drop=True)
+        idx_of = {c: i for i, c in enumerate(full["candidate_id"].to_numpy())}
 
         for k in MODELS:
-            outcome, early, held = [], [], []
+            rl_v = np.zeros(len(full))
+            fx_v = np.zeros(len(full))
+            early_v = np.zeros(len(full), dtype=bool)
+            held_v = np.full(len(full), -1)
+            reason_v = np.array([""] * len(full), dtype=object)
             for cid, g in te_ep.groupby("candidate_id", sort=False):
                 g = g.sort_values("step")
-                fixed_R = g["all_hold_terminal_R"].iloc[0]
+                fixed_R = float(g["all_hold_terminal_R"].iloc[0])
+                tr = g[g["terminal"]]
+                reason = (
+                    str(tr["terminal_reason"].iloc[0]) if len(tr) else "TIMEOUT"
+                )
                 out, bars, is_early = fixed_R, int(g["bars_held"].max()), False
                 for _, row in g.iterrows():
                     j = int(row["step"])
@@ -281,19 +304,23 @@ def main():
                     if j == 11:
                         out, bars, is_early = float(row["all_hold_terminal_R"]), j, False
                         break
-                outcome.append(out)
-                held.append(bars)
-                early.append(is_early)
-            outcome = np.array(outcome)
-            fixed = te_ep.groupby("candidate_id", sort=False)[
-                "all_hold_terminal_R"].first().to_numpy()
-            cids = te_ep.groupby("candidate_id", sort=False).size().index
+                i = idx_of[cid]
+                rl_v[i], fx_v[i] = out, fixed_R
+                early_v[i], held_v[i], reason_v[i] = is_early, bars, reason
+            # 硬断言：未交易事件在机会集曲线中必须记 0
+            _nt = ~full["traded"].to_numpy()
+            assert np.all(rl_v[_nt] == 0.0) and np.all(fx_v[_nt] == 0.0), (
+                f"F{fi}/{k}: 未交易事件的收益不为 0（机会集口径被污染）"
+            )
             results.append(dict(
                 折=f"F{fi}", 模型=k,
-                day=day_of.reindex(cids).to_numpy(),
-                symbol=sym_of.reindex(cids).to_numpy(),
-                rl=outcome, fixed=fixed,
-                early=np.array(early), held=np.array(held),
+                candidate_id=full["candidate_id"].to_numpy(),
+                day=full["day"].to_numpy(),
+                symbol=full["symbol"].to_numpy(),
+                action=full["action"].to_numpy(),
+                traded=full["traded"].to_numpy(),
+                rl=rl_v, fixed=fx_v, early=early_v, held=held_v,
+                reason=reason_v,
             ))
         print(f"[RL] F{fi} done", flush=True)
 
@@ -301,10 +328,13 @@ def main():
     long_res = pd.concat([
         pd.DataFrame(dict(
             折=r["折"], 模型=r["模型"], symbol=r["symbol"], day=r["day"],
-            rl=r["rl"], fixed=r["fixed"], early=r["early"], held=r["held"],
+            candidate_id=r["candidate_id"], action=r["action"],
+            traded=r["traded"], rl=r["rl"], fixed=r["fixed"],
+            early=r["early"], held=r["held"], reason=r["reason"],
         ))
         for r in results
     ], ignore_index=True)
+    # 逐事件诊断（M5 用）：可再生，不入库
     long_res.to_parquet(OUT / "rl_episodes.parquet", index=False)
 
     def agg_by(keys):
@@ -312,16 +342,18 @@ def main():
         for kk, g in long_res.groupby(keys):
             kk = kk if isinstance(kk, tuple) else (kk,)
             d = dict(zip(keys, kk))
+            gt = g[g["traded"]]
             for tag, col in (("固定退出", "fixed"), ("动态退出", "rl")):
-                p = perf(g[col].to_numpy(), g["day"].to_numpy())
+                p = perf(g[col].to_numpy(), g["day"].to_numpy(),
+                         g["traded"].to_numpy())
                 out.append(dict(
                     **d, 退出方式=tag, **p,
                     提前退出比例=(
-                        round(float(g["early"].mean()), 4)
+                        round(float(gt["early"].mean()), 4)
                         if tag == "动态退出" else 0.0
                     ),
                     平均持有K线数=(
-                        round(float(g["held"].mean()), 4)
+                        round(float(gt["held"].mean()), 4)
                         if tag == "动态退出" else None
                     ),
                 ))
@@ -340,8 +372,13 @@ def main():
             模型=k,
             固定退出夏普=a["夏普率"], 动态退出夏普=b["夏普率"],
             夏普差值=round(b["夏普率"] - a["夏普率"], 4),
-            固定退出累计=a["累计收益"], 动态退出累计=b["累计收益"],
-            累计差值=round(b["累计收益"] - a["累计收益"], 4),
+            固定退出机会集累计=a["opportunity_curve_cumulative_R"],
+            动态退出机会集累计=b["opportunity_curve_cumulative_R"],
+            机会集累计差值=round(
+                b["opportunity_curve_cumulative_R"]
+                - a["opportunity_curve_cumulative_R"], 4),
+            固定退出trade_total_R=a["trade_total_R"],
+            动态退出trade_total_R=b["trade_total_R"],
             提前退出比例=b["提前退出比例"], 平均持有K线数=b["平均持有K线数"],
         ))
     inc = pd.DataFrame(inc)
