@@ -1,0 +1,4 @@
+﻿目标,深亏状态数,state_share_exit_gain_positive,state_weighted_mean_exit_gain_R,state_median_exit_gain_R,p10,p90,n_positive,mean_positive_R,n_negative,mean_negative_R
+1.5R,3351,0.8556,-0.058423,0.138321,-0.8457,0.2309,2867,0.1698,484,-1.4105
+2.0R,3533,0.8551,-0.06591,0.138536,-0.7562,0.231,3021,0.1692,512,-1.4532
+2.5R,3579,0.8539,-0.068206,0.138479,-0.7607,0.2313,3056,0.1694,523,-1.4568
