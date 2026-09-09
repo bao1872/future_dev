@@ -1,0 +1,65 @@
+{
+  "experiment": "ob_path_relationship_v1",
+  "git_head": "0b753b957ec9574ea4cb29d1295182e5ed7014e2",
+  "candidate_count": 21481,
+  "split_method": "whole_trading_day_70_30",
+  "split_day": "2026-03-11T00:00:00",
+  "horizon": 12,
+  "stop_atr": 1.0,
+  "target_R": 2.0,
+  "same_bar_policy": "conservative",
+  "directions": [
+    "FOLLOW",
+    "FADE"
+  ],
+  "factors": {
+    "source_tf": [
+      "5m",
+      "15m",
+      "1h"
+    ],
+    "source_ob_structure": [
+      "internal",
+      "swing"
+    ],
+    "touch_bin": [
+      "1",
+      "2",
+      "3",
+      "4+"
+    ],
+    "touch_behavior": [
+      "NO_BREACH",
+      "BREACH_RECLAIM",
+      "CLOSE_BEYOND"
+    ],
+    "quant_state": [
+      "LOW",
+      "MID",
+      "HIGH"
+    ],
+    "smc_internal_align_count": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "smc_swing_align_count": [
+      0,
+      1,
+      2,
+      3
+    ]
+  },
+  "thresholds": {
+    "min_discovery_n": 200,
+    "min_validation_n": 100,
+    "min_symbol_n": 30,
+    "min_discovery_delta_R": 0.05,
+    "min_validation_delta_R": 0.02,
+    "min_symbols_same_sign": 3
+  },
+  "relationship_rows": 92,
+  "screen_rows": 46,
+  "stable_relationship_count": 4
+}
