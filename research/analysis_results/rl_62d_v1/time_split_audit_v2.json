@@ -1,0 +1,45 @@
+{
+  "split_basis": "trading_day_60_20_20_then_observation_window_embargo",
+  "embargo_rule": "前一段任何事件的 reward_observation_end_time 必须早于后一段第一笔事件的 decision_time",
+  "train": {
+    "start_date": "2025-01-02",
+    "end_date": "2026-01-05",
+    "events": 11862,
+    "by_symbol": {
+      "AG": 3452,
+      "CU": 3040,
+      "M": 2694,
+      "RB": 2676
+    },
+    "max_reward_observation_span_minutes": 12660.0
+  },
+  "selection": {
+    "start_date": "2026-01-05",
+    "end_date": "2026-05-12",
+    "events": 4012,
+    "by_symbol": {
+      "CU": 1122,
+      "AG": 1074,
+      "RB": 993,
+      "M": 823
+    },
+    "max_reward_observation_span_minutes": 15510.0
+  },
+  "test": {
+    "start_date": "2026-05-12",
+    "end_date": "2026-09-04",
+    "events": 4123,
+    "by_symbol": {
+      "AG": 1249,
+      "CU": 1059,
+      "RB": 957,
+      "M": 858
+    },
+    "max_reward_observation_span_minutes": 5460.0
+  },
+  "boundary_events_dropped": 11,
+  "max_reward_observation_span_minutes": 15510.0,
+  "cross_calendar_day_events": 1822,
+  "cross_weekend_events": 386,
+  "no_reward_window_overlap": true
+}

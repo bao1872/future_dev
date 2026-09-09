@@ -92,11 +92,11 @@ class QNetwork(nn.Module):
     当前候选交易动作的预计收益。
     """
 
-    def __init__(self, n_features: int = 62):
+    def __init__(self, encoded_feature_count: int):
         super().__init__()
 
         self.net = nn.Sequential(
-            nn.Linear(n_features, 128),
+            nn.Linear(encoded_feature_count, 128),
             nn.ReLU(),
             nn.Linear(128, 128),
             nn.ReLU(),

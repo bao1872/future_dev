@@ -1,0 +1,54 @@
+{
+  "touch_vs_decision": {
+    "decision_time_definition": "触碰 K 线收盘后决策；入场价为下一根有效 K 线开盘价",
+    "entry_bar_offset_from_touch": 1,
+    "evidence": "validate_against_authoritative 用旧连续语义复算，与权威 primary_reward_R 逐笔对照"
+  },
+  "trading_day_semantics": {
+    "night_session_hour_ge_21_trading_day_minus_calendar_day_mode": 1,
+    "day_session_hour_lt_21_trading_day_minus_calendar_day_mode": 0,
+    "night_events": 6811,
+    "day_events": 13202,
+    "conclusion": "21:00 及之后的夜盘归属下一自然日的交易日，符合交易所交易日语义"
+  },
+  "rollover_risk": {
+    "continuous_series": true,
+    "data_source": "PyTDX *L8 主力连续",
+    "gap_atr_mean": 0.303957,
+    "gap_atr_p50": 0.104669,
+    "gap_atr_p95": 1.165991,
+    "gap_atr_p99": 4.178462,
+    "gap_atr_max": 73.38026,
+    "events_gap_gt_3atr": 2137,
+    "events_gap_gt_5atr": 942,
+    "events_gap_gt_10atr": 243,
+    "events_gap_gt_20atr": 40,
+    "events_gap_gt_30atr": 16,
+    "evaluable_action_pairs": 120048
+  },
+  "price_executability": {
+    "entry_price": "下一根有效 K 线开盘价",
+    "stop_price": "entry - direction x 1.0 ATR",
+    "target_price": "entry + direction x target_R x 1.0 ATR",
+    "timeout_settlement": "第 12 根有效 K 线收盘价",
+    "gap_through_stop": "按实际开盘价退出（允许亏损超过 1R）",
+    "gap_through_target": "按原止盈价结算（不额外赚取跳空）",
+    "same_bar_both": "conservative，按止损处理",
+    "uses_future_confirmed_price": false
+  },
+  "authoritative_replication": {
+    "compared_pairs": 60390,
+    "exact_match": 60358,
+    "exact_match_rate": 0.99947,
+    "differences_all_on_favorable_gap": true,
+    "difference_count": 32,
+    "difference_on_gap_target_count": 32,
+    "symbols": [
+      "AG",
+      "CU",
+      "M",
+      "RB"
+    ]
+  },
+  "git_head": "9aa454afd1afc6f240556a5ce1948137e7f4d74c"
+}

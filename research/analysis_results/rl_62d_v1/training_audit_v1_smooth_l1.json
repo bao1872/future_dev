@@ -1,0 +1,77 @@
+{
+  "git_head": "9aa454afd1afc6f240556a5ce1948137e7f4d74c",
+  "seed": 20240901,
+  "training_params": {
+    "network": "136->128->128->64->1",
+    "optimizer": "Adam",
+    "learning_rate": 0.001,
+    "batch_size": 1024,
+    "max_epochs": 60,
+    "early_stop_patience": 5,
+    "early_stop_metric": "selection_smooth_l1_loss",
+    "best_epoch": 1,
+    "loss": "smooth_l1",
+    "no_target_network": true,
+    "no_replay_buffer": true,
+    "no_discount_factor": true,
+    "no_next_state": true,
+    "no_bellman_update": true
+  },
+  "data": {
+    "raw_feature_count": 62,
+    "encoded_feature_count": 136,
+    "evaluable_events": 20008,
+    "roll_gap_atr_threshold": 10.0,
+    "events_dropped_by_roll_gap": 68,
+    "events_used": 19940
+  },
+  "fixed_action": "NO_TRADE",
+  "prediction_diagnostics": {
+    "pred_realized_corr_all_rows": 0.057191,
+    "pred_realized_corr_by_action": {
+      "FOLLOW_1.5R": 0.069457,
+      "FOLLOW_2.0R": 0.074959,
+      "FOLLOW_2.5R": 0.069684,
+      "FADE_1.5R": 0.069771,
+      "FADE_2.0R": 0.071171,
+      "FADE_2.5R": 0.062575
+    },
+    "predicted_mean": -0.356669,
+    "predicted_std": 0.093639,
+    "test_events_with_positive_best_prediction": 0,
+    "test_events": 19940
+  },
+  "curve_definition": "每日机会集等权标准化收益：当天所有合格事件等权平均，不交易记 0；研究型标准化信号曲线，不是账户资金曲线",
+  "history": [
+    {
+      "epoch": 1,
+      "train_loss": 0.718497,
+      "selection_loss": 0.726464
+    },
+    {
+      "epoch": 2,
+      "train_loss": 0.704717,
+      "selection_loss": 0.745858
+    },
+    {
+      "epoch": 3,
+      "train_loss": 0.666542,
+      "selection_loss": 0.821468
+    },
+    {
+      "epoch": 4,
+      "train_loss": 0.604682,
+      "selection_loss": 0.873977
+    },
+    {
+      "epoch": 5,
+      "train_loss": 0.547872,
+      "selection_loss": 0.863827
+    },
+    {
+      "epoch": 6,
+      "train_loss": 0.491166,
+      "selection_loss": 0.970235
+    }
+  ]
+}

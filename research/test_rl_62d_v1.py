@@ -300,7 +300,7 @@ def test_reward_uses_authoritative_simulator():
 
 
 def test_single_output_network_shape():
-    net = QNetwork(n_features=62)
+    net = QNetwork(62)
     x = torch.randn(16, 62)
     y = net(x)
     assert tuple(y.shape) == (16,), "单输出网络必须输出一维收益"
