@@ -61,13 +61,6 @@ from research.analyze_ob_candidate_v3_phase1 import (  # noqa: E402
     weighted_quantile,
 )
 
-# B (explore_ob_survival_invalidation_v1) does not re-export the
-# generic weighted helpers; bind them so B.weighted_mean /
-# B.weighted_quantile resolve at runtime (used by
-# build_geometry_profile). Semantics unchanged.
-B.weighted_mean = weighted_mean
-B.weighted_quantile = weighted_quantile
-
 
 # ============================================================
 # Fixed experiment contract
@@ -1289,7 +1282,7 @@ def build_geometry_profile(
 
                 if analyzed.any():
 
-                    mean_distance = B.weighted_mean(
+                    mean_distance = weighted_mean(
                         distance[
                             analyzed
                         ],
@@ -1298,7 +1291,7 @@ def build_geometry_profile(
                         ],
                     )
 
-                    median_distance = B.weighted_quantile(
+                    median_distance = weighted_quantile(
                         distance[
                             analyzed
                         ],
