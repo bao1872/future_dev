@@ -31,6 +31,7 @@ Hard rules
 
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -61,6 +62,26 @@ def resolve_git_head() -> str:
     if len(sha) != 40:
         raise RuntimeError(f"invalid git HEAD: {sha!r}")
     return sha
+
+
+def sha256_file(
+    path: Path,
+) -> str:
+    """SHA256 of one generated dataset artifact."""
+
+    h = hashlib.sha256()
+
+    with path.open("rb") as f:
+        for block in iter(
+            lambda: f.read(
+                1024 * 1024
+            ),
+            b"",
+        ):
+            h.update(block)
+
+    return h.hexdigest()
+
 
 OUT_ROOT = (
     ROOT
@@ -1693,10 +1714,42 @@ def main() -> None:
     )
     audit_no_quarantined(state, action_df)
 
-    state.to_csv(OUT_ROOT / "ob_rl_state_v0.csv", index=False)
-    action_df.to_csv(
-        OUT_ROOT / "ob_rl_action_v0.csv", index=False
+    state_path = (
+        OUT_ROOT
+        / "ob_rl_state_v0.csv"
     )
+
+    action_path = (
+        OUT_ROOT
+        / "ob_rl_action_v0.csv"
+    )
+
+    manifest_path = (
+        OUT_ROOT
+        / "dataset_manifest.json"
+    )
+
+    state.to_csv(
+        state_path,
+        index=False,
+    )
+
+    action_df.to_csv(
+        action_path,
+        index=False,
+    )
+
+    artifact_sha256 = {
+        state_path.name:
+            sha256_file(
+                state_path
+            ),
+
+        action_path.name:
+            sha256_file(
+                action_path
+            ),
+    }
 
     manifest = {
         "dataset_version": DATASET_VERSION,
@@ -1705,6 +1758,8 @@ def main() -> None:
         "gate_b_dataset_builder_sha": (
             GATE_B_DATASET_BUILDER_SHA
         ),
+        "artifact_sha256":
+            artifact_sha256,
         # Deprecated: kept only so old readers still resolve.
         "baseline_sha": BASELINE_SHA,
         "baseline_sha_semantics": BASELINE_SHA_SEMANTICS,
@@ -1750,8 +1805,12 @@ def main() -> None:
             or c in ("primary_reward_R", "reward_version")
         ],
     }
-    (OUT_ROOT / "dataset_manifest.json").write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2),
+    manifest_path.write_text(
+        json.dumps(
+            manifest,
+            ensure_ascii=False,
+            indent=2,
+        ),
         encoding="utf-8",
     )
     print("OB_RL_DATASET_BUILD_DONE", flush=True)
