@@ -41,3 +41,6 @@ research/exports/ob_trigger_execution_v21/
 # OB Candidate Universe V3 local export (regenerable by
 # research/build_ob_candidate_universe_v3.py)
 research/exports/ob_candidate_universe_v3/
+
+# RL 62D 可再生中间产物
+research/analysis_results/rl_62d_v1/*.npy
