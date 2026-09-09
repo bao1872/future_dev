@@ -1,0 +1,12 @@
+{
+  "script": "research/m6_learnability_v1.py",
+  "entry": "LightGBM SNAPSHOT 方向 + 固定目标",
+  "targets": [
+    "1.5R",
+    "2.0R",
+    "2.5R"
+  ],
+  "seed": 20240901,
+  "features": 98,
+  "note": "直接监督 oracle_continuation_advantage_R；全步骤共享模型；事件级 4 折时间切分后展开轨迹状态。"
+}
