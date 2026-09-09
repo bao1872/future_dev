@@ -1,0 +1,63 @@
+{
+  "script": "research/m7_path_learnability_v1.py",
+  "targets": [
+    "1.5R",
+    "2.0R",
+    "2.5R"
+  ],
+  "seed": 20240901,
+  "path_features": [
+    "unrealized_R_delta_1",
+    "unrealized_R_delta_2",
+    "unrealized_R_delta_3",
+    "unrealized_R_slope_3",
+    "drawdown_from_MFE_R",
+    "rebound_from_MAE_R",
+    "MFE_delta_1",
+    "MFE_delta_3",
+    "MAE_delta_1",
+    "MAE_delta_3",
+    "distance_to_stop_delta_1",
+    "distance_to_stop_delta_3",
+    "distance_to_target_delta_1",
+    "distance_to_target_delta_3",
+    "bars_since_MFE",
+    "bars_since_MAE"
+  ],
+  "n_path_features": 16,
+  "views": {
+    "S0_CURRENT": 98,
+    "S1_PATH_ONLY": 21,
+    "S2_CURRENT_PLUS_PATH": 114
+  },
+  "causal_checks": {
+    "1.5R": {
+      "drawdown_from_MFE_R_非负": true,
+      "rebound_from_MAE_R_非负": true,
+      "bars_since_MFE_范围合法": true,
+      "bars_since_MAE_范围合法": true,
+      "unrealized_R_delta_1_等于相邻开盘差": true,
+      "MFE_单调不减": true,
+      "MAE_单调不增": true
+    },
+    "2.0R": {
+      "drawdown_from_MFE_R_非负": true,
+      "rebound_from_MAE_R_非负": true,
+      "bars_since_MFE_范围合法": true,
+      "bars_since_MAE_范围合法": true,
+      "unrealized_R_delta_1_等于相邻开盘差": true,
+      "MFE_单调不减": true,
+      "MAE_单调不增": true
+    },
+    "2.5R": {
+      "drawdown_from_MFE_R_非负": true,
+      "rebound_from_MAE_R_非负": true,
+      "bars_since_MFE_范围合法": true,
+      "bars_since_MAE_范围合法": true,
+      "unrealized_R_delta_1_等于相邻开盘差": true,
+      "MFE_单调不减": true,
+      "MAE_单调不增": true
+    }
+  },
+  "note": "目标A=exit_gain_vs_fixed_R(主要)；目标B=oracle_continuation_advantage_R(理论上限对照)。"
+}
