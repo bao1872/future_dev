@@ -59,6 +59,19 @@ from research.export_ob_trigger_execution_v21 import (  # noqa: E402
 from research.analyze_ob_candidate_v3_phase1 import (  # noqa: E402
     weighted_mean,
     weighted_quantile,
+    EXIT_INSUFFICIENT,
+    EXIT_NONCONTIG,
+    EXIT_GAP_STOP,
+    EXIT_GAP_TARGET,
+    EXIT_BOTH,
+    EXIT_STOP,
+    EXIT_TARGET,
+    EXIT_TIMEOUT,
+)
+
+from research.ob_rl_dataset_v0_spec import (  # noqa: E402
+    ACTIONS,
+    parse_action,
 )
 
 
@@ -90,6 +103,25 @@ GEOMETRY_STRATA = (
     "G3",
     "G4_FARTHEST",
 )
+
+
+ACTION_PARQUET = (
+    B.DATA_ROOT
+    / "ob_rl_action_v0.parquet"
+)
+
+TRADE_ACTIONS = tuple(
+    a
+    for a in ACTIONS
+    if a != "SKIP"
+)
+
+if len(TRADE_ACTIONS) != 6:
+    raise RuntimeError(
+        "expected exactly six trade actions"
+    )
+
+MIN_ACTION_SELECTION_TRADES = 200
 
 
 # ============================================================
@@ -1893,6 +1925,1307 @@ def geometry_h12_summary(
 
 
 # ============================================================
+# Trading-performance layer
+# ============================================================
+
+def weighted_rate(
+    mask: np.ndarray,
+    w: np.ndarray,
+) -> float:
+
+    mask = np.asarray(
+        mask,
+        dtype=bool,
+    )
+
+    w = np.asarray(
+        w,
+        dtype=float,
+    )
+
+    ok = (
+        np.isfinite(w)
+        & (w > 0)
+    )
+
+    if not ok.any():
+        return np.nan
+
+    return float(
+        np.sum(
+            w[
+                ok & mask
+            ]
+        )
+        / np.sum(
+            w[ok]
+        )
+    )
+
+
+def longest_true_run(
+    x: np.ndarray,
+) -> int:
+
+    best = 0
+    cur = 0
+
+    for v in np.asarray(
+        x,
+        dtype=bool,
+    ):
+
+        if v:
+            cur += 1
+            best = max(
+                best,
+                cur,
+            )
+        else:
+            cur = 0
+
+    return int(
+        best
+    )
+
+
+def load_trade_rewards() -> pd.DataFrame:
+
+    if not ACTION_PARQUET.exists():
+
+        raise RuntimeError(
+            "missing corrected action parquet: "
+            f"{ACTION_PARQUET}"
+        )
+
+    cols = [
+        "candidate_id",
+        "symbol",
+        "touch_time",
+        "trading_day",
+        "action",
+        "decision_weight",
+        "gross_R_h12",
+        "exit_code_h12",
+    ]
+
+    a = pd.read_parquet(
+        ACTION_PARQUET,
+        columns=cols,
+    )
+
+    expected = (
+        EXPECTED_CANDIDATES
+        * len(ACTIONS)
+    )
+
+    if len(a) != expected:
+
+        raise RuntimeError(
+            "action parquet cardinality drift: "
+            f"{len(a)} != {expected}"
+        )
+
+    if a.duplicated(
+        [
+            "candidate_id",
+            "action",
+        ]
+    ).any():
+
+        raise RuntimeError(
+            "duplicate candidate/action"
+        )
+
+    got_actions = set(
+        a[
+            "action"
+        ]
+        .astype(str)
+        .unique()
+    )
+
+    if got_actions != set(
+        ACTIONS
+    ):
+
+        raise RuntimeError(
+            "action space drift: "
+            f"{sorted(got_actions)}"
+        )
+
+    a = a[
+        a[
+            "action"
+        ].isin(
+            TRADE_ACTIONS
+        )
+    ].copy()
+
+    a[
+        "touch_time"
+    ] = pd.to_datetime(
+        a[
+            "touch_time"
+        ],
+        errors="raise",
+    )
+
+    a[
+        "trading_day"
+    ] = pd.to_datetime(
+        a[
+            "trading_day"
+        ],
+        errors="raise",
+    )
+
+    return a
+
+
+def daily_curve(
+    g: pd.DataFrame,
+    all_days: list[pd.Timestamp],
+) -> pd.DataFrame:
+
+    rows = []
+
+    for day in all_days:
+
+        z = g[
+            g[
+                "trading_day"
+            ]
+            == day
+        ]
+
+        if len(z):
+
+            r = pd.to_numeric(
+                z[
+                    "gross_R_h12"
+                ],
+                errors="coerce",
+            ).to_numpy(float)
+
+            w = pd.to_numeric(
+                z[
+                    "decision_weight"
+                ],
+                errors="coerce",
+            ).to_numpy(float)
+
+            code = pd.to_numeric(
+                z[
+                    "exit_code_h12"
+                ],
+                errors="coerce",
+            ).to_numpy(float)
+
+            ok = (
+                np.isfinite(r)
+                & np.isfinite(w)
+                & (w > 0)
+                & (
+                    code
+                    != EXIT_INSUFFICIENT
+                )
+                & (
+                    code
+                    != EXIT_NONCONTIG
+                )
+            )
+
+            if ok.any():
+
+                day_r = weighted_mean(
+                    r[ok],
+                    w[ok],
+                )
+
+                trade_n = int(
+                    ok.sum()
+                )
+
+            else:
+
+                day_r = 0.0
+                trade_n = 0
+
+        else:
+
+            day_r = 0.0
+            trade_n = 0
+
+        rows.append(
+            {
+                "trading_day":
+                    day,
+
+                "daily_R":
+                    float(
+                        day_r
+                    ),
+
+                "trade_n":
+                    trade_n,
+            }
+        )
+
+    out = pd.DataFrame(
+        rows
+    )
+
+    out[
+        "cum_R"
+    ] = out[
+        "daily_R"
+    ].cumsum()
+
+    running_peak = np.maximum.accumulate(
+        np.maximum(
+            out[
+                "cum_R"
+            ].to_numpy(float),
+            0.0,
+        )
+    )
+
+    out[
+        "drawdown_R"
+    ] = (
+        out[
+            "cum_R"
+        ].to_numpy(float)
+        - running_peak
+    )
+
+    return out
+
+
+def trade_metrics(
+    g: pd.DataFrame,
+    all_days: list[pd.Timestamp],
+) -> tuple[
+    dict,
+    pd.DataFrame,
+]:
+
+    if g.empty:
+
+        return (
+            {
+                "trades": 0,
+                "effective_weight": 0.0,
+                "win_rate": np.nan,
+                "loss_rate": np.nan,
+                "zero_rate": np.nan,
+                "avg_win_R": np.nan,
+                "avg_loss_R": np.nan,
+                "realized_payoff_ratio": np.nan,
+                "realized_breakeven_win_rate": np.nan,
+                "expectancy_R": np.nan,
+                "median_R": np.nan,
+                "profit_factor": np.nan,
+                "gross_signal_total_R": np.nan,
+                "target_hit_rate": np.nan,
+                "stop_hit_rate": np.nan,
+                "timeout_rate": np.nan,
+                "both_hit_rate": np.nan,
+                "daily_sharpe_252": np.nan,
+                "max_drawdown_R": np.nan,
+                "max_losing_streak": 0,
+                "active_days": 0,
+                "trading_days": len(
+                    all_days
+                ),
+                "active_day_rate": 0.0,
+                "trades_per_active_day": np.nan,
+            },
+            daily_curve(
+                g,
+                all_days,
+            ),
+        )
+
+    x = g.copy()
+
+    r = pd.to_numeric(
+        x[
+            "gross_R_h12"
+        ],
+        errors="coerce",
+    ).to_numpy(float)
+
+    code = pd.to_numeric(
+        x[
+            "exit_code_h12"
+        ],
+        errors="coerce",
+    ).to_numpy(float)
+
+    w = pd.to_numeric(
+        x[
+            "decision_weight"
+        ],
+        errors="coerce",
+    ).to_numpy(float)
+
+    analyzed = (
+        np.isfinite(r)
+        & np.isfinite(code)
+        & np.isfinite(w)
+        & (w > 0)
+        & (
+            code
+            != EXIT_INSUFFICIENT
+        )
+        & (
+            code
+            != EXIT_NONCONTIG
+        )
+    )
+
+    z = x.loc[
+        analyzed
+    ].copy()
+
+    rr = r[
+        analyzed
+    ]
+
+    cc = code[
+        analyzed
+    ].astype(int)
+
+    ww = w[
+        analyzed
+    ]
+
+    n = int(
+        len(rr)
+    )
+
+    curve = daily_curve(
+        z,
+        all_days,
+    )
+
+    if n == 0:
+
+        return (
+            {
+                "trades": 0,
+                "effective_weight": 0.0,
+                "win_rate": np.nan,
+                "loss_rate": np.nan,
+                "zero_rate": np.nan,
+                "avg_win_R": np.nan,
+                "avg_loss_R": np.nan,
+                "realized_payoff_ratio": np.nan,
+                "realized_breakeven_win_rate": np.nan,
+                "expectancy_R": np.nan,
+                "median_R": np.nan,
+                "profit_factor": np.nan,
+                "gross_signal_total_R": np.nan,
+                "target_hit_rate": np.nan,
+                "stop_hit_rate": np.nan,
+                "timeout_rate": np.nan,
+                "both_hit_rate": np.nan,
+                "daily_sharpe_252": np.nan,
+                "max_drawdown_R": np.nan,
+                "max_losing_streak": 0,
+                "active_days": 0,
+                "trading_days": len(
+                    all_days
+                ),
+                "active_day_rate": 0.0,
+                "trades_per_active_day": np.nan,
+            },
+            curve,
+        )
+
+    wins = (
+        rr > 0
+    )
+
+    losses = (
+        rr < 0
+    )
+
+    zeros = (
+        rr == 0
+    )
+
+    avg_win = (
+        weighted_mean(
+            rr[
+                wins
+            ],
+            ww[
+                wins
+            ],
+        )
+        if wins.any()
+        else np.nan
+    )
+
+    avg_loss = (
+        weighted_mean(
+            rr[
+                losses
+            ],
+            ww[
+                losses
+            ],
+        )
+        if losses.any()
+        else np.nan
+    )
+
+    payoff = (
+        float(
+            avg_win
+            / abs(
+                avg_loss
+            )
+        )
+        if (
+            np.isfinite(
+                avg_win
+            )
+            and np.isfinite(
+                avg_loss
+            )
+            and avg_loss < 0
+        )
+        else np.nan
+    )
+
+    realized_be = (
+        float(
+            abs(
+                avg_loss
+            )
+            / (
+                avg_win
+                + abs(
+                    avg_loss
+                )
+            )
+        )
+        if (
+            np.isfinite(
+                avg_win
+            )
+            and np.isfinite(
+                avg_loss
+            )
+            and avg_win > 0
+            and avg_loss < 0
+        )
+        else np.nan
+    )
+
+    gross_profit = float(
+        np.sum(
+            ww[
+                wins
+            ]
+            * rr[
+                wins
+            ]
+        )
+    )
+
+    gross_loss = float(
+        np.sum(
+            ww[
+                losses
+            ]
+            * rr[
+                losses
+            ]
+        )
+    )
+
+    profit_factor = (
+        float(
+            gross_profit
+            / abs(
+                gross_loss
+            )
+        )
+        if gross_loss < 0
+        else np.inf
+    )
+
+    daily_r = curve[
+        "daily_R"
+    ].to_numpy(float)
+
+    if (
+        len(daily_r) >= 2
+        and np.std(
+            daily_r,
+            ddof=1,
+        )
+        > 0
+    ):
+
+        sharpe = float(
+            np.mean(
+                daily_r
+            )
+            / np.std(
+                daily_r,
+                ddof=1,
+            )
+            * np.sqrt(
+                252.0
+            )
+        )
+
+    else:
+
+        sharpe = np.nan
+
+    max_dd = float(
+        -min(
+            0.0,
+            float(
+                curve[
+                    "drawdown_R"
+                ].min()
+            ),
+        )
+    )
+
+    order = np.argsort(
+        pd.to_datetime(
+            z[
+                "touch_time"
+            ]
+        ).to_numpy(
+            dtype="datetime64[ns]"
+        ),
+        kind="stable",
+    )
+
+    losing_streak = longest_true_run(
+        rr[
+            order
+        ]
+        < 0
+    )
+
+    active_days = int(
+        (
+            curve[
+                "trade_n"
+            ]
+            > 0
+        ).sum()
+    )
+
+    trading_days = int(
+        len(
+            curve
+        )
+    )
+
+    return (
+        {
+            "trades":
+                n,
+
+            "effective_weight":
+                float(
+                    np.sum(
+                        ww
+                    )
+                ),
+
+            "win_rate":
+                weighted_rate(
+                    wins,
+                    ww,
+                ),
+
+            "loss_rate":
+                weighted_rate(
+                    losses,
+                    ww,
+                ),
+
+            "zero_rate":
+                weighted_rate(
+                    zeros,
+                    ww,
+                ),
+
+            "avg_win_R":
+                avg_win,
+
+            "avg_loss_R":
+                avg_loss,
+
+            "realized_payoff_ratio":
+                payoff,
+
+            "realized_breakeven_win_rate":
+                realized_be,
+
+            "expectancy_R":
+                weighted_mean(
+                    rr,
+                    ww,
+                ),
+
+            "median_R":
+                weighted_quantile(
+                    rr,
+                    0.50,
+                    ww,
+                ),
+
+            "profit_factor":
+                profit_factor,
+
+            "gross_signal_total_R":
+                float(
+                    np.sum(
+                        ww
+                        * rr
+                    )
+                ),
+
+            "target_hit_rate":
+                weighted_rate(
+                    (
+                        cc
+                        == EXIT_TARGET
+                    )
+                    | (
+                        cc
+                        == EXIT_GAP_TARGET
+                    ),
+                    ww,
+                ),
+
+            "stop_hit_rate":
+                weighted_rate(
+                    (
+                        cc
+                        == EXIT_STOP
+                    )
+                    | (
+                        cc
+                        == EXIT_GAP_STOP
+                    ),
+                    ww,
+                ),
+
+            "timeout_rate":
+                weighted_rate(
+                    cc
+                    == EXIT_TIMEOUT,
+                    ww,
+                ),
+
+            "both_hit_rate":
+                weighted_rate(
+                    cc
+                    == EXIT_BOTH,
+                    ww,
+                ),
+
+            "daily_sharpe_252":
+                sharpe,
+
+            "max_drawdown_R":
+                max_dd,
+
+            "max_losing_streak":
+                losing_streak,
+
+            "active_days":
+                active_days,
+
+            "trading_days":
+                trading_days,
+
+            "active_day_rate":
+                (
+                    active_days
+                    / trading_days
+                    if trading_days
+                    else np.nan
+                ),
+
+            "trades_per_active_day":
+                (
+                    n
+                    / active_days
+                    if active_days
+                    else np.nan
+                ),
+        },
+        curve,
+    )
+
+
+def build_trading_evaluation(
+    x: pd.DataFrame,
+    screen: pd.DataFrame,
+) -> tuple[
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+]:
+
+    rewards = load_trade_rewards()
+
+    candidate_meta = x[
+        [
+            "candidate_id",
+            "symbol",
+            "trading_day",
+            "split",
+            "eligible",
+            "source_tf",
+            "touch_bin",
+            "ob_width_bucket",
+        ]
+    ].copy()
+
+    candidate_meta[
+        "trading_day"
+    ] = pd.to_datetime(
+        candidate_meta[
+            "trading_day"
+        ],
+        errors="raise",
+    )
+
+    rewards = rewards.drop(
+        columns=[
+            "symbol",
+            "trading_day",
+        ],
+        errors="ignore",
+    )
+
+    z = rewards.merge(
+        candidate_meta,
+        on="candidate_id",
+        how="left",
+        validate="many_to_one",
+    )
+
+    if z[
+        "split"
+    ].isna().any():
+
+        raise RuntimeError(
+            "trade reward/meta merge incomplete"
+        )
+
+    all_action_rows = []
+
+    selected_rows = []
+
+    curve_rows = []
+
+    symbol_rows = []
+
+    screen_key = (
+        screen.set_index(
+            [
+                "factor",
+                "bucket",
+            ]
+        )[
+            "status"
+        ]
+        .to_dict()
+    )
+
+    split_days = {}
+
+    for split in (
+        "DISCOVERY",
+        "VALIDATION",
+    ):
+
+        split_days[
+            split
+        ] = [
+            pd.Timestamp(
+                d
+            )
+            for d in sorted(
+                candidate_meta.loc[
+                    candidate_meta[
+                        "split"
+                    ]
+                    == split,
+                    "trading_day",
+                ].unique()
+            )
+        ]
+
+    symbols = sorted(
+        candidate_meta[
+            "symbol"
+        ]
+        .astype(str)
+        .unique()
+    )
+
+    for target in TARGETS:
+
+        factor = target[
+            "factor"
+        ]
+
+        bucket = target[
+            "bucket"
+        ]
+
+        known_values = set(
+            FACTOR_BUCKETS[
+                factor
+            ]
+        )
+
+        base = z[
+            z[
+                "eligible"
+            ].astype(bool)
+            & z[
+                factor
+            ].isin(
+                known_values
+            )
+        ].copy()
+
+        bucket_base = base[
+            base[
+                factor
+            ]
+            .astype(str)
+            .eq(
+                str(
+                    bucket
+                )
+            )
+        ].copy()
+
+        action_discovery = []
+
+        for action in TRADE_ACTIONS:
+
+            mode, target_r = parse_action(
+                action
+            )
+
+            nominal_be = (
+                1.0
+                / (
+                    1.0
+                    + target_r
+                )
+            )
+
+            for split in (
+                "DISCOVERY",
+                "VALIDATION",
+            ):
+
+                g = bucket_base[
+                    (
+                        bucket_base[
+                            "split"
+                        ]
+                        == split
+                    )
+                    & (
+                        bucket_base[
+                            "action"
+                        ]
+                        == action
+                    )
+                ]
+
+                metrics, _ = trade_metrics(
+                    g,
+                    split_days[
+                        split
+                    ],
+                )
+
+                row = {
+                    "factor":
+                        factor,
+
+                    "bucket":
+                        bucket,
+
+                    "split":
+                        split,
+
+                    "action":
+                        action,
+
+                    "trade_mode":
+                        mode,
+
+                    "target_R":
+                        target_r,
+
+                    "nominal_breakeven_win_rate":
+                        nominal_be,
+
+                    **metrics,
+                }
+
+                all_action_rows.append(
+                    row
+                )
+
+                if split == "DISCOVERY":
+
+                    action_discovery.append(
+                        row
+                    )
+
+        candidates = [
+            row
+            for row in action_discovery
+            if (
+                row[
+                    "trades"
+                ]
+                >= MIN_ACTION_SELECTION_TRADES
+
+                and np.isfinite(
+                    row[
+                        "expectancy_R"
+                    ]
+                )
+            )
+        ]
+
+        if not candidates:
+
+            selected_rows.append(
+                {
+                    "factor":
+                        factor,
+
+                    "bucket":
+                        bucket,
+
+                    "mechanism_status":
+                        screen_key[
+                            (
+                                factor,
+                                bucket,
+                            )
+                        ],
+
+                    "selection_status":
+                        "NO_DISCOVERY_ACTION_SUPPORT",
+                }
+            )
+
+            continue
+
+        chosen = sorted(
+            candidates,
+            key=lambda r: (
+                -float(
+                    r[
+                        "expectancy_R"
+                    ]
+                ),
+                str(
+                    r[
+                        "action"
+                    ]
+                ),
+            ),
+        )[0]
+
+        action = chosen[
+            "action"
+        ]
+
+        mode, target_r = parse_action(
+            action
+        )
+
+        nominal_be = (
+            1.0
+            / (
+                1.0
+                + target_r
+            )
+        )
+
+        packed = {
+            "factor":
+                factor,
+
+            "bucket":
+                bucket,
+
+            "mechanism_status":
+                screen_key[
+                    (
+                        factor,
+                        bucket,
+                    )
+                ],
+
+            "selection_status":
+                "DISCOVERY_ACTION_SELECTED",
+
+            "selected_action":
+                action,
+
+            "trade_mode":
+                mode,
+
+            "target_R":
+                target_r,
+
+            "nominal_breakeven_win_rate":
+                nominal_be,
+        }
+
+        for split in (
+            "DISCOVERY",
+            "VALIDATION",
+        ):
+
+            g = bucket_base[
+                (
+                    bucket_base[
+                        "split"
+                    ]
+                    == split
+                )
+                & (
+                    bucket_base[
+                        "action"
+                    ]
+                    == action
+                )
+            ]
+
+            metrics, curve = trade_metrics(
+                g,
+                split_days[
+                    split
+                ],
+            )
+
+            for key, value in metrics.items():
+
+                packed[
+                    f"{split.lower()}_{key}"
+                ] = value
+
+            curve = curve.copy()
+
+            curve[
+                "factor"
+            ] = factor
+
+            curve[
+                "bucket"
+            ] = bucket
+
+            curve[
+                "mechanism_status"
+            ] = screen_key[
+                (
+                    factor,
+                    bucket,
+                )
+            ]
+
+            curve[
+                "selected_action"
+            ] = action
+
+            curve[
+                "split"
+            ] = split
+
+            curve_rows.append(
+                curve
+            )
+
+        validation_rest = base[
+            (
+                base[
+                    "split"
+                ]
+                == "VALIDATION"
+            )
+            & (
+                base[
+                    "action"
+                ]
+                == action
+            )
+            & (
+                ~base[
+                    factor
+                ]
+                .astype(str)
+                .eq(
+                    str(
+                        bucket
+                    )
+                )
+            )
+        ]
+
+        rest_metrics, _ = trade_metrics(
+            validation_rest,
+            split_days[
+                "VALIDATION"
+            ],
+        )
+
+        for key, value in rest_metrics.items():
+
+            packed[
+                f"validation_rest_{key}"
+            ] = value
+
+        packed[
+            "validation_expectancy_delta_vs_rest_R"
+        ] = (
+            packed[
+                "validation_expectancy_R"
+            ]
+            - packed[
+                "validation_rest_expectancy_R"
+            ]
+            if (
+                np.isfinite(
+                    packed[
+                        "validation_expectancy_R"
+                    ]
+                )
+                and np.isfinite(
+                    packed[
+                        "validation_rest_expectancy_R"
+                    ]
+                )
+            )
+            else np.nan
+        )
+
+        selected_rows.append(
+            packed
+        )
+
+        for symbol in symbols:
+
+            g = bucket_base[
+                (
+                    bucket_base[
+                        "split"
+                    ]
+                    == "VALIDATION"
+                )
+                & (
+                    bucket_base[
+                        "action"
+                    ]
+                    == action
+                )
+                & (
+                    bucket_base[
+                        "symbol"
+                    ]
+                    .astype(str)
+                    .eq(
+                        symbol
+                    )
+                )
+            ]
+
+            metrics, _ = trade_metrics(
+                g,
+                split_days[
+                    "VALIDATION"
+                ],
+            )
+
+            symbol_rows.append(
+                {
+                    "factor":
+                        factor,
+
+                    "bucket":
+                        bucket,
+
+                    "mechanism_status":
+                        screen_key[
+                            (
+                                factor,
+                                bucket,
+                            )
+                        ],
+
+                    "selected_action":
+                        action,
+
+                    "symbol":
+                        symbol,
+
+                    **metrics,
+                }
+            )
+
+    all_actions = pd.DataFrame(
+        all_action_rows
+    )
+
+    selected = pd.DataFrame(
+        selected_rows
+    )
+
+    curves = (
+        pd.concat(
+            curve_rows,
+            ignore_index=True,
+        )
+        if curve_rows
+        else pd.DataFrame()
+    )
+
+    by_symbol = pd.DataFrame(
+        symbol_rows
+    )
+
+    return (
+        all_actions,
+        selected,
+        curves,
+        by_symbol,
+    )
+
+
+# ============================================================
 # Main
 # ============================================================
 
@@ -1966,6 +3299,16 @@ def main() -> None:
         by_symbol,
     )
 
+    (
+        all_action_metrics,
+        selected_policy_metrics,
+        selected_policy_curve,
+        selected_policy_by_symbol,
+    ) = build_trading_evaluation(
+        x,
+        screen,
+    )
+
     geometry_summary = (
         geometry_h12_summary(
             geometry_profile
@@ -1999,6 +3342,30 @@ def main() -> None:
     screen.to_csv(
         OUT
         / "relationship_screen.csv",
+        index=False,
+    )
+
+    all_action_metrics.to_csv(
+        OUT
+        / "all_action_trading_metrics.csv",
+        index=False,
+    )
+
+    selected_policy_metrics.to_csv(
+        OUT
+        / "selected_policy_metrics.csv",
+        index=False,
+    )
+
+    selected_policy_curve.to_csv(
+        OUT
+        / "selected_policy_equity_curve.csv",
+        index=False,
+    )
+
+    selected_policy_by_symbol.to_csv(
+        OUT
+        / "selected_policy_by_symbol.csv",
         index=False,
     )
 
@@ -2140,6 +3507,78 @@ def main() -> None:
                     screen
                 )
             ),
+
+        "all_action_metric_rows":
+            int(
+                len(
+                    all_action_metrics
+                )
+            ),
+
+        "selected_policy_rows":
+            int(
+                len(
+                    selected_policy_metrics
+                )
+            ),
+
+        "selected_policy_curve_rows":
+            int(
+                len(
+                    selected_policy_curve
+                )
+            ),
+
+        "selected_policy_symbol_rows":
+            int(
+                len(
+                    selected_policy_by_symbol
+                )
+            ),
+
+        "trading_metrics": {
+            "reward":
+                "GROSS_R_H12_ONLY",
+
+            "costs":
+                "NO_COMMISSION_NO_SLIPPAGE",
+
+            "action_selection":
+                (
+                    "max Discovery expectancy_R "
+                    "among six frozen trade actions; "
+                    "same action frozen for Validation"
+                ),
+
+            "trade_actions":
+                list(
+                    TRADE_ACTIONS
+                ),
+
+            "min_discovery_action_trades":
+                MIN_ACTION_SELECTION_TRADES,
+
+            "equity_curve":
+                (
+                    "normalized daily weighted-mean R; "
+                    "zero on split trading days "
+                    "with no analyzed trade"
+                ),
+
+            "sharpe":
+                (
+                    "mean(daily_R)/std(daily_R)"
+                    "*sqrt(252), including zero-trade days"
+                ),
+
+            "strategy_claim":
+                (
+                    "no qualitative strategy verdict "
+                    "without Validation win rate, "
+                    "realized payoff ratio, "
+                    "expectancy_R and sample size"
+                ),
+        },
     }
 
     (
@@ -2201,6 +3640,43 @@ def main() -> None:
             ]
         ]
         .to_string(
+            index=False
+        )
+    )
+
+    print()
+    print(
+        "SELECTED_POLICY_VALIDATION_METRICS"
+    )
+
+    cols = [
+        "factor",
+        "bucket",
+        "mechanism_status",
+        "selected_action",
+        "validation_trades",
+        "validation_win_rate",
+        "validation_avg_win_R",
+        "validation_avg_loss_R",
+        "validation_realized_payoff_ratio",
+        "validation_expectancy_R",
+        "validation_profit_factor",
+        "validation_daily_sharpe_252",
+        "validation_max_drawdown_R",
+        "validation_max_losing_streak",
+        "validation_active_day_rate",
+        "validation_expectancy_delta_vs_rest_R",
+    ]
+
+    print(
+        selected_policy_metrics[
+            [
+                c
+                for c in cols
+                if c
+                in selected_policy_metrics.columns
+            ]
+        ].to_string(
             index=False
         )
     )
