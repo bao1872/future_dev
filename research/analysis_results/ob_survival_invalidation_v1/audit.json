@@ -1,0 +1,69 @@
+{
+  "experiment": "ob_survival_invalidation_v1",
+  "git_head": "76c0c511732e0ed55a04d857c73e6a5cc620f720",
+  "candidate_count": 21481,
+  "already_invalidated_touch_bar": 1468,
+  "eligible_candidates": 20013,
+  "invalidation_definition": "future_5m_close_beyond_source_ob_far_edge",
+  "future_starts": "next_5m_bar_after_touch",
+  "split_method": "whole_trading_day_70_30",
+  "split_day": "2026-03-11T00:00:00",
+  "horizons": [
+    6,
+    12,
+    24
+  ],
+  "primary_horizon": 12,
+  "factors": {
+    "source_tf": [
+      "5m",
+      "15m",
+      "1h"
+    ],
+    "source_ob_structure": [
+      "internal",
+      "swing"
+    ],
+    "touch_bin": [
+      "1",
+      "2",
+      "3",
+      "4+"
+    ],
+    "ob_width_bucket": [
+      "NARROW_LE_0.5",
+      "MEDIUM_0.5_1.0",
+      "WIDE_GT_1.0"
+    ],
+    "quant_state": [
+      "LOW",
+      "MID",
+      "HIGH"
+    ],
+    "smc_internal_align_count": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "smc_swing_align_count": [
+      0,
+      1,
+      2,
+      3
+    ]
+  },
+  "thresholds": {
+    "min_discovery_n": 200,
+    "min_validation_n": 100,
+    "min_symbol_n": 30,
+    "min_discovery_delta_pp": 5.0,
+    "min_validation_delta_pp": 3.0,
+    "min_symbols_same_sign": 3
+  },
+  "baseline_rows": 6,
+  "relationship_rows": 138,
+  "symbol_rows": 276,
+  "screen_rows": 23,
+  "survivor_count": 7
+}
