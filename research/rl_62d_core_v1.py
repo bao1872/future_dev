@@ -1,28 +1,30 @@
 #!/usr/bin/env python3
 
-"""62维状态 + 单步离线强化学习 V1 -- 模型核心。
+"""62维状态 + 单步离线强化学习 V1 -- 模型核心（第二阶段修订）。
 
 实验目标
 --------
-验证 62 维决策时点市场状态，是否能帮助模型在 7 个冻结动作中做出
-选择，并在历史测试段形成优于固定动作基准的收益曲线。
+验证 62 维决策时点描述，是否能帮助模型在 7 个冻结动作中做出选择，
+并在历史测试段形成优于固定动作基准的收益曲线。
+
+模型结构裁决（第二阶段）
+------------------------
+权威 62 维是「动作相对」编码：同一事件在不同候选交易方案下取值不同。
+因此模型不再是「一个状态同时预测 7 个动作」，而是：
+
+    一个事件 x 一个候选交易方案 -> 一行 62 维 -> 一个收益预测值
+
+即状态—动作价值网络 Q(s, a)，输入 62 维，输出 1 个标量。
+
+「不交易」不进入网络，其价值固定为 0（NO_TRADE_VALUE）。
+决策时：对 6 个真实交易方案分别评分，取最高；若最高值 <= 0 则不交易。
 
 关键边界
 --------
-* 一个交易事件 = 一个单步决策。不人为构造下一状态，不建立多步
-  马尔可夫链。
-* 模型输出 7 个动作各自的预期收益，最终选择预期收益最高的动作。
-* ``NO_TRADE`` 是正式动作之一，其真实收益恒为 0。
+* 一个交易事件 = 一个单步决策。不构造下一状态，不建多步马尔可夫链。
 * 收益回测必须使用模型选择动作后**实际发生的历史收益**，
   严禁使用模型预测收益。
-* 第一版禁止模型结构搜索、禁止网格搜索。
-
-重要未决问题（见 experiment_contract.json）
-------------------------------------------
-权威 62 维（``MODEL_FEATURES_V0``）是**动作相对**编码：62 维中有
-51 维在同一事件的不同动作下取值不同，无法作为「一个事件一个状态」
-直接输入 7 头 Q 网络。本模块按用户给定合同实现
-``n_features=62, n_actions=7``，但输入口径需先裁决后再训练。
+* 第一版禁止模型结构搜索、禁止网格搜索、禁止调整收益门槛。
 """
 
 from __future__ import annotations
@@ -45,12 +47,19 @@ ACTION_NAMES = (
     "FADE_2.5R",
 )
 
-# 数据集里「不交易」的历史动作名是 SKIP，两者是同一个动作。
-DATASET_SKIP_ACTION = "SKIP"
+# 进入价值网络的 6 个真实交易动作（不含不交易）。
+TRADE_ACTION_NAMES = ACTION_NAMES[1:]
 
 N_ACTIONS = len(ACTION_NAMES)
+N_TRADE_ACTIONS = len(TRADE_ACTION_NAMES)
 
-NO_TRADE_INDEX = ACTION_NAMES.index("NO_TRADE")
+NO_TRADE_INDEX = 0
+
+# 不交易的价值恒为 0，不参与网络训练。
+NO_TRADE_VALUE = 0.0
+
+# 数据集里「不交易」的历史动作名是 SKIP，两者是同一个动作。
+DATASET_SKIP_ACTION = "SKIP"
 
 # 主视野：12 根 5 分钟 K 线 = 60 分钟，与数据集 PRIMARY_HORIZON 一致。
 PRIMARY_HORIZON = 12
@@ -64,6 +73,9 @@ MAX_FUTURE_OBSERVATION_MINUTES = (
     MAX_FUTURE_OBSERVATION_BARS * BAR_MINUTES
 )
 
+# 训练粒度合同：一个事件 x 6 个真实交易动作。
+TRAINING_ROWS_PER_EVENT = N_TRADE_ACTIONS
+
 
 # ------------------------------------------------------------
 # 网络
@@ -71,17 +83,16 @@ MAX_FUTURE_OBSERVATION_MINUTES = (
 
 
 class QNetwork(nn.Module):
-    """62维状态价值网络。
+    """状态—动作价值网络。
 
-    输入为交易决策时刻的62维市场状态。
-    输出为7个冻结动作各自的预期收益。
+    每一行输入代表：
+    当前市场状态与某一个候选交易动作组成的62维描述。
+
+    输出代表：
+    当前候选交易动作的预计收益。
     """
 
-    def __init__(
-        self,
-        n_features: int = 62,
-        n_actions: int = N_ACTIONS,
-    ):
+    def __init__(self, n_features: int = 62):
         super().__init__()
 
         self.net = nn.Sequential(
@@ -91,11 +102,11 @@ class QNetwork(nn.Module):
             nn.ReLU(),
             nn.Linear(128, 64),
             nn.ReLU(),
-            nn.Linear(64, n_actions),
+            nn.Linear(64, 1),
         )
 
     def forward(self, x):
-        return self.net(x)
+        return self.net(x).squeeze(-1)
 
 
 def compute_training_loss(
@@ -103,7 +114,7 @@ def compute_training_loss(
     features,
     realized_rewards,
 ):
-    """使用7个动作的历史真实收益，同时训练7个动作价值输出。"""
+    """学习当前62维状态—动作组合对应的历史实际收益。"""
 
     predicted_rewards = model(features)
 
@@ -113,23 +124,55 @@ def compute_training_loss(
     )
 
 
+# ------------------------------------------------------------
+# 决策
+# ------------------------------------------------------------
+
+
 @torch.no_grad()
-def choose_actions(
-    model,
-    features,
-):
-    """为每个市场状态选择预期收益最高的动作。"""
+def score_actions(model, action_features):
+    """对 [事件数 x 6, 62] 的动作行逐行打分。
+
+    返回 [事件数 x 6] 的预测收益（按事件顺序展开）。
+    """
 
     model.eval()
+    return model(action_features)
 
-    predicted_rewards = model(features)
 
-    selected_actions = torch.argmax(
-        predicted_rewards,
-        dim=1,
+def select_actions(scores) -> np.ndarray:
+    """把每个事件的 6 个交易动作得分转成最终动作编号。
+
+    scores 形状为 [事件数, 6]。
+
+    规则：
+        1. 取预测收益最高的交易动作；
+        2. 若最高预测收益 <= 0，则不交易（编号 0）；
+        3. 否则返回该交易动作在 ACTION_NAMES 中的编号。
+
+    第一版不设置任何额外门槛。
+    """
+
+    if isinstance(scores, torch.Tensor):
+        s = scores.detach().cpu().numpy()
+    else:
+        s = np.asarray(scores, dtype=float)
+
+    if s.ndim != 2 or s.shape[1] != N_TRADE_ACTIONS:
+        raise RuntimeError(
+            f"动作得分形状错误: {s.shape}, 期望 (N, 6)"
+        )
+
+    best_local = np.argmax(s, axis=1)
+    best_value = s[np.arange(s.shape[0]), best_local]
+
+    # 交易动作编号从 1 开始，因为 0 号是不交易。
+    action = best_local + 1
+    action = np.where(
+        best_value > 0.0, action, NO_TRADE_INDEX
     )
 
-    return selected_actions, predicted_rewards
+    return action.astype(int)
 
 
 def realized_policy_rewards(
@@ -156,6 +199,8 @@ def choose_best_fixed_action(train_reward_matrix):
     """只使用训练数据，选择历史平均收益最高的固定动作。
 
     后面的历史测试阶段不得重新选择。
+    矩阵含 7 列，不交易列恒为 0，因此若所有交易动作平均为负，
+    最优固定动作就是「不交易」。
     """
 
     mean_rewards = np.asarray(
@@ -163,6 +208,40 @@ def choose_best_fixed_action(train_reward_matrix):
     ).mean(axis=0)
 
     return int(np.argmax(mean_rewards))
+
+
+def oracle_actions(reward_matrix: np.ndarray) -> np.ndarray:
+    """事后选择真实收益最高的动作。
+
+    该基准不可实盘，只用于衡量 7 动作空间的理论上限。
+    """
+
+    m = np.asarray(reward_matrix, dtype=float)
+    return np.argmax(m, axis=1)
+
+
+# ------------------------------------------------------------
+# 动作粒度：先按事件切分，再展开成 6 行动作
+# ------------------------------------------------------------
+
+
+def expand_events_to_action_rows(event_index: np.ndarray):
+    """事件索引 -> 动作行索引映射。
+
+    时间切分必须先按事件完成，再展开成动作行，
+    禁止把同一事件的 6 行动作拆到不同时间段。
+    """
+
+    event_index = np.asarray(event_index)
+    return np.repeat(event_index, TRAINING_ROWS_PER_EVENT)
+
+
+def assert_action_grain(n_events: int, action_rows: int) -> None:
+    expected = n_events * TRAINING_ROWS_PER_EVENT
+    if action_rows != expected:
+        raise RuntimeError(
+            f"动作粒度错误: {action_rows} != {expected}"
+        )
 
 
 # ------------------------------------------------------------
@@ -216,18 +295,3 @@ class Standardizer:
         self, x: np.ndarray, split_name: str
     ) -> np.ndarray:
         return self.fit(x, split_name).transform(x)
-
-
-# ------------------------------------------------------------
-# 事后完美选择基准
-# ------------------------------------------------------------
-
-
-def oracle_actions(reward_matrix: np.ndarray) -> np.ndarray:
-    """事后选择真实收益最高的动作。
-
-    该基准不可实盘，只用于衡量 7 动作空间的理论上限。
-    """
-
-    m = np.asarray(reward_matrix, dtype=float)
-    return np.argmax(m, axis=1)

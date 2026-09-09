@@ -106,7 +106,9 @@
     "n_features": 62,
     "n_actions": 7,
     "structure_search_forbidden": true,
-    "grid_search_forbidden": true
+    "grid_search_forbidden": true,
+    "architecture": "62 -> 128 -> 128 -> 64 -> 1 (state-action value)",
+    "no_trade_value": 0.0
   },
   "time_split": {
     "split_basis": "trading_day_chronological_60_20_20",
@@ -155,5 +157,13 @@
     "covered_events": 10031,
     "universe_events": 10065,
     "dropped_by_embargo_events": 34
+  },
+  "causality_status": {
+    "total_features": 62,
+    "passed_features": 62,
+    "confirmed_leak": 0,
+    "quant_fields_status": "PASS_AFTER_TRACE",
+    "status": "CAUSALITY_PASS",
+    "evidence": "quant_feature_causality_audit.csv"
   }
 }
