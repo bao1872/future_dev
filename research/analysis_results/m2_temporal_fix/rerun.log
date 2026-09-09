@@ -1,0 +1,87 @@
+[load_base] idx/rewards/gaps loaded; n_kept=19940
+[load_base] state parquet loaded + meta built
+[load_base] action parquet + 62d features built; snap_rows=(119640, 62)
+[build_temporal] start; syms=['M', 'RB', 'AG', 'CU']
+[build_panel] loading precomputed panel research/analysis_results/m2/temporal_market_panel.parquet
+[build_panel] cached panels for ['AG', 'CU', 'M', 'RB']
+[build_temporal] M: panel built; building features
+[build_temporal] RB: panel built; building features
+[build_temporal] AG: panel built; building features
+[build_temporal] CU: panel built; building features
+[temporal-join] {'action_rows': 119640, 'temporal_event_rows': 19940, 'unique_candidate_id_count': 19940, 'rows_with_temporal_data': 119640, 'rows_all_temporal_nan': 0, 'events_with_temporal_data': 19940, 'events_all_temporal_nan': 0, 'temporal_cols': 24}
+[rerun] CatBoost回归/TEMPORAL F1: cov=0.1 test=1868 traded=370
+[rerun] CatBoost回归/TEMPORAL F2: cov=0.3 test=2003 traded=567
+[rerun] CatBoost回归/TEMPORAL F3: cov=0.3 test=1976 traded=540
+[rerun] CatBoost回归/TEMPORAL F4: cov=0.1 test=2387 traded=162
+[rerun] LightGBM回归/TEMPORAL F1: cov=0.1 test=1868 traded=217
+[rerun] LightGBM回归/TEMPORAL F2: cov=0.2 test=2003 traded=447
+[rerun] LightGBM回归/TEMPORAL F3: cov=0.1 test=1976 traded=180
+[rerun] LightGBM回归/TEMPORAL F4: cov=0.5 test=2387 traded=1157
+[rerun] XGBoost回归/TEMPORAL F1: cov=0.3 test=1868 traded=602
+[rerun] XGBoost回归/TEMPORAL F2: cov=0.5 test=2003 traded=914
+[rerun] XGBoost回归/TEMPORAL F3: cov=0.1 test=1976 traded=124
+[rerun] XGBoost回归/TEMPORAL F4: cov=0.1 test=2387 traded=204
+[rerun] Ridge回归/TEMPORAL F1: cov=0.1 test=1868 traded=516
+[rerun] Ridge回归/TEMPORAL F2: cov=0.1 test=2003 traded=43
+[rerun] Ridge回归/TEMPORAL F3: cov=0.1 test=1976 traded=109
+[rerun] Ridge回归/TEMPORAL F4: cov=0.3 test=2387 traded=532
+[rerun] LightGBM回归/SNAPSHOT F1: cov=0.3 test=1868 traded=570
+[rerun] LightGBM回归/SNAPSHOT F2: cov=0.3 test=2003 traded=706
+[rerun] LightGBM回归/SNAPSHOT F3: cov=0.1 test=1976 traded=113
+[rerun] LightGBM回归/SNAPSHOT F4: cov=0.1 test=2387 traded=202
+
+=== 主表（修正后）===
+        模型     特征视图    累计收益     夏普率   最大回撤     利润因子  交易次数  不交易比例    选中平均收益
+CatBoost回归 TEMPORAL -0.5981 -0.4624 1.2166 0.957080  1628 0.8009 -0.026221
+LightGBM回归 SNAPSHOT  1.5659  1.2070 0.9926 1.063844  1581 0.8068  0.037061
+LightGBM回归 TEMPORAL -3.5348 -2.4133 3.9891 0.857980  1997 0.7570 -0.092771
+   Ridge回归 TEMPORAL  0.3588  0.2883 1.3244 1.047653  1193 0.8543  0.029382
+ XGBoost回归 TEMPORAL -1.2051 -0.7907 2.9162 0.951999  1831 0.7761 -0.028904
+
+=== 快照 vs 修正后时间增强 ===
+        模型    快照夏普  修正后时间增强夏普      差值
+CatBoost回归 -0.9173    -0.4624  0.4549
+LightGBM回归  1.2070    -2.4133 -3.6203
+   Ridge回归  0.3601     0.2883 -0.0718
+ XGBoost回归 -0.0936    -0.7907 -0.6971
+
+=== M3 四层（修正后）===
+        模型     特征视图        层级       平均R   相对上一层增量
+CatBoost回归 TEMPORAL 所有事件六动作平均 -0.037255       NaN
+CatBoost回归 TEMPORAL 被选事件六动作平均 -0.009139  0.028116
+CatBoost回归 TEMPORAL  模型所选方向平均  0.020813  0.029953
+CatBoost回归 TEMPORAL    模型最终动作 -0.026221 -0.047035
+LightGBM回归 SNAPSHOT 所有事件六动作平均 -0.037255       NaN
+LightGBM回归 SNAPSHOT 被选事件六动作平均 -0.020621  0.016634
+LightGBM回归 SNAPSHOT  模型所选方向平均  0.050605  0.071226
+LightGBM回归 SNAPSHOT    模型最终动作  0.037061 -0.013544
+LightGBM回归 TEMPORAL 所有事件六动作平均 -0.037255       NaN
+LightGBM回归 TEMPORAL 被选事件六动作平均 -0.050291 -0.013035
+LightGBM回归 TEMPORAL  模型所选方向平均 -0.071357 -0.021067
+LightGBM回归 TEMPORAL    模型最终动作 -0.092771 -0.021414
+   Ridge回归 TEMPORAL 所有事件六动作平均 -0.037255       NaN
+   Ridge回归 TEMPORAL 被选事件六动作平均  0.003474  0.040729
+   Ridge回归 TEMPORAL  模型所选方向平均  0.010506  0.007032
+   Ridge回归 TEMPORAL    模型最终动作  0.029382  0.018876
+ XGBoost回归 TEMPORAL 所有事件六动作平均 -0.037255       NaN
+ XGBoost回归 TEMPORAL 被选事件六动作平均  0.000785  0.038040
+ XGBoost回归 TEMPORAL  模型所选方向平均 -0.008270 -0.009054
+ XGBoost回归 TEMPORAL    模型最终动作 -0.028904 -0.020634
+
+=== M3 三层贡献（修正后）===
+        模型     特征视图  所有事件六动作平均  被选事件六动作平均  模型所选方向平均    模型最终动作    事件筛选增量    方向选择增量    目标档位增量      最终增量   事件筛选占比    方向选择占比    目标档位占比  全部事件数  被选事件数
+CatBoost回归 TEMPORAL  -0.037255  -0.009139  0.020813 -0.026221  0.028116  0.029953 -0.047035  0.011034 2.548143  2.714650 -4.262793   8234   1639
+LightGBM回归 SNAPSHOT  -0.037255  -0.020621  0.050605  0.037061  0.016634  0.071226 -0.013544  0.074316 0.223825  0.958422 -0.182246   8234   1591
+LightGBM回归 TEMPORAL  -0.037255  -0.050291 -0.071357 -0.092771 -0.013035 -0.021067 -0.021414 -0.055516 0.234806  0.379468  0.385725   8234   2001
+   Ridge回归 TEMPORAL  -0.037255   0.003474  0.010506  0.029382  0.040729  0.007032  0.018876  0.066637 0.611204  0.105526  0.283270   8234   1200
+ XGBoost回归 TEMPORAL  -0.037255   0.000785 -0.008270 -0.028904  0.038040 -0.009054 -0.020634  0.008351 4.555073 -1.084223 -2.470849   8234   1844
+
+=== 方向能力（经济增量 vs 事后命中率）===
+        模型     特征视图    经济方向增量  事后最佳方向命中率  被选事件数
+CatBoost回归 TEMPORAL  0.029953   0.527151   1639
+LightGBM回归 SNAPSHOT  0.071226   0.540541   1591
+LightGBM回归 TEMPORAL -0.021067   0.502749   2001
+   Ridge回归 TEMPORAL  0.007032   0.527500   1200
+ XGBoost回归 TEMPORAL -0.009054   0.488069   1844
+
+RERUN_DONE

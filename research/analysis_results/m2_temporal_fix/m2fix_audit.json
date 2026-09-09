@@ -1,0 +1,35 @@
+{
+  "script": "research/m2_temporal_rerun_v1.py",
+  "fix": "时间增强特征由 pd.concat 位置对齐改为 candidate_id many-to-one merge，并加入硬断言",
+  "runs": [
+    {
+      "模型": "CatBoost回归",
+      "view": "TEMPORAL"
+    },
+    {
+      "模型": "LightGBM回归",
+      "view": "TEMPORAL"
+    },
+    {
+      "模型": "XGBoost回归",
+      "view": "TEMPORAL"
+    },
+    {
+      "模型": "Ridge回归",
+      "view": "TEMPORAL"
+    },
+    {
+      "模型": "LightGBM回归",
+      "view": "SNAPSHOT"
+    }
+  ],
+  "seed": 20240901,
+  "coverages": [
+    0.1,
+    0.2,
+    0.3,
+    0.5
+  ],
+  "n_kept": 19940,
+  "note": "快照结果沿用冻结的 M2，未重新评估。"
+}

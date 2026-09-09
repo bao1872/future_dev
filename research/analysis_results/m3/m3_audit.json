@@ -1,0 +1,19 @@
+{
+  "script": "research/m3_reward_decomposition_v1.py",
+  "model": "LightGBM回归",
+  "views": [
+    "SNAPSHOT",
+    "TEMPORAL"
+  ],
+  "seed": 20240901,
+  "n_kept": 19940,
+  "n_test_events": {
+    "SNAPSHOT": 8234,
+    "TEMPORAL": 8234
+  },
+  "n_traded": {
+    "SNAPSHOT": 1591,
+    "TEMPORAL": 1490
+  },
+  "note": "M2 未保存逐事件预测；本脚本以相同确定性流程重跑 4 折取回 逐事件 yhat/cutoff/chosen，未改模型、参数、覆盖率或特征。"
+}

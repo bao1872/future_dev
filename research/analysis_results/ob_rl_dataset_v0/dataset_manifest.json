@@ -1,6 +1,14 @@
 {
   "dataset_version": "ob_rl_dataset_v0",
+  "source_data_baseline_sha": "0b0caad7ddba837f4d837c1fbdd990abe28f6167",
+  "builder_code_sha": "a96930a1898a1cceea22b49ec95aedfdf0e7fa1b",
+  "gate_b_dataset_builder_sha": "c475239e872246fcee64ca439f7d3d8e550a0c4e",
+  "artifact_sha256": {
+    "ob_rl_state_v0.csv": "b6a1088ec6b377f7f32038f4f0280c197ef3601e321deb33e51157875b0fa546",
+    "ob_rl_action_v0.csv": "8789c82c64a2d3f6869378e9b512e16d8e69fcb9252f5ad065ee3add3b4ea8b6"
+  },
   "baseline_sha": "0b0caad7ddba837f4d837c1fbdd990abe28f6167",
+  "baseline_sha_semantics": "deprecated alias of source_data_baseline_sha",
   "reward_version": "GROSS_R_V0",
   "candidates": 21481,
   "state_rows": 21481,
@@ -57,6 +65,56 @@
   "momentum_coverage": {
     "expected_rows": 64443,
     "actual_rows": 64443
+  },
+  "dsa_coverage": {
+    "authority": "recomputed_from_frozen_bars_via_compute_dsa_canonical",
+    "expected_rows": 64443,
+    "actual_rows": 64443,
+    "incomplete_candidates": 0
+  },
+  "frozen_v3_dsa_columns_ignored": [
+    "dsa_direction",
+    "dsa_raw_dsa_vwap_dev_pct"
+  ],
+  "dsa_confirmation_gate": {
+    "5m": {
+      "rows": 21481,
+      "confirmed_rows": 8654,
+      "unconfirmed_rows": 12827,
+      "provisional_dev_rows_masked": 12827,
+      "confirmed_dev_rows": 8654
+    },
+    "15m": {
+      "rows": 21481,
+      "confirmed_rows": 9558,
+      "unconfirmed_rows": 11923,
+      "provisional_dev_rows_masked": 11923,
+      "confirmed_dev_rows": 9558
+    },
+    "1h": {
+      "rows": 21481,
+      "confirmed_rows": 9757,
+      "unconfirmed_rows": 11724,
+      "provisional_dev_rows_masked": 11724,
+      "confirmed_dev_rows": 9757
+    }
+  },
+  "dsa_action_confirmation_gate": {
+    "5m": {
+      "action_rows": 150367,
+      "unconfirmed_rows": 89789,
+      "unconfirmed_rel_nonnull": 0
+    },
+    "15m": {
+      "action_rows": 150367,
+      "unconfirmed_rows": 83461,
+      "unconfirmed_rel_nonnull": 0
+    },
+    "1h": {
+      "action_rows": 150367,
+      "unconfirmed_rows": 82068,
+      "unconfirmed_rel_nonnull": 0
+    }
   },
   "metadata_columns": [
     "candidate_id",
@@ -436,33 +494,5 @@
     "exit_code_h24",
     "primary_reward_R",
     "reward_version"
-  ],
-  "source_data_baseline_sha": "0b0caad7ddba837f4d837c1fbdd990abe28f6167",
-  "gate_b_dataset_builder_sha": "c475239e872246fcee64ca439f7d3d8e550a0c4e",
-  "representation_code_sha": "b2e0f954fbd6c61fab60e6c6bfe209dd5c14f7ec",
-  "audit_code_sha": "b2e0f954fbd6c61fab60e6c6bfe209dd5c14f7ec",
-  "gate_b_manifest_sha256_original": "fbd139ce644ff48628ac66e6964c9b55e5a98c884305b0cb93078acc1b9de967",
-  "model_view_version": "ob_rl_model_view_v0",
-  "parquet": {
-    "state": {
-      "rows": 21481,
-      "columns": 137,
-      "csv_sha256": "4cb1c775eebc595e8c9f72787e30a482070584a7fd8c0aaafa8953974313ab35",
-      "parquet_sha256": "2ad59e269a1a47fbba1d833e0e2cae3f36214791672360cafc5a400f99411c23",
-      "schema_match": true,
-      "key_match": true,
-      "content_exact": true
-    },
-    "action": {
-      "rows": 150367,
-      "columns": 232,
-      "csv_sha256": "df8ed3c84db582c88ba49ae90a164c9d630ff274a1823b8c559b4ca12ca99422",
-      "parquet_sha256": "44488a9e52f441d3deb8f2b8c3e50da6a610faa1339a6de5d32160f05cef7063",
-      "schema_match": true,
-      "key_match": true,
-      "content_exact": true
-    }
-  },
-  "rl0_finalized": true,
-  "model_view_feature_count": 62
+  ]
 }

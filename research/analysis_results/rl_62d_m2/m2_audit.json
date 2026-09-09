@@ -1,0 +1,55 @@
+{
+  "script": "research/m2_nondeep_temporal_v1.py",
+  "base_commit": "9cfcb0218927a01b699bbab3ea55d5eaec4ca098",
+  "current_head": "9cfcb0218927a01b699bbab3ea55d5eaec4ca098",
+  "seed": 20240901,
+  "coverages": [
+    0.1,
+    0.2,
+    0.3,
+    0.5
+  ],
+  "n_kept": 19940,
+  "n_days": 407,
+  "fold_bounds": [
+    200,
+    240,
+    280,
+    320
+  ],
+  "temporal_features": [
+    "sqzmom_val__d1",
+    "sqzmom_val__d3",
+    "sqzmom_val__d6",
+    "sqzmom_val__slope6",
+    "sqzmom_delta__d1",
+    "sqzmom_delta__d3",
+    "sqzmom_delta__d6",
+    "sqzmom_delta__slope6",
+    "dsa_raw_dsa_vwap_dev_pct__d1",
+    "dsa_raw_dsa_vwap_dev_pct__d3",
+    "dsa_raw_dsa_vwap_dev_pct__d6",
+    "dsa_raw_dsa_vwap_dev_pct__slope6",
+    "vol20__d1",
+    "vol20__d3",
+    "vol20__d6",
+    "vol20__slope6",
+    "vol_part__d1",
+    "vol_part__d3",
+    "vol_part__d6",
+    "vol_part__slope6",
+    "momentum_direction_code__changed3",
+    "momentum_direction_code__since_change",
+    "dsa_direction__changed3",
+    "dsa_direction__since_change"
+  ],
+  "temporal_scope_note": "时间增强仅覆盖 momentum+DSA+基础波动/参与的逐根状态；internal_bias/swing_bias/active_ob_structure_class/quant_state 为冻结单点快照，无逐根函数，本轮不纳入时间维度。",
+  "models": [
+    "CatBoost回归",
+    "LightGBM回归",
+    "XGBoost回归",
+    "Ridge回归",
+    "LightGBM回归+排序",
+    "XGBoost回归+排序"
+  ]
+}

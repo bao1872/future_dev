@@ -1,0 +1,73 @@
+[load_base] idx/rewards/gaps loaded; n_kept=19940
+[load_base] state parquet loaded + meta built
+[load_base] action parquet + 62d features built; snap_rows=(119640, 62)
+[build_temporal] start; syms=['M', 'RB', 'AG', 'CU']
+[build_panel] loading precomputed panel research/analysis_results/m2/temporal_market_panel.parquet
+[build_panel] cached panels for ['AG', 'CU', 'M', 'RB']
+[build_temporal] M: panel built; building features
+[build_temporal] RB: panel built; building features
+[build_temporal] AG: panel built; building features
+[build_temporal] CU: panel built; building features
+temporal features built: shape=(19940, 24), nan%=0.01%
+folds built: N_days=407, bounds=[200, 240, 280, 320] train / [40, 40, 40, 40] sel / [40, 40, 40, 47] test
+  done CatBoost回归 / SNAPSHOT: sharpe=-0.917 cum=-1.101 pf=0.960 trades=1225
+  done CatBoost回归 / TEMPORAL: sharpe=0.392 cum=0.718 pf=1.054 trades=2147
+  done LightGBM回归 / SNAPSHOT: sharpe=1.207 cum=1.566 pf=1.064 trades=1581
+  done LightGBM回归 / TEMPORAL: sharpe=1.459 cum=1.906 pf=1.080 trades=1481
+  done XGBoost回归 / SNAPSHOT: sharpe=-0.094 cum=-0.123 pf=0.976 trades=1625
+/Users/zhenbao/Desktop/coding/future_dev/.venv/lib/python3.12/site-packages/numpy/lib/_function_base_impl.py:3036: RuntimeWarning: invalid value encountered in divide
+  c /= stddev[:, None]
+/Users/zhenbao/Desktop/coding/future_dev/.venv/lib/python3.12/site-packages/numpy/lib/_function_base_impl.py:3037: RuntimeWarning: invalid value encountered in divide
+  c /= stddev[None, :]
+  done XGBoost回归 / TEMPORAL: sharpe=0.076 cum=0.093 pf=0.976 trades=1685
+  done Ridge回归 / SNAPSHOT: sharpe=0.360 cum=0.432 pf=1.029 trades=1032
+  done Ridge回归 / TEMPORAL: sharpe=0.876 cum=1.137 pf=1.079 trades=1156
+  done LightGBM回归+排序 / SNAPSHOT: sharpe=0.775 cum=1.271 pf=1.035 trades=1525
+  done LightGBM回归+排序 / TEMPORAL: sharpe=0.170 cum=0.247 pf=1.004 trades=1230
+  done XGBoost回归+排序 / SNAPSHOT: sharpe=-0.088 cum=-0.195 pf=1.033 trades=3299
+/Users/zhenbao/Desktop/coding/future_dev/.venv/lib/python3.12/site-packages/numpy/lib/_function_base_impl.py:3036: RuntimeWarning: invalid value encountered in divide
+  c /= stddev[:, None]
+/Users/zhenbao/Desktop/coding/future_dev/.venv/lib/python3.12/site-packages/numpy/lib/_function_base_impl.py:3037: RuntimeWarning: invalid value encountered in divide
+  c /= stddev[None, :]
+  done XGBoost回归+排序 / TEMPORAL: sharpe=0.694 cum=1.115 pf=1.059 trades=1242
+
+=== M2 主表 ===
+           模型     特征视图    累计收益     夏普率   最大回撤     pf  交易次数  不交易比例    选中平均收益
+   CatBoost回归 SNAPSHOT -1.1007 -0.9173 1.2417 0.9599  1225 0.8512 -0.025102
+   CatBoost回归 TEMPORAL  0.7181  0.3917 1.2922 1.0542  2147 0.7393  0.033203
+   LightGBM回归 SNAPSHOT  1.5659  1.2070 0.9926 1.0638  1581 0.8080  0.037295
+   LightGBM回归 TEMPORAL  1.9059  1.4591 0.8863 1.0799  1481 0.8201  0.046329
+    XGBoost回归 SNAPSHOT -0.1232 -0.0936 1.4415 0.9757  1625 0.8026 -0.014959
+    XGBoost回归 TEMPORAL  0.0932  0.0756 1.8811 0.9761  1685 0.7954 -0.014674
+      Ridge回归 SNAPSHOT  0.4325  0.3601 1.2913 1.0290  1032 0.8747  0.018319
+      Ridge回归 TEMPORAL  1.1371  0.8760 1.2781 1.0786  1156 0.8596  0.048339
+LightGBM回归+排序 SNAPSHOT  1.2709  0.7749 1.7758 1.0354  1525 0.8148  0.022784
+LightGBM回归+排序 TEMPORAL  0.2472  0.1697 1.5345 1.0041  1230 0.8506  0.002662
+ XGBoost回归+排序 SNAPSHOT -0.1945 -0.0881 1.8291 1.0331  3299 0.5993  0.021630
+ XGBoost回归+排序 TEMPORAL  1.1148  0.6943 1.5397 1.0593  1242 0.8492  0.039200
+
+=== 快照 vs 时间增强 ===
+           模型    快照夏普  时间增强夏普      差值    快照收益  时间增强收益
+   CatBoost回归 -0.9173  0.3917  1.3090 -1.1007  0.7181
+   LightGBM回归  1.2070  1.4591  0.2521  1.5659  1.9059
+    XGBoost回归 -0.0936  0.0756  0.1692 -0.1232  0.0932
+      Ridge回归  0.3601  0.8760  0.5159  0.4325  1.1371
+LightGBM回归+排序  0.7749  0.1697 -0.6052  1.2709  0.2472
+ XGBoost回归+排序 -0.0881  0.6943  0.7824 -0.1945  1.1148
+
+=== 排序能力（回归 vs 排序动作选择）===
+           模型     特征视图 动作选择来源  第一名命中率  前二名命中率  事件内排序相关  方向正确率   平均动作遗憾
+   CatBoost回归 SNAPSHOT   回归模型  0.1930  0.3190   0.0005 0.3874 1.505601
+   CatBoost回归 TEMPORAL   回归模型  0.1955  0.3076   0.0181 0.3954 1.495116
+   LightGBM回归 SNAPSHOT   回归模型  0.2146  0.3005   0.0004 0.3971 1.519589
+   LightGBM回归 TEMPORAL   回归模型  0.2141  0.2997  -0.0010 0.3966 1.522178
+    XGBoost回归 SNAPSHOT   回归模型  0.2100  0.2955   0.0028 0.4009 1.500398
+    XGBoost回归 TEMPORAL   回归模型  0.2100  0.2943  -0.0080 0.3946 1.515447
+      Ridge回归 SNAPSHOT   回归模型  0.2125  0.2878   0.0134 0.3732 1.457394
+      Ridge回归 TEMPORAL   回归模型  0.2098  0.2873   0.0123 0.3714 1.463564
+LightGBM回归+排序 SNAPSHOT   排序模型  0.2174  0.2403  -0.0216 0.3472 1.474022
+LightGBM回归+排序 TEMPORAL   排序模型  0.2073  0.2341  -0.0134 0.3423 1.499852
+ XGBoost回归+排序 SNAPSHOT   排序模型  0.2136  0.2548  -0.0139 0.3447 1.463390
+ XGBoost回归+排序 TEMPORAL   排序模型  0.2237  0.2588  -0.0167 0.3537 1.461403
+
+RL_62D_M2_DONE head=9cfcb0218927a01b699bbab3ea55d5eaec4ca098

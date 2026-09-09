@@ -1,0 +1,109 @@
+{
+  "representation_version": "RL0_PARQUET_V1_CAUSAL_DSA",
+  "engine": "pyarrow",
+  "compression": "zstd",
+  "dsa_contract_version": "CONFIRMED_CAUSAL_DSA_V1",
+  "source_data_baseline_sha": "0b0caad7ddba837f4d837c1fbdd990abe28f6167",
+  "historical_gate_b_dataset_builder_sha": "c475239e872246fcee64ca439f7d3d8e550a0c4e",
+  "dataset_builder_code_sha": "a96930a1898a1cceea22b49ec95aedfdf0e7fa1b",
+  "representation_code_sha": "548593d5efa7d4f042d97e92c84ced07dbf81d48",
+  "dataset_manifest_sha256": "e4f5e432c215a13ee3ce6e5e11dd8250b09bc2d2133e1f1df46412f42a0476af",
+  "state": {
+    "rows": 21481,
+    "columns": 137,
+    "schema_match": true,
+    "key_match": true,
+    "content_exact": true,
+    "dsa_confirmation_contract": {
+      "5m": {
+        "rows": 21481,
+        "confirmed_rows": 8654,
+        "unconfirmed_dev_nonnull": 0
+      },
+      "15m": {
+        "rows": 21481,
+        "confirmed_rows": 9558,
+        "unconfirmed_dev_nonnull": 0
+      },
+      "1h": {
+        "rows": 21481,
+        "confirmed_rows": 9757,
+        "unconfirmed_dev_nonnull": 0
+      }
+    },
+    "csv_bytes": 26812312,
+    "parquet_bytes": 5626995,
+    "compression_ratio": 4.765,
+    "csv_sha256": "b6a1088ec6b377f7f32038f4f0280c197ef3601e321deb33e51157875b0fa546",
+    "csv_dsa_confirmation_contract": {
+      "5m": {
+        "rows": 21481,
+        "confirmed_rows": 8654,
+        "unconfirmed_dev_nonnull": 0
+      },
+      "15m": {
+        "rows": 21481,
+        "confirmed_rows": 9558,
+        "unconfirmed_dev_nonnull": 0
+      },
+      "1h": {
+        "rows": 21481,
+        "confirmed_rows": 9757,
+        "unconfirmed_dev_nonnull": 0
+      }
+    },
+    "parquet_sha256": "ff4462ae8d9468e3851a352eac2c76f35dbde06ccc137382e6bd6e8f262b3a71"
+  },
+  "action": {
+    "rows": 150367,
+    "columns": 232,
+    "schema_match": true,
+    "key_match": true,
+    "content_exact": true,
+    "dsa_confirmation_contract": {
+      "5m": {
+        "rows": 150367,
+        "confirmed_rows": 60578,
+        "unconfirmed_dev_nonnull": 0,
+        "unconfirmed_rel_nonnull": 0
+      },
+      "15m": {
+        "rows": 150367,
+        "confirmed_rows": 66906,
+        "unconfirmed_dev_nonnull": 0,
+        "unconfirmed_rel_nonnull": 0
+      },
+      "1h": {
+        "rows": 150367,
+        "confirmed_rows": 68299,
+        "unconfirmed_dev_nonnull": 0,
+        "unconfirmed_rel_nonnull": 0
+      }
+    },
+    "csv_bytes": 320797127,
+    "parquet_bytes": 31888247,
+    "compression_ratio": 10.06,
+    "csv_sha256": "8789c82c64a2d3f6869378e9b512e16d8e69fcb9252f5ad065ee3add3b4ea8b6",
+    "csv_dsa_confirmation_contract": {
+      "5m": {
+        "rows": 150367,
+        "confirmed_rows": 60578,
+        "unconfirmed_dev_nonnull": 0,
+        "unconfirmed_rel_nonnull": 0
+      },
+      "15m": {
+        "rows": 150367,
+        "confirmed_rows": 66906,
+        "unconfirmed_dev_nonnull": 0,
+        "unconfirmed_rel_nonnull": 0
+      },
+      "1h": {
+        "rows": 150367,
+        "confirmed_rows": 68299,
+        "unconfirmed_dev_nonnull": 0,
+        "unconfirmed_rel_nonnull": 0
+      }
+    },
+    "parquet_sha256": "59127c0817f9da5d16fcacd295d5635daf13ad4f633298b9f8f8b0f7f4783c1f"
+  }
+}

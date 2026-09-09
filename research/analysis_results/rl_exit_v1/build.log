@@ -1,0 +1,59 @@
+[load_base] idx/rewards/gaps loaded; n_kept=19940
+[load_base] state parquet loaded + meta built
+[load_base] action parquet + 62d features built; snap_rows=(119640, 62)
+[M4] kept events=19940, cat_features=14
+[M4] atr valid=19940/19940, bias valid=19940/19940
+[M4] AG: events=5745 win_ok=5745 dropped=0
+[M4]   AG FOLLOW_1.5R: episodes=5745 rows=24829
+[M4]   AG FOLLOW_2.0R: episodes=5745 rows=29760
+[M4]   AG FOLLOW_2.5R: episodes=5745 rows=32618
+[M4]   AG FADE_1.5R: episodes=5745 rows=23574
+[M4]   AG FADE_2.0R: episodes=5745 rows=27756
+[M4]   AG FADE_2.5R: episodes=5745 rows=30780
+[M4] CU: events=5206 win_ok=5206 dropped=0
+[M4]   CU FOLLOW_1.5R: episodes=5206 rows=23522
+[M4]   CU FOLLOW_2.0R: episodes=5206 rows=28330
+[M4]   CU FOLLOW_2.5R: episodes=5206 rows=31312
+[M4]   CU FADE_1.5R: episodes=5206 rows=22512
+[M4]   CU FADE_2.0R: episodes=5206 rows=26227
+[M4]   CU FADE_2.5R: episodes=5206 rows=28932
+[M4] M: events=4369 win_ok=4369 dropped=0
+[M4]   M FOLLOW_1.5R: episodes=4369 rows=19901
+[M4]   M FOLLOW_2.0R: episodes=4369 rows=23565
+[M4]   M FOLLOW_2.5R: episodes=4369 rows=26196
+[M4]   M FADE_1.5R: episodes=4369 rows=18946
+[M4]   M FADE_2.0R: episodes=4369 rows=22238
+[M4]   M FADE_2.5R: episodes=4369 rows=24759
+[M4] RB: events=4620 win_ok=4620 dropped=0
+[M4]   RB FOLLOW_1.5R: episodes=4620 rows=21623
+[M4]   RB FOLLOW_2.0R: episodes=4620 rows=25340
+[M4]   RB FOLLOW_2.5R: episodes=4620 rows=27856
+[M4]   RB FADE_1.5R: episodes=4620 rows=21300
+[M4]   RB FADE_2.0R: episodes=4620 rows=24857
+[M4]   RB FADE_2.5R: episodes=4620 rows=27597
+
+[M4] trajectory rows=614330 cols=112
+
+=== M4-PRE 轨迹统计 ===
+  episode_count: 119640
+  row_count: 614330
+  max_step: 11
+  forced_gap_stop_count: 3065
+  forced_gap_target_count: 2276
+  both_conservative_stop_count: 244
+  stop_count: 67134
+  target_count: 31366
+  timeout_count: 15555
+  steps_distribution: {0: 119640, 1: 97584, 2: 78188, 3: 63577, 4: 52838, 5: 44282, 6: 37133, 7: 31732, 8: 27373, 9: 23618, 10: 20392, 11: 17973}
+  terminal_reason_distribution: {'STOP': 67134, 'TARGET': 31366, 'TIMEOUT': 15555, 'GAP_STOP': 3065, 'GAP_TARGET': 2276, 'BOTH_CONSERVATIVE_STOP': 244}
+
+=== 因果检查 ===
+  all_hold_vs_authoritative_max_abs_diff: 0.0
+  all_hold_mismatches: 0
+  all_hold_compared: 119640
+  episode_single_trading_day: True
+  dyn_bar_before_decision_bar: True
+  exit_value_matches_current_open: True
+  terminal_only_at_last_step_of_episode: True
+
+M4_PRE_DONE
