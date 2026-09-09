@@ -1,6 +1,6 @@
 {
   "experiment": "ob_q_relationship_v1",
-  "git_head": "02424edc156036e3a4d817683680629fe54c64f6",
+  "git_head": "548593d5efa7d4f042d97e92c84ced07dbf81d48",
   "model_view_version": "ob_rl_model_view_v0",
   "model_feature_count": 62,
   "validated_timeframes": [
