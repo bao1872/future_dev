@@ -1,0 +1,30 @@
+{
+  "experiment": "ob_close_beyond_action_spread_v1",
+  "git_head": "2a224293550cca8421694a6116023727ec23a2b4",
+  "candidate_count": 21481,
+  "split_method": "whole_trading_day_70_30",
+  "split_day": "2026-03-11T00:00:00",
+  "actions": {
+    "follow": "FOLLOW_2.0R",
+    "fade": "FADE_2.0R"
+  },
+  "horizons": [
+    6,
+    12,
+    24
+  ],
+  "primary_horizon": 12,
+  "screen": {
+    "status": "ACTION_PREFERENCE_FAIL",
+    "discovery_close_beyond_delta_R": 0.103438836623819,
+    "validation_close_beyond_delta_R": 0.25579016696109386,
+    "discovery_rest_delta_R": -0.022345890884249233,
+    "validation_rest_delta_R": -0.01067337585494045,
+    "discovery_incremental_delta_R": 0.12578472750806824,
+    "validation_incremental_delta_R": 0.2664635428160343,
+    "discovery_paired_n": 801,
+    "validation_paired_n": 348,
+    "symbols_available": 4,
+    "symbols_fade_preferred": 2
+  }
+}
