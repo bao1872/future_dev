@@ -13,10 +13,11 @@ Question being tested:
 
 Method (user-specified, minimal):
     2 models:  EVENT_ACTION, FULL_NO_MOMENTUM
-    3 chronological train/test windows by candidate percentile:
-        A: train 0-55%,   test 55-70%
-        B: train 0-70%,   test 70-85%
-        C: train 0-85%,   test 85-100%
+    3 chronological windows by whole trading day:
+        A: train 0-55d,  test 55-70d
+        B: train 0-70d,  test 70-85d
+        C: train 0-85d,  test 85-100d
+    No same-day leakage: split is on unique trading days.
     No feature redesign, no CatBoost tuning, no bootstrap.
 
 Only reports: q_corr, selected_R, trade_rate, per-symbol selected_R.
@@ -55,14 +56,28 @@ cand_meta = cand_meta.sort_values(
     ["_day", "candidate_id"]
 ).reset_index(drop=True)
 
-ids = cand_meta["candidate_id"].tolist()
-n = len(ids)
+days = list(
+    sorted(
+        cand_meta[
+            "_day"
+        ].unique()
+    )
+)
 
-# (train_start_frac, train_end_frac, test_start_frac, test_end_frac)
+n_days = len(days)
+
+if n_days < 10:
+    raise RuntimeError(
+        "too few trading days "
+        "for survival probe"
+    )
+
+
 WINDOWS = {
-    "A": (0.00, 0.55, 0.55, 0.70),
-    "B": (0.00, 0.70, 0.70, 0.85),
-    "C": (0.00, 0.85, 0.85, 1.00),
+    # train_end, test_end
+    "A": (0.55, 0.70),
+    "B": (0.70, 0.85),
+    "C": (0.85, 1.00),
 }
 
 MODELS = {
@@ -71,16 +86,101 @@ MODELS = {
 }
 
 
-def frac_idx(frac: float) -> int:
-    return int(round(n * frac))
+def day_idx(
+    frac: float,
+) -> int:
+
+    return min(
+        max(
+            int(
+                n_days
+                * frac
+            ),
+            1,
+        ),
+        n_days,
+    )
 
 
 results = []
 
-for wname, (tr0, tr1, te0, te1) in WINDOWS.items():
+for (
+    wname,
+    (
+        train_end_frac,
+        test_end_frac,
+    ),
+) in WINDOWS.items():
 
-    train_ids = set(ids[frac_idx(tr0):frac_idx(tr1)])
-    test_ids = set(ids[frac_idx(te0):frac_idx(te1)])
+    train_end = day_idx(
+        train_end_frac
+    )
+
+    test_end = day_idx(
+        test_end_frac
+    )
+
+    train_days = (
+        days[
+            :train_end
+        ]
+    )
+
+    test_days = (
+        days[
+            train_end:
+            test_end
+        ]
+    )
+
+    if (
+        not train_days
+        or not test_days
+    ):
+        raise RuntimeError(
+            f"{wname}: empty "
+            "train/test day window"
+        )
+
+    if not (
+        max(train_days)
+        < min(test_days)
+    ):
+        raise RuntimeError(
+            f"{wname}: "
+            "trading-day overlap"
+        )
+
+    train_ids = set(
+        cand_meta.loc[
+            cand_meta[
+                "_day"
+            ].isin(
+                train_days
+            ),
+            "candidate_id",
+        ]
+    )
+
+    test_ids = set(
+        cand_meta.loc[
+            cand_meta[
+                "_day"
+            ].isin(
+                test_days
+            ),
+            "candidate_id",
+        ]
+    )
+
+    if (
+        train_ids
+        & test_ids
+    ):
+        raise RuntimeError(
+            f"{wname}: "
+            "candidate overlap"
+        )
 
     train = (
         work[work["candidate_id"].isin(train_ids)]
@@ -163,6 +263,102 @@ for mname in MODELS:
         f"{mname}: windows_selected_R>0 = {n_pos}/3 "
         f"values={[round(v, 5) for v in vals]}"
     )
+
+print()
+print(
+    "INCREMENTAL_STATE_VALUE"
+)
+
+lookup = {
+    (
+        r["window"],
+        r["model"],
+    ):
+        r
+    for r in results
+}
+
+delta_values = []
+
+for wname in WINDOWS:
+
+    base = lookup[
+        (
+            wname,
+            "EVENT_ACTION",
+        )
+    ]
+
+    state = lookup[
+        (
+            wname,
+            "FULL_NO_MOMENTUM",
+        )
+    ]
+
+    delta_r = (
+        state[
+            "selected_R"
+        ]
+        - base[
+            "selected_R"
+        ]
+    )
+
+    delta_qcorr = (
+        state[
+            "q_corr"
+        ]
+        - base[
+            "q_corr"
+        ]
+    )
+
+    symbols = sorted(
+        set(
+            base[
+                "per_symbol_R"
+            ]
+        )
+        & set(
+            state[
+                "per_symbol_R"
+            ]
+        )
+    )
+
+    delta_symbol = {
+        sym:
+            (
+                state[
+                    "per_symbol_R"
+                ][sym]
+                - base[
+                    "per_symbol_R"
+                ][sym]
+            )
+        for sym in symbols
+    }
+
+    delta_values.append(
+        delta_r
+    )
+
+    print(
+        wname,
+        f"delta_R={delta_r:+.5f}",
+        f"delta_qcorr={delta_qcorr:+.5f}",
+        f"delta_symbol={delta_symbol}",
+    )
+
+print(
+    "windows_delta_R>0 =",
+    sum(
+        v > 0
+        for v in delta_values
+    ),
+    "/3",
+)
 
 print()
 print("JUDGEMENT_LEFT_TO_USER_PER_STATED_RULE")
