@@ -29,7 +29,6 @@ if str(ROOT) not in sys.path:
 from research.build_ob_rl_dataset_v0 import OUT_ROOT  # noqa: E402
 from research import build_ob_rl_parquet_v0 as PQ  # noqa: E402
 from research.build_ob_rl_parquet_v0 import (  # noqa: E402
-    EXPECTED_GATE_B_FILES,
     sha256_file,
 )
 from research.build_ob_rl_dataset_v0 import (  # noqa: E402
@@ -104,45 +103,94 @@ def _full_columns(name: str) -> list[str]:
     )
 
 
-def verify_original_manifest(root: Path) -> dict:
-    """The Gate-B manifest is INPUT EVIDENCE, not the final artifact.
+def verify_manifest_link(
+    root: Path,
+    receipt: dict,
+) -> dict:
+    """Bind the Parquet receipt to the corrected dataset manifest.
 
-    It must be identified as either (a) the audited Gate-B file or
-    (b) an RL-0 finalized manifest that still records that original
-    hash. Anything else is a STOP.
+    Before finalization:
+        current manifest SHA must equal the receipt source SHA.
+
+    After finalization:
+        the manifest has been enriched by this audit, so the original
+        pre-finalization source SHA is preserved explicitly in
+        parquet_source_manifest_sha256.
     """
-    expected = EXPECTED_GATE_B_FILES["dataset_manifest.json"]
-    p = root / "dataset_manifest.json"
-    if not p.exists():
-        raise RuntimeError(f"missing Gate-B manifest: {p}")
 
-    cur = sha256_file(p)
-    if cur == expected:
-        return {
-            "original_intact": True,
-            "already_finalized": False,
-            "sha256_original": expected,
-        }
-
-    try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as e:
-        raise RuntimeError(
-            "manifest is not the audited Gate-B file and is "
-            "not valid JSON"
-        ) from e
-
-    if data.get("gate_b_manifest_sha256_original") == expected:
-        return {
-            "original_intact": False,
-            "already_finalized": True,
-            "sha256_original": expected,
-        }
-
-    raise RuntimeError(
-        "manifest is neither the audited Gate-B file nor an "
-        "RL-0 finalized manifest"
+    source = (
+        PQ.verify_rebuilt_dataset(
+            root
+        )
     )
+
+    manifest = source[
+        "manifest"
+    ]
+
+    p = (
+        root
+        / "dataset_manifest.json"
+    )
+
+    current_sha = sha256_file(
+        p
+    )
+
+    already_finalized = (
+        manifest.get(
+            "rl0_finalized"
+        )
+        is True
+    )
+
+    if already_finalized:
+
+        source_sha = manifest.get(
+            "parquet_source_manifest_sha256"
+        )
+
+        if (
+            not isinstance(
+                source_sha,
+                str,
+            )
+            or len(source_sha) != 64
+        ):
+            raise RuntimeError(
+                "finalized manifest missing "
+                "parquet source manifest SHA"
+            )
+
+    else:
+
+        source_sha = current_sha
+
+    receipt_sha = receipt.get(
+        "dataset_manifest_sha256"
+    )
+
+    if receipt_sha != source_sha:
+        raise RuntimeError(
+            "Parquet receipt/source manifest "
+            "SHA mismatch: "
+            f"receipt={receipt_sha} "
+            f"source={source_sha}"
+        )
+
+    return {
+        "manifest":
+            manifest,
+
+        "current_manifest_sha256":
+            current_sha,
+
+        "source_manifest_sha256":
+            source_sha,
+
+        "already_finalized":
+            already_finalized,
+    }
 
 
 def read_receipt(root: Path) -> dict:
@@ -155,41 +203,167 @@ def read_receipt(root: Path) -> dict:
     return json.loads(p.read_text(encoding="utf-8"))
 
 
-def verify_receipt(root: Path, receipt: dict) -> dict:
-    """A receipt is EVIDENCE, not TRUTH. Re-verify it against disk.
+def dsa_contract_columns(
+    *,
+    action_table: bool,
+) -> list[str]:
 
-    Without this, a receipt could still claim ``content_exact = true``
-    after the Parquet it describes was modified or corrupted, and the
-    committed manifest would inherit that claim.
-    """
+    cols = []
+
+    for tf in VALIDATED_TFS:
+
+        cols.extend(
+            [
+                f"dsa_direction_{tf}",
+                f"dsa_vwap_dev_pct_{tf}",
+            ]
+        )
+
+        if action_table:
+            cols.append(
+                f"dsa_vwap_dev_rel_{tf}"
+            )
+
+    return cols
+
+
+def verify_receipt(
+    root: Path,
+    receipt: dict,
+    manifest_state: dict | None = None,
+) -> dict:
+    """Re-verify receipt provenance and final Parquet artifacts."""
+
+    if manifest_state is None:
+        manifest_state = (
+            verify_manifest_link(
+                root,
+                receipt,
+            )
+        )
+
+    source_manifest = (
+        manifest_state[
+            "manifest"
+        ]
+    )
+
     if (
-        receipt.get("representation_version")
+        receipt.get(
+            "representation_version"
+        )
         != PQ.REPRESENTATION_VERSION
     ):
-        raise RuntimeError("representation version drift")
-    if receipt.get("engine") != "pyarrow":
-        raise RuntimeError("unexpected parquet engine")
-    if receipt.get("compression") != "zstd":
-        raise RuntimeError("unexpected parquet compression")
+        raise RuntimeError(
+            "representation version drift"
+        )
+
     if (
-        receipt.get("gate_b_dataset_builder_sha")
+        receipt.get(
+            "dsa_contract_version"
+        )
+        != PQ.DSA_CONTRACT_VERSION
+    ):
+        raise RuntimeError(
+            "DSA contract version drift"
+        )
+
+    if receipt.get("engine") != "pyarrow":
+        raise RuntimeError(
+            "unexpected parquet engine"
+        )
+
+    if (
+        receipt.get(
+            "compression"
+        )
+        != "zstd"
+    ):
+        raise RuntimeError(
+            "unexpected parquet compression"
+        )
+
+    if (
+        receipt.get(
+            "source_data_baseline_sha"
+        )
+        != SOURCE_DATA_BASELINE_SHA
+    ):
+        raise RuntimeError(
+            "source baseline drift"
+        )
+
+    if (
+        receipt.get(
+            "historical_gate_b_dataset_builder_sha"
+        )
         != GATE_B_DATASET_BUILDER_SHA
     ):
-        raise RuntimeError("Gate-B builder SHA drift")
+        raise RuntimeError(
+            "historical Gate-B lineage drift"
+        )
+
+    if (
+        receipt.get(
+            "dataset_builder_code_sha"
+        )
+        != PQ.EXPECTED_DATASET_BUILDER_CODE_SHA
+    ):
+        raise RuntimeError(
+            "corrected dataset builder "
+            "provenance drift"
+        )
+
+    if (
+        receipt.get(
+            "dataset_manifest_sha256"
+        )
+        != manifest_state[
+            "source_manifest_sha256"
+        ]
+    ):
+        raise RuntimeError(
+            "receipt/source manifest link drift"
+        )
+
+    artifact_sha = source_manifest.get(
+        "artifact_sha256",
+        {},
+    )
 
     specs = (
-        ("state", "ob_rl_state_v0", PQ.EXPECTED_STATE_ROWS),
+        (
+            "state",
+            "ob_rl_state_v0",
+            PQ.EXPECTED_STATE_ROWS,
+            False,
+        ),
+
         (
             "action",
             "ob_rl_action_v0",
             PQ.EXPECTED_ACTION_ROWS,
+            True,
         ),
     )
 
-    result: dict = {}
-    for tag, name, expected_rows in specs:
-        r = receipt.get(tag)
-        if not isinstance(r, dict):
+    result = {}
+
+    for (
+        tag,
+        name,
+        expected_rows,
+        action_table,
+    ) in specs:
+
+        r = receipt.get(
+            tag
+        )
+
+        if not isinstance(
+            r,
+            dict,
+        ):
             raise RuntimeError(
                 f"missing receipt section {tag}"
             )
@@ -201,43 +375,142 @@ def verify_receipt(root: Path, receipt: dict) -> dict:
         ):
             if r.get(flag) is not True:
                 raise RuntimeError(
-                    f"{tag} parity flag {flag} != true"
+                    f"{tag} parity flag "
+                    f"{flag} != true"
                 )
 
-        csv_path = root / f"{name}.csv"
-        pq_path = root / f"{name}.parquet"
+        csv_path = (
+            root
+            / f"{name}.csv"
+        )
+
+        pq_path = (
+            root
+            / f"{name}.parquet"
+        )
+
         if not csv_path.exists():
-            raise RuntimeError(f"missing CSV {csv_path}")
-        if not pq_path.exists():
-            raise RuntimeError(f"missing parquet {pq_path}")
-
-        expected_csv_sha = EXPECTED_GATE_B_FILES[
-            f"{name}.csv"
-        ]
-        actual_csv_sha = sha256_file(csv_path)
-        if (
-            r.get("csv_sha256") != expected_csv_sha
-            or actual_csv_sha != expected_csv_sha
-        ):
-            raise RuntimeError(f"{tag} CSV provenance drift")
-
-        actual_pq_sha = sha256_file(pq_path)
-        if r.get("parquet_sha256") != actual_pq_sha:
             raise RuntimeError(
-                f"{tag} parquet hash does not match receipt"
+                f"missing CSV {csv_path}"
             )
 
-        if r.get("rows") != expected_rows:
-            raise RuntimeError(f"{tag} receipt row drift")
+        if not pq_path.exists():
+            raise RuntimeError(
+                f"missing parquet {pq_path}"
+            )
+
+        expected_csv_sha = (
+            artifact_sha.get(
+                f"{name}.csv"
+            )
+        )
+
+        actual_csv_sha = (
+            sha256_file(
+                csv_path
+            )
+        )
+
+        if (
+            not expected_csv_sha
+            or r.get(
+                "csv_sha256"
+            )
+            != expected_csv_sha
+            or actual_csv_sha
+            != expected_csv_sha
+        ):
+            raise RuntimeError(
+                f"{tag} corrected CSV "
+                "provenance drift"
+            )
+
+        actual_pq_sha = (
+            sha256_file(
+                pq_path
+            )
+        )
+
+        if (
+            r.get(
+                "parquet_sha256"
+            )
+            != actual_pq_sha
+        ):
+            raise RuntimeError(
+                f"{tag} parquet hash "
+                "does not match receipt"
+            )
+
+        if (
+            r.get("rows")
+            != expected_rows
+        ):
+            raise RuntimeError(
+                f"{tag} receipt row drift"
+            )
+
+        receipt_csv_dsa = r.get(
+            "csv_dsa_confirmation_contract"
+        )
+
+        receipt_pq_dsa = r.get(
+            "dsa_confirmation_contract"
+        )
+
+        if (
+            receipt_csv_dsa
+            != receipt_pq_dsa
+        ):
+            raise RuntimeError(
+                f"{tag} CSV/Parquet "
+                "DSA receipt drift"
+            )
+
+        pq_dsa = pd.read_parquet(
+            pq_path,
+            columns=dsa_contract_columns(
+                action_table=action_table,
+            ),
+        )
+
+        actual_dsa = (
+            PQ.verify_dsa_confirmation_contract(
+                pq_dsa,
+                action_table=action_table,
+            )
+        )
+
+        if actual_dsa != receipt_pq_dsa:
+            raise RuntimeError(
+                f"{tag} DSA confirmation "
+                "contract drift"
+            )
 
         result[tag] = {
-            "rows": int(r["rows"]),
-            "columns": int(r["columns"]),
-            "csv_sha256": actual_csv_sha,
-            "parquet_sha256": actual_pq_sha,
-            "schema_match": True,
-            "key_match": True,
-            "content_exact": True,
+            "rows":
+                int(r["rows"]),
+
+            "columns":
+                int(r["columns"]),
+
+            "csv_sha256":
+                actual_csv_sha,
+
+            "parquet_sha256":
+                actual_pq_sha,
+
+            "schema_match":
+                True,
+
+            "key_match":
+                True,
+
+            "content_exact":
+                True,
+
+            "dsa_confirmation_contract":
+                actual_dsa,
         }
 
     return result
@@ -250,56 +523,107 @@ def write_final_manifest(
     verified_receipt: dict,
     extra: dict,
 ) -> Path:
-    """Regenerate the committed manifest with full provenance.
 
-    ``representation_code_sha`` is the SHA that PRODUCED the Parquet
-    (taken from the receipt); ``audit_code_sha`` is the SHA running
-    this audit. The contract requires them to be the same commit.
-    """
-    rep_sha = receipt.get("representation_code_sha")
+    rep_sha = receipt.get(
+        "representation_code_sha"
+    )
+
     audit_sha = resolve_git_head()
+
     if rep_sha != audit_sha:
         raise RuntimeError(
             "representation/audit HEAD drift: "
-            f"parquet built by {rep_sha}, audit by {audit_sha}"
+            f"parquet built by {rep_sha}, "
+            f"audit by {audit_sha}"
         )
 
-    p = root / "dataset_manifest.json"
-    data = (
-        json.loads(p.read_text(encoding="utf-8"))
-        if p.exists()
-        else {}
+    p = (
+        root
+        / "dataset_manifest.json"
     )
+
+    data = json.loads(
+        p.read_text(
+            encoding="utf-8"
+        )
+    )
+
+    # Keep all corrected dataset authority written by the builder.
+    # Add representation/finalization provenance only.
     data.update(
         {
-            "source_data_baseline_sha": (
-                SOURCE_DATA_BASELINE_SHA
-            ),
-            "gate_b_dataset_builder_sha": (
-                GATE_B_DATASET_BUILDER_SHA
-            ),
-            "representation_code_sha": rep_sha,
-            "audit_code_sha": audit_sha,
-            "gate_b_manifest_sha256_original": (
-                EXPECTED_GATE_B_FILES["dataset_manifest.json"]
-            ),
-            "model_view_version": MODEL_VIEW_VERSION,
+            "parquet_source_manifest_sha256":
+                receipt[
+                    "dataset_manifest_sha256"
+                ],
+
+            "representation_version":
+                receipt[
+                    "representation_version"
+                ],
+
+            "dsa_contract_version":
+                receipt[
+                    "dsa_contract_version"
+                ],
+
+            "dataset_builder_code_sha":
+                receipt[
+                    "dataset_builder_code_sha"
+                ],
+
+            "representation_code_sha":
+                rep_sha,
+
+            "audit_code_sha":
+                audit_sha,
+
+            "model_view_version":
+                MODEL_VIEW_VERSION,
+
             "parquet": {
-                "state": verified_receipt["state"],
-                "action": verified_receipt["action"],
+                "state":
+                    verified_receipt[
+                        "state"
+                    ],
+
+                "action":
+                    verified_receipt[
+                        "action"
+                    ],
             },
-            "rl0_finalized": True,
+
+            "rl0_finalized":
+                True,
         }
     )
-    data.update(extra)
 
-    tmp = root / ".dataset_manifest.json.tmp"
-    tmp.unlink(missing_ok=True)
+    data.update(
+        extra
+    )
+
+    tmp = (
+        root
+        / ".dataset_manifest.json.tmp"
+    )
+
+    tmp.unlink(
+        missing_ok=True
+    )
+
     tmp.write_text(
-        json.dumps(data, ensure_ascii=False, indent=2),
+        json.dumps(
+            data,
+            ensure_ascii=False,
+            indent=2,
+        ),
         encoding="utf-8",
     )
-    tmp.replace(p)
+
+    tmp.replace(
+        p
+    )
+
     return p
 
 
@@ -319,12 +643,24 @@ def nan_rate(s: pd.Series) -> float:
 
 
 def main() -> None:
-    # The Gate-B manifest is checked as INPUT EVIDENCE before anything
-    # is regenerated, and the Parquet receipt must already exist.
-    manifest_state = verify_original_manifest(OUT_ROOT)
-    receipt = read_receipt(OUT_ROOT)
-    # Only the VERIFIED receipt may feed the audit and the manifest.
-    verified_receipt = verify_receipt(OUT_ROOT, receipt)
+    receipt = read_receipt(
+        OUT_ROOT
+    )
+
+    manifest_state = (
+        verify_manifest_link(
+            OUT_ROOT,
+            receipt,
+        )
+    )
+
+    verified_receipt = (
+        verify_receipt(
+            OUT_ROOT,
+            receipt,
+            manifest_state,
+        )
+    )
 
     state = _read("ob_rl_state_v0")
 
@@ -391,49 +727,124 @@ def main() -> None:
     }
 
     # ---------------- storage ----------------
-    storage = {
-        "gate_b_expected": {},
-        "gate_b_actual": {},
-        "parquet": {},
-    }
-    for name in EXPECTED_GATE_B_FILES:
-        p = OUT_ROOT / name
-        storage["gate_b_expected"][name] = EXPECTED_GATE_B_FILES[
-            name
+    source_manifest = (
+        manifest_state[
+            "manifest"
         ]
-        storage["gate_b_actual"][name] = (
-            sha256_file(p) if p.exists() else None
+    )
+
+    storage = {
+        "source_dataset": {
+            "builder_code_sha":
+                source_manifest[
+                    "builder_code_sha"
+                ],
+
+            "artifact_sha256":
+                source_manifest[
+                    "artifact_sha256"
+                ],
+
+            "source_manifest_sha256":
+                manifest_state[
+                    "source_manifest_sha256"
+                ],
+
+            "current_manifest_sha256":
+                manifest_state[
+                    "current_manifest_sha256"
+                ],
+
+            "already_finalized":
+                manifest_state[
+                    "already_finalized"
+                ],
+        },
+
+        "parquet":
+            {},
+    }
+
+    for name in (
+        "ob_rl_state_v0",
+        "ob_rl_action_v0",
+    ):
+
+        pq_path = (
+            OUT_ROOT
+            / f"{name}.parquet"
         )
-    for name in ("ob_rl_state_v0", "ob_rl_action_v0"):
-        pq = OUT_ROOT / f"{name}.parquet"
-        if pq.exists():
-            storage["parquet"][name] = {
-                "bytes": int(pq.stat().st_size),
-                "sha256": sha256_file(pq),
+
+        if pq_path.exists():
+
+            storage[
+                "parquet"
+            ][name] = {
+                "bytes":
+                    int(
+                        pq_path.stat().st_size
+                    ),
+
+                "sha256":
+                    sha256_file(
+                        pq_path
+                    ),
             }
 
-    storage["gate_b_manifest"] = manifest_state
-    storage["parity"] = {
-        "representation_version": receipt.get(
-            "representation_version"
-        ),
-        "engine": receipt.get("engine"),
-        "compression": receipt.get("compression"),
-        "representation_code_sha": receipt.get(
-            "representation_code_sha"
-        ),
+    storage[
+        "parity"
+    ] = {
+        "representation_version":
+            receipt.get(
+                "representation_version"
+            ),
+
+        "dsa_contract_version":
+            receipt.get(
+                "dsa_contract_version"
+            ),
+
+        "engine":
+            receipt.get(
+                "engine"
+            ),
+
+        "compression":
+            receipt.get(
+                "compression"
+            ),
+
+        "dataset_builder_code_sha":
+            receipt.get(
+                "dataset_builder_code_sha"
+            ),
+
+        "representation_code_sha":
+            receipt.get(
+                "representation_code_sha"
+            ),
+
         **{
             tag: {
-                k: verified_receipt[tag].get(k)
+                k:
+                    verified_receipt[
+                        tag
+                    ].get(k)
+
                 for k in (
                     "schema_match",
                     "key_match",
                     "content_exact",
                     "csv_sha256",
                     "parquet_sha256",
+                    "dsa_confirmation_contract",
                 )
             }
-            for tag in ("state", "action")
+
+            for tag in (
+                "state",
+                "action",
+            )
         },
     }
 

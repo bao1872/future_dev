@@ -39,7 +39,7 @@ from research.ob_rl_dataset_v0_spec import (  # noqa: E402
 )
 
 EXPECTED_DATASET_BUILDER_CODE_SHA = (
-    "9e63f4b01fc3a4b26bef8a28d26289f7004db927"
+    "a96930a1898a1cceea22b49ec95aedfdf0e7fa1b"
 )
 
 EXPECTED_STATE_ROWS = 21_481
@@ -111,6 +111,17 @@ def verify_rebuilt_dataset(
     ):
         raise RuntimeError(
             "source data baseline drift"
+        )
+
+    if (
+        manifest.get(
+            "gate_b_dataset_builder_sha"
+        )
+        != GATE_B_DATASET_BUILDER_SHA
+    ):
+        raise RuntimeError(
+            "historical Gate-B builder "
+            "lineage drift"
         )
 
     if (
@@ -349,6 +360,39 @@ def verify_rebuilt_dataset(
                 "action feature leaked"
             )
 
+    # --------------------------------------------------------
+    # Build-time artifact authority
+    # --------------------------------------------------------
+
+    artifact_sha256 = manifest.get(
+        "artifact_sha256"
+    )
+
+    if not isinstance(
+        artifact_sha256,
+        dict,
+    ):
+        raise RuntimeError(
+            "missing artifact_sha256 "
+            "in corrected dataset manifest"
+        )
+
+    artifact_names = {
+        "ob_rl_state_v0.csv",
+        "ob_rl_action_v0.csv",
+    }
+
+    if (
+        set(
+            artifact_sha256
+        )
+        != artifact_names
+    ):
+        raise RuntimeError(
+            "dataset artifact hash set drift: "
+            f"{sorted(artifact_sha256)}"
+        )
+
     files = {
         "ob_rl_state_v0.csv":
             root
@@ -357,9 +401,6 @@ def verify_rebuilt_dataset(
         "ob_rl_action_v0.csv":
             root
             / "ob_rl_action_v0.csv",
-
-        "dataset_manifest.json":
-            manifest_path,
     }
 
     hashes = {}
@@ -368,14 +409,49 @@ def verify_rebuilt_dataset(
 
         if not path.exists():
             raise RuntimeError(
-                f"missing rebuilt dataset file: {path}"
+                f"missing rebuilt dataset file: "
+                f"{path}"
             )
 
-        hashes[name] = (
-            sha256_file(
-                path
+        expected = artifact_sha256[
+            name
+        ]
+
+        if (
+            not isinstance(
+                expected,
+                str,
             )
+            or len(expected) != 64
+        ):
+            raise RuntimeError(
+                f"invalid build-time SHA256 "
+                f"for {name}: {expected!r}"
+            )
+
+        actual = sha256_file(
+            path
         )
+
+        if actual != expected:
+            raise RuntimeError(
+                "rebuilt dataset artifact "
+                f"hash mismatch for {name}: "
+                f"expected {expected} "
+                f"got {actual}"
+            )
+
+        hashes[name] = actual
+
+    # The manifest is not self-hashed by the builder.
+    # Its current hash is nevertheless sealed into the
+    # Parquet receipt to bind this representation to the
+    # exact source manifest used for conversion.
+    hashes[
+        "dataset_manifest.json"
+    ] = sha256_file(
+        manifest_path
+    )
 
     return {
         "manifest":

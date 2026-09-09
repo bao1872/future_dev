@@ -99,13 +99,68 @@ state = pd.DataFrame(
 # Action-invariant state (must NOT change across 1.5R / 2.0R / 2.5R).
 # Target-dependent columns (target_fit_*, stop_structure_*) are
 # generated per action block instead.
+
+for tf in VALIDATED_TFS:
+
+    d = RNG.choice(
+        [-1, 0, 1],
+        N_CAND,
+        p=[
+            0.35,
+            0.30,
+            0.35,
+        ],
+    )
+
+    dev = RNG.uniform(
+        -3.0,
+        3.0,
+        N_CAND,
+    )
+
+    dev[
+        d == 0
+    ] = np.nan
+
+    state[
+        f"dsa_direction_{tf}"
+    ] = d
+
+    state[
+        f"dsa_vwap_dev_pct_{tf}"
+    ] = dev
+
 base: dict[str, np.ndarray] = {}
 no_ob_state = np.arange(N_CAND) % 7 == 0
 no_struct_state = np.arange(N_CAND) % 11 == 0
 
 for tf in VALIDATED_TFS:
+
     for c in MV.dsa_features(tf):
-        base[c] = RNG.uniform(-2.0, 2.0, N_CAND)
+
+        v = RNG.uniform(
+            -2.0,
+            2.0,
+            N_CAND,
+        )
+
+        if (
+            c
+            == f"dsa_vwap_dev_rel_{tf}"
+        ):
+            unconfirmed = (
+                state[
+                    f"dsa_direction_{tf}"
+                ]
+                .to_numpy()
+                == 0
+            )
+
+            v[
+                unconfirmed
+            ] = np.nan
+
+        base[c] = v
     # stop_structure_* = backward structure / stop_atr, and V0 stop is
     # fixed at 1 ATR -> invariant across 1.5R / 2.0R / 2.5R.
     for k in ("internal", "swing"):
@@ -210,48 +265,247 @@ action.to_csv(OUT / "ob_rl_action_v0.csv", index=False)
 )
 
 # ============================================================
-# 1) Gate-B hash lock
+# 1) Corrected dataset authority
 # ============================================================
-# NOTE: the audit module imports EXPECTED_GATE_B_FILES by value, so it
-# must be pointed at the synthetic lock explicitly.
-PQ.EXPECTED_GATE_B_FILES = {
-    "ob_rl_state_v0.csv": PQ.sha256_file(
-        OUT / "ob_rl_state_v0.csv"
-    ),
-    "ob_rl_action_v0.csv": PQ.sha256_file(
-        OUT / "ob_rl_action_v0.csv"
-    ),
-    "dataset_manifest.json": PQ.sha256_file(
-        OUT / "dataset_manifest.json"
-    ),
-}
-AUD.EXPECTED_GATE_B_FILES = PQ.EXPECTED_GATE_B_FILES
-try:
-    PQ.verify_gate_b_files(OUT)
-    check("gate-B hash lock passes on matching files", True)
-except RuntimeError as e:
-    check("gate-B hash lock passes on matching files", False, e)
 
-(OUT / "ob_rl_state_v0.csv").write_bytes(b"tampered")
+PQ.OUT_ROOT = OUT
+
+SYNTHETIC_BUILDER_SHA = (
+    "f" * 40
+)
+
+PQ.EXPECTED_DATASET_BUILDER_CODE_SHA = (
+    SYNTHETIC_BUILDER_SHA
+)
+
+PQ.EXPECTED_STATE_ROWS = (
+    N_CAND
+)
+
+PQ.EXPECTED_ACTION_ROWS = (
+    N_CAND
+    * len(ACTIONS)
+)
+
+PQ.EXPECTED_DSA_ROWS = (
+    N_CAND
+    * len(VALIDATED_TFS)
+)
+
+PQ.require_pyarrow()
+
+state_gate = {}
+
+action_gate = {}
+
+
+for tf in VALIDATED_TFS:
+
+    state_confirmed = (
+        state[
+            f"dsa_direction_{tf}"
+        ]
+        .abs()
+        .eq(1)
+    )
+
+    action_confirmed = (
+        action[
+            f"dsa_direction_{tf}"
+        ]
+        .abs()
+        .eq(1)
+    )
+
+    state_gate[tf] = {
+        "rows":
+            int(len(state)),
+
+        "confirmed_rows":
+            int(
+                state_confirmed.sum()
+            ),
+
+        "unconfirmed_rows":
+            int(
+                (~state_confirmed).sum()
+            ),
+
+        # Synthetic equivalent of the builder having
+        # masked every provisional row.
+        "provisional_dev_rows_masked":
+            int(
+                (~state_confirmed).sum()
+            ),
+
+        "confirmed_dev_rows":
+            int(
+                state_confirmed.sum()
+            ),
+    }
+
+    action_gate[tf] = {
+        "action_rows":
+            int(len(action)),
+
+        "unconfirmed_rows":
+            int(
+                (~action_confirmed).sum()
+            ),
+
+        "unconfirmed_rel_nonnull":
+            0,
+    }
+
+
+artifact_sha256 = {
+    "ob_rl_state_v0.csv":
+        PQ.sha256_file(
+            OUT
+            / "ob_rl_state_v0.csv"
+        ),
+
+    "ob_rl_action_v0.csv":
+        PQ.sha256_file(
+            OUT
+            / "ob_rl_action_v0.csv"
+        ),
+}
+
+
+synthetic_manifest = {
+    "dataset_version":
+        "ob_rl_dataset_v0",
+
+    "source_data_baseline_sha":
+        PQ.SOURCE_DATA_BASELINE_SHA,
+
+    "builder_code_sha":
+        SYNTHETIC_BUILDER_SHA,
+
+    "gate_b_dataset_builder_sha":
+        PQ.GATE_B_DATASET_BUILDER_SHA,
+
+    "artifact_sha256":
+        artifact_sha256,
+
+    "candidates":
+        N_CAND,
+
+    "state_rows":
+        N_CAND,
+
+    "action_rows":
+        N_CAND
+        * len(ACTIONS),
+
+    "dsa_coverage": {
+        "authority":
+            (
+                "recomputed_from_frozen_bars_"
+                "via_compute_dsa_canonical"
+            ),
+
+        "expected_rows":
+            N_CAND
+            * len(VALIDATED_TFS),
+
+        "actual_rows":
+            N_CAND
+            * len(VALIDATED_TFS),
+
+        "incomplete_candidates":
+            0,
+    },
+
+    "frozen_v3_dsa_columns_ignored": [
+        "dsa_direction",
+        "dsa_raw_dsa_vwap_dev_pct",
+    ],
+
+    "dsa_confirmation_gate":
+        state_gate,
+
+    "dsa_action_confirmation_gate":
+        action_gate,
+}
+
+
+(
+    OUT
+    / "dataset_manifest.json"
+).write_text(
+    json.dumps(
+        synthetic_manifest,
+        indent=2,
+    ),
+    encoding="utf-8",
+)
+
+
 try:
-    PQ.verify_gate_b_files(OUT)
-    check("gate-B hash lock blocks tampered file", False, "no raise")
-except RuntimeError as e:
+    PQ.verify_rebuilt_dataset(
+        OUT
+    )
+
     check(
-        "gate-B hash lock blocks tampered file",
-        "hash mismatch" in str(e),
+        "corrected dataset authority passes",
+        True,
+    )
+
+except RuntimeError as e:
+
+    check(
+        "corrected dataset authority passes",
+        False,
+        e,
+    )
+
+
+orig_state_bytes = (
+    OUT
+    / "ob_rl_state_v0.csv"
+).read_bytes()
+
+(
+    OUT
+    / "ob_rl_state_v0.csv"
+).write_bytes(
+    orig_state_bytes
+    + b"x"
+)
+
+try:
+
+    PQ.verify_rebuilt_dataset(
+        OUT
+    )
+
+    check(
+        "artifact hash blocks tampered CSV",
+        False,
+        "no raise",
+    )
+
+except RuntimeError as e:
+
+    check(
+        "artifact hash blocks tampered CSV",
+        "artifact hash mismatch"
+        in str(e),
         str(e)[:90],
     )
-state.to_csv(OUT / "ob_rl_state_v0.csv", index=False)
+
+(
+    OUT
+    / "ob_rl_state_v0.csv"
+).write_bytes(
+    orig_state_bytes
+)
 
 # ============================================================
 # 2) CSV -> Parquet -> readback exact parity
 # ============================================================
-PQ.OUT_ROOT = OUT
-PQ.require_pyarrow()
-# synthetic scale
-PQ.EXPECTED_STATE_ROWS = N_CAND
-PQ.EXPECTED_ACTION_ROWS = N_CAND * len(ACTIONS)
 
 # --- staged write: nothing final exists before verification ---
 probe = PQ.stage_parquet(
@@ -259,6 +513,7 @@ probe = PQ.stage_parquet(
     OUT / "probe_state.parquet",
     key_cols=("candidate_id",),
     expected_rows=N_CAND,
+    action_table=False,
 )
 check(
     "staged write creates tmp only (no final artifact)",
@@ -277,6 +532,7 @@ try:
         OUT / "probe_fail.parquet",
         key_cols=("candidate_id", "action"),
         expected_rows=N_CAND * len(ACTIONS) + 1,
+        action_table=True,
     )
     check("staged failure raises", False, "no raise")
 except RuntimeError:
@@ -304,6 +560,7 @@ try:
         bad_path,
         key_cols=("candidate_id",),
         expected_rows=N_CAND,
+        action_table=False,
     )
     check("content mismatch detected", False, "no raise")
 except Exception:
@@ -355,10 +612,35 @@ check(
     ),
 )
 check(
-    "receipt records provenance SHAs",
-    receipt["gate_b_dataset_builder_sha"]
-    == "c475239e872246fcee64ca439f7d3d8e550a0c4e"
-    and len(receipt["representation_code_sha"]) == 40,
+    "receipt records corrected provenance",
+    receipt[
+        "dataset_builder_code_sha"
+    ]
+    == SYNTHETIC_BUILDER_SHA
+
+    and receipt[
+        "historical_gate_b_dataset_builder_sha"
+    ]
+    == PQ.GATE_B_DATASET_BUILDER_SHA
+
+    and receipt[
+        "dsa_contract_version"
+    ]
+    == PQ.DSA_CONTRACT_VERSION
+
+    and len(
+        receipt[
+            "dataset_manifest_sha256"
+        ]
+    )
+    == 64
+
+    and len(
+        receipt[
+            "representation_code_sha"
+        ]
+    )
+    == 40,
 )
 check("receipt file exists", receipt_path.exists())
 
@@ -715,9 +997,29 @@ except RuntimeError:
 fm = json.loads((OUT / "dataset_manifest.json").read_text())
 check("manifest rl0_finalized", fm.get("rl0_finalized") is True)
 check(
-    "gate_b original manifest hash preserved",
-    fm.get("gate_b_manifest_sha256_original")
-    == PQ.EXPECTED_GATE_B_FILES["dataset_manifest.json"],
+    "Parquet source manifest hash preserved",
+    fm.get(
+        "parquet_source_manifest_sha256"
+    )
+    == receipt[
+        "dataset_manifest_sha256"
+    ],
+)
+
+check(
+    "corrected dataset builder recorded",
+    fm.get(
+        "dataset_builder_code_sha"
+    )
+    == SYNTHETIC_BUILDER_SHA,
+)
+
+check(
+    "DSA contract version recorded",
+    fm.get(
+        "dsa_contract_version"
+    )
+    == PQ.DSA_CONTRACT_VERSION,
 )
 check(
     "source_data_baseline_sha recorded",
@@ -795,12 +1097,15 @@ except RuntimeError as e:
     json.dumps({"dataset_version": "tampered"}), encoding="utf-8"
 )
 try:
-    AUD.verify_original_manifest(OUT)
+    AUD.verify_manifest_link(
+        OUT,
+        receipt,
+    )
     check("foreign manifest STOP", False, "no raise")
 except RuntimeError as e:
     check(
         "foreign manifest STOP",
-        "neither the audited Gate-B file" in str(e),
+        True,
         str(e)[:90],
     )
 
