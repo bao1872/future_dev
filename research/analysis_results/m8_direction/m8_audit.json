@@ -1,0 +1,49 @@
+{
+  "script": "research/m8_direction_v1.py",
+  "events": 19940,
+  "event_features": 106,
+  "invariant_from_62": [
+    "source_tf",
+    "source_ob_structure",
+    "source_ob_bias",
+    "source_ob_width_atr5",
+    "touch_behavior",
+    "touch_ordinal",
+    "forward_active_ob_bias_rel_5m",
+    "momentum_direction_5m",
+    "momentum_direction_15m",
+    "momentum_direction_1h",
+    "quant_state",
+    "quant_width_percentile_train"
+  ],
+  "target_related_excluded": [
+    "target_R",
+    "target_fit_internal_15m",
+    "target_fit_internal_1h",
+    "target_fit_internal_5m",
+    "target_fit_ob_15m",
+    "target_fit_ob_1h",
+    "target_fit_ob_5m",
+    "target_fit_swing_15m",
+    "target_fit_swing_1h",
+    "target_fit_swing_5m",
+    "trade_direction",
+    "trade_mode"
+  ],
+  "groups": {
+    "DSA": 9,
+    "OB属性": 21,
+    "其他": 3,
+    "动量": 9,
+    "结构": 22,
+    "趋势": 12,
+    "风险几何": 30
+  },
+  "coverages": [
+    0.1,
+    0.2,
+    0.3,
+    0.5
+  ],
+  "seed": 20240901
+}
