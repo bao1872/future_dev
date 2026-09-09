@@ -1,0 +1,48 @@
+{
+  "split_basis": "trading_day_chronological_60_20_20",
+  "max_future_observation_bars": 12,
+  "max_future_observation_minutes": 60,
+  "bar_minutes": 5,
+  "embargo_trading_days": 1,
+  "embargo_rationale": "最大未来观察长度为入场后 12 根连续 5 分钟 K 线（60 分钟）；60 分钟可能跨越自然日夜盘边界，因此以交易日为最小单位取 1 个交易日的隔离带，确保前段事件的前向窗口不会读取后段行情",
+  "total_trading_days": 406,
+  "train": {
+    "start_date": "2025-01-02",
+    "end_date": "2025-12-31",
+    "trading_days": 242,
+    "events": 5936,
+    "by_symbol": {
+      "AG": 2096,
+      "CU": 1721,
+      "M": 1117,
+      "RB": 1002
+    }
+  },
+  "selection": {
+    "start_date": "2026-01-06",
+    "end_date": "2026-05-11",
+    "trading_days": 80,
+    "events": 2017,
+    "by_symbol": {
+      "AG": 659,
+      "CU": 622,
+      "RB": 395,
+      "M": 341
+    }
+  },
+  "test": {
+    "start_date": "2026-05-13",
+    "end_date": "2026-09-04",
+    "trading_days": 82,
+    "events": 2078,
+    "by_symbol": {
+      "AG": 745,
+      "CU": 601,
+      "RB": 373,
+      "M": 359
+    }
+  },
+  "covered_events": 10031,
+  "universe_events": 10065,
+  "dropped_by_embargo_events": 34
+}

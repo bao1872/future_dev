@@ -1,0 +1,159 @@
+{
+  "experiment": "rl_62d_v1",
+  "stage": "AUDIT_ONLY",
+  "git_head": "bbcc8fe2dd65341b641264d506cc084c36390903",
+  "research_question": "62维决策时点市场状态是否能帮助模型在7个冻结动作中做出选择，并在历史测试段形成优于固定动作基准的收益曲线",
+  "feature_contract": {
+    "authority": "research/ob_rl_model_view_v0_spec.py::MODEL_FEATURES_V0",
+    "total_features": 62,
+    "unique_features": 62,
+    "single_state_features": 11,
+    "action_relative_features": 51,
+    "physical_groups": {
+      "订单块或结构位置": 24,
+      "结构": 12,
+      "趋势": 9,
+      "动量": 9,
+      "成交量或成交参与": 3,
+      "其他": 3,
+      "波动": 2
+    },
+    "missing_rate_max": 0.616195
+  },
+  "blocking_conflict": {
+    "id": "Q_HEAD_INPUT_GRAIN_CONFLICT",
+    "severity": "BLOCKING",
+    "summary": "权威 62 维是动作相对编码（candidate x action 粒度），其中 51 维在同一事件的不同动作下取值不同，只有 11 维是事件级单一状态。7 头 Q 网络要求一个事件一个状态，两者不可直接兼容。",
+    "evidence": {
+      "state_table_rows": 21481,
+      "action_table_rows": 150367,
+      "action_table_grain": "candidate_x_action",
+      "no_trade_row_target_fit_nan_rate": 1.0
+    },
+    "options": [
+      {
+        "id": "P1",
+        "desc": "改用事件级绝对状态（STATE 表 137 列中的action-free 编码），重新定义一版 62 维或更少",
+        "impact": "需要新增一轮特征工程，不是复用现有 62 维"
+      },
+      {
+        "id": "P2",
+        "desc": "保留 62 维动作相对编码，改为 Q(s,a) 单头网络：把动作字段置为各动作取值后分别前向，取 7 个标量",
+        "impact": "保留 62 维定义，但架构不同于 7 头向量输出；且 NO_TRADE 无交易方向，动作相对字段在其上未定义"
+      },
+      {
+        "id": "P3",
+        "desc": "只用 11 维事件级纯状态",
+        "impact": "维度大幅缩水，偏离 62 维研究目标"
+      }
+    ],
+    "resolution": "PENDING_USER_DECISION"
+  },
+  "action_space": {
+    "names": [
+      "NO_TRADE",
+      "FOLLOW_1.5R",
+      "FOLLOW_2.0R",
+      "FOLLOW_2.5R",
+      "FADE_1.5R",
+      "FADE_2.0R",
+      "FADE_2.5R"
+    ],
+    "n_actions": 7,
+    "frozen": true,
+    "no_trade_index": 0,
+    "dataset_skip_action": "SKIP"
+  },
+  "reward_contract": {
+    "simulator": "research/analyze_ob_candidate_v3_phase1.py::simulate + apply_policy",
+    "reward_column": "primary_reward_R",
+    "reward_version": "GROSS_R_V0",
+    "primary_horizon": 12,
+    "stop_atr": 1.0,
+    "target_R": [
+      1.5,
+      2.0,
+      2.5
+    ],
+    "same_bar_policy": "conservative",
+    "gross_only": true,
+    "no_commission_slippage": true
+  },
+  "candidate_contract": {
+    "candidate_count": 21481,
+    "eligible_candidates": 20013,
+    "reference_candidate_count": 21481,
+    "reference_eligible_count": 20013,
+    "matches_reference": true,
+    "final_usable_events": 10065,
+    "excluded_reason_non_contiguous": "主视野 h12 前向 12 根 K 线不连续",
+    "bucket_filters_used": [],
+    "forbidden_bucket_factors": [
+      "source_tf",
+      "touch_bin",
+      "ob_width_bucket"
+    ]
+  },
+  "baselines": [
+    "ZERO_NO_TRADE",
+    "FIXED_BEST_ACTION_FROM_TRAIN",
+    "RL_62D",
+    "ORACLE_PERFECT_HINDSIGHT"
+  ],
+  "model_contract": {
+    "module": "research/rl_62d_core_v1.py",
+    "class": "QNetwork",
+    "n_features": 62,
+    "n_actions": 7,
+    "structure_search_forbidden": true,
+    "grid_search_forbidden": true
+  },
+  "time_split": {
+    "split_basis": "trading_day_chronological_60_20_20",
+    "max_future_observation_bars": 12,
+    "max_future_observation_minutes": 60,
+    "bar_minutes": 5,
+    "embargo_trading_days": 1,
+    "embargo_rationale": "最大未来观察长度为入场后 12 根连续 5 分钟 K 线（60 分钟）；60 分钟可能跨越自然日夜盘边界，因此以交易日为最小单位取 1 个交易日的隔离带，确保前段事件的前向窗口不会读取后段行情",
+    "total_trading_days": 406,
+    "train": {
+      "start_date": "2025-01-02",
+      "end_date": "2025-12-31",
+      "trading_days": 242,
+      "events": 5936,
+      "by_symbol": {
+        "AG": 2096,
+        "CU": 1721,
+        "M": 1117,
+        "RB": 1002
+      }
+    },
+    "selection": {
+      "start_date": "2026-01-06",
+      "end_date": "2026-05-11",
+      "trading_days": 80,
+      "events": 2017,
+      "by_symbol": {
+        "AG": 659,
+        "CU": 622,
+        "RB": 395,
+        "M": 341
+      }
+    },
+    "test": {
+      "start_date": "2026-05-13",
+      "end_date": "2026-09-04",
+      "trading_days": 82,
+      "events": 2078,
+      "by_symbol": {
+        "AG": 745,
+        "CU": 601,
+        "RB": 373,
+        "M": 359
+      }
+    },
+    "covered_events": 10031,
+    "universe_events": 10065,
+    "dropped_by_embargo_events": 34
+  }
+}

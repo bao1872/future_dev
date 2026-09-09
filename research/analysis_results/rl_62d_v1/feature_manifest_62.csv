@@ -1,0 +1,63 @@
+﻿feature_index,feature_name,physical_group,source_module,source_field,decision_time_available,future_data_risk,missing_rate,dtype,notes,family,is_categorical,varies_across_actions,candidates_with_variation,row_grain
+1,source_tf,订单块或结构位置,research/ob_rl_model_view_v0_spec.py,source_tf,YES,NONE,0.0,object,订单块来源周期 5m/15m/1h,EVENT,True,False,0,candidate_x_action
+2,source_ob_structure,订单块或结构位置,research/ob_rl_model_view_v0_spec.py,source_ob_structure,YES,NONE,0.0,object,订单块结构类型 internal/swing,EVENT,True,False,0,candidate_x_action
+3,source_ob_bias,订单块或结构位置,research/ob_rl_model_view_v0_spec.py,source_ob_bias,YES,NONE,0.0,int64,订单块方向 +1 多头 / -1 空头,EVENT,False,False,0,candidate_x_action
+4,source_ob_width_atr5,订单块或结构位置,research/ob_rl_model_view_v0_spec.py,source_ob_width_atr5,YES,NONE,0.0,float64,订单块宽度，按 ATR5 归一化,EVENT,False,False,0,candidate_x_action
+5,touch_behavior,订单块或结构位置,research/ob_rl_model_view_v0_spec.py,touch_behavior,YES,NONE,0.0,object,触碰行为 NO_BREACH/BREACH_RECLAIM/CLOSE_BEYOND,EVENT,True,False,0,candidate_x_action
+6,touch_ordinal,订单块或结构位置,research/ob_rl_model_view_v0_spec.py,touch_ordinal,YES,NONE,0.0,int64,该订单块被触碰的序号,EVENT,False,False,0,candidate_x_action
+7,internal_bias_rel_5m,趋势,research/ob_rl_model_view_v0_spec.py,internal_bias_rel_5m,ACTION_DEPENDENT,NONE,0.0,float64,5m 内部结构方向，按交易方向旋转,SMC_5m,False,True,10065,candidate_x_action
+8,swing_bias_rel_5m,趋势,research/ob_rl_model_view_v0_spec.py,swing_bias_rel_5m,ACTION_DEPENDENT,NONE,0.0,float64,5m 摆动结构方向，按交易方向旋转,SMC_5m,False,True,10031,candidate_x_action
+9,target_fit_internal_5m,结构,research/ob_rl_model_view_v0_spec.py,target_fit_internal_5m,ACTION_DEPENDENT,NONE,0.301788,float64,5m 前方内部结构距离 / 目标距离，随 target_R 变化,SMC_5m,False,True,10065,candidate_x_action
+10,target_fit_swing_5m,结构,research/ob_rl_model_view_v0_spec.py,target_fit_swing_5m,ACTION_DEPENDENT,NONE,0.217337,float64,5m 前方摆动结构距离 / 目标距离，随 target_R 变化,SMC_5m,False,True,10057,candidate_x_action
+11,target_fit_ob_5m,订单块或结构位置,research/ob_rl_model_view_v0_spec.py,target_fit_ob_5m,ACTION_DEPENDENT,NONE,0.015698,float64,5m 前方活跃订单块距离 / 目标距离，随 target_R 变化,SMC_5m,False,True,10065,candidate_x_action
+12,stop_structure_internal_5m,结构,research/ob_rl_model_view_v0_spec.py,stop_structure_internal_5m,ACTION_DEPENDENT,NONE,0.301788,float64,5m 后方内部结构距离 / 止损距离，止损固定 1 ATR，随方向翻转,SMC_5m,False,True,9968,candidate_x_action
+13,stop_structure_swing_5m,结构,research/ob_rl_model_view_v0_spec.py,stop_structure_swing_5m,ACTION_DEPENDENT,NONE,0.217337,float64,5m 后方摆动结构距离 / 止损距离，止损固定 1 ATR，随方向翻转,SMC_5m,False,True,10020,candidate_x_action
+14,stop_structure_ob_5m,订单块或结构位置,research/ob_rl_model_view_v0_spec.py,stop_structure_ob_5m,ACTION_DEPENDENT,NONE,0.015698,float64,5m 后方活跃订单块距离 / 止损距离，止损固定 1 ATR，随方向翻转,SMC_5m,False,True,9910,candidate_x_action
+15,forward_active_ob_bias_rel_5m,订单块或结构位置,research/ob_rl_model_view_v0_spec.py,forward_active_ob_bias_rel_5m,ACTION_DEPENDENT,NONE,0.015698,float64,5m 前方最近活跃订单块方向，按交易方向旋转,SMC_5m,False,True,316,candidate_x_action
+16,forward_active_ob_structure_class_5m,订单块或结构位置,research/ob_rl_model_view_v0_spec.py,forward_active_ob_structure_class_5m,ACTION_DEPENDENT,NONE,0.015698,object,5m 前方最近活跃订单块结构类别，缺失为 NO_OB,SMC_5m,True,True,1705,candidate_x_action
+17,backward_active_ob_bias_5m,订单块或结构位置,research/ob_rl_model_view_v0_spec.py,backward_active_ob_bias_5m,ACTION_DEPENDENT,NONE,0.015698,float64,5m 后方最近活跃订单块方向,SMC_5m,False,True,10065,candidate_x_action
+18,backward_active_ob_structure_class_5m,订单块或结构位置,research/ob_rl_model_view_v0_spec.py,backward_active_ob_structure_class_5m,ACTION_DEPENDENT,NONE,0.015698,object,5m 后方最近活跃订单块结构类别，缺失为 NO_OB,SMC_5m,True,True,1705,candidate_x_action
+19,internal_bias_rel_15m,趋势,research/ob_rl_model_view_v0_spec.py,internal_bias_rel_15m,ACTION_DEPENDENT,NONE,0.0,float64,15m 内部结构方向，按交易方向旋转,SMC_15m,False,True,10063,candidate_x_action
+20,swing_bias_rel_15m,趋势,research/ob_rl_model_view_v0_spec.py,swing_bias_rel_15m,ACTION_DEPENDENT,NONE,0.0,float64,15m 摆动结构方向，按交易方向旋转,SMC_15m,False,True,9913,candidate_x_action
+21,target_fit_internal_15m,结构,research/ob_rl_model_view_v0_spec.py,target_fit_internal_15m,ACTION_DEPENDENT,NONE,0.250671,float64,15m 前方内部结构距离 / 目标距离，随 target_R 变化,SMC_15m,False,True,10065,candidate_x_action
+22,target_fit_swing_15m,结构,research/ob_rl_model_view_v0_spec.py,target_fit_swing_15m,ACTION_DEPENDENT,NONE,0.210184,float64,15m 前方摆动结构距离 / 目标距离，随 target_R 变化,SMC_15m,False,True,10021,candidate_x_action
+23,target_fit_ob_15m,订单块或结构位置,research/ob_rl_model_view_v0_spec.py,target_fit_ob_15m,ACTION_DEPENDENT,NONE,0.040387,float64,15m 前方活跃订单块距离 / 目标距离，随 target_R 变化,SMC_15m,False,True,10058,candidate_x_action
+24,stop_structure_internal_15m,结构,research/ob_rl_model_view_v0_spec.py,stop_structure_internal_15m,ACTION_DEPENDENT,NONE,0.250671,float64,15m 后方内部结构距离 / 止损距离，止损固定 1 ATR，随方向翻转,SMC_15m,False,True,9981,candidate_x_action
+25,stop_structure_swing_15m,结构,research/ob_rl_model_view_v0_spec.py,stop_structure_swing_15m,ACTION_DEPENDENT,NONE,0.210184,float64,15m 后方摆动结构距离 / 止损距离，止损固定 1 ATR，随方向翻转,SMC_15m,False,True,10004,candidate_x_action
+26,stop_structure_ob_15m,订单块或结构位置,research/ob_rl_model_view_v0_spec.py,stop_structure_ob_15m,ACTION_DEPENDENT,NONE,0.040387,float64,15m 后方活跃订单块距离 / 止损距离，止损固定 1 ATR，随方向翻转,SMC_15m,False,True,9980,candidate_x_action
+27,forward_active_ob_bias_rel_15m,订单块或结构位置,research/ob_rl_model_view_v0_spec.py,forward_active_ob_bias_rel_15m,ACTION_DEPENDENT,NONE,0.040387,float64,15m 前方最近活跃订单块方向，按交易方向旋转,SMC_15m,False,True,1607,candidate_x_action
+28,forward_active_ob_structure_class_15m,订单块或结构位置,research/ob_rl_model_view_v0_spec.py,forward_active_ob_structure_class_15m,ACTION_DEPENDENT,NONE,0.040387,object,15m 前方最近活跃订单块结构类别，缺失为 NO_OB,SMC_15m,True,True,1825,candidate_x_action
+29,backward_active_ob_bias_15m,订单块或结构位置,research/ob_rl_model_view_v0_spec.py,backward_active_ob_bias_15m,ACTION_DEPENDENT,NONE,0.040387,float64,15m 后方最近活跃订单块方向,SMC_15m,False,True,9250,candidate_x_action
+30,backward_active_ob_structure_class_15m,订单块或结构位置,research/ob_rl_model_view_v0_spec.py,backward_active_ob_structure_class_15m,ACTION_DEPENDENT,NONE,0.040387,object,15m 后方最近活跃订单块结构类别，缺失为 NO_OB,SMC_15m,True,True,1825,candidate_x_action
+31,internal_bias_rel_1h,趋势,research/ob_rl_model_view_v0_spec.py,internal_bias_rel_1h,ACTION_DEPENDENT,NONE,0.0,float64,1h 内部结构方向，按交易方向旋转,SMC_1h,False,True,10021,candidate_x_action
+32,swing_bias_rel_1h,趋势,research/ob_rl_model_view_v0_spec.py,swing_bias_rel_1h,ACTION_DEPENDENT,NONE,0.0,float64,1h 摆动结构方向，按交易方向旋转,SMC_1h,False,True,9563,candidate_x_action
+33,target_fit_internal_1h,结构,research/ob_rl_model_view_v0_spec.py,target_fit_internal_1h,ACTION_DEPENDENT,NONE,0.213761,float64,1h 前方内部结构距离 / 目标距离，随 target_R 变化,SMC_1h,False,True,10057,candidate_x_action
+34,target_fit_swing_1h,结构,research/ob_rl_model_view_v0_spec.py,target_fit_swing_1h,ACTION_DEPENDENT,NONE,0.221759,float64,1h 前方摆动结构距离 / 目标距离，随 target_R 变化,SMC_1h,False,True,9950,candidate_x_action
+35,target_fit_ob_1h,订单块或结构位置,research/ob_rl_model_view_v0_spec.py,target_fit_ob_1h,ACTION_DEPENDENT,NONE,0.095281,float64,1h 前方活跃订单块距离 / 目标距离，随 target_R 变化,SMC_1h,False,True,9995,candidate_x_action
+36,stop_structure_internal_1h,结构,research/ob_rl_model_view_v0_spec.py,stop_structure_internal_1h,ACTION_DEPENDENT,NONE,0.213761,float64,1h 后方内部结构距离 / 止损距离，止损固定 1 ATR，随方向翻转,SMC_1h,False,True,10029,candidate_x_action
+37,stop_structure_swing_1h,结构,research/ob_rl_model_view_v0_spec.py,stop_structure_swing_1h,ACTION_DEPENDENT,NONE,0.221759,float64,1h 后方摆动结构距离 / 止损距离，止损固定 1 ATR，随方向翻转,SMC_1h,False,True,9936,candidate_x_action
+38,stop_structure_ob_1h,订单块或结构位置,research/ob_rl_model_view_v0_spec.py,stop_structure_ob_1h,ACTION_DEPENDENT,NONE,0.095281,float64,1h 后方活跃订单块距离 / 止损距离，止损固定 1 ATR，随方向翻转,SMC_1h,False,True,9944,candidate_x_action
+39,forward_active_ob_bias_rel_1h,订单块或结构位置,research/ob_rl_model_view_v0_spec.py,forward_active_ob_bias_rel_1h,ACTION_DEPENDENT,NONE,0.095281,float64,1h 前方最近活跃订单块方向，按交易方向旋转,SMC_1h,False,True,2197,candidate_x_action
+40,forward_active_ob_structure_class_1h,订单块或结构位置,research/ob_rl_model_view_v0_spec.py,forward_active_ob_structure_class_1h,ACTION_DEPENDENT,NONE,0.095281,object,1h 前方最近活跃订单块结构类别，缺失为 NO_OB,SMC_1h,True,True,2225,candidate_x_action
+41,backward_active_ob_bias_1h,订单块或结构位置,research/ob_rl_model_view_v0_spec.py,backward_active_ob_bias_1h,ACTION_DEPENDENT,NONE,0.095281,float64,1h 后方最近活跃订单块方向,SMC_1h,False,True,9576,candidate_x_action
+42,backward_active_ob_structure_class_1h,订单块或结构位置,research/ob_rl_model_view_v0_spec.py,backward_active_ob_structure_class_1h,ACTION_DEPENDENT,NONE,0.095281,object,1h 后方最近活跃订单块结构类别，缺失为 NO_OB,SMC_1h,True,True,2225,candidate_x_action
+43,dsa_alignment_5m,趋势,research/ob_rl_model_view_v0_spec.py,dsa_alignment_5m,ACTION_DEPENDENT,NONE,0.0,float64,5m DSA 已确认方向与交易方向的一致性，随动作变化,DSA_5m,False,True,3863,candidate_x_action
+44,dsa_vwap_dev_rel_5m,成交量或成交参与,research/ob_rl_model_view_v0_spec.py,dsa_vwap_dev_rel_5m,ACTION_DEPENDENT,NONE,0.616195,float64,5m VWAP 偏离，按交易方向旋转；DSA 未确认时为 NaN,DSA_5m,False,True,3863,candidate_x_action
+45,dsa_alignment_15m,趋势,research/ob_rl_model_view_v0_spec.py,dsa_alignment_15m,ACTION_DEPENDENT,NONE,0.0,float64,15m DSA 已确认方向与交易方向的一致性，随动作变化,DSA_15m,False,True,4508,candidate_x_action
+46,dsa_vwap_dev_rel_15m,成交量或成交参与,research/ob_rl_model_view_v0_spec.py,dsa_vwap_dev_rel_15m,ACTION_DEPENDENT,NONE,0.552111,float64,15m VWAP 偏离，按交易方向旋转；DSA 未确认时为 NaN,DSA_15m,False,True,4508,candidate_x_action
+47,dsa_alignment_1h,趋势,research/ob_rl_model_view_v0_spec.py,dsa_alignment_1h,ACTION_DEPENDENT,NONE,0.0,float64,1h DSA 已确认方向与交易方向的一致性，随动作变化,DSA_1h,False,True,4535,candidate_x_action
+48,dsa_vwap_dev_rel_1h,成交量或成交参与,research/ob_rl_model_view_v0_spec.py,dsa_vwap_dev_rel_1h,ACTION_DEPENDENT,NONE,0.549429,float64,1h VWAP 偏离，按交易方向旋转；DSA 未确认时为 NaN,DSA_1h,False,True,4535,candidate_x_action
+49,momentum_direction_5m,动量,research/ob_rl_model_view_v0_spec.py,momentum_direction_5m,YES,NONE,9.9e-05,object,5m SQZMOM 方向 expanding/contracting/flat,MOMENTUM_5m,True,False,0,candidate_x_action
+50,momentum_value_rel_5m,动量,research/ob_rl_model_view_v0_spec.py,momentum_value_rel_5m,ACTION_DEPENDENT,NONE,9.9e-05,float64,5m SQZMOM 强度，按交易方向旋转,MOMENTUM_5m,False,True,10064,candidate_x_action
+51,momentum_delta_rel_5m,动量,research/ob_rl_model_view_v0_spec.py,momentum_delta_rel_5m,ACTION_DEPENDENT,NONE,9.9e-05,float64,5m SQZMOM 变化量，按交易方向旋转,MOMENTUM_5m,False,True,10064,candidate_x_action
+52,momentum_direction_15m,动量,research/ob_rl_model_view_v0_spec.py,momentum_direction_15m,YES,NONE,0.000695,object,15m SQZMOM 方向 expanding/contracting/flat,MOMENTUM_15m,True,False,0,candidate_x_action
+53,momentum_value_rel_15m,动量,research/ob_rl_model_view_v0_spec.py,momentum_value_rel_15m,ACTION_DEPENDENT,NONE,0.000695,float64,15m SQZMOM 强度，按交易方向旋转,MOMENTUM_15m,False,True,10058,candidate_x_action
+54,momentum_delta_rel_15m,动量,research/ob_rl_model_view_v0_spec.py,momentum_delta_rel_15m,ACTION_DEPENDENT,NONE,0.000695,float64,15m SQZMOM 变化量，按交易方向旋转,MOMENTUM_15m,False,True,10058,candidate_x_action
+55,momentum_direction_1h,动量,research/ob_rl_model_view_v0_spec.py,momentum_direction_1h,YES,NONE,0.004074,object,1h SQZMOM 方向 expanding/contracting/flat,MOMENTUM_1h,True,False,0,candidate_x_action
+56,momentum_value_rel_1h,动量,research/ob_rl_model_view_v0_spec.py,momentum_value_rel_1h,ACTION_DEPENDENT,NONE,0.004074,float64,1h SQZMOM 强度，按交易方向旋转,MOMENTUM_1h,False,True,10024,candidate_x_action
+57,momentum_delta_rel_1h,动量,research/ob_rl_model_view_v0_spec.py,momentum_delta_rel_1h,ACTION_DEPENDENT,NONE,0.004074,float64,1h SQZMOM 变化量，按交易方向旋转,MOMENTUM_1h,False,True,10024,candidate_x_action
+58,quant_state,波动,research/ob_rl_model_view_v0_spec.py,quant_state,YES,REVIEW_REQUIRED,0.0,object,分位机会宽度分位状态 LOW/MID/HIGH/UNKNOWN,QUANTILE,True,False,0,candidate_x_action
+59,quant_width_percentile_train,波动,research/ob_rl_model_view_v0_spec.py,quant_width_percentile_train,YES,REVIEW_REQUIRED,0.601391,float64,分位机会宽度预测值相对训练分布的分位,QUANTILE,False,False,0,candidate_x_action
+60,trade_mode,其他,research/ob_rl_model_view_v0_spec.py,trade_mode,ACTION_DEPENDENT,NONE,0.0,object,动作标识 FOLLOW/FADE，非市场状态,ACTION,True,True,10065,candidate_x_action
+61,trade_direction,其他,research/ob_rl_model_view_v0_spec.py,trade_direction,ACTION_DEPENDENT,NONE,0.0,float64,动作标识 = source_ob_bias x 方向系数，非市场状态,ACTION,True,True,10065,candidate_x_action
+62,target_R,其他,research/ob_rl_model_view_v0_spec.py,target_R,ACTION_DEPENDENT,NONE,0.0,float64,动作标识 盈利目标倍数，非市场状态,ACTION,False,True,10065,candidate_x_action

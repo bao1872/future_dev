@@ -1,0 +1,12 @@
+﻿level,key,rule,count
+STAGE,frozen_candidates,冻结 V3 候选全集,21481
+STAGE,excluded_touch_bar_close_beyond,剔除触碰当根收盘已越过远端边界,1468
+STAGE,eligible_candidates,合格候选,20013
+STAGE,excluded_non_contiguous_h12,剔除主视野 h12 前向 12 根 K 线不连续,9948
+STAGE,final_usable_events,合格且在 h12 可评估的最终事件集,10065
+REFERENCE,reference_candidate_count,历史参考不变量,21481
+REFERENCE,reference_eligible_count,历史参考不变量,20013
+SYMBOL,final_usable_events_AG,最终事件集分品种,3513
+SYMBOL,final_usable_events_CU,最终事件集分品种,2950
+SYMBOL,final_usable_events_M,最终事件集分品种,1823
+SYMBOL,final_usable_events_RB,最终事件集分品种,1779

@@ -1,0 +1,63 @@
+﻿feature_name,physical_group,decision_time_available,lookahead_bars,future_data_risk,risk_reason,confirmed_leak,suggested_action
+source_tf,订单块或结构位置,YES,0,NONE,决策时点由已冻结的当期结构与指标直接得到,False,保持使用
+source_ob_structure,订单块或结构位置,YES,0,NONE,决策时点由已冻结的当期结构与指标直接得到,False,保持使用
+source_ob_bias,订单块或结构位置,YES,0,NONE,决策时点由已冻结的当期结构与指标直接得到,False,保持使用
+source_ob_width_atr5,订单块或结构位置,YES,0,NONE,决策时点由已冻结的当期结构与指标直接得到,False,保持使用
+touch_behavior,订单块或结构位置,YES,0,NONE,决策时点由已冻结的当期结构与指标直接得到,False,保持使用
+touch_ordinal,订单块或结构位置,YES,0,NONE,决策时点由已冻结的当期结构与指标直接得到,False,保持使用
+internal_bias_rel_5m,趋势,ACTION_DEPENDENT,0,NONE,取值依赖被评估的动作（按交易方向旋转或除以目标距离），不存在单一事件状态取值,False,需裁决输入口径后再训练，见 experiment_contract.json
+swing_bias_rel_5m,趋势,ACTION_DEPENDENT,0,NONE,取值依赖被评估的动作（按交易方向旋转或除以目标距离），不存在单一事件状态取值,False,需裁决输入口径后再训练，见 experiment_contract.json
+target_fit_internal_5m,结构,ACTION_DEPENDENT,0,NONE,取值依赖被评估的动作（按交易方向旋转或除以目标距离），不存在单一事件状态取值,False,需裁决输入口径后再训练，见 experiment_contract.json
+target_fit_swing_5m,结构,ACTION_DEPENDENT,0,NONE,取值依赖被评估的动作（按交易方向旋转或除以目标距离），不存在单一事件状态取值,False,需裁决输入口径后再训练，见 experiment_contract.json
+target_fit_ob_5m,订单块或结构位置,ACTION_DEPENDENT,0,NONE,取值依赖被评估的动作（按交易方向旋转或除以目标距离），不存在单一事件状态取值,False,需裁决输入口径后再训练，见 experiment_contract.json
+stop_structure_internal_5m,结构,ACTION_DEPENDENT,0,NONE,取值依赖被评估的动作（按交易方向旋转或除以目标距离），不存在单一事件状态取值,False,需裁决输入口径后再训练，见 experiment_contract.json
+stop_structure_swing_5m,结构,ACTION_DEPENDENT,0,NONE,取值依赖被评估的动作（按交易方向旋转或除以目标距离），不存在单一事件状态取值,False,需裁决输入口径后再训练，见 experiment_contract.json
+stop_structure_ob_5m,订单块或结构位置,ACTION_DEPENDENT,0,NONE,取值依赖被评估的动作（按交易方向旋转或除以目标距离），不存在单一事件状态取值,False,需裁决输入口径后再训练，见 experiment_contract.json
+forward_active_ob_bias_rel_5m,订单块或结构位置,ACTION_DEPENDENT,0,NONE,取值依赖被评估的动作（按交易方向旋转或除以目标距离），不存在单一事件状态取值,False,需裁决输入口径后再训练，见 experiment_contract.json
+forward_active_ob_structure_class_5m,订单块或结构位置,ACTION_DEPENDENT,0,NONE,取值依赖被评估的动作（按交易方向旋转或除以目标距离），不存在单一事件状态取值,False,需裁决输入口径后再训练，见 experiment_contract.json
+backward_active_ob_bias_5m,订单块或结构位置,ACTION_DEPENDENT,0,NONE,取值依赖被评估的动作（按交易方向旋转或除以目标距离），不存在单一事件状态取值,False,需裁决输入口径后再训练，见 experiment_contract.json
+backward_active_ob_structure_class_5m,订单块或结构位置,ACTION_DEPENDENT,0,NONE,取值依赖被评估的动作（按交易方向旋转或除以目标距离），不存在单一事件状态取值,False,需裁决输入口径后再训练，见 experiment_contract.json
+internal_bias_rel_15m,趋势,ACTION_DEPENDENT,0,NONE,取值依赖被评估的动作（按交易方向旋转或除以目标距离），不存在单一事件状态取值,False,需裁决输入口径后再训练，见 experiment_contract.json
+swing_bias_rel_15m,趋势,ACTION_DEPENDENT,0,NONE,取值依赖被评估的动作（按交易方向旋转或除以目标距离），不存在单一事件状态取值,False,需裁决输入口径后再训练，见 experiment_contract.json
+target_fit_internal_15m,结构,ACTION_DEPENDENT,0,NONE,取值依赖被评估的动作（按交易方向旋转或除以目标距离），不存在单一事件状态取值,False,需裁决输入口径后再训练，见 experiment_contract.json
+target_fit_swing_15m,结构,ACTION_DEPENDENT,0,NONE,取值依赖被评估的动作（按交易方向旋转或除以目标距离），不存在单一事件状态取值,False,需裁决输入口径后再训练，见 experiment_contract.json
+target_fit_ob_15m,订单块或结构位置,ACTION_DEPENDENT,0,NONE,取值依赖被评估的动作（按交易方向旋转或除以目标距离），不存在单一事件状态取值,False,需裁决输入口径后再训练，见 experiment_contract.json
+stop_structure_internal_15m,结构,ACTION_DEPENDENT,0,NONE,取值依赖被评估的动作（按交易方向旋转或除以目标距离），不存在单一事件状态取值,False,需裁决输入口径后再训练，见 experiment_contract.json
+stop_structure_swing_15m,结构,ACTION_DEPENDENT,0,NONE,取值依赖被评估的动作（按交易方向旋转或除以目标距离），不存在单一事件状态取值,False,需裁决输入口径后再训练，见 experiment_contract.json
+stop_structure_ob_15m,订单块或结构位置,ACTION_DEPENDENT,0,NONE,取值依赖被评估的动作（按交易方向旋转或除以目标距离），不存在单一事件状态取值,False,需裁决输入口径后再训练，见 experiment_contract.json
+forward_active_ob_bias_rel_15m,订单块或结构位置,ACTION_DEPENDENT,0,NONE,取值依赖被评估的动作（按交易方向旋转或除以目标距离），不存在单一事件状态取值,False,需裁决输入口径后再训练，见 experiment_contract.json
+forward_active_ob_structure_class_15m,订单块或结构位置,ACTION_DEPENDENT,0,NONE,取值依赖被评估的动作（按交易方向旋转或除以目标距离），不存在单一事件状态取值,False,需裁决输入口径后再训练，见 experiment_contract.json
+backward_active_ob_bias_15m,订单块或结构位置,ACTION_DEPENDENT,0,NONE,取值依赖被评估的动作（按交易方向旋转或除以目标距离），不存在单一事件状态取值,False,需裁决输入口径后再训练，见 experiment_contract.json
+backward_active_ob_structure_class_15m,订单块或结构位置,ACTION_DEPENDENT,0,NONE,取值依赖被评估的动作（按交易方向旋转或除以目标距离），不存在单一事件状态取值,False,需裁决输入口径后再训练，见 experiment_contract.json
+internal_bias_rel_1h,趋势,ACTION_DEPENDENT,0,NONE,取值依赖被评估的动作（按交易方向旋转或除以目标距离），不存在单一事件状态取值,False,需裁决输入口径后再训练，见 experiment_contract.json
+swing_bias_rel_1h,趋势,ACTION_DEPENDENT,0,NONE,取值依赖被评估的动作（按交易方向旋转或除以目标距离），不存在单一事件状态取值,False,需裁决输入口径后再训练，见 experiment_contract.json
+target_fit_internal_1h,结构,ACTION_DEPENDENT,0,NONE,取值依赖被评估的动作（按交易方向旋转或除以目标距离），不存在单一事件状态取值,False,需裁决输入口径后再训练，见 experiment_contract.json
+target_fit_swing_1h,结构,ACTION_DEPENDENT,0,NONE,取值依赖被评估的动作（按交易方向旋转或除以目标距离），不存在单一事件状态取值,False,需裁决输入口径后再训练，见 experiment_contract.json
+target_fit_ob_1h,订单块或结构位置,ACTION_DEPENDENT,0,NONE,取值依赖被评估的动作（按交易方向旋转或除以目标距离），不存在单一事件状态取值,False,需裁决输入口径后再训练，见 experiment_contract.json
+stop_structure_internal_1h,结构,ACTION_DEPENDENT,0,NONE,取值依赖被评估的动作（按交易方向旋转或除以目标距离），不存在单一事件状态取值,False,需裁决输入口径后再训练，见 experiment_contract.json
+stop_structure_swing_1h,结构,ACTION_DEPENDENT,0,NONE,取值依赖被评估的动作（按交易方向旋转或除以目标距离），不存在单一事件状态取值,False,需裁决输入口径后再训练，见 experiment_contract.json
+stop_structure_ob_1h,订单块或结构位置,ACTION_DEPENDENT,0,NONE,取值依赖被评估的动作（按交易方向旋转或除以目标距离），不存在单一事件状态取值,False,需裁决输入口径后再训练，见 experiment_contract.json
+forward_active_ob_bias_rel_1h,订单块或结构位置,ACTION_DEPENDENT,0,NONE,取值依赖被评估的动作（按交易方向旋转或除以目标距离），不存在单一事件状态取值,False,需裁决输入口径后再训练，见 experiment_contract.json
+forward_active_ob_structure_class_1h,订单块或结构位置,ACTION_DEPENDENT,0,NONE,取值依赖被评估的动作（按交易方向旋转或除以目标距离），不存在单一事件状态取值,False,需裁决输入口径后再训练，见 experiment_contract.json
+backward_active_ob_bias_1h,订单块或结构位置,ACTION_DEPENDENT,0,NONE,取值依赖被评估的动作（按交易方向旋转或除以目标距离），不存在单一事件状态取值,False,需裁决输入口径后再训练，见 experiment_contract.json
+backward_active_ob_structure_class_1h,订单块或结构位置,ACTION_DEPENDENT,0,NONE,取值依赖被评估的动作（按交易方向旋转或除以目标距离），不存在单一事件状态取值,False,需裁决输入口径后再训练，见 experiment_contract.json
+dsa_alignment_5m,趋势,ACTION_DEPENDENT,0,NONE,取值依赖被评估的动作（按交易方向旋转或除以目标距离），不存在单一事件状态取值,False,需裁决输入口径后再训练，见 experiment_contract.json
+dsa_vwap_dev_rel_5m,成交量或成交参与,ACTION_DEPENDENT,0,NONE,取值依赖被评估的动作（按交易方向旋转或除以目标距离），不存在单一事件状态取值,False,需裁决输入口径后再训练，见 experiment_contract.json
+dsa_alignment_15m,趋势,ACTION_DEPENDENT,0,NONE,取值依赖被评估的动作（按交易方向旋转或除以目标距离），不存在单一事件状态取值,False,需裁决输入口径后再训练，见 experiment_contract.json
+dsa_vwap_dev_rel_15m,成交量或成交参与,ACTION_DEPENDENT,0,NONE,取值依赖被评估的动作（按交易方向旋转或除以目标距离），不存在单一事件状态取值,False,需裁决输入口径后再训练，见 experiment_contract.json
+dsa_alignment_1h,趋势,ACTION_DEPENDENT,0,NONE,取值依赖被评估的动作（按交易方向旋转或除以目标距离），不存在单一事件状态取值,False,需裁决输入口径后再训练，见 experiment_contract.json
+dsa_vwap_dev_rel_1h,成交量或成交参与,ACTION_DEPENDENT,0,NONE,取值依赖被评估的动作（按交易方向旋转或除以目标距离），不存在单一事件状态取值,False,需裁决输入口径后再训练，见 experiment_contract.json
+momentum_direction_5m,动量,YES,0,NONE,决策时点由已冻结的当期结构与指标直接得到,False,保持使用
+momentum_value_rel_5m,动量,ACTION_DEPENDENT,0,NONE,取值依赖被评估的动作（按交易方向旋转或除以目标距离），不存在单一事件状态取值,False,需裁决输入口径后再训练，见 experiment_contract.json
+momentum_delta_rel_5m,动量,ACTION_DEPENDENT,0,NONE,取值依赖被评估的动作（按交易方向旋转或除以目标距离），不存在单一事件状态取值,False,需裁决输入口径后再训练，见 experiment_contract.json
+momentum_direction_15m,动量,YES,0,NONE,决策时点由已冻结的当期结构与指标直接得到,False,保持使用
+momentum_value_rel_15m,动量,ACTION_DEPENDENT,0,NONE,取值依赖被评估的动作（按交易方向旋转或除以目标距离），不存在单一事件状态取值,False,需裁决输入口径后再训练，见 experiment_contract.json
+momentum_delta_rel_15m,动量,ACTION_DEPENDENT,0,NONE,取值依赖被评估的动作（按交易方向旋转或除以目标距离），不存在单一事件状态取值,False,需裁决输入口径后再训练，见 experiment_contract.json
+momentum_direction_1h,动量,YES,0,NONE,决策时点由已冻结的当期结构与指标直接得到,False,保持使用
+momentum_value_rel_1h,动量,ACTION_DEPENDENT,0,NONE,取值依赖被评估的动作（按交易方向旋转或除以目标距离），不存在单一事件状态取值,False,需裁决输入口径后再训练，见 experiment_contract.json
+momentum_delta_rel_1h,动量,ACTION_DEPENDENT,0,NONE,取值依赖被评估的动作（按交易方向旋转或除以目标距离），不存在单一事件状态取值,False,需裁决输入口径后再训练，见 experiment_contract.json
+quant_state,波动,YES,0,REVIEW_REQUIRED,分位机会宽度是决策时点的模型输出，分位参考分布按 fold 拟合；需复核分位模型输入是否全部决策时点可知,False,保持使用，训练前人工复核分位模型输入
+quant_width_percentile_train,波动,YES,0,REVIEW_REQUIRED,分位机会宽度是决策时点的模型输出，分位参考分布按 fold 拟合；需复核分位模型输入是否全部决策时点可知,False,保持使用，训练前人工复核分位模型输入
+trade_mode,其他,ACTION_DEPENDENT,0,NONE,取值依赖被评估的动作（按交易方向旋转或除以目标距离），不存在单一事件状态取值,False,需裁决输入口径后再训练，见 experiment_contract.json
+trade_direction,其他,ACTION_DEPENDENT,0,NONE,取值依赖被评估的动作（按交易方向旋转或除以目标距离），不存在单一事件状态取值,False,需裁决输入口径后再训练，见 experiment_contract.json
+target_R,其他,ACTION_DEPENDENT,0,NONE,取值依赖被评估的动作（按交易方向旋转或除以目标距离），不存在单一事件状态取值,False,需裁决输入口径后再训练，见 experiment_contract.json

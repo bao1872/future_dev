@@ -1,0 +1,21 @@
+﻿check,value
+n_events,10065
+n_action_columns,7
+no_trade_all_zero,True
+all_finite,True
+primary_horizon,12
+reward_version,GROSS_R_V0
+stop_atr,1.0
+target_R,"1.5,2.0,2.5"
+same_bar_policy,conservative
+simulator_module,research/analyze_ob_candidate_v3_phase1.py
+simulator_functions,simulate + apply_policy
+reward_source_column,primary_reward_R
+reward_equals_gross_R_h12,True
+action_NO_TRADE,"mean_R=0.0,std_R=0.0,nan=0"
+action_FOLLOW_1.5R,"mean_R=0.019223,std_R=1.165297,nan=0"
+action_FOLLOW_2.0R,"mean_R=0.017776,std_R=1.286555,nan=0"
+action_FOLLOW_2.5R,"mean_R=0.017707,std_R=1.363224,nan=0"
+action_FADE_1.5R,"mean_R=-0.024973,std_R=1.16399,nan=0"
+action_FADE_2.0R,"mean_R=-0.012499,std_R=1.298139,nan=0"
+action_FADE_2.5R,"mean_R=-0.017296,std_R=1.385853,nan=0"
