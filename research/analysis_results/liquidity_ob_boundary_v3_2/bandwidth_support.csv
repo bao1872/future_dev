@@ -1,0 +1,5 @@
+﻿bandwidth,n,n_left,n_right,n_edge_touch,n_symbol_ok,support_ok
+0.1,504,242,262,1100,5,False
+0.2,1778,856,922,1100,14,False
+0.3,3181,1545,1636,1100,15,True
+0.5,5669,2684,2985,1100,15,True

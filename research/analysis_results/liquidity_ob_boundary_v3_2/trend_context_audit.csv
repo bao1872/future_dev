@@ -1,0 +1,7 @@
+﻿field,valid_share,n_plus,n_zero,n_minus,n_null
+trend_struct_5m,1.0,13266,45,11720,0
+trend_struct_15m,1.0,13288,450,11293,0
+trend_struct_1h,1.0,12652,1397,10982,0
+causal_check_5m,1.0,1,0,0,0
+causal_check_15m,1.0,1,0,0,0
+causal_check_1h,1.0,1,0,0,0

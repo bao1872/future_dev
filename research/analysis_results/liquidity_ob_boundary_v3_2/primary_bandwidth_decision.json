@@ -1,0 +1,9 @@
+{
+  "primary_bandwidth": 0.3,
+  "rule": "\u4ece\u5c0f\u5230\u5927\u7b2c\u4e00\u4e2a\u6ee1\u8db3\u652f\u6301\u5ea6 Gate \u7684 h\uff08\u6392\u9664 EDGE_TOUCH\uff09",
+  "n": 3181,
+  "n_left": 1545,
+  "n_right": 1636,
+  "n_edge_touch": 1100,
+  "status": "OK"
+}

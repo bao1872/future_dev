@@ -1,0 +1,4 @@
+﻿state,n,raw_reclaim,raw_structural_acceptance
+NEAR_MISS,1545,0.7838,0.2162
+EDGE_TOUCH,1100,0.7982,0.2018
+ENTERED_OB,1636,0.8313,0.1675
