@@ -1,12 +1,27 @@
 # Phase 1 — OB Event Tradability（结果说明）
 
+## RESULTS_STATUS
+
+```text
+Phase 1 discovery: PASS
+```
+
+**权威定义与权威数值见 `PHASE1_FREEZE.md`。**
+
+> ⚠️ 本文件以下各节为历史记录。其中 unbounded / 24bar 口径的数值
+> **已作废为结论依据**，仅作 horizon sensitivity 保留。
+> 引用 Phase 1 结果一律使用 `PHASE1_FREEZE.md` §3 的 **12 valid 5m bars**
+> 权威结果（DEV4 / NEW11 zero-shot / ALL15 refit）。
+
+primary label 已于 2026-09-10 由 24bar 改为 **12 valid 5m bars**。
+
 ## 研究问题
 
 > 一个 canonical OB 触发事件，在不知道未来交易方向和具体买卖点的前提下，
 > 是否值得进入后续交易研究？
 
 标签：**是否存在至少一侧 1:2.5 的参考机会**（方向中性）。
-不使用 12 根固定 horizon，采用 first-passage barrier resolution。
+primary horizon = **12 valid 5m bars**（约 1 小时有效交易时间）。
 **本阶段不进入 Phase 2（方向 / 买卖点 / 止损 / 退出）。**
 
 ## 继承的前提（不重新讨论）

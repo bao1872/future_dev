@@ -22,8 +22,14 @@ from research.phase1_tradability.phase1_contract_v1 import RESULTS
 from research.phase1_tradability.run_phase1_v1 import fit_logistic, prep
 
 DEV4 = ("AG", "CU", "M", "RB")
-H_PRIMARY = "24"
-HORIZONS = ("12", "24", "48", "unb")
+
+# Phase 1 Candidate v1：primary label 已由 24bar 改为 **12 valid 5m bars**。
+# 依据：DEV4 / Phase 1A / NEW11 zero-shot 三层验证均显示信号随 horizon
+# 单调衰减，且 NEW11 从未参与 horizon discovery 仍重现 12>24>48>unbounded。
+# 24 / 48 / unbounded 仅保留为历史 sensitivity，不再用于任何结论。
+H_PRIMARY = "12"
+H_SENSITIVITY = ("24", "48", "unb")
+HORIZONS = (H_PRIMARY,) + H_SENSITIVITY
 BOOT = 500
 
 
@@ -331,7 +337,7 @@ def main():
         json.dumps(out, indent=2, default=str, ensure_ascii=False),
         encoding="utf-8")
     a = out[H_PRIMARY]
-    print("\n=== 核心对照（24bar）===")
+    print(f"\n=== 核心对照（{H_PRIMARY}bar primary）===")
     for k in ("DEV4", "NEW12_full", "ALL16_full"):
         d = a[k]
         print(f"  {k:12s} n={d['n']:6d} AUC={d['AUC']} "
