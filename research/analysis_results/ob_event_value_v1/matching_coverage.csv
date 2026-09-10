@@ -1,5 +1,5 @@
-﻿维度,treatments_total,treatments_matched,match_rate,unique_controls
-ALL,68512,68512,1.0,122936
-15m,19823,19823,1.0,49469
-1h,9033,9033,1.0,24221
-5m,39656,39656,1.0,91960
+﻿维度,treatments_total,treatments_matched,match_rate,unique_controls,unmatched
+ALL,68512,65829,0.9608,121873,2683
+15m,19823,18875,0.9522,48637,948
+1h,9033,8525,0.9438,23591,508
+5m,39656,38429,0.9691,91135,1227

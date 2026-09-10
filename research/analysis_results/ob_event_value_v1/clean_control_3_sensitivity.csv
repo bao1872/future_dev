@@ -1,0 +1,2 @@
+﻿dataset,horizon,match_rate,n_pairs,max_directional_excursion_R_ob,max_directional_excursion_R_control,max_directional_excursion_R_delta,max_directional_excursion_R_rel,forward_range_R_ob,forward_range_R_control,forward_range_R_delta,forward_range_R_rel,hit_abs_2p5R_ob,hit_abs_2p5R_control,hit_abs_2p5R_delta,hit_abs_2p5R_rel
+CLEAN_CONTROL_3,12,0.9582,65647,3.6448,3.5413,0.1035,0.0292,4.4657,4.3483,0.1174,0.027,0.5703,0.5532,0.0171,0.031

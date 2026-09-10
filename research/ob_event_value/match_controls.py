@@ -13,6 +13,15 @@ from research.ob_event_value.ev_contract_v1 import (
     pre_event_state,
 )
 
+# ---------------- Matching Design v1.1 ----------------
+# 唯一一次设计修订：只对 pre_range_12_R 加固定 caliper。
+# v1.0 中该变量 before-SMD=0.3678 / after-SMD=0.1081（未达 0.10），
+# 其余 5 个变量均在 0.10 以内。caliper 使用已定义的
+# symbol-level robust scaling（median / IQR）。
+# 本次修订后禁止再改 caliper / K / 匹配变量 / 距离 / 时间窗 / session bucket。
+PRE_RANGE_CALIPER = 0.50
+_RANGE_IDX = MATCH_COLS.index("pre_range_12_R")
+
 
 def robust_scale_params(frame: pd.DataFrame):
     med = frame[MATCH_COLS].median()
@@ -116,6 +125,9 @@ def main():
         Xc, dord, cid = buckets[key]
         m = (dord != row.trading_day_ord) & \
             (np.abs(dord - row.trading_day_ord) <= DAY_WINDOW)
+        # v1.1：pre_range caliper（在算最近邻距离之前过滤）
+        m = m & (np.abs(Xc[:, _RANGE_IDX] - xt[_RANGE_IDX])
+                 <= PRE_RANGE_CALIPER)
         if m.sum() < K_CONTROLS:
             unmatched += 1
             continue
@@ -145,8 +157,10 @@ def main():
             match_rate=round(mm["event_bar_id"].nunique() / len(sub), 4),
             unique_controls=int(mm["control_id"].nunique())))
     cov = pd.DataFrame(cov_rows)
+    cov["unmatched"] = cov["treatments_total"] - cov["treatments_matched"]
     cov.to_csv(RESULTS / "matching_coverage.csv", index=False,
                encoding="utf-8-sig")
+    print(f"\n  unmatched treatments = {unmatched}")
     print("\n=== MATCHING COVERAGE ===")
     print(cov.to_string(index=False), flush=True)
 
