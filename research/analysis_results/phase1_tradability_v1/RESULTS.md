@@ -1,5 +1,20 @@
 # Phase 1 — OB Event Tradability（结果说明）
 
+## INVALIDATED FOR NATIVE-DIRECTION PHASE 1 RESEARCH
+
+Reason: previous label treated either UP or DOWN opportunity as success and
+did not test canonical OB native direction.
+
+本文件中所有结论（58.88% base rate、direction-agnostic UP-or-DOWN 标签、
+12bar primary、103-feature frozen-model conclusion、DEV4/NEW11 historical
+performance conclusion、Phase 1 discovery PASS）对 native-direction 研究
+一律无效，不得引用。
+
+替代实验见：`research/analysis_results/phase1_native_direction_v1/`
+（结论：FAIL）。
+
+---
+
 ## RESULTS_STATUS
 
 ```text

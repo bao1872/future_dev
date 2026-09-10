@@ -1,0 +1,5 @@
+﻿折,train_events,train_usable,train_purged,selection_events,selection_usable,selection_purged,test_events
+F1,38719,38697,22,8197,8179,18,7787
+F2,46916,46898,18,7787,7762,25,7652
+F3,54703,54678,25,7652,7629,23,7861
+F4,62355,62332,23,7861,7839,22,9512
