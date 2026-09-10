@@ -48,7 +48,14 @@ def label_tradability_event(
     high: np.ndarray,
     low: np.ndarray,
     discontinuity_before_bar: np.ndarray,
+    max_bars: int | None = None,
 ) -> TradabilityResult:
+    """max_bars=None 保持原「无界 first-passage」语义（Phase 1 冻结口径）。
+
+    max_bars=H 时只扫描触发后 H 根有效 bar；H 根内未形成 2.5R 机会
+    → label=0 且 status=RESOLVED（明确「该窗口内没有机会」，不是 censored）。
+    horizon 内先遇到不可信边界才记 ROLL_CENSORED。
+    """
     up_target = reference_price + TARGET_R * r_ref
     up_stop = reference_price - STOP_R * r_ref
     down_target = reference_price - TARGET_R * r_ref
@@ -59,6 +66,9 @@ def label_tradability_event(
     n = len(open_)
 
     for i in range(start_idx, n):
+        # horizon 优先：已扫满 max_bars 根仍未形成机会 → 明确记 0
+        if max_bars is not None and (i - start_idx) >= max_bars:
+            return TradabilityResult(0, "RESOLVED", None, i - 1, max_bars)
         if discontinuity_before_bar[i]:
             return TradabilityResult(None, "ROLL_CENSORED", None, i,
                                      i - start_idx)

@@ -1,0 +1,17 @@
+﻿symbol,raw_5m_available,canonical_ob_available,feature_available,first_timestamp,last_timestamp,candidate_count,source_tf_coverage,included,exclusion_reason
+AG,True,True,True,2025-01-02 09:00:00,2026-09-04 14:55:00,6365,15m|1h|5m,True,
+AU,True,True,True,2025-01-02 09:00:00,2026-09-04 14:55:00,6018,15m|1h|5m,True,
+CU,True,True,True,2025-01-02 09:00:00,2026-09-04 14:55:00,5632,15m|1h|5m,True,
+AL,True,True,True,2025-01-02 09:00:00,2026-09-04 14:55:00,5625,15m|1h|5m,True,
+SN,True,True,True,2025-01-02 09:00:00,2026-09-04 14:55:00,5771,15m|1h|5m,True,
+NI,True,True,True,2025-01-02 09:00:00,2026-09-04 14:55:00,6413,15m|1h|5m,True,
+RB,True,True,True,2025-01-02 09:00:00,2026-09-04 14:55:00,4851,15m|1h|5m,True,
+I,True,True,True,2025-01-02 09:00:00,2026-09-04 14:55:00,5087,15m|1h|5m,True,
+SC,True,True,True,2025-01-02 09:00:00,2026-09-04 14:55:00,6472,15m|1h|5m,True,
+RU,True,True,True,2025-01-02 09:00:00,2026-09-04 14:55:00,4885,15m|1h|5m,True,
+MA,True,True,True,2025-01-02 09:00:00,2026-09-04 14:55:00,4422,15m|1h|5m,True,
+TA,True,True,True,2025-01-02 09:00:00,2026-09-04 14:55:00,4414,15m|1h|5m,True,
+M,True,True,True,2025-01-02 09:00:00,2026-09-04 14:55:00,4633,15m|1h|5m,True,
+P,True,True,True,2025-01-02 09:00:00,2026-09-04 14:55:00,4801,15m|1h|5m,True,
+CF,True,True,True,2025-01-02 09:00:00,2026-09-04 14:55:00,4507,15m|1h|5m,True,
+LC,True,False,False,2025-01-02 09:00:00,2026-09-04 14:55:00,0,,False,quantile 训练样本不足(len(tr)<600)，canonical OB universe 无法构建

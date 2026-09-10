@@ -330,8 +330,21 @@ def attach_quantile_state(
         "quant_crossed",
         "quant_fold",
     ]
+    # pandas 3.0 起禁止把字符串/bool 写入 float64 列（LossySetitemError），
+    # 旧版本则会把整列 upcast 成 object。DEV4 已生成的结果里这三个列正是
+    # object（str / bool），因此这里直接以 object 初始化，保证语义与 dtype
+    # 与既有 DEV4 产物完全一致。
+    _OBJECT_COLS = {
+        "quant_state_decision_time",   # 时间戳字符串
+        "quant_top30_train",           # bool
+        "quant_crossed",               # bool
+    }
     for c in cols:
-        cand[c] = np.nan
+        if c in _OBJECT_COLS:
+            cand[c] = pd.Series([None] * len(cand), dtype="object",
+                                index=cand.index)
+        else:
+            cand[c] = np.nan
 
     locs = {c: cand.columns.get_loc(c) for c in cols}
 

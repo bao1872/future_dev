@@ -62,3 +62,19 @@ package/
 
 # Phase 1 可再生中间产物（不入库）
 research/analysis_results/phase1_tradability_v1/*.parquet
+
+# Phase 1B：新增 11 品种 canonical OB universe 分块（共 1.3G，
+# 由 research/phase1_tradability/build_ob_universe_v3_extend.py 重建）
+research/analysis_data/ob_candidate_universe_v3/*/AL/
+research/analysis_data/ob_candidate_universe_v3/*/AU/
+research/analysis_data/ob_candidate_universe_v3/*/CF/
+research/analysis_data/ob_candidate_universe_v3/*/I/
+research/analysis_data/ob_candidate_universe_v3/*/MA/
+research/analysis_data/ob_candidate_universe_v3/*/NI/
+research/analysis_data/ob_candidate_universe_v3/*/P/
+research/analysis_data/ob_candidate_universe_v3/*/RU/
+research/analysis_data/ob_candidate_universe_v3/*/SC/
+research/analysis_data/ob_candidate_universe_v3/*/SN/
+research/analysis_data/ob_candidate_universe_v3/*/TA/
+# 15 品种状态表（1.2G CSV + parquet，由 build_state_16.py 重建）
+research/analysis_results/ob_rl_dataset_v0_16/
