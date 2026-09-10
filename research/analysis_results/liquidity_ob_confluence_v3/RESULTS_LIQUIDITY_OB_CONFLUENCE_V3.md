@@ -1,149 +1,258 @@
-# 多周期流动性 × 订单块共振实验 v3.0（阶段一：订单块与共振层）
+# 多周期流动性 × 订单块共振实验 v3.0
 
-Base: `efce81a1464f13805f14313f1285979369ca962a`
+Base: `193d04f847b9c7a748ba616991facad75839645b`
 
-```
+```text
 不训练机器学习 / 不计算夏普 / 不计算策略收益 / 不寻找入场点 / 不优化止损
 不使用固定未来 N 根 K 线标签 / 不研究 2.5R
 不重新定义订单块 / 不重新定义 displacement
 ```
 
-## 当前状态
-
-**订单块活动图与共振分类已完成并通过因果审计。**
-**Landmark A / Landmark B 的匹配与结果尚未执行。**
-本文件**不得**被当作订单块有效性的结论。
+**本轮状态：几何补全完成；Landmark A 匹配 Gate 未过；outcome 保持 LOCKED。**
 
 ---
 
-## 一、订单块来源完全复用 canonical
+## 一、对照组修复（第一步）
 
-- `build_full_ob_smc_tf`（每个周期）
-- `replay_ob_lifetimes`（canonical 活动/失效/驱逐生命周期）
-- `spatial_ob_bounds`（空间边界，处理端点互换）
-- `smc["ob_lifecycle_events"]` 中的 `OB_ENTERED`（用于新鲜度）
+原代码用 `opposing_ob_count == 0` 定义"无 OB 共振"，实际代表
+**根本没有外侧反向 OB**，与报告口径不一致。已修正为：
 
-来源周期仅 **5m / 15m / 1h**。**未伪造 4h 订单块**（仓库无合法 canonical 4h OB）。
-
-每个 OB 记录：`ob_id` / `ob_source_tf` / `ob_bias` / `ob_available_time` /
-`ob_inactive_time` / `ob_inactive_reason` / `zone_low` / `zone_high` /
-`endpoints_swapped` / `ob_enter_times`。
-
-### 因果边界（硬断言）
 ```python
-ob_available_time <= penetration_bar_start
-ob_inactive_time is None or ob_inactive_time > penetration_bar_start
+treatment = OB_BEYOND_LIQUIDITY &  has_opposing_ob_hit
+control   = OB_BEYOND_LIQUIDITY & ~has_opposing_ob_hit
+                                &  opposing_ob_count > 0
 ```
-即：**penetration bar 当根才确认的、未来才形成的、已失效的订单块，一律排除**。
 
-### 订单块活动图规模（ob_active_map_audit.csv）
-
-| symbol | OB 数 |
-|---|---:|
-| AG | 3,700 |
-| AL | 2,674 |
-| AU | 3,681 |
-| CF | 1,917 |
-（其余品种见审计文件）
-
----
-
-## 二、共振分类
-
-输入：**fresh penetrated interactions = 51,424**
-（即 v2.0 的 `VALID_AHEAD + CONTINUOUS_CROSS + PENETRATED`）
-
-### 几何关系分布（ob_geometry_relation.csv）
-
-| relation | n | 占比 |
-|---|---:|---:|
-| **OB_BEYOND_LIQUIDITY（Primary 族）** | 48,655 | 94.61% |
-| OB_CONTAINS_LIQUIDITY | 1,229 | 2.39% |
-| NO_RELEVANT_OB | 1,094 | 2.13% |
-| OB_BEFORE_LIQUIDITY | 446 | 0.87% |
-
-Primary 只保留 **OB_BEYOND_LIQUIDITY**（OB 位于 liquidity 外侧，
-几何上必然先穿 liquidity 再进入 OB，不依赖 bar 内路径假设）。
-其余三类单独画像，**不进入主结论**。
-
-### 处理组 / 对照组（同一几何族内）
-
-| 组 | 定义 | n |
-|---|---|---:|
-| **处理组 OB_CONFLUENCE=1** | 外侧存在反向 OB，且穿透极值**真正到达**其 near edge | **15,177** |
-| **对照组 OB_CONFLUENCE=0** | 外侧存在反向 OB，但穿透极值**未到达** | **33,478** |
-
-选取"同一几何族内 扫到 vs 未扫到"而非"有 OB vs 无 OB"，
-是因为后者会混入"该位置附近根本没有 OB"的另一类市场结构，
-不是最干净的对照。
-
-### 反向 OB 方向规则
-
-- 上方 BSL 被扫 → `reversal_direction = -1` → 只匹配 **bearish OB**
-- 下方 SSL 被扫 → `reversal_direction = +1` → 只匹配 **bullish OB**
-
-OB bias 只用于定义区域的历史结构方向，**不作为交易标签**。
-
-### 主 OB 来源周期（处理组内）
-
-| source_tf | n |
-|---|---:|
-| 5m | 8,702 |
-| 15m | 4,480 |
-| 1h | 1,995 |
-
-### 新鲜度（处理组内，`prior_ob_enter_count` 只统计 t0 前的 canonical OB_ENTERED）
+验证结果（完全吻合预期）：
 
 | | n |
 |---|---:|
-| FRESH（未被进入过） | 10,686 |
-| RETESTED（已进入过 ≥1 次） | 4,491 |
+| OB_BEYOND_LIQUIDITY 总计 | **48,655** |
+| Treatment（扫进 OB） | **15,177** |
+| Control（外侧有 OB 但未扫到） | **33,478** |
+| 合计 | **48,655** ✓ |
 
-### 同方向 OB
-`same_direction_ob_count_in_path` / `same_direction_ob_hit` 已记录，
-用于后续 sensitivity（排除同方向 OB 污染）。
+## 二、订单块几何补全（无论 hit / miss 都保存）
 
----
+所有 `OB_BEYOND_LIQUIDITY` 事件现在都记录 liquidity 外侧**最近的反向
+active OB**（此前只有 hit 组有 OB 信息，miss 组全空）：
 
-## 三、⚠️ 未匹配的原始对比不可解读
+`nearest_ob_id` / `nearest_ob_source_tf` / `nearest_ob_near_edge` /
+`nearest_ob_far_edge` / `nearest_ob_distance_R` / `nearest_ob_width_R` /
+`nearest_ob_prior_enter_count` / `nearest_ob_freshness`
 
-未匹配的描述性数字如下，**仅供说明混淆程度，不得作为结论**：
+### ob_margin_R 断言
 
-| 组 | n | same_bar_reclaim | close_beyond | reversal_mss(占全体) |
+```python
+ob_margin_R = penetration_depth_R - nearest_ob_distance_R
+            = side * (extreme - near_edge) / R0
+```
+
+| 断言 | 结果 |
+|---|---|
+| treatment `ob_margin_R >= -TOL` | **True**（min = −0.000000） |
+| control `ob_margin_R < TOL` | **True**（max = −0.002999） |
+
+容忍度 `TOL = 1e-9`（统一极小数值容忍，非 ATR 阈值）。
+
+### 几何画像（R 单位，`R0 = ATR5[t0-1]`）
+
+| 变量 | 组 | p10 | p25 | median | p75 | p90 |
+|---|---|---:|---:|---:|---:|---:|
+| nearest_ob_distance_R | HIT | 0.133 | 0.238 | **0.455** | 0.900 | 1.579 |
+| nearest_ob_distance_R | MISS | 0.710 | 1.270 | **2.500** | 5.000 | 8.929 |
+| nearest_ob_width_R | HIT | 0.625 | 0.952 | 1.486 | 2.432 | 3.998 |
+| nearest_ob_width_R | MISS | 0.676 | 1.027 | 1.667 | 2.791 | 4.521 |
+| ob_margin_R | HIT | 0.000 | 0.156 | 0.485 | 1.146 | 2.356 |
+| ob_margin_R | MISS | −7.917 | −4.054 | **−1.750** | −0.675 | −0.278 |
+
+**关键读数：HIT 组最近 OB 距离中位数 0.455R，MISS 组 2.500R。**
+即"是否扫进 OB"主要由 **OB 离 liquidity 多远** 决定，
+其次才是扫破深度。
+
+### 最近 OB 周期分布
+
+| hit | 5m | 15m | 1h |
+|---|---:|---:|---:|
+| False (MISS) | 16,553 | 10,830 | 6,095 |
+| True (HIT) | 8,702 | 4,480 | 1,995 |
+
+### 新鲜度分布
+
+| hit | FRESH | RETESTED |
+|---|---:|---:|
+| False (MISS) | 28,486 | 4,992 |
+| True (HIT) | 10,686 | 4,491 |
+
+### 进入方式（5 分类）
+
+| mode | n |
+|---|---:|
+| NEAR_MISS | 33,478 |
+| WICK_ENTER_OB | 7,344 |
+| CLOSE_INSIDE_OB | 4,926 |
+| TRAVERSE_OB | 1,518 |
+| CLOSE_BEYOND_OB | 1,389 |
+
+## 三、共同支撑画像
+
+`penetration_depth_R` 分箱下 hit / miss 双侧样本量：
+
+| depth 区间(R) | n | n_hit | n_miss | hit_rate |
 |---|---:|---:|---:|---:|
-| 未扫到 OB | 33,478 | 0.4614 | 0.4409 | 0.2131 |
-| 扫进 OB | 15,177 | 0.2627 | 0.6767 | 0.1226 |
+| (−inf, 0.25] | 9,031 | 880 | 8,151 | 0.0974 |
+| (0.25, 0.5] | 11,271 | 2,141 | 9,130 | 0.1900 |
+| (0.5, 0.75] | 7,279 | 1,979 | 5,300 | 0.2719 |
+| (0.75, 1.0] | 5,467 | 1,951 | 3,516 | 0.3569 |
+| (1.0, 1.5] | 6,189 | 2,624 | 3,565 | 0.4240 |
+| (1.5, 2.0] | 3,265 | 1,634 | 1,631 | 0.5005 |
+| (2.0, inf] | 6,099 | 3,926 | 2,173 | 0.6437 |
 
-**这组数字完全被穿透深度混淆**：
-"扫进 OB"在定义上就要求穿透极值更大，因此必然
-更少同 bar 收回、更多收盘站到 level 外。
-两组 `reversal_mss` 也不可比——该字段当前只对 SAME_BAR_RECLAIM 计算，
-而两组的同 bar 收回比例差异巨大。
+**共同支撑判定：PASS**（≥3 个分箱 hit/miss 各 ≥200；实际 7/7 分箱满足）。
 
-**必须完成 Landmark A / B 的匹配（含 `penetration_depth_R` 匹配变量）之后，
-才允许给出任何效应结论。**
+但必须注意：**hit_rate 随扫破深度从 9.7% 单调升到 64.4%**。
+这说明 `penetration_depth_R` 与 `has_opposing_ob_hit` 高度共线。
 
----
+## 四、Landmark A 匹配 —— **GATE FAIL**
 
-## 四、尚未执行的部分
+Landmark A universe（CLOSE_BEYOND + OB_BEYOND_LIQUIDITY）= 24,986
+→ Treatment 10,237 / Control 14,749。
 
-- Landmark A：`CLOSE_BEYOND → LATER_RECLAIM vs 同方向新 BOS`，
-  匹配（symbol × liquidity_type × side × session_type × sweep_vs_1h exact；
-  K=3；`close_beyond` caliper 0.50；session 位置 caliper 60 分钟）、
-  coverage/balance gate、outcome、bootstrap
-- Landmark B：`RECLAIM → 反向 MSS vs 重新接受`，重新匹配与 gate
-- 完整路径漏斗 `P(RECLAIM 且 REVERSAL_MSS | OB_CONFLUENCE)`
+匹配设置（严格按合同，未调参）：
+- Exact：symbol × liquidity_type × side × session_type × sweep_vs_1h
+- Numeric（symbol 内 median/IQR robust scaling）：14 个变量
+- **明确排除** `nearest_ob_distance_R` 与 `ob_margin_R`
+- K=3 with replacement；不同 canonical trading_day；±120 日
+- caliper：`|z(close_beyond_R)| ≤ 0.50`；session 位置 ≤ 60 分钟
+
+### Coverage（要求 overall ≥ 0.80，主要 type/symbol ≥ 0.70）
+
+| 维度 | coverage |
+|---|---:|
+| **ALL** | **0.4498** ❌ |
+| PREV_CONTIG_SESSION_HIGH | 0.6138 ❌ |
+| PREV_CONTIG_SESSION_LOW | 0.6410 ❌ |
+| CONFIRMED_SWING_HIGH | 0.2119 ❌ |
+| CONFIRMED_SWING_LOW | 0.1827 ❌ |
+| PREV_TRADING_DAY_HIGH | 0.2674 ❌ |
+| PREV_TRADING_DAY_LOW | 0.2358 ❌ |
+| symbol 范围 | 0.3795 – 0.5513 ❌ |
+
+全部未达标。
+
+### Balance（要求 overall ≤ 0.10，主要组 ≤ 0.15）
+
+`max |SMD| overall = 0.2927`，`max |SMD| by group = 0.4781`。❌
+
+最差变量：
+
+| variable | SMD |
+|---|---:|
+| **penetration_depth_R** | **0.2927** |
+| pre_range_12_R | 0.2668 |
+| volume_z_t0 | 0.1943 |
+| level_age_log1p | 0.1750 |
+| bar_range_R | 0.1619 |
+
+control reuse max = 14（可接受，非主要失败原因）。
+
+### 判定
+
+```text
+LANDMARK_A_MATCHING_FAIL
+```
+
+**outcome 保持 LOCKED** —— 未计算任何 `later_reclaim` /
+`STRUCTURAL_ACCEPTANCE`。按合同未调 K / caliper / exact 约束 / 距离度量。
+
+## 五、失败原因诊断（这是本轮最重要的发现）
+
+**不是实现 bug，是结构性的可识别性问题，而且它精确验证了第三节的洞察。**
+
+`has_opposing_ob_hit` 在数学上等价于：
+
+```text
+penetration_depth_R >= nearest_ob_distance_R
+```
+
+因此：
+
+1. `penetration_depth_R` 与 hit 天然高度共线（hit_rate 9.7% → 64.4%）。
+2. 在同一个 exact cell（symbol × type × side × session × sweep_vs_1h）内，
+   同时满足"depth 接近"和"hit 状态不同"的 control 极其稀少
+   → 覆盖率只有 45%。
+3. 强行匹配 depth 后，残差仍不平衡（SMD 0.2927），
+   因为 depth 相近时 hit 状态几乎被确定。
+
+这正对应你第三节给出的两个案例：
+
+```text
+案例 A：OB 距 liquidity 0.3R，价格扫 0.5R → 扫进 OB
+案例 B：OB 距 liquidity 0.8R，价格扫 0.5R → 没扫进 OB
+```
+
+在"同样扫了 0.5R"的条件下，A/B 的真正差别就是 **OB 距离**。
+而 OB 距离是我们要研究的结构变量，不能匹配掉；
+但 depth 匹配不掉又会留下混淆。
+
+**结论：简单的"匹配 sweep 强度 → 比较 hit/miss"走不通。**
+这不是可以靠调 K 或 caliper 解决的。
+
+## 六、下一步建议（未执行，供裁定）
+
+数据本身指向一个更干净的识别策略，即你第九节的思路：
+
+### 建议 A（推荐）：`ob_margin_R` 断点设计
+
+在 `ob_margin_R ≈ 0` 附近比较紧邻两侧：
+
+```text
+ob_margin_R ∈ [-δ, 0)  差一点没到 OB near edge
+ob_margin_R ∈ [0, +δ]  刚刚进入 OB
+```
+
+这里 depth 与 distance 之和被局部固定，断点两侧只在"是否跨过 OB 边界"
+上不同，识别最干净。可直接回答：
+
+> 价格真正跨入 OB 边界时，市场状态是否发生变化？
+
+这也自然避免了对 depth 的全局匹配。
+
+### 建议 B：在共同支撑最好的 depth 区间内分层比较
+
+`(1.5, 2.0]` 区间 hit_rate ≈ 0.50（1,634 vs 1,631，近乎完美平衡），
+`(1.0, 2.0]` 也是不错的区间。可在该区间内直接比较 hit / miss。
+
+### 建议 C：改用 `nearest_ob_distance_R` 作为连续暴露变量
+
+不做二元 hit/miss，直接看 reclaim 概率随 OB 距离 / margin 的形状。
+
+## 七、本轮可确认的事实（不依赖 outcome，均可信）
+
+1. **94.6%（48,655/51,424）** 的真实 liquidity 穿透，其外侧存在事前活动的
+   反向订单块 —— 说明"外面有没有 OB"几乎没有筛选能力。
+2. 但**只有 29.5%（15,177）真正扫进**该 OB —— "是否真正进入"仍有筛选价值。
+3. 扫进的 OB 以 **5m 为主（8,702）**，15m 次之（4,480），1h 最少（1,995）；
+   **70.4% 是 FRESH**。
+4. **HIT 组最近 OB 距离中位数 0.455R，MISS 组 2.500R** ——
+   hit/miss 主要由 OB 距离驱动。
+5. 进入方式分布：NEAR_MISS 33,478 / WICK_ENTER 7,344 /
+   CLOSE_INSIDE 4,926 / TRAVERSE 1,518 / CLOSE_BEYOND_OB 1,389。
+
+**"扫进订单块是否提供额外预测信息"仍未回答** —— outcome 保持锁定。
+
+## 八、未执行
+
+- Landmark A outcome（later_reclaim 比较）
+- Landmark B（reclaim 后 reversal MSS）
+- 按 OB 周期 / freshness / 品种 / F1-F4 / AGAINST-WITH 1h / 4h 分层的效应
 - 同方向 OB sensitivity
-- 非 Primary 几何（CONTAINS / BEFORE）画像
-- 多周期（4h×1h、1h×15m、1h×15m×5m）分层
-- 14 项 pytest
+- pytest
 
-## 五、本轮可确认的事实
+## 九、已知限制
 
-1. 真实 liquidity 穿透中，**94.6%** 的位置外侧存在事前活动的反向订单块；
-   其中 **29.5%**（15,177 / 51,424）的穿透极值真正扫进了该订单块。
-2. 扫进的订单块以 **5m 为主（8,702）**，15m 次之（4,480），1h 最少（1,995）。
-3. 扫进的订单块中 **70.4% 是 FRESH**（此前未被 canonical 进入过）。
-
-以上三点均为**构造事实**，不依赖任何未来结果，可信。
-"订单块是否提高状态转移概率"这一核心问题**仍未回答**。
+1. Landmark A 匹配失败，未做后续分析。
+2. `minute_from_session_open` 由 session 分段重算（5 分钟断口），
+   非交易所官方 session 时钟。
+3. 未做多重检验校正。
+4. 共同支撑 PASS 是"双侧都有样本"的意义，不等于"匹配后可比"。
