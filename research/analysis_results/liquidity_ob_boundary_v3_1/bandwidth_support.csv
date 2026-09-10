@@ -1,0 +1,5 @@
+﻿bandwidth,n,n_left,n_right,n_symbol_ok,support_ok
+0.1,1604,242,1362,5,False
+0.2,2878,856,2022,14,True
+0.3,4281,1545,2736,15,True
+0.5,6769,2684,4085,15,True

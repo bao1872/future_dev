@@ -1,0 +1,4 @@
+﻿model,base,n,tau_base,delta_15m,p_15m,delta_1h,p_1h,delta_RETESTED,p_RETESTED,delta_AGAINST_TREND,p_AGAINST_TREND,delta_UNKNOWN,p_UNKNOWN
+D × nearest_ob_source_tf,5m,2878,0.0316,-0.0918,0.0403,0.0604,0.2833,,,,,,
+D × nearest_ob_freshness,FRESH,2878,0.0268,,,,,-0.0808,0.0826,,,,
+D × sweep_vs_1h,WITH_TREND,2878,-0.0333,,,,,,,0.0998,,0.0305,

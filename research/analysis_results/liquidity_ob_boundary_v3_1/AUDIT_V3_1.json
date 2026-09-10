@@ -1,0 +1,15 @@
+{
+  "primary_bandwidth": 0.2,
+  "max_smd_all": 0.3341,
+  "max_smd_key": 0.1242,
+  "max_categorical_pp": 7.89,
+  "gate_numeric": false,
+  "gate_categorical": true,
+  "exact_zero_count": 1100,
+  "exact_zero_share": 0.043946,
+  "unique_margin_values_left": 4355,
+  "unique_margin_values_right": 2314,
+  "n_left_005": 77,
+  "n_right_005": 82,
+  "gate_pass": false
+}
