@@ -1,0 +1,334 @@
+{
+  "main": [
+    {
+      "universe": "ALL15",
+      "模型": "M0_constant",
+      "n": 32812,
+      "base_rate": 0.2846,
+      "AUC": 0.5,
+      "PR_AUC": 0.2846,
+      "Brier": 0.203586,
+      "Top20_rate": 0.2846,
+      "Lift@20": 1.0,
+      "Top20_uplift": 0.0
+    },
+    {
+      "universe": "ALL15",
+      "模型": "M1_metadata",
+      "n": 32812,
+      "base_rate": 0.2846,
+      "AUC": 0.5072,
+      "PR_AUC": 0.289,
+      "Brier": 0.203636,
+      "Top20_rate": 0.2948,
+      "Lift@20": 1.0361,
+      "Top20_uplift": 0.0103
+    },
+    {
+      "universe": "ALL15",
+      "模型": "M2_state",
+      "n": 32812,
+      "base_rate": 0.2846,
+      "AUC": 0.5061,
+      "PR_AUC": 0.2862,
+      "Brier": 0.206004,
+      "Top20_rate": 0.2871,
+      "Lift@20": 1.0088,
+      "Top20_uplift": 0.0025
+    },
+    {
+      "universe": "ALL15",
+      "模型": "M3_metadata_state",
+      "n": 32812,
+      "base_rate": 0.2846,
+      "AUC": 0.5039,
+      "PR_AUC": 0.2862,
+      "Brier": 0.206071,
+      "Top20_rate": 0.2947,
+      "Lift@20": 1.0356,
+      "Top20_uplift": 0.0101
+    },
+    {
+      "universe": "ALL15",
+      "模型": "ZS_M1_tf_dir",
+      "n": 32812,
+      "base_rate": 0.2846,
+      "AUC": 0.5073,
+      "PR_AUC": 0.2892,
+      "Brier": 0.203664,
+      "Top20_rate": 0.2939,
+      "Lift@20": 1.0329,
+      "Top20_uplift": 0.0094
+    },
+    {
+      "universe": "ALL15",
+      "模型": "ZS_M3_tf_dir_state",
+      "n": 32812,
+      "base_rate": 0.2846,
+      "AUC": 0.5053,
+      "PR_AUC": 0.2873,
+      "Brier": 0.220956,
+      "Top20_rate": 0.2918,
+      "Lift@20": 1.0254,
+      "Top20_uplift": 0.0072
+    },
+    {
+      "universe": "DEV4",
+      "模型": "M0_constant",
+      "n": 8905,
+      "base_rate": 0.2873,
+      "AUC": 0.5,
+      "PR_AUC": 0.2873,
+      "Brier": 0.204739,
+      "Top20_rate": 0.2873,
+      "Lift@20": 1.0,
+      "Top20_uplift": 0.0
+    },
+    {
+      "universe": "DEV4",
+      "模型": "M1_metadata",
+      "n": 8905,
+      "base_rate": 0.2873,
+      "AUC": 0.5146,
+      "PR_AUC": 0.2946,
+      "Brier": 0.204652,
+      "Top20_rate": 0.3065,
+      "Lift@20": 1.0671,
+      "Top20_uplift": 0.0193
+    },
+    {
+      "universe": "DEV4",
+      "模型": "M2_state",
+      "n": 8905,
+      "base_rate": 0.2873,
+      "AUC": 0.5193,
+      "PR_AUC": 0.3012,
+      "Brier": 0.205439,
+      "Top20_rate": 0.3116,
+      "Lift@20": 1.0848,
+      "Top20_uplift": 0.0244
+    },
+    {
+      "universe": "DEV4",
+      "模型": "M3_metadata_state",
+      "n": 8905,
+      "base_rate": 0.2873,
+      "AUC": 0.5188,
+      "PR_AUC": 0.3013,
+      "Brier": 0.205492,
+      "Top20_rate": 0.3223,
+      "Lift@20": 1.122,
+      "Top20_uplift": 0.035
+    },
+    {
+      "universe": "DEV4",
+      "模型": "ZS_M1_tf_dir",
+      "n": 8905,
+      "base_rate": 0.2873,
+      "AUC": 0.5051,
+      "PR_AUC": 0.2925,
+      "Brier": 0.204783,
+      "Top20_rate": 0.3039,
+      "Lift@20": 1.058,
+      "Top20_uplift": 0.0167
+    },
+    {
+      "universe": "DEV4",
+      "模型": "ZS_M3_tf_dir_state",
+      "n": 8905,
+      "base_rate": 0.2873,
+      "AUC": 0.5222,
+      "PR_AUC": 0.3009,
+      "Brier": 0.212307,
+      "Top20_rate": 0.3049,
+      "Lift@20": 1.0614,
+      "Top20_uplift": 0.0176
+    },
+    {
+      "universe": "NEW11",
+      "模型": "M0_constant",
+      "n": 23907,
+      "base_rate": 0.2836,
+      "AUC": 0.5,
+      "PR_AUC": 0.2836,
+      "Brier": 0.203152,
+      "Top20_rate": 0.2836,
+      "Lift@20": 1.0,
+      "Top20_uplift": 0.0
+    },
+    {
+      "universe": "NEW11",
+      "模型": "M1_metadata",
+      "n": 23907,
+      "base_rate": 0.2836,
+      "AUC": 0.5044,
+      "PR_AUC": 0.2864,
+      "Brier": 0.203257,
+      "Top20_rate": 0.2934,
+      "Lift@20": 1.0346,
+      "Top20_uplift": 0.0098
+    },
+    {
+      "universe": "NEW11",
+      "模型": "M2_state",
+      "n": 23907,
+      "base_rate": 0.2836,
+      "AUC": 0.5013,
+      "PR_AUC": 0.2818,
+      "Brier": 0.206215,
+      "Top20_rate": 0.2788,
+      "Lift@20": 0.9831,
+      "Top20_uplift": -0.0048
+    },
+    {
+      "universe": "NEW11",
+      "模型": "M3_metadata_state",
+      "n": 23907,
+      "base_rate": 0.2836,
+      "AUC": 0.4985,
+      "PR_AUC": 0.2816,
+      "Brier": 0.206287,
+      "Top20_rate": 0.2844,
+      "Lift@20": 1.003,
+      "Top20_uplift": 0.0008
+    },
+    {
+      "universe": "NEW11",
+      "模型": "ZS_M1_tf_dir",
+      "n": 23907,
+      "base_rate": 0.2836,
+      "AUC": 0.508,
+      "PR_AUC": 0.288,
+      "Brier": 0.203248,
+      "Top20_rate": 0.2902,
+      "Lift@20": 1.0233,
+      "Top20_uplift": 0.0066
+    },
+    {
+      "universe": "NEW11",
+      "模型": "ZS_M3_tf_dir_state",
+      "n": 23907,
+      "base_rate": 0.2836,
+      "AUC": 0.4995,
+      "PR_AUC": 0.2836,
+      "Brier": 0.224177,
+      "Top20_rate": 0.2857,
+      "Lift@20": 1.0074,
+      "Top20_uplift": 0.0021
+    }
+  ],
+  "delta": [
+    {
+      "universe": "ALL15",
+      "comparison": "M3 - M1 (metadata)",
+      "delta_AUC": -0.0033,
+      "delta_PR_AUC": -0.0028,
+      "delta_Brier": 0.002435,
+      "delta_Top20_uplift": -0.0002
+    },
+    {
+      "universe": "ALL15",
+      "comparison": "ZS_M3 - ZS_M1 (tf+dir)",
+      "delta_AUC": -0.002,
+      "delta_PR_AUC": -0.0019,
+      "delta_Brier": 0.017292,
+      "delta_Top20_uplift": -0.0022
+    },
+    {
+      "universe": "DEV4",
+      "comparison": "M3 - M1 (metadata)",
+      "delta_AUC": 0.0042,
+      "delta_PR_AUC": 0.0067,
+      "delta_Brier": 0.00084,
+      "delta_Top20_uplift": 0.0157
+    },
+    {
+      "universe": "DEV4",
+      "comparison": "ZS_M3 - ZS_M1 (tf+dir)",
+      "delta_AUC": 0.0171,
+      "delta_PR_AUC": 0.0084,
+      "delta_Brier": 0.007524,
+      "delta_Top20_uplift": 0.0009
+    },
+    {
+      "universe": "NEW11_zero_shot",
+      "comparison": "M3 - M1 (metadata)",
+      "delta_AUC": -0.0059,
+      "delta_PR_AUC": -0.0048,
+      "delta_Brier": 0.00303,
+      "delta_Top20_uplift": -0.009
+    },
+    {
+      "universe": "NEW11_zero_shot",
+      "comparison": "ZS_M3 - ZS_M1 (tf+dir)",
+      "delta_AUC": -0.0085,
+      "delta_PR_AUC": -0.0044,
+      "delta_Brier": 0.020929,
+      "delta_Top20_uplift": -0.0045
+    }
+  ],
+  "within": [
+    {
+      "dataset": "ALL15_M3",
+      "n_strata": 90,
+      "usable_strata": 86,
+      "low_sample_strata": 4,
+      "event_weighted_uplift": 0.0042,
+      "macro_mean_uplift": 0.0033,
+      "macro_median_uplift": 0.012,
+      "event_weighted_lift": 1.0105,
+      "macro_median_lift": 1.045,
+      "positive_strata": 46
+    },
+    {
+      "dataset": "NEW11_ZS_M3",
+      "n_strata": 66,
+      "usable_strata": 63,
+      "low_sample_strata": 3,
+      "event_weighted_uplift": -0.0038,
+      "macro_mean_uplift": -0.0089,
+      "macro_median_uplift": -0.0065,
+      "event_weighted_lift": 0.9925,
+      "macro_median_lift": 0.9784,
+      "positive_strata": 28
+    },
+    {
+      "dataset": "DEDUP_M3",
+      "n_strata": 90,
+      "usable_strata": 62,
+      "low_sample_strata": 28,
+      "event_weighted_uplift": 0.0006,
+      "macro_mean_uplift": -0.0069,
+      "macro_median_uplift": -0.0014,
+      "event_weighted_lift": 0.9971,
+      "macro_median_lift": 0.9949,
+      "positive_strata": 31
+    }
+  ],
+  "bootstrap": [
+    {
+      "dataset": "ALL15",
+      "n_rep": 500,
+      "delta_AUC_ci": [
+        -0.0192,
+        0.0127
+      ],
+      "delta_Top20_uplift_ci": [
+        -0.0229,
+        0.0179
+      ]
+    },
+    {
+      "dataset": "NEW11_zero_shot",
+      "n_rep": 500,
+      "delta_AUC_ci": [
+        -0.0301,
+        0.0146
+      ],
+      "delta_Top20_uplift_ci": [
+        -0.0321,
+        0.0276
+      ]
+    }
+  ]
+}

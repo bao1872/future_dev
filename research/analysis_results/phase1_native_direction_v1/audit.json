@@ -1,0 +1,13 @@
+{
+  "resolved_events": 79728,
+  "features": 179,
+  "test_events": 32812,
+  "base_rate": 0.2846,
+  "macro_mean_AUC": 0.5018,
+  "macro_median_AUC": 0.4973,
+  "macro_mean_Lift20": 1.0065,
+  "macro_median_Lift20": 1.0014,
+  "positive_symbols": 8,
+  "n_symbols": 15,
+  "folds_Lift20_gt_1_05": 0
+}

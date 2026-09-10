@@ -1,6 +1,11 @@
 # Phase 1 — Native-Direction OB Tradability
 
-**结论：FAIL**
+**结论：FAIL**（经 nested metadata+state 审计确认）
+
+前一轮结论曾改为 `PROVISIONAL FAIL — pending nested metadata+state audit`，
+原因是原始比较为 **metadata-only vs state-only**（非嵌套）。
+本轮补做嵌套比较 `M1 metadata` vs `M3 metadata+state`（见 §7b），
+结论确认为 **FAIL**。
 
 本实验与旧 `research/phase1_tradability` 完全独立。旧结论（58.88% base rate、
 direction-agnostic UP-or-DOWN 标签、12bar primary、103 维冻结模型、
@@ -83,6 +88,77 @@ median 5 根 ≈ 0.42 小时。LONG 5 / SHORT 5；5m 5 / 15m 5 / 1h 6。
 **Full Logistic 输给 metadata baseline**（AUC 0.5061 < 0.5146，
 Lift@20 1.0088 < 1.1042）。LightGBM 未提供额外可泛化信息。
 
+> ⚠️ 此处的 1.1042 来自把 `symbol` 当作**整数编码**的 baseline。
+> 对名义变量这是不当编码（强加了不存在的序关系）。
+> 改用 train-only one-hot 后，metadata baseline 的 Lift@20 = **1.0361**
+> （见 §7b M1_metadata）。因此 metadata 的条件基准率信息是**存在但温和**的，
+> 不是 1.10 那个量级。
+
+## 7b. Nested 审计：M1 metadata vs M3 metadata+state
+
+标签 / candidate / feature contract / split 全部冻结，未调参。
+M3 与 M1 使用完全相同的 Logistic 参数、train-only imputer/scaler/one-hot。
+
+| universe | 模型 | AUC | PR-AUC | Brier | Lift@20 | Top20 uplift |
+|---|---|---:|---:|---:|---:|---:|
+| ALL15 | M0 constant | 0.5000 | 0.2846 | 0.203586 | 1.0000 | 0.0000 |
+| ALL15 | **M1_metadata** | **0.5072** | 0.2890 | 0.203636 | 1.0361 | 0.0103 |
+| ALL15 | M2_state | 0.5061 | 0.2862 | 0.206004 | 1.0088 | 0.0025 |
+| ALL15 | **M3_metadata_state** | **0.5039** | 0.2862 | 0.206071 | 1.0356 | 0.0101 |
+| NEW11 | ZS_M1 (tf+dir) | 0.5080 | 0.2880 | 0.203248 | 1.0233 | 0.0066 |
+| NEW11 | **ZS_M3 (tf+dir+state)** | **0.4995** | 0.2836 | 0.224177 | 1.0074 | 0.0021 |
+
+### 增量（M3 − M1）
+
+| universe | 比较 | ΔAUC | ΔPR-AUC | ΔBrier↓ | ΔTop20 uplift |
+|---|---|---:|---:|---:|---:|
+| ALL15 | M3 − M1 | **−0.0033** | −0.0028 | +0.002435 | −0.0002 |
+| NEW11 zero-shot | M3 − M1 | **−0.0059** | −0.0048 | +0.003030 | −0.0090 |
+| NEW11 zero-shot | ZS_M3 − ZS_M1 | **−0.0085** | −0.0044 | +0.020929 | −0.0045 |
+| DEV4 | M3 − M1 | +0.0042 | +0.0067 | +0.000840 | +0.0157 |
+
+**唯一的正增量出现在 DEV4**——即训练时见过其 symbol 的那一组。
+在未见品种上增量全部为负。Brier 一律变差（越高越差）。
+
+### 每折增量
+
+| 折 | ALL15 ΔAUC | ALL15 Δuplift | NEW11_ZS ΔAUC | NEW11_ZS Δuplift |
+|---|---:|---:|---:|---:|
+| F1 | +0.0118 | +0.0151 | −0.0308 | −0.0367 |
+| F2 | −0.0094 | +0.0080 | −0.0085 | +0.0175 |
+| F3 | +0.0096 | −0.0067 | +0.0098 | −0.0064 |
+| F4 | −0.0203 | −0.0363 | −0.0160 | −0.0029 |
+
+ALL15 2/4 折 ΔAUC 为正；NEW11_ZS **1/4**。方向不稳定。
+
+### Within-stratum（symbol × source_tf × native_direction 组内排序）
+
+| 数据集 | 可用 strata | 事件加权 uplift | 事件加权 Lift | macro 中位 Lift | 正 strata |
+|---|---:|---:|---:|---:|---:|
+| ALL15 M3 | 86 | +0.0042 | 1.0105 | 1.0450 | 46/86 |
+| NEW11 ZS_M3 | 63 | **−0.0038** | **0.9925** | 0.9784 | 28/63 |
+| DEDUP M3 | 62 | +0.0006 | **0.9971** | 0.9949 | 31/62 |
+
+严格控制品种 / 周期 / 多空后，事件状态在未见品种上的组内排序能力为负，
+去重后基本归零（Lift 0.9971）。
+
+### DEDUP
+
+| | M1 | M3 | Δ |
+|---|---:|---:|---:|
+| AUC | 0.5041 | 0.5028 | **−0.0013** |
+| Lift@20 | 1.0286 | 1.0313 | +0.0027 |
+| Top20 uplift | 0.0082 | 0.0090 | +0.0008 |
+
+### Paired day-block bootstrap（同一 resample 内同时算 M3 与 M1，500 次）
+
+| 数据集 | ΔAUC 95%CI | ΔTop20 uplift 95%CI |
+|---|---|---|
+| ALL15 | [−0.0192, 0.0127] | [−0.0229, 0.0179] |
+| NEW11 zero-shot | [−0.0301, 0.0146] | [−0.0321, 0.0276] |
+
+**全部含 0。**
+
 ## 9. 十分位梯度（Logistic，pooled）
 
 | D1 | D2 | D3 | D4 | D5 | D6 | D7 | D8 | D9 | D10 |
@@ -147,7 +223,21 @@ Logistic 在去重后完全消失。
 | F | DEDUP Lift@20 > 1.05 | 1.0007 | ❌ |
 | G | Top20 uplift 95% CI 下界 > 0 | −0.0126 | ❌ |
 
+## 裁决（嵌套审计后的最终判据）
+
+| 判据 | 实测 | 判定 |
+|---|---|:--:|
+| ALL15：M3 稳定超过 M1 | ΔAUC −0.0033，Δuplift −0.0002 | ❌ |
+| NEW11 zero-shot：ZS_M3 稳定超过 ZS_M1 | ΔAUC −0.0085，Δuplift −0.0045 | ❌ |
+| within-stratum uplift ≈ 0 | ALL15 +0.0042 / NEW11 −0.0038 / DEDUP 0.9971 | ❌ |
+| paired bootstrap 增量 CI 含 0 | 全部含 0 | ❌ |
+| DEDUP 后无增量 | ΔAUC −0.0013 | ❌ |
+
 ### **Phase 1 native-direction tradability：FAIL**
+
+    Metadata contains modest conditional base-rate information,
+    but event-time causal market state provides no reproducible
+    incremental ability to rank native-direction OB quality.
 
 ## SYNTHETIC REFERENCE METRIC ONLY
 
@@ -171,12 +261,23 @@ Logistic 在去重后完全消失。
 按预注册停止规则：**不进入 Phase 2、不做 entry/exit 优化、不做强化学习、
 不回到 FOLLOW/FADE 框架。**
 
-本轮最硬的负面事实是两条：
+本轮最硬的负面事实是三条：
 
-1. **native 与 flipped 的成功率都停在 28.57% 几何基准上**（29.07% vs 29.59%，
-   差 −0.0051，CI 含 0）。OB 原生方向在本口径下没有可测的方向优势。
-2. **metadata baseline（direction+source_tf+symbol，Lift 1.104）明显强于
-   179 维全模型（Lift 1.009）**，且 DEV4 的微弱信号在未见品种上归零。
+1. **native 与 flipped 的成功率几乎相同**（29.07% vs 29.59%，差 −0.0051，
+   paired CI 含 0）。最可靠的证据是这条 paired placebo 本身，
+   而不是"29% ≈ 28.57%"——28.57% 来自理想化无漂移连续随机过程，
+   真实市场有 drift / volatility clustering / gaps / 交易时段结构，
+   不应把它当成必须精确命中的零假设。
+2. **事件状态无法在 metadata 之上提供增量**：M3 − M1 的 ΔAUC 在 ALL15 为
+   −0.0033、在未见品种为 −0.0059（ZS −0.0085），Brier 一律变差；
+   唯一的正增量出现在训练时见过其 symbol 的 DEV4。
+3. **组内排序（严格控制 symbol × source_tf × direction 后）在未见品种上为负
+   （Lift 0.9925）、去重后归零（0.9971）**，paired bootstrap 增量 CI 全部含 0。
 
-即：不是"模型不够好"，而是**事件时的 causal state 在此标签下几乎不携带
-关于 native-direction 成功的排序信息**。
+即：不是"模型不够好"，而是**事件时的 causal market state 在此标签下不携带
+可复现的、能区分 native-direction OB 质量的排序信息**。
+
+需要区分的是：这**不等于**"OB 什么都没有"。metadata 确实含有温和的条件
+基准率信息（one-hot M1 Lift@20 = 1.0361，AUC 0.5072），
+即不同 品种 × 周期 × 多空 组合的成功率存在稳定差异；
+但单个 OB 触发时的状态无法进一步区分同类 OB 之间的质量。

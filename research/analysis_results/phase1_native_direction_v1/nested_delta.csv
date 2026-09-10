@@ -1,0 +1,7 @@
+﻿universe,comparison,delta_AUC,delta_PR_AUC,delta_Brier,delta_Top20_uplift
+ALL15,M3 - M1 (metadata),-0.0033,-0.0028,0.002435,-0.0002
+ALL15,ZS_M3 - ZS_M1 (tf+dir),-0.002,-0.0019,0.017292,-0.0022
+DEV4,M3 - M1 (metadata),0.0042,0.0067,0.00084,0.0157
+DEV4,ZS_M3 - ZS_M1 (tf+dir),0.0171,0.0084,0.007524,0.0009
+NEW11_zero_shot,M3 - M1 (metadata),-0.0059,-0.0048,0.00303,-0.009
+NEW11_zero_shot,ZS_M3 - ZS_M1 (tf+dir),-0.0085,-0.0044,0.020929,-0.0045
