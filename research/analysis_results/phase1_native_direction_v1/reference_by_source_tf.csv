@@ -1,0 +1,4 @@
+﻿source_tf,n,close_inside_zone_pct,close_beyond_near_pct,close_beyond_far_pct,touch_to_close_p10,touch_to_close_p25,touch_to_close_median,touch_to_close_p75,touch_to_close_p90,touch_to_close_p95,MFE_ge_0_5R_pct,MFE_ge_1_0R_pct,MFE_ge_1_5R_pct,MFE_ge_2_5R_pct,MAE_ge_0_5R_pct,MAE_ge_1_0R_pct,bar_order_ambiguous_pct,room_to_far_edge_median_R,native_base_rate
+15m,22285,0.4487,0.4993,0.052,-0.7692,-0.2778,0.0,0.3875,0.75,1.0,0.8462,0.4333,0.1344,0.0125,0.3365,0.1452,0.2208,1.8377,0.2875
+1h,9722,0.4762,0.4795,0.0442,-1.0714,-0.3571,0.0,0.3787,0.7143,0.9522,0.8091,0.4063,0.122,0.0131,0.361,0.1851,0.2071,3.4091,0.2855
+5m,47889,0.4072,0.509,0.0838,-0.6977,-0.2632,0.0458,0.3922,0.75,1.0,0.8664,0.4434,0.1321,0.0114,0.3227,0.1313,0.2228,1.129,0.2922

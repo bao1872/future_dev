@@ -1,0 +1,3 @@
+﻿native_direction,n,close_inside_zone_pct,close_beyond_near_pct,close_beyond_far_pct,touch_to_close_p10,touch_to_close_p25,touch_to_close_median,touch_to_close_p75,touch_to_close_p90,touch_to_close_p95,MFE_ge_0_5R_pct,MFE_ge_1_0R_pct,MFE_ge_1_5R_pct,MFE_ge_2_5R_pct,MAE_ge_0_5R_pct,MAE_ge_1_0R_pct,bar_order_ambiguous_pct,room_to_far_edge_median_R,native_base_rate
+-1,39291,0.4302,0.498,0.0718,-0.75,-0.283,0.0,0.3846,0.75,0.9788,0.8479,0.4329,0.1301,0.0115,0.3317,0.1415,0.2176,1.4062,0.2846
+1,40605,0.4243,0.5073,0.0684,-0.7462,-0.2679,0.0403,0.3927,0.75,1.0,0.8595,0.4391,0.1329,0.0123,0.3308,0.1419,0.223,1.4063,0.2954

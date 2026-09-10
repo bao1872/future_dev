@@ -277,7 +277,28 @@ Logistic 在去重后完全消失。
 即：不是"模型不够好"，而是**事件时的 causal market state 在此标签下不携带
 可复现的、能区分 native-direction OB 质量的排序信息**。
 
-需要区分的是：这**不等于**"OB 什么都没有"。metadata 确实含有温和的条件
-基准率信息（one-hot M1 Lift@20 = 1.0361，AUC 0.5072），
-即不同 品种 × 周期 × 多空 组合的成功率存在稳定差异；
+需要区分的是：这**不等于**"OB 什么都没有"。metadata 含有**很弱的**条件
+基准率差异（one-hot M1 Lift@20 = 1.0361，AUC 0.5072）——
+即不同 品种 × 周期 × 多空 组合的成功率存在小幅差异；
 但单个 OB 触发时的状态无法进一步区分同类 OB 之间的质量。
+
+（措辞已按裁决收紧：原表述"存在**稳定**差异"证据不足，改为"**很弱的**
+条件基准率差异"。）
+
+## 测量定义已审计（Reference Semantics Audit）
+
+结论 `trigger-close reference is adequate`，见
+`RESULTS_REFERENCE_AUDIT.md`：
+
+- 中位事件在触发 bar 收盘时相对 canonical 进入边界仅位移 **+0.026R**；
+- 按滞后程度分组的 base rate 平坦（0.2855–0.2961，极差 1.06pp），
+  FAIL 不集中在"close 已滞后"的事件；
+- near/far edge 定义与 canonical `touch_close_beyond_far_edge` 一致率
+  **1.000000**（n=79,896）。
+
+→ 因此本 FAIL 应被理解为：
+
+    "以 trigger close + ATR5 作为统一参考交易，OB native direction
+     的触发时状态不可筛选。"
+
+而不是"数学上证明 OB 无效"。
