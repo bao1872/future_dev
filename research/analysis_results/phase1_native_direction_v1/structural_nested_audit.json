@@ -1,0 +1,210 @@
+{
+  "main": [
+    {
+      "universe": "ALL15",
+      "模型": "M0_constant",
+      "n": 29517,
+      "base_rate": 0.2749,
+      "AUC": 0.5,
+      "PR_AUC": 0.2749,
+      "Brier": 0.199342,
+      "Top20_rate": 0.2749,
+      "Lift@20": 1.0,
+      "Top20_uplift": 0.0
+    },
+    {
+      "universe": "ALL15",
+      "模型": "M1_metadata",
+      "n": 29517,
+      "base_rate": 0.2749,
+      "AUC": 0.5224,
+      "PR_AUC": 0.2821,
+      "Brier": 0.199205,
+      "Top20_rate": 0.2843,
+      "Lift@20": 1.0342,
+      "Top20_uplift": 0.0094
+    },
+    {
+      "universe": "ALL15",
+      "模型": "M3_metadata_state",
+      "n": 29517,
+      "base_rate": 0.2749,
+      "AUC": 0.5084,
+      "PR_AUC": 0.2796,
+      "Brier": 0.202355,
+      "Top20_rate": 0.2815,
+      "Lift@20": 1.0239,
+      "Top20_uplift": 0.0066
+    },
+    {
+      "universe": "ALL15",
+      "模型": "ZS_M1",
+      "n": 29517,
+      "base_rate": 0.2749,
+      "AUC": 0.5231,
+      "PR_AUC": 0.2897,
+      "Brier": 0.199052,
+      "Top20_rate": 0.2948,
+      "Lift@20": 1.0722,
+      "Top20_uplift": 0.0199
+    },
+    {
+      "universe": "ALL15",
+      "模型": "ZS_M3",
+      "n": 29517,
+      "base_rate": 0.2749,
+      "AUC": 0.5022,
+      "PR_AUC": 0.2793,
+      "Brier": 0.214781,
+      "Top20_rate": 0.2854,
+      "Lift@20": 1.0381,
+      "Top20_uplift": 0.0105
+    },
+    {
+      "universe": "NEW11_zero_shot",
+      "模型": "M0_constant",
+      "n": 21452,
+      "base_rate": 0.2736,
+      "AUC": 0.5,
+      "PR_AUC": 0.2736,
+      "Brier": 0.198759,
+      "Top20_rate": 0.2736,
+      "Lift@20": 1.0,
+      "Top20_uplift": 0.0
+    },
+    {
+      "universe": "NEW11_zero_shot",
+      "模型": "M1_metadata",
+      "n": 21452,
+      "base_rate": 0.2736,
+      "AUC": 0.5219,
+      "PR_AUC": 0.2791,
+      "Brier": 0.198659,
+      "Top20_rate": 0.2766,
+      "Lift@20": 1.0108,
+      "Top20_uplift": 0.003
+    },
+    {
+      "universe": "NEW11_zero_shot",
+      "模型": "M3_metadata_state",
+      "n": 21452,
+      "base_rate": 0.2736,
+      "AUC": 0.5008,
+      "PR_AUC": 0.2738,
+      "Brier": 0.202661,
+      "Top20_rate": 0.2666,
+      "Lift@20": 0.9743,
+      "Top20_uplift": -0.007
+    },
+    {
+      "universe": "NEW11_zero_shot",
+      "模型": "ZS_M1",
+      "n": 21452,
+      "base_rate": 0.2736,
+      "AUC": 0.53,
+      "PR_AUC": 0.294,
+      "Brier": 0.198307,
+      "Top20_rate": 0.3004,
+      "Lift@20": 1.0979,
+      "Top20_uplift": 0.0268
+    },
+    {
+      "universe": "NEW11_zero_shot",
+      "模型": "ZS_M3",
+      "n": 21452,
+      "base_rate": 0.2736,
+      "AUC": 0.4986,
+      "PR_AUC": 0.2761,
+      "Brier": 0.217252,
+      "Top20_rate": 0.279,
+      "Lift@20": 1.0194,
+      "Top20_uplift": 0.0053
+    }
+  ],
+  "delta": [
+    {
+      "universe": "ALL15",
+      "comparison": "M3 - M1",
+      "delta_AUC": -0.014,
+      "delta_PR_AUC": -0.0025,
+      "delta_Brier": 0.00315,
+      "delta_Top20_uplift": -0.0028
+    },
+    {
+      "universe": "ALL15",
+      "comparison": "ZS_M3 - ZS_M1",
+      "delta_AUC": -0.0209,
+      "delta_PR_AUC": -0.0104,
+      "delta_Brier": 0.015729,
+      "delta_Top20_uplift": -0.0094
+    },
+    {
+      "universe": "NEW11_zero_shot",
+      "comparison": "M3 - M1",
+      "delta_AUC": -0.0211,
+      "delta_PR_AUC": -0.0053,
+      "delta_Brier": 0.004002,
+      "delta_Top20_uplift": -0.01
+    },
+    {
+      "universe": "NEW11_zero_shot",
+      "comparison": "ZS_M3 - ZS_M1",
+      "delta_AUC": -0.0314,
+      "delta_PR_AUC": -0.0179,
+      "delta_Brier": 0.018945,
+      "delta_Top20_uplift": -0.0215
+    }
+  ],
+  "within": [
+    {
+      "dataset": "ALL15_M3",
+      "n_strata": 90,
+      "usable_strata": 85,
+      "low_sample_strata": 5,
+      "event_weighted_uplift": -0.0025,
+      "macro_mean_uplift": 0.0019,
+      "macro_median_uplift": -0.0017,
+      "event_weighted_lift": 0.9929,
+      "macro_median_lift": 0.9909,
+      "positive_strata": 42
+    },
+    {
+      "dataset": "NEW11_ZS_M3",
+      "n_strata": 66,
+      "usable_strata": 63,
+      "low_sample_strata": 3,
+      "event_weighted_uplift": -0.0097,
+      "macro_mean_uplift": -0.015,
+      "macro_median_uplift": -0.0174,
+      "event_weighted_lift": 0.9767,
+      "macro_median_lift": 0.9311,
+      "positive_strata": 23
+    }
+  ],
+  "bootstrap": [
+    {
+      "dataset": "ALL15",
+      "n_rep": 500,
+      "delta_AUC_ci": [
+        -0.03,
+        0.0006
+      ],
+      "delta_Top20_uplift_ci": [
+        -0.0231,
+        0.0206
+      ]
+    },
+    {
+      "dataset": "NEW11_zero_shot",
+      "n_rep": 500,
+      "delta_AUC_ci": [
+        -0.0494,
+        -0.0104
+      ],
+      "delta_Top20_uplift_ci": [
+        -0.0468,
+        0.0024
+      ]
+    }
+  ]
+}

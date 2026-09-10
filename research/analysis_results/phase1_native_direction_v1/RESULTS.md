@@ -302,3 +302,30 @@ Logistic 在去重后完全消失。
      的触发时状态不可筛选。"
 
 而不是"数学上证明 OB 无效"。
+
+## 最后一次 native-direction 实验：Structural OB label
+
+用 OB 自己的失效边 `far_edge` 定义风险（不再用固定 1 ATR5）：
+
+    R_struct = |close − far_edge|
+    target   = close + d × 2.5 × R_struct
+    stop     = close − d × 1.0 × R_struct ≡ far_edge
+
+门控通过（`R_struct/ATR5` median **1.406**，仅 15.72% 落在 [0.8,1.2]；
+1h 中位达 3.409 —— 原 ATR5 止损对 1h OB 确实过紧），故该实验有理由执行。
+
+**结果同样 FAIL，且更差**（详见 `RESULTS_STRUCTURAL.md`）：
+
+- native 0.2804 vs flipped 0.2936，diff **−0.0132**，
+  CI **[−0.0254, −0.0002] 不含 0 → 反向显著更优**；
+- M3 − M1 ΔAUC −0.0140（ALL15）/ **−0.0314**（NEW11 zero-shot）；
+- within-stratum 组内 Lift 0.9929（ALL15）/ **0.9767**（NEW11）；
+- NEW11 paired bootstrap ΔAUC CI **[−0.0494, −0.0104] 完全在 0 以下**。
+
+    Native-direction OB tradability: CLOSED.
+    换用更有理论依据的 OB 自身结构边界后结果未改善反而更差，
+    按路线图彻底结束 native direction，不再给第三次机会。
+
+下一步研究问题改为 **OB Event Value Test（OB vs matched non-OB）**：
+不再问"哪个 OB 值得做多/做空"，而问"OB 出现后市场是否比普通时刻
+更容易发动行情"。该研究本轮未启动。

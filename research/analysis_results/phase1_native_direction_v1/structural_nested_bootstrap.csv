@@ -1,0 +1,3 @@
+﻿dataset,n_rep,delta_AUC_ci,delta_Top20_uplift_ci
+ALL15,500,"[-0.03, 0.0006]","[-0.0231, 0.0206]"
+NEW11_zero_shot,500,"[-0.0494, -0.0104]","[-0.0468, 0.0024]"

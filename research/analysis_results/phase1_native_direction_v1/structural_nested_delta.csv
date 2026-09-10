@@ -1,0 +1,5 @@
+﻿universe,comparison,delta_AUC,delta_PR_AUC,delta_Brier,delta_Top20_uplift
+ALL15,M3 - M1,-0.014,-0.0025,0.00315,-0.0028
+ALL15,ZS_M3 - ZS_M1,-0.0209,-0.0104,0.015729,-0.0094
+NEW11_zero_shot,M3 - M1,-0.0211,-0.0053,0.004002,-0.01
+NEW11_zero_shot,ZS_M3 - ZS_M1,-0.0314,-0.0179,0.018945,-0.0215
