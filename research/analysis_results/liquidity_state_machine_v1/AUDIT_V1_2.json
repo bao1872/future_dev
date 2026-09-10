@@ -1,0 +1,12 @@
+{
+  "penetrations": 64098,
+  "same_bar_reclaim": 23169,
+  "close_beyond": 36193,
+  "close_at_level": 4736,
+  "old_reclaim": 52221,
+  "same_bar_share_of_old_reclaim": 0.4437,
+  "later_reclaim": 25172,
+  "structural_acceptance": 10988,
+  "p_later_reclaim_given_close_beyond": 0.6955,
+  "p_structural_acceptance_given_close_beyond": 0.3036
+}

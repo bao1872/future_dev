@@ -3,7 +3,15 @@
 Base: `cd1a339`。合同修订见
 `research/liquidity_state_machine/REVIEWER_DECISION_V1_1.md`。
 
-**最终分类：B. PARTIAL / HETEROGENEOUS STATE TRANSITION**
+> ⚠️ **本文件的 `P(RECLAIM|PENETRATION)=81.43%` 已标记为
+> `PROVISIONAL — ASYMMETRIC EVENT TIMING`。**
+> v1.1 中 reclaim 可在 penetration bar 自身成立，而 acceptance 必须等待
+> penetration bar 之后的新 BOS，两者不是对称 competing risks。
+> 且 trading_day 曾误用自然日（39.01% 样本归错）。
+> **已由 `RESULTS_EVENT_SEQUENCING_V1_2.md` 修正重估，请以该文件为准。**
+> 修正后：CLOSE_BEYOND 条件下 later reclaim 69.55% vs 结构性接受 30.36%。
+
+**v1.1 分类（已被 v1.2 取代）：B. PARTIAL / HETEROGENEOUS STATE TRANSITION**
 
 ```
 NO ML / NO model / NO PnL / NO Sharpe / NO entry-stop-target optimization

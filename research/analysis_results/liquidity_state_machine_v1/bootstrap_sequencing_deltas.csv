@@ -1,0 +1,3 @@
+﻿metric,n_a,n_b,p_a,p_b,pp_diff,relative_risk,ci,rr_ci
+H1: P(SAME_BAR_RECLAIM|pen) AGAINST vs WITH,29536,30705,0.3688,0.3582,0.0107,1.0298,"[-0.0028, 0.0245]","[0.9923, 1.0694]"
+H2: P(LATER_RECLAIM|close_beyond) AGAINST vs WITH,16524,17451,0.704,0.689,0.015,1.0218,"[-0.0055, 0.0372]","[0.992, 1.0545]"
