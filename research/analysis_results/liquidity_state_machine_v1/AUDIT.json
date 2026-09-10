@@ -1,0 +1,8 @@
+{
+  "levels": 81306,
+  "interactions": 77232,
+  "penetrations": 64126,
+  "p_reclaim_given_pen": 0.8143,
+  "p_accept_given_pen": 0.1851,
+  "displacement": "NOT TESTED — NO CANONICAL SEMANTICS"
+}
