@@ -1,0 +1,22 @@
+﻿维度,取值,候选数
+总计,ALL,21481
+source_tf,5m,12939
+source_tf,15m,6043
+source_tf,1h,2499
+symbol,AG,6365
+symbol,CU,5632
+symbol,RB,4851
+symbol,M,4633
+symbol×source_tf,AG|15m,1704
+symbol×source_tf,AG|1h,695
+symbol×source_tf,AG|5m,3966
+symbol×source_tf,CU|15m,1638
+symbol×source_tf,CU|1h,633
+symbol×source_tf,CU|5m,3361
+symbol×source_tf,M|15m,1298
+symbol×source_tf,M|1h,576
+symbol×source_tf,M|5m,2759
+symbol×source_tf,RB|15m,1403
+symbol×source_tf,RB|1h,595
+symbol×source_tf,RB|5m,2853
+与event_index交集,state=21481 index=20008,20008

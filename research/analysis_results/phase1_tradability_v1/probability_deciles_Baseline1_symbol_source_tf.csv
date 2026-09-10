@@ -1,0 +1,11 @@
+﻿decile,n,pred,actual,模型
+1,892,0.584746,0.569507,Baseline1_symbol_source_tf
+2,889,0.585631,0.59955,Baseline1_symbol_source_tf
+3,889,0.586864,0.593926,Baseline1_symbol_source_tf
+4,889,0.588854,0.606299,Baseline1_symbol_source_tf
+5,892,0.589931,0.606502,Baseline1_symbol_source_tf
+6,888,0.590573,0.564189,Baseline1_symbol_source_tf
+7,889,0.591674,0.614173,Baseline1_symbol_source_tf
+8,889,0.592501,0.583802,Baseline1_symbol_source_tf
+9,889,0.593633,0.583802,Baseline1_symbol_source_tf
+10,892,0.59415,0.579596,Baseline1_symbol_source_tf

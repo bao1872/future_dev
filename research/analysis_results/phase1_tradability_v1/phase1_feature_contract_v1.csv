@@ -1,0 +1,183 @@
+﻿feature,group,source,causal_status,included,exclusion_reason
+symbol,其他事件状态,state_parquet,EVENT_LEVEL,False,分组变量(Baseline1专用)，非事件状态特征
+source_tf,其他事件状态,state_parquet,EVENT_LEVEL,False,分组变量(Baseline1专用)，非事件状态特征
+source_ob_internal,OB属性,state_parquet,EVENT_LEVEL,True,
+source_ob_structure,OB属性,state_parquet,EVENT_LEVEL,True,
+source_ob_bias,OB属性,state_parquet,EVENT_LEVEL,True,
+source_ob_zone_low,OB属性,state_parquet,EVENT_LEVEL,False,匹配排除模式 _zone_low
+source_ob_zone_high,OB属性,state_parquet,EVENT_LEVEL,False,匹配排除模式 _zone_high
+source_ob_width_atr5,OB属性,state_parquet,EVENT_LEVEL,True,
+touch_ordinal,OB属性,state_parquet,EVENT_LEVEL,True,
+is_first_touch,OB属性,state_parquet,EVENT_LEVEL,True,
+touch_intrabar_far_edge_breach,OB属性,state_parquet,EVENT_LEVEL,True,
+touch_close_beyond_far_edge,OB属性,state_parquet,EVENT_LEVEL,True,
+touch_reclaimed_by_close,OB属性,state_parquet,EVENT_LEVEL,True,
+group_candidate_count,OB属性,state_parquet,EVENT_LEVEL,True,
+group_has_5m,OB属性,state_parquet,EVENT_LEVEL,True,
+group_has_15m,OB属性,state_parquet,EVENT_LEVEL,True,
+group_has_1h,OB属性,state_parquet,EVENT_LEVEL,True,
+touch_behavior,OB属性,state_parquet,EVENT_LEVEL,True,
+quant_width,OB属性,state_parquet,EVENT_LEVEL,True,
+quant_width_percentile_train,OB属性,state_parquet,EVENT_LEVEL,True,
+quant_top30_train,OB属性,state_parquet,EVENT_LEVEL,True,
+quant_crossed,OB属性,state_parquet,EVENT_LEVEL,True,
+quant_state,OB属性,state_parquet,EVENT_LEVEL,True,
+swing_bias_15m,趋势,state_parquet,EVENT_LEVEL,True,
+swing_bias_1h,趋势,state_parquet,EVENT_LEVEL,True,
+swing_bias_5m,趋势,state_parquet,EVENT_LEVEL,True,
+internal_bias_15m,趋势,state_parquet,EVENT_LEVEL,True,
+internal_bias_1h,趋势,state_parquet,EVENT_LEVEL,True,
+internal_bias_5m,趋势,state_parquet,EVENT_LEVEL,True,
+last_swing_structure_type_15m,结构,state_parquet,EVENT_LEVEL,True,
+last_swing_structure_type_1h,结构,state_parquet,EVENT_LEVEL,True,
+last_swing_structure_type_5m,结构,state_parquet,EVENT_LEVEL,True,
+last_swing_structure_bias_15m,趋势,state_parquet,EVENT_LEVEL,True,
+last_swing_structure_bias_1h,趋势,state_parquet,EVENT_LEVEL,True,
+last_swing_structure_bias_5m,趋势,state_parquet,EVENT_LEVEL,True,
+last_swing_structure_age_15m,结构,state_parquet,EVENT_LEVEL,True,
+last_swing_structure_age_1h,结构,state_parquet,EVENT_LEVEL,True,
+last_swing_structure_age_5m,结构,state_parquet,EVENT_LEVEL,True,
+last_internal_structure_type_15m,结构,state_parquet,EVENT_LEVEL,True,
+last_internal_structure_type_1h,结构,state_parquet,EVENT_LEVEL,True,
+last_internal_structure_type_5m,结构,state_parquet,EVENT_LEVEL,True,
+last_internal_structure_bias_15m,趋势,state_parquet,EVENT_LEVEL,True,
+last_internal_structure_bias_1h,趋势,state_parquet,EVENT_LEVEL,True,
+last_internal_structure_bias_5m,趋势,state_parquet,EVENT_LEVEL,True,
+last_internal_structure_age_15m,结构,state_parquet,EVENT_LEVEL,True,
+last_internal_structure_age_1h,结构,state_parquet,EVENT_LEVEL,True,
+last_internal_structure_age_5m,结构,state_parquet,EVENT_LEVEL,True,
+dsa_direction_15m,DSA,state_parquet,EVENT_LEVEL,True,
+dsa_direction_1h,DSA,state_parquet,EVENT_LEVEL,True,
+dsa_direction_5m,DSA,state_parquet,EVENT_LEVEL,True,
+dsa_raw_dsa_vwap_dev_pct_15m,DSA,state_parquet,EVENT_LEVEL,True,
+dsa_raw_dsa_vwap_dev_pct_1h,DSA,state_parquet,EVENT_LEVEL,True,
+dsa_raw_dsa_vwap_dev_pct_5m,DSA,state_parquet,EVENT_LEVEL,True,
+momentum_direction_15m,动量,state_parquet,EVENT_LEVEL,True,
+momentum_direction_1h,动量,state_parquet,EVENT_LEVEL,True,
+momentum_direction_5m,动量,state_parquet,EVENT_LEVEL,True,
+sqzmom_val_15m,动量,state_parquet,EVENT_LEVEL,True,
+sqzmom_val_1h,动量,state_parquet,EVENT_LEVEL,True,
+sqzmom_val_5m,动量,state_parquet,EVENT_LEVEL,True,
+sqzmom_delta_15m,动量,state_parquet,EVENT_LEVEL,True,
+sqzmom_delta_1h,动量,state_parquet,EVENT_LEVEL,True,
+sqzmom_delta_5m,动量,state_parquet,EVENT_LEVEL,True,
+above_ob_bias_15m,多周期背景,state_parquet,EVENT_LEVEL,True,
+above_ob_bias_1h,多周期背景,state_parquet,EVENT_LEVEL,True,
+above_ob_bias_5m,其他事件状态,state_parquet,EVENT_LEVEL,True,
+above_ob_structure_class_15m,结构,state_parquet,EVENT_LEVEL,True,
+above_ob_structure_class_1h,结构,state_parquet,EVENT_LEVEL,True,
+above_ob_structure_class_5m,结构,state_parquet,EVENT_LEVEL,True,
+above_ob_zone_low_15m,多周期背景,state_parquet,EVENT_LEVEL,False,匹配排除模式 _zone_low
+above_ob_zone_low_1h,多周期背景,state_parquet,EVENT_LEVEL,False,匹配排除模式 _zone_low
+above_ob_zone_low_5m,其他事件状态,state_parquet,EVENT_LEVEL,False,匹配排除模式 _zone_low
+above_ob_zone_high_15m,多周期背景,state_parquet,EVENT_LEVEL,False,匹配排除模式 _zone_high
+above_ob_zone_high_1h,多周期背景,state_parquet,EVENT_LEVEL,False,匹配排除模式 _zone_high
+above_ob_zone_high_5m,其他事件状态,state_parquet,EVENT_LEVEL,False,匹配排除模式 _zone_high
+below_ob_bias_15m,多周期背景,state_parquet,EVENT_LEVEL,True,
+below_ob_bias_1h,多周期背景,state_parquet,EVENT_LEVEL,True,
+below_ob_bias_5m,其他事件状态,state_parquet,EVENT_LEVEL,True,
+below_ob_structure_class_15m,结构,state_parquet,EVENT_LEVEL,True,
+below_ob_structure_class_1h,结构,state_parquet,EVENT_LEVEL,True,
+below_ob_structure_class_5m,结构,state_parquet,EVENT_LEVEL,True,
+below_ob_zone_low_15m,多周期背景,state_parquet,EVENT_LEVEL,False,匹配排除模式 _zone_low
+below_ob_zone_low_1h,多周期背景,state_parquet,EVENT_LEVEL,False,匹配排除模式 _zone_low
+below_ob_zone_low_5m,其他事件状态,state_parquet,EVENT_LEVEL,False,匹配排除模式 _zone_low
+below_ob_zone_high_15m,多周期背景,state_parquet,EVENT_LEVEL,False,匹配排除模式 _zone_high
+below_ob_zone_high_1h,多周期背景,state_parquet,EVENT_LEVEL,False,匹配排除模式 _zone_high
+below_ob_zone_high_5m,其他事件状态,state_parquet,EVENT_LEVEL,False,匹配排除模式 _zone_high
+ob_above_atr_15m,风险几何,state_parquet,EVENT_LEVEL,True,
+ob_above_atr_1h,风险几何,state_parquet,EVENT_LEVEL,True,
+ob_above_atr_5m,风险几何,state_parquet,EVENT_LEVEL,True,
+ob_below_atr_15m,风险几何,state_parquet,EVENT_LEVEL,True,
+ob_below_atr_1h,风险几何,state_parquet,EVENT_LEVEL,True,
+ob_below_atr_5m,风险几何,state_parquet,EVENT_LEVEL,True,
+internal_high_atr_5m,风险几何,state_parquet,EVENT_LEVEL,True,
+internal_high_level_5m,其他事件状态,state_parquet,EVENT_LEVEL,False,匹配排除模式 _level_
+internal_high_relation_5m,风险几何,state_parquet,EVENT_LEVEL,True,
+internal_low_atr_5m,风险几何,state_parquet,EVENT_LEVEL,True,
+internal_low_level_5m,其他事件状态,state_parquet,EVENT_LEVEL,False,匹配排除模式 _level_
+internal_low_relation_5m,风险几何,state_parquet,EVENT_LEVEL,True,
+swing_high_atr_5m,风险几何,state_parquet,EVENT_LEVEL,True,
+swing_high_level_5m,其他事件状态,state_parquet,EVENT_LEVEL,False,匹配排除模式 _level_
+swing_high_relation_5m,风险几何,state_parquet,EVENT_LEVEL,True,
+swing_low_atr_5m,风险几何,state_parquet,EVENT_LEVEL,True,
+swing_low_level_5m,其他事件状态,state_parquet,EVENT_LEVEL,False,匹配排除模式 _level_
+swing_low_relation_5m,风险几何,state_parquet,EVENT_LEVEL,True,
+dsa_vwap_dev_pct_5m,DSA,state_parquet,EVENT_LEVEL,True,
+internal_high_atr_15m,风险几何,state_parquet,EVENT_LEVEL,True,
+internal_high_level_15m,多周期背景,state_parquet,EVENT_LEVEL,False,匹配排除模式 _level_
+internal_high_relation_15m,风险几何,state_parquet,EVENT_LEVEL,True,
+internal_low_atr_15m,风险几何,state_parquet,EVENT_LEVEL,True,
+internal_low_level_15m,多周期背景,state_parquet,EVENT_LEVEL,False,匹配排除模式 _level_
+internal_low_relation_15m,风险几何,state_parquet,EVENT_LEVEL,True,
+swing_high_atr_15m,风险几何,state_parquet,EVENT_LEVEL,True,
+swing_high_level_15m,多周期背景,state_parquet,EVENT_LEVEL,False,匹配排除模式 _level_
+swing_high_relation_15m,风险几何,state_parquet,EVENT_LEVEL,True,
+swing_low_atr_15m,风险几何,state_parquet,EVENT_LEVEL,True,
+swing_low_level_15m,多周期背景,state_parquet,EVENT_LEVEL,False,匹配排除模式 _level_
+swing_low_relation_15m,风险几何,state_parquet,EVENT_LEVEL,True,
+dsa_vwap_dev_pct_15m,DSA,state_parquet,EVENT_LEVEL,True,
+internal_high_atr_1h,风险几何,state_parquet,EVENT_LEVEL,True,
+internal_high_level_1h,多周期背景,state_parquet,EVENT_LEVEL,False,匹配排除模式 _level_
+internal_high_relation_1h,风险几何,state_parquet,EVENT_LEVEL,True,
+internal_low_atr_1h,风险几何,state_parquet,EVENT_LEVEL,True,
+internal_low_level_1h,多周期背景,state_parquet,EVENT_LEVEL,False,匹配排除模式 _level_
+internal_low_relation_1h,风险几何,state_parquet,EVENT_LEVEL,True,
+swing_high_atr_1h,风险几何,state_parquet,EVENT_LEVEL,True,
+swing_high_level_1h,多周期背景,state_parquet,EVENT_LEVEL,False,匹配排除模式 _level_
+swing_high_relation_1h,风险几何,state_parquet,EVENT_LEVEL,True,
+swing_low_atr_1h,风险几何,state_parquet,EVENT_LEVEL,True,
+swing_low_level_1h,多周期背景,state_parquet,EVENT_LEVEL,False,匹配排除模式 _level_
+swing_low_relation_1h,风险几何,state_parquet,EVENT_LEVEL,True,
+dsa_vwap_dev_pct_1h,DSA,state_parquet,EVENT_LEVEL,True,
+internal_bias_rel_5m,趋势,MODEL_FEATURES_V0,ACTION_RELATIVE,False,62维中与action相关或未能证明事件级
+swing_bias_rel_5m,趋势,MODEL_FEATURES_V0,ACTION_RELATIVE,False,62维中与action相关或未能证明事件级
+target_fit_internal_5m,其他事件状态,MODEL_FEATURES_V0,ACTION_RELATIVE,False,62维中与action相关或未能证明事件级
+target_fit_swing_5m,其他事件状态,MODEL_FEATURES_V0,ACTION_RELATIVE,False,62维中与action相关或未能证明事件级
+target_fit_ob_5m,其他事件状态,MODEL_FEATURES_V0,ACTION_RELATIVE,False,62维中与action相关或未能证明事件级
+stop_structure_internal_5m,其他事件状态,MODEL_FEATURES_V0,ACTION_RELATIVE,False,62维中与action相关或未能证明事件级
+stop_structure_swing_5m,其他事件状态,MODEL_FEATURES_V0,ACTION_RELATIVE,False,62维中与action相关或未能证明事件级
+stop_structure_ob_5m,其他事件状态,MODEL_FEATURES_V0,ACTION_RELATIVE,False,62维中与action相关或未能证明事件级
+forward_active_ob_bias_rel_5m,其他事件状态,MODEL_FEATURES_V0,ACTION_RELATIVE,False,62维中与action相关或未能证明事件级
+forward_active_ob_structure_class_5m,结构,MODEL_FEATURES_V0,ACTION_RELATIVE,False,62维中与action相关或未能证明事件级
+backward_active_ob_bias_5m,其他事件状态,MODEL_FEATURES_V0,ACTION_RELATIVE,False,62维中与action相关或未能证明事件级
+backward_active_ob_structure_class_5m,结构,MODEL_FEATURES_V0,ACTION_RELATIVE,False,62维中与action相关或未能证明事件级
+internal_bias_rel_15m,趋势,MODEL_FEATURES_V0,ACTION_RELATIVE,False,62维中与action相关或未能证明事件级
+swing_bias_rel_15m,趋势,MODEL_FEATURES_V0,ACTION_RELATIVE,False,62维中与action相关或未能证明事件级
+target_fit_internal_15m,多周期背景,MODEL_FEATURES_V0,ACTION_RELATIVE,False,62维中与action相关或未能证明事件级
+target_fit_swing_15m,多周期背景,MODEL_FEATURES_V0,ACTION_RELATIVE,False,62维中与action相关或未能证明事件级
+target_fit_ob_15m,多周期背景,MODEL_FEATURES_V0,ACTION_RELATIVE,False,62维中与action相关或未能证明事件级
+stop_structure_internal_15m,多周期背景,MODEL_FEATURES_V0,ACTION_RELATIVE,False,62维中与action相关或未能证明事件级
+stop_structure_swing_15m,多周期背景,MODEL_FEATURES_V0,ACTION_RELATIVE,False,62维中与action相关或未能证明事件级
+stop_structure_ob_15m,多周期背景,MODEL_FEATURES_V0,ACTION_RELATIVE,False,62维中与action相关或未能证明事件级
+forward_active_ob_bias_rel_15m,多周期背景,MODEL_FEATURES_V0,ACTION_RELATIVE,False,62维中与action相关或未能证明事件级
+forward_active_ob_structure_class_15m,结构,MODEL_FEATURES_V0,ACTION_RELATIVE,False,62维中与action相关或未能证明事件级
+backward_active_ob_bias_15m,多周期背景,MODEL_FEATURES_V0,ACTION_RELATIVE,False,62维中与action相关或未能证明事件级
+backward_active_ob_structure_class_15m,结构,MODEL_FEATURES_V0,ACTION_RELATIVE,False,62维中与action相关或未能证明事件级
+internal_bias_rel_1h,趋势,MODEL_FEATURES_V0,ACTION_RELATIVE,False,62维中与action相关或未能证明事件级
+swing_bias_rel_1h,趋势,MODEL_FEATURES_V0,ACTION_RELATIVE,False,62维中与action相关或未能证明事件级
+target_fit_internal_1h,多周期背景,MODEL_FEATURES_V0,ACTION_RELATIVE,False,62维中与action相关或未能证明事件级
+target_fit_swing_1h,多周期背景,MODEL_FEATURES_V0,ACTION_RELATIVE,False,62维中与action相关或未能证明事件级
+target_fit_ob_1h,多周期背景,MODEL_FEATURES_V0,ACTION_RELATIVE,False,62维中与action相关或未能证明事件级
+stop_structure_internal_1h,多周期背景,MODEL_FEATURES_V0,ACTION_RELATIVE,False,62维中与action相关或未能证明事件级
+stop_structure_swing_1h,多周期背景,MODEL_FEATURES_V0,ACTION_RELATIVE,False,62维中与action相关或未能证明事件级
+stop_structure_ob_1h,多周期背景,MODEL_FEATURES_V0,ACTION_RELATIVE,False,62维中与action相关或未能证明事件级
+forward_active_ob_bias_rel_1h,多周期背景,MODEL_FEATURES_V0,ACTION_RELATIVE,False,62维中与action相关或未能证明事件级
+forward_active_ob_structure_class_1h,结构,MODEL_FEATURES_V0,ACTION_RELATIVE,False,62维中与action相关或未能证明事件级
+backward_active_ob_bias_1h,多周期背景,MODEL_FEATURES_V0,ACTION_RELATIVE,False,62维中与action相关或未能证明事件级
+backward_active_ob_structure_class_1h,结构,MODEL_FEATURES_V0,ACTION_RELATIVE,False,62维中与action相关或未能证明事件级
+dsa_alignment_5m,其他事件状态,MODEL_FEATURES_V0,ACTION_RELATIVE,False,62维中与action相关或未能证明事件级
+dsa_vwap_dev_rel_5m,其他事件状态,MODEL_FEATURES_V0,ACTION_RELATIVE,False,62维中与action相关或未能证明事件级
+dsa_alignment_15m,多周期背景,MODEL_FEATURES_V0,ACTION_RELATIVE,False,62维中与action相关或未能证明事件级
+dsa_vwap_dev_rel_15m,多周期背景,MODEL_FEATURES_V0,ACTION_RELATIVE,False,62维中与action相关或未能证明事件级
+dsa_alignment_1h,多周期背景,MODEL_FEATURES_V0,ACTION_RELATIVE,False,62维中与action相关或未能证明事件级
+dsa_vwap_dev_rel_1h,多周期背景,MODEL_FEATURES_V0,ACTION_RELATIVE,False,62维中与action相关或未能证明事件级
+momentum_value_rel_5m,其他事件状态,MODEL_FEATURES_V0,ACTION_RELATIVE,False,62维中与action相关或未能证明事件级
+momentum_delta_rel_5m,其他事件状态,MODEL_FEATURES_V0,ACTION_RELATIVE,False,62维中与action相关或未能证明事件级
+momentum_value_rel_15m,多周期背景,MODEL_FEATURES_V0,ACTION_RELATIVE,False,62维中与action相关或未能证明事件级
+momentum_delta_rel_15m,多周期背景,MODEL_FEATURES_V0,ACTION_RELATIVE,False,62维中与action相关或未能证明事件级
+momentum_value_rel_1h,多周期背景,MODEL_FEATURES_V0,ACTION_RELATIVE,False,62维中与action相关或未能证明事件级
+momentum_delta_rel_1h,多周期背景,MODEL_FEATURES_V0,ACTION_RELATIVE,False,62维中与action相关或未能证明事件级
+trade_mode,其他事件状态,MODEL_FEATURES_V0,ACTION_RELATIVE,False,62维中与action相关或未能证明事件级
+trade_direction,其他事件状态,MODEL_FEATURES_V0,ACTION_RELATIVE,False,62维中与action相关或未能证明事件级
+target_R,其他事件状态,MODEL_FEATURES_V0,ACTION_RELATIVE,False,62维中与action相关或未能证明事件级

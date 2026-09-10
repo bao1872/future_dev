@@ -1,0 +1,8 @@
+{
+  "script": "research/phase1_tradability/run_phase1_v1.py",
+  "resolved": 21421,
+  "features": 103,
+  "base_rate": 0.5888,
+  "dedup_base_rate": 0.5884,
+  "seed": 20240901
+}

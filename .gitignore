@@ -59,3 +59,6 @@ package/
 # 本地 agent 工作数据（不入库）
 .agents/
 .claude/
+
+# Phase 1 可再生中间产物（不入库）
+research/analysis_results/phase1_tradability_v1/*.parquet

@@ -1,0 +1,91 @@
+[labels] AG: 6365 events in 1.2s
+
+=== AG SMOKE TEST ===
+
+--- label=1 ---
+  AG:5m:1:1:18:20:1 tf=5m P0=7598.0 R=9.4000 side=UP bars=22.0
+  AG:5m:1:1:69:85:1 tf=5m P0=7636.0 R=5.8000 side=UP bars=5.0
+  AG:5m:1:1:69:85:3 tf=5m P0=7627.0 R=8.0000 side=UP bars=3.0
+  AG:5m:1:-1:111:118:1 tf=5m P0=7650.0 R=10.6000 side=DOWN bars=13.0
+  AG:5m:1:-1:111:118:3 tf=5m P0=7665.0 R=13.0000 side=UP bars=12.0
+
+--- label=0 ---
+  AG:5m:1:1:36:45:1 tf=5m P0=7609.0 R=12.0000 side=nan bars=13.0
+  AG:5m:1:1:69:85:2 tf=5m P0=7635.0 R=6.8000 side=nan bars=5.0
+  AG:5m:1:1:69:85:4 tf=5m P0=7631.0 R=8.4000 side=nan bars=18.0
+  AG:5m:1:-1:111:118:2 tf=5m P0=7643.0 R=6.4000 side=nan bars=6.0
+  AG:5m:1:1:150:156:1 tf=5m P0=7619.0 R=15.6000 side=nan bars=6.0
+
+--- censored / ambiguous ---
+  AG:5m:1:1:1099:1105:1 status=AMBIGUOUS_INTRABAR bars=1.0
+  AG:5m:1:1:2136:2140:2 status=AMBIGUOUS_INTRABAR bars=11.0
+  AG:5m:1:1:2136:2140:3 status=AMBIGUOUS_INTRABAR bars=6.0
+  AG:5m:1:-1:2192:2201:1 status=AMBIGUOUS_INTRABAR bars=1.0
+  AG:5m:1:-1:2847:2850:5 status=AMBIGUOUS_INTRABAR bars=15.0
+
+--- 单事件命中序列 ---
+  AG:5m:1:1:18:20:1 P0=7598.0 R=9.4000 up_target=7621.5 up_stop=7588.6 down_target=7574.5 down_stop=7607.4
+    bar24: O=7598.0 H=7606.0 L=7597.0 C=7601.0
+    bar25: O=7600.0 H=7605.0 L=7597.0 C=7604.0
+    bar26: O=7604.0 H=7606.0 L=7598.0 C=7599.0
+    bar27: O=7616.0 H=7618.0 L=7609.0 C=7612.0
+    bar28: O=7613.0 H=7615.0 L=7608.0 C=7614.0
+    bar29: O=7615.0 H=7619.0 L=7609.0 C=7611.0
+    bar30: O=7610.0 H=7613.0 L=7608.0 C=7613.0
+    bar31: O=7612.0 H=7615.0 L=7610.0 C=7610.0
+    bar32: O=7610.0 H=7615.0 L=7608.0 C=7613.0
+    bar33: O=7613.0 H=7613.0 L=7605.0 C=7610.0
+    bar34: O=7609.0 H=7610.0 L=7604.0 C=7607.0
+    bar35: O=7607.0 H=7609.0 L=7601.0 C=7602.0
+    bar36: O=7602.0 H=7608.0 L=7600.0 C=7607.0
+    bar37: O=7608.0 H=7610.0 L=7604.0 C=7609.0
+    bar38: O=7609.0 H=7613.0 L=7607.0 C=7613.0
+    bar39: O=7611.0 H=7614.0 L=7607.0 C=7607.0
+    bar40: O=7606.0 H=7611.0 L=7604.0 C=7610.0
+    bar41: O=7610.0 H=7613.0 L=7609.0 C=7611.0
+    bar42: O=7611.0 H=7614.0 L=7610.0 C=7611.0
+    bar43: O=7610.0 H=7616.0 L=7610.0 C=7614.0
+    bar44: O=7614.0 H=7616.0 L=7612.0 C=7614.0
+    bar45: O=7631.0 H=7639.0 L=7616.0 C=7620.0
+    bar46: O=7620.0 H=7627.0 L=7614.0 C=7615.0
+[labels] AG: 6365 events in 0.7s
+[labels] CU: 5632 events in 0.7s
+[labels] M: 4633 events in 0.5s
+[labels] RB: 4851 events in 0.5s
+
+=== 标签画像 ===
+              维度                   取值   事件数
+              总计                  ALL 21481
+          status             RESOLVED 21421
+          status   AMBIGUOUS_INTRABAR    56
+          status END_OF_DATA_CENSORED     4
+           label                  1.0 12613
+           label                  0.0  8808
+           label                  nan    60
+   symbol×status          AG|RESOLVED  6332
+   symbol×status         AG|AMBIGUOUS    32
+   symbol×status          CU|RESOLVED  5623
+   symbol×status         CU|AMBIGUOUS     9
+   symbol×status           M|RESOLVED  4630
+   symbol×status          M|AMBIGUOUS     3
+   symbol×status          RB|RESOLVED  4836
+   symbol×status         RB|AMBIGUOUS    12
+source_tf×status         15m|RESOLVED  6029
+source_tf×status        15m|AMBIGUOUS    13
+source_tf×status          1h|RESOLVED  2494
+source_tf×status         1h|AMBIGUOUS     5
+source_tf×status          5m|RESOLVED 12898
+source_tf×status         5m|AMBIGUOUS    38
+
+=== resolution（bars）===
+       维度  取值   事件数  p25  p50  p75  p90  p95    p99   max  mean_bars  median_hours
+       全部 ALL 21421  5.0 10.0 19.0 35.0 51.0 103.00 791.0     16.773         0.833
+source_tf 15m  6029  5.0 10.0 20.0 37.0 53.0 103.00 791.0     17.211         0.833
+source_tf  1h  2494  5.0 11.0 21.0 39.0 62.0 129.07 662.0     19.291         0.917
+source_tf  5m 12898  5.0 10.0 19.0 33.0 48.0  93.00 791.0     16.081         0.833
+   symbol  AG  6332  5.0 10.0 19.0 41.0 66.0 111.00 507.0     17.776         0.833
+   symbol  CU  5623  6.0 10.0 19.0 37.0 53.0 107.00 292.0     16.795         0.833
+   symbol   M  4630  5.0 10.0 20.0 32.0 44.0  74.00 791.0     16.858         0.833
+   symbol  RB  4836  5.0 10.0 20.0 33.0 43.0  74.65 248.0     15.353         0.833
+
+LABELS_DONE

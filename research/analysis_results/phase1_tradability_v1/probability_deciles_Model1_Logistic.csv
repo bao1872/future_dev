@@ -1,0 +1,11 @@
+﻿decile,n,pred,actual,模型
+1,892,0.415512,0.557175,Model1_Logistic
+2,889,0.499142,0.544432,Model1_Logistic
+3,889,0.528242,0.575928,Model1_Logistic
+4,889,0.548646,0.5973,Model1_Logistic
+5,892,0.567811,0.589686,Model1_Logistic
+6,888,0.586446,0.602477,Model1_Logistic
+7,889,0.605915,0.595051,Model1_Logistic
+8,889,0.627845,0.588301,Model1_Logistic
+9,889,0.657277,0.611924,Model1_Logistic
+10,892,0.715018,0.639013,Model1_Logistic
