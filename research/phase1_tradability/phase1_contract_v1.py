@@ -69,12 +69,14 @@ def compute_atr5(bars: dict) -> np.ndarray:
     return atr
 
 
-def discontinuity_flags(sym: str) -> np.ndarray:
+def discontinuity_flags(sym: str,
+                        threshold: float = ROLL_GAP_ATR_THRESHOLD
+                        ) -> np.ndarray:
     """discontinuity_before_bar[i] = True 表示进入第 i 根之前存在不可信边界。
 
-    判定（复用既有阈值与语义）：
+    判定（复用既有语义，阈值可参数化以便做敏感性检查）：
       - 非 5 分钟连续 且 不属于反复出现的正常交易时段边界；
-      - 或 相邻两根之间的价格跳空 |open[i] - close[i-1]| / ATR5 > ROLL_GAP_ATR_THRESHOLD。
+      - 或 相邻两根之间的价格跳空 |open[i] - close[i-1]| / ATR5 > threshold。
     """
     bars = get_bars(sym)
     t = bars["time"]
@@ -89,7 +91,7 @@ def discontinuity_flags(sym: str) -> np.ndarray:
     prev_c[1:] = bars["close"][:-1]
     with np.errstate(divide="ignore", invalid="ignore"):
         gap_atr = np.abs(bars["open"] - prev_c) / atr
-    gap_px[1:] = np.nan_to_num(gap_atr[1:], nan=0.0) > ROLL_GAP_ATR_THRESHOLD
+    gap_px[1:] = np.nan_to_num(gap_atr[1:], nan=0.0) > threshold
 
     return gap_time | gap_px
 

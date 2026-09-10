@@ -24,8 +24,8 @@ import numpy as np
 import pandas as pd
 
 from research.phase1_tradability.phase1_contract_v1 import (
-    RESULTS, STOP_R, SYMBOLS, TARGET_R, compute_atr5, discontinuity_flags,
-    get_bars,
+    RESULTS, ROLL_GAP_ATR_THRESHOLD, STOP_R, SYMBOLS, TARGET_R, compute_atr5,
+    discontinuity_flags, get_bars,
 )
 
 FIVE_MIN = np.timedelta64(5, "m")
@@ -111,14 +111,15 @@ def label_tradability_event(
     return TradabilityResult(None, "END_OF_DATA_CENSORED", None, None, None)
 
 
-def build(symbols=SYMBOLS) -> pd.DataFrame:
+def build(symbols=SYMBOLS, threshold: float = ROLL_GAP_ATR_THRESHOLD,
+          quiet: bool = False) -> pd.DataFrame:
     cand = pd.read_parquet(RESULTS / "candidates_v1.parquet")
     recs = []
     for sym in symbols:
         t0 = time.perf_counter()
         bars = get_bars(sym)
         atr = compute_atr5(bars)
-        disc = discontinuity_flags(sym)
+        disc = discontinuity_flags(sym, threshold=threshold)
         o, h, l, c, t = (bars["open"], bars["high"], bars["low"],
                          bars["close"], bars["time"])
         n = len(o)
@@ -159,8 +160,9 @@ def build(symbols=SYMBOLS) -> pd.DataFrame:
                 resolution_bar_index=res.resolution_bar_index,
                 decision_time=t[di] + FIVE_MIN, resolution_time=rt,
                 reference_price=p0, R_ref=r))
-        print(f"[labels] {sym}: {len(sub)} events in "
-              f"{time.perf_counter()-t0:.1f}s", flush=True)
+        if not quiet:
+            print(f"[labels] {sym}: {len(sub)} events in "
+                  f"{time.perf_counter()-t0:.1f}s", flush=True)
     return pd.DataFrame(recs)
 
 

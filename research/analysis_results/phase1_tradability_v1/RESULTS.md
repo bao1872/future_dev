@@ -123,7 +123,68 @@ decision_time、特征集与动作字段无交集、`_rel_` 计数 0、无 `targ
 按第 11 条前提：本结果属于同一段 407 日数据上的 discovery，
 **不得作为最终独立 OOS 证据**。
 
+## Phase 1A — Tradability Signal Sanity Check
+
+不训练新模型，只用现有标签 + 确定性折叠拟合取回逐事件分数。
+
+### A. decile × 累计成功发生率（Logistic）
+
+| decile | by 6 | by 12 | by 24 | by 48 | by 96 | 最终(无限) |
+|---|---:|---:|---:|---:|---:|---:|
+| D1 | 0.1753 | 0.2921 | 0.4034 | 0.4652 | 0.5124 | 0.5360 |
+| D10 | 0.2539 | 0.4258 | 0.5427 | 0.6112 | 0.6303 | 0.6393 |
+| **差** | **+7.9pp** | **+13.4pp** | **+13.9pp** | **+14.6pp** | +11.8pp | +10.3pp |
+
+D10 的同期 Lift：by6 **1.153**、by12 1.149、by24 1.099、by48 1.094、
+by96 1.080、最终 1.085。
+
+**关键：区分在 12–24 根 bar 内就已基本形成；无限延长反而稀释信号**
+（48bar 时 +14.6pp → 无限时 +10.3pp；Lift 1.15 → 1.08）。
+即模型抓到的是「触发后早期就会出现机会」的状态，不是靠长尾等待。
+
+### B. 成功速度（Logistic）
+
+| decile | 成功中位 bars | 成功均值 bars |
+|---|---:|---:|
+| D1 | 11.0 | 23.49 |
+| D10 | **8.0** | **15.18 |
+
+Spearman(decile, 成功中位bars) = **−0.430**；
+Spearman(decile, 成功均值bars) = **−0.321**。
+高分事件不仅更容易成功，而且**明显更快**成功。
+
+### C. source_tf × decile（success_by_24bar）
+
+| source_tf | D1 | D10 |
+|---|---:|---:|
+| 5m | 0.4045 | 0.5388 |
+| 15m | 0.3891 | 0.5175 |
+| 1h | 0.3238 | **0.6190** |
+
+三个周期 D10 均高于 D1；1h 最强。且三者 resolution 中位数接近
+（5m 10 / 15m 10 / 1h 11 根），**没有数量级差异** → 不需要按 source_tf
+人为设计不同 horizon。
+
+### D. rollover 阈值敏感性
+
+| 阈值 | RESOLVED | AMBIGUOUS | ROLL_CENSORED | base rate | 标签与10ATR不同 |
+|---|---:|---:|---:|---:|---:|
+| 3 ATR | 21,019 | 56 | 402 | 0.5888 | **0** |
+| 5 ATR | 21,421 | 56 | 0 | 0.5888 | 0 |
+| 10 ATR | 21,421 | 56 | 0 | 0.5888 | — |
+
+**三个阈值下标签零变化。** 即便收紧到 3 ATR，仅 402 个事件（1.9%）被
+ROLL_CENSORED，且剩余样本 base rate 完全不变（58.88%）。
+rollover 未污染标签，此前 ROLL_CENSORED=0 是可信的，不是检测失效。
+
+### Phase 1A 结论
+
+命中用户设定的**情况 A**：区分早期形成、长尾稀释。
+因此**不启动 canonical OB lifecycle / horizon 重建**
+（未满足三个启动条件中的任何一个）。
+
 ## 可再生中间产物（不入库，已 .gitignore）
 
 `candidates_v1.parquet`、`labels_v1.parquet`、`features_v1.parquet`、
-`predictions_v1.parquet`，均由 `research/phase1_tradability/` 下脚本重建。
+`predictions_v1.parquet`、`phase1a_predictions.parquet`，
+均由 `research/phase1_tradability/` 下脚本重建。
