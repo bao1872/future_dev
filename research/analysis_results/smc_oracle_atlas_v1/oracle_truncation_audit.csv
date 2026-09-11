@@ -1,0 +1,7 @@
+﻿metric,value
+path_len > 500 的 oracle 行占比,0.9838
+第500根仍未 stop 且路径未结束（v1.0 被截断）占比,0.1059
+20ATR 距离截断会丢 target 的 contact 占比,0.8009
+400 target 数量截断生效的 contact 占比,0.0
+median path_len,15209.0
+p95 path_len,33773.15

@@ -2,6 +2,29 @@
 
 Base: `06d45de39897f73a5243b080d3d5de47e020503c`
 
+> ## ⚠️ v1.0 状态：PROVISIONAL（已被 v1.1 取代）
+>
+> v1.1 语义审计（提交 `3b7d1be` 之后）发现 v1.0 存在三处会改变核心
+> 画像的定义问题。以下 v1.0 结果**作废，不得引用为数据事实**：
+>
+> ```text
+> - liquidity field density（±0.5R 各 scope 数量）：高估约 6–14 倍
+> - same-price multi-identity 占比 82.5%（含已消费历史 liquidity）
+> - Oracle RR 前沿的精确数值（受 500bar / 20ATR 截断影响）
+> - Oracle direction 比例（MIXED 51.9%）
+> - target 相关画像（target 可能来自已被扫掉的 liquidity）
+> - “重复接触更容易 TOUCH_ONLY”（survivor selection 假象）
+> ```
+>
+> **保留有效**：80,289 liquidity / 96,959 contact 的规模框架、
+> contact 三级数据结构、多周期趋势快照框架、ATR 风险网格设计、
+> Long/Short 双向 Oracle 框架、Oracle 标签隔离原则。
+>
+> 所有后续研究请改用 `research/analysis_results/smc_oracle_atlas_v1/`
+> 下的 `*_v1_1.*` 文件与 `SMC_ORACLE_DATA_ATLAS_V1_1.md`。
+>
+> v1.0 作废原因详见 v1.1 报告第二节。
+
 本轮**不训练任何预测模型、不做 PnL、不优化交易规则**。
 目标是建立未来所有 SMC 研究使用的统一事件数据库。
 

@@ -1,0 +1,110 @@
+{
+  "active_density_pm05": [
+    {
+      "scope": "5m",
+      "pm05_mean_active": 0.4609,
+      "pm05_median_active": 0.0,
+      "pm05_mean_v10": 4.3619,
+      "ratio_v11_over_v10": 0.1057
+    },
+    {
+      "scope": "15m",
+      "pm05_mean_active": 0.1794,
+      "pm05_median_active": 0.0,
+      "pm05_mean_v10": 1.3043,
+      "ratio_v11_over_v10": 0.1375
+    },
+    {
+      "scope": "1h",
+      "pm05_mean_active": 0.0611,
+      "pm05_median_active": 0.0,
+      "pm05_mean_v10": 0.3626,
+      "ratio_v11_over_v10": 0.1685
+    },
+    {
+      "scope": "CONTIG_SESSION",
+      "pm05_mean_active": 1.2481,
+      "pm05_median_active": 1.0,
+      "pm05_mean_v10": 17.0686,
+      "ratio_v11_over_v10": 0.0731
+    },
+    {
+      "scope": "TRADING_DAY",
+      "pm05_mean_active": 0.4721,
+      "pm05_median_active": 0.0,
+      "pm05_mean_v10": 4.3249,
+      "ratio_v11_over_v10": 0.1092
+    },
+    {
+      "scope": "TRADING_WEEK",
+      "pm05_mean_active": 0.1261,
+      "pm05_median_active": 0.0,
+      "pm05_mean_v10": 0.893,
+      "ratio_v11_over_v10": 0.1412
+    }
+  ],
+  "pct_multi_active": 0.5693,
+  "pct_multi_v10_historical": 0.8254,
+  "mean_active_visible": 198.92,
+  "mean_historical_visible": 2678.76,
+  "duplicate_identity_groups": 0,
+  "duplicate_identity_extra_rows": 0,
+  "contact_hazard": [
+    {
+      "contact_number": 1,
+      "n_at_risk": 76099,
+      "penetration_hazard": 0.8326,
+      "touch_only_probability": 0.1674
+    },
+    {
+      "contact_number": 2,
+      "n_at_risk": 12415,
+      "penetration_hazard": 0.6244,
+      "touch_only_probability": 0.3756
+    },
+    {
+      "contact_number": 3,
+      "n_at_risk": 4541,
+      "penetration_hazard": 0.5461,
+      "touch_only_probability": 0.4539
+    },
+    {
+      "contact_number": 4,
+      "n_at_risk": 2009,
+      "penetration_hazard": 0.5296,
+      "touch_only_probability": 0.4704
+    }
+  ],
+  "truncation_audit": {
+    "path_len > 500 的 oracle 行占比": 0.9838,
+    "第500根仍未 stop 且路径未结束（v1.0 被截断）占比": 0.1059,
+    "20ATR 距离截断会丢 target 的 contact 占比": 0.8009,
+    "400 target 数量截断生效的 contact 占比": 0.0,
+    "median path_len": 15209.0,
+    "p95 path_len": 33773.15
+  },
+  "status_counts": {
+    "TARGET_REACHED_THEN_STOPPED": 631615,
+    "STOPPED": 602624,
+    "AMBIGUOUS_INTRABAR_ORDER": 65963,
+    "TARGET_REACHED_CENSORED": 36946,
+    "NO_ACTIVE_TARGET": 19047,
+    "CENSORED_NO_TARGET": 405
+  },
+  "path_censor": {
+    "DATA_END_CENSORED": 1296498,
+    "ROLL_CENSORED": 60102
+  },
+  "rr_direction": {
+    "LONG_RR_DOMINATES": 33255,
+    "SHORT_RR_DOMINATES": 31634,
+    "MIXED_RR": 29013,
+    "NO_CLEAR_RR": 2998
+  },
+  "pareto_direction": {
+    "MIXED_PARETO": 43578,
+    "LONG_PARETO_DOMINATES": 25614,
+    "SHORT_PARETO_DOMINATES": 24710,
+    "NO_PARETO": 2998
+  }
+}
