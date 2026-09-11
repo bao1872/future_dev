@@ -1,0 +1,98 @@
+{
+  "experiment": "SMC Direction Asymmetric Selective Abstention v1.4",
+  "base_commit": "9bd2c8770f50fdfb8cd73dc7a1ac780b125ed03e",
+  "no_new_features": true,
+  "primary_risk": 1.0,
+  "oos_boundary_excluded": "2026-09-07",
+  "wf": [
+    {
+      "name": "WF1",
+      "train": [
+        "TB1"
+      ],
+      "test": [
+        "TB2"
+      ]
+    },
+    {
+      "name": "WF2",
+      "train": [
+        "TB1",
+        "TB2"
+      ],
+      "test": [
+        "TB3"
+      ]
+    },
+    {
+      "name": "WF3",
+      "train": [
+        "TB1",
+        "TB2",
+        "TB3"
+      ],
+      "test": [
+        "TB4"
+      ]
+    }
+  ],
+  "clear": {
+    "model": "C_GLOBAL4 Logistic",
+    "target_precision": 0.85,
+    "min_oof_selection": 0.05
+  },
+  "direction": {
+    "feature": "G4_BASE",
+    "features": [
+      "symbol",
+      "side",
+      "nearest_above_R",
+      "nearest_below_R",
+      "nearest_ahead_R",
+      "nearest_behind_R"
+    ],
+    "model": "HistGradientBoostingClassifier(max_depth=3,learning_rate=0.05,max_iter=200,l2_regularization=1.0,random_state=42)"
+  },
+  "selectors": [
+    "S0_SYMMETRIC_10_10",
+    "S1_CONTINUATION_ONLY_10",
+    "S2_REVERSAL_ONLY_10",
+    "S3_CLASS_SPECIFIC_PRECISION"
+  ],
+  "target_direction_precision": {
+    "value": 0.71,
+    "derivation": "target actionable 0.60 / clear precision 0.85 = 0.706 -> preregister 0.71 (not tuned on history)"
+  },
+  "target_actionable_precision_3class": 0.6,
+  "min_class_oof_coverage": 0.02,
+  "gate": {
+    "per_wf_actionable": 0.58,
+    "mean": 0.6,
+    "per_wf_selection": 0.05,
+    "pooled_long_short": 0.58
+  },
+  "p0_frozen_v13": {
+    "direction_rank_stable": "AUC ~0.63-0.66",
+    "clear_gate_stable": "AUC ~0.78",
+    "g4_psi": "< 0.03 (no strong marginal covariate shift)",
+    "domain_auc": "~0.60-0.63 -> modest multivariate temporal shift",
+    "rank_stable_tail_drift": "descriptive protocol verdict, NOT independent OOS statistical proof"
+  },
+  "forbidden": [
+    "FVG",
+    "external/internal",
+    "pre-contact dynamics",
+    "OB",
+    "trend",
+    "新risk",
+    "PnL",
+    "stop/target",
+    "参数搜索",
+    "prospective OOS",
+    "删品种",
+    "LightGBM调参",
+    "SHAP",
+    "LC"
+  ],
+  "trading_metrics": "NOT_APPLICABLE"
+}

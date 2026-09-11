@@ -1,0 +1,124 @@
+{
+  "experiment": "SMC Direction Asymmetric Selective Abstention v1.4",
+  "base_commit": "9bd2c87",
+  "gates": {
+    "ASYMMETRIC_ACTIONABLE_DIRECTION": true,
+    "CONTINUATION_ONLY_ACTIONABLE": true,
+    "S0_SYMMETRIC_pass": true,
+    "S1_pass": true,
+    "S2_pass": false,
+    "S3_pass": true,
+    "T3_ASYM_pass": true
+  },
+  "gate_details": {
+    "S0": {
+      "wf_actionable": [
+        0.598531684698609,
+        0.6192354368932039,
+        0.6264651449722394
+      ],
+      "wf_selection": [
+        0.10499411740841413,
+        0.14720857525681108,
+        0.14815830362855315
+      ],
+      "mean_actionable": 0.6147440888546841,
+      "pooled_LONG_actionable": 0.6090267983074753,
+      "pooled_SHORT_actionable": 0.6203189392581975
+    },
+    "S1": {
+      "wf_actionable": [
+        0.6364152013613159,
+        0.6469002695417789,
+        0.678246013667426
+      ],
+      "wf_selection": [
+        0.07152419976469633,
+        0.08284948637784725,
+        0.08024860616031441
+      ],
+      "mean_actionable": 0.6538538281901736,
+      "pooled_LONG_actionable": 0.6548289302728454,
+      "pooled_SHORT_actionable": 0.6528548123980424
+    },
+    "S2": {
+      "wf_actionable": [
+        0.5175757575757576,
+        0.5836224843858432,
+        0.5652759084791387
+      ],
+      "wf_selection": [
+        0.033469917643717796,
+        0.06435908887896383,
+        0.06790969746823873
+      ],
+      "mean_actionable": 0.5554913834802465,
+      "pooled_LONG_actionable": 0.5234627831715211,
+      "pooled_SHORT_actionable": 0.5806836248012719
+    },
+    "S3": {
+      "wf_actionable": [
+        0.6236919213059857,
+        0.5807866647170639,
+        0.597864768683274
+      ],
+      "wf_selection": [
+        0.19384153515355593,
+        0.3054488610987048,
+        0.34672333424732654
+      ],
+      "mean_actionable": 0.6007811182354411,
+      "pooled_LONG_actionable": 0.5865981588524941,
+      "pooled_SHORT_actionable": 0.6092070573920098
+    },
+    "T3": {
+      "wf_actionable": [
+        0.6206624605678234,
+        0.5924114671163575,
+        0.63025350233489
+      ],
+      "wf_selection": [
+        0.15432674753539696,
+        0.26485037963376507,
+        0.2740151722877251
+      ],
+      "mean_actionable": 0.6144424766730237,
+      "pooled_LONG_actionable": 0.6036059576691926,
+      "pooled_SHORT_actionable": 0.6232045567112432
+    }
+  },
+  "tail_asymmetry": {
+    "per_wf": [
+      {
+        "wf": "WF1",
+        "n_cont_tail": 1764,
+        "n_rev_tail": 1282,
+        "continuation_tail_accuracy": 0.7726757369614512,
+        "reversal_tail_accuracy": 0.5655226209048362,
+        "delta_cont_minus_rev": 0.20715311605661502
+      },
+      {
+        "wf": "WF2",
+        "n_cont_tail": 1792,
+        "n_rev_tail": 1479,
+        "continuation_tail_accuracy": 0.7868303571428571,
+        "reversal_tail_accuracy": 0.6680189317106153,
+        "delta_cont_minus_rev": 0.11881142543224177
+      },
+      {
+        "wf": "WF3",
+        "n_cont_tail": 1611,
+        "n_rev_tail": 1660,
+        "continuation_tail_accuracy": 0.845437616387337,
+        "reversal_tail_accuracy": 0.6590361445783133,
+        "delta_cont_minus_rev": 0.18640147180902378
+      }
+    ],
+    "n_wf_cont_gt_rev": 3,
+    "n_wf_ci_lo_gt0": 3,
+    "CONTINUATION_TAIL_STRUCTURALLY_STRONGER": true,
+    "note": "same-history development evidence, NOT independent OOS"
+  },
+  "next_step": "FIXED_EXECUTION_BASELINE_V1",
+  "trading_metrics": "NOT_APPLICABLE"
+}
