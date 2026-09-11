@@ -1,0 +1,52 @@
+{
+  "experiment": "SMC Execution Selection Purity Gate v1.1",
+  "base_commit": "7c7858ae4ecec3a582e5b8d3691bfb88bb1012ab",
+  "frozen": {
+    "risk": 1.0,
+    "target": "selected-boundary beyond-attack (CONT) / nearest opposing (REV)",
+    "direction_model": "G4_BASE HGB availability-safe OOF",
+    "cont_threshold": "q10 of availability-safe direction OOF",
+    "rev_threshold": "q90 of availability-safe direction OOF",
+    "entry": "next valid 5m open",
+    "stop": "decision_close - direction*atr0",
+    "same_bar": "STOP_FIRST",
+    "oos_cutoff": "v1.0.1 repaired semantics"
+  },
+  "variants": {
+    "CLEAR85": {
+      "target_precision": 0.85,
+      "min_oof_selection": 0.05,
+      "role": "baseline / reproduce v1.0.1"
+    },
+    "CLEAR90": {
+      "target_precision": 0.9,
+      "min_oof_selection": 0.05,
+      "role": "single preregistered stricter hypothesis"
+    }
+  },
+  "clear90_is_development_hypothesis": "0.90 是看过 v1.0.1 后提出的 development hypothesis，不是 independent OOS confirmation",
+  "gates": {
+    "mechanism": {
+      "A_baseline_mechanism": "E_R_clear>0 & E_R_nonclear<0 3/3",
+      "B_purity": "CLEAR90 purity > CLEAR85 purity 3/3",
+      "C_execution": "CLEAR90 expectancy > CLEAR85 3/3"
+    },
+    "execution": {
+      "per_wf": ">0 3/3",
+      "pooled": ">0",
+      "min_trades": 200
+    }
+  },
+  "forbidden": [
+    "risk 0.5/2.0",
+    "target修改",
+    "minimum RR filter",
+    "direction threshold修改",
+    "新增feature",
+    "FVG/OB/trend",
+    "删symbol",
+    "手续费",
+    "prospective OOS",
+    "根据PnL扫描clear threshold"
+  ]
+}

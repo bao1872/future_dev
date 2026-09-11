@@ -1,0 +1,43 @@
+{
+  "experiment": "SMC Execution Selection Purity Gate v1.1",
+  "base_commit": "7c7858a",
+  "p1_signal_rr_consistency": {
+    "n_groups_with_multiple_rr": 0,
+    "fatal": false,
+    "status": "PASS (unique rr within execution signal group)"
+  },
+  "p4_clear85_reproduces_v101": true,
+  "gates": {
+    "SELECTION_PURITY_MECHANISM_CONFIRMED": false,
+    "CLEAR90_GROSS_EXECUTION_EDGE_PRESENT": false,
+    "components": {
+      "A_baseline_mechanism": true,
+      "B_purity_improved": true,
+      "C_expectancy_improved": false
+    },
+    "per_wf_clear85": [
+      -0.042,
+      0.0253,
+      -0.0376
+    ],
+    "per_wf_clear90": [
+      -0.0209,
+      0.0627,
+      -0.0439
+    ],
+    "pooled_clear90": -0.0006
+  },
+  "reversal": {
+    "variant": "CLEAR90_secondary",
+    "per_wf": [
+      0.0606,
+      0.0372,
+      0.0071
+    ],
+    "pooled": 0.0324,
+    "REVERSAL_CLEAR90_CANDIDATE": true,
+    "note": "candidate only, not promoted"
+  },
+  "mechanism_note": "收紧 clear gate 会同时 (a) 提高 clear_purity、(b) 降低 E_R_clear、(c) 抬高 required_clear_purity。实测 CLEAR85->90：WF1 E_R_clear 0.1555->0.1040 而 required 0.8346->0.8551；WF3 E_R_clear 0.2010->0.1121 而 required 0.7934->0.8589。即 purity 的收益被 E_R_clear 的衰减抵消（WF3 甚至更差）。这是 CLEAR90 无法闭合缺口的结构原因。",
+  "next_step": "边界案例（reviewer 裁决）：purity 3/3 提高 (B=TRUE)，但 expectancy 未 3/3 改善 (C=FALSE, WF3 恶化)；pooled 由 -0.0156 改善到 -0.0006（约到 breakeven 但未转正）。按 P12，'purity 提高但 expectancy 未稳定改善' 使 RISK_COUPLED_EXECUTION 变为 eligible，但需 reviewer 决定。"
+}
