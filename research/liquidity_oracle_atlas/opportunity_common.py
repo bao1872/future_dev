@@ -14,6 +14,12 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from sklearn.compose import ColumnTransformer
+from sklearn.impute import SimpleImputer
+from sklearn.linear_model import LogisticRegression
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import (OneHotEncoder, SplineTransformer,
+                                  StandardScaler)
 
 ATLAS = Path("research/analysis_results/smc_oracle_atlas_v1")
 OUT = Path("research/analysis_results/smc_opportunity_v1")
@@ -88,7 +94,79 @@ SPLINE_NUMERIC = [
     "nearest_opposing_ob_distance_R", "nearest_opposing_ob_width_R",
     "nearest_same_direction_ob_distance_R", "nearest_same_direction_ob_width_R",
     "atr0",
-] + B2_BIN_COLS  # 分箱计数亦作数值
+] + B2_BIN_COLS  # 分箱计数亦作数值（G4，冻结 Atlas v1.2 真实存在）
+
+# 普通数值（中位数填补 + StandardScaler，禁止进 OneHot）
+ORDINARY_NUMERIC = [
+    "contact_number", "bars_since_available", "bars_since_previous_contact",
+    "n_targets_L", "n_targets_S", "same_price_identity_count",
+    "nearest_opposing_ob_prior_enter_count",
+    "nearest_same_direction_ob_prior_enter_count",
+]
+
+# 分类（most_frequent 填补 + OneHot）
+CATEGORICAL_COLS = [
+    "symbol", "side", "liquidity_type", "liquidity_scope", "contact_type",
+    "is_first_contact", "is_penetration",
+    "env_direction_4h", "trend_struct_1h", "trend_struct_15m", "trend_struct_5m",
+    "sweep_vs_5m", "sweep_vs_15m", "sweep_vs_1h",
+    "env4h_vs_1h", "trend_1h_vs_15m", "trend_15m_vs_5m",
+    "nearest_opposing_ob_source_tf", "nearest_opposing_ob_freshness",
+    "nearest_same_direction_ob_source_tf", "nearest_same_direction_ob_freshness",
+]
+
+
+def trifold_route(cols):
+    """把列名分到三路：spline / ordinary / categorical。"""
+    sp = [c for c in cols if c in SPLINE_NUMERIC]
+    ordi = [c for c in cols if c in ORDINARY_NUMERIC]
+    cat = [c for c in cols if c not in SPLINE_NUMERIC
+           and c not in ORDINARY_NUMERIC]
+    return sp, ordi, cat
+
+
+def make_trifold_pipeline(cols):
+    """三路特征管线：spline / ordinary-numeric / categorical。"""
+    sp, ordi, cat = trifold_route(cols)
+    pre = ColumnTransformer([
+        ("spline", Pipeline([
+            ("imp", SimpleImputer(strategy="median")),
+            ("sp", SplineTransformer(n_knots=4, degree=2, knots="quantile",
+                                    include_bias=False)),
+            ("sc", StandardScaler())]), sp),
+        ("ord", Pipeline([
+            ("imp", SimpleImputer(strategy="median")),
+            ("sc", StandardScaler())]), ordi),
+        ("cat", Pipeline([
+            ("imp", SimpleImputer(strategy="most_frequent")),
+            ("oh", OneHotEncoder(handle_unknown="ignore"))]), cat),
+    ])
+    return Pipeline([
+        ("pre", pre),
+        ("clf", LogisticRegression(penalty="l2", C=1.0, solver="lbfgs",
+                                   max_iter=3000)),
+    ])
+
+
+def tie_aware_auc(y, p):
+    """Mann-Whitney tie-corrected AUC（与 sklearn roc_auc_score 一致）。"""
+    y = np.asarray(y, dtype=np.int64).ravel()
+    p = np.asarray(p, dtype=np.float64).ravel()
+    n = len(p)
+    order = np.argsort(p, kind="mergesort")
+    ranks = np.empty(n, dtype=np.float64)
+    ranks[order] = np.arange(1, n + 1)
+    uniq, inv, counts = np.unique(p, return_inverse=True, return_counts=True)
+    sums = np.zeros(len(counts))
+    np.add.at(sums, inv, ranks)
+    mean_rank = sums / counts
+    ranks = mean_rank[inv]
+    n_pos = int(y.sum())
+    n_neg = n - n_pos
+    if n_pos == 0 or n_neg == 0:
+        return np.nan
+    return (ranks[y == 1].sum() - n_pos * (n_pos + 1) / 2) / (n_pos * n_neg)
+
 
 FEATURE_MANIFEST = {
     "study": "SMC Structural Delivery Opportunity Study v1.0",
@@ -198,8 +276,9 @@ def build_features() -> pd.DataFrame:
                 "close_relative_to_level_R", "bar_range_R", "abs_return_R",
                 "n_targets_L", "n_targets_S", "nearest_above_R", "nearest_below_R",
                 "nearest_ahead_R", "nearest_behind_R", "same_price_identity_count"]
-               # 注：B2_BIN_COLS（5m/15m/1h/session/day/week 距离分箱）在冻结 Atlas v1.2
-               # 中不存在（已扫描全部 20 个冻结文件确认），不进入特征。
+               # B2_BIN_COLS（5m/15m/1h/session/day/week 距离分箱）在冻结 Atlas v1.2
+               # 真实存在（60 列，P0.2 active density 比对精确通过），经 _build_bin_features
+               # 归并为 5m_pos_* / 5m_neg_* 进入特征；缺失值由 numerical imputer 处理。
                + ["nearest_opposing_ob_distance_R", "nearest_opposing_ob_width_R",
                   "nearest_opposing_ob_prior_enter_count",
                   "nearest_same_direction_ob_distance_R",
