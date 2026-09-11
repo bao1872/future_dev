@@ -1,0 +1,43 @@
+{
+  "experiment": "SMC Direction Actionability Architecture v1.2",
+  "base_commit": "26f4785",
+  "reused_v1_1_1": "run_direction_deployability_v1_1_1_repair helpers",
+  "p0_risk_wording_corrected": "risk-dependent structural switching (P4c continuous direct-switch median ~1.74 ATR); v1.1.1 '~1.25 ATR switch' phrase superseded",
+  "gate": {
+    "ACTIONABLE_DIRECTION_PRESENT": false,
+    "CALIBRATED_TWO_STAGE_pass": false,
+    "T3_HGB_20pct_pass": false,
+    "g_2stage": {
+      "wf_actionable": [
+        0.560463832136941,
+        0.6196519216823785,
+        0.6456128371457835
+      ],
+      "wf_selection": [
+        0.1469430808552071,
+        0.12317999106744082,
+        0.13385430947810986
+      ],
+      "pooled_LONG_actionable": 0.0,
+      "pooled_SHORT_actionable": 0.8518319928507596,
+      "mean_actionable": 0.6085761969883676
+    },
+    "g_3class": {
+      "wf_actionable": [
+        0.5600858369098712,
+        0.6104979811574697,
+        0.6316936488169365
+      ],
+      "wf_selection": [
+        0.18905432269057568,
+        0.1659222867351496,
+        0.14678731377387808
+      ],
+      "pooled_LONG_actionable": 0.0,
+      "pooled_SHORT_actionable": 0.929279576999339,
+      "mean_actionable": 0.6007591556280925
+    }
+  },
+  "next_step_if_TRUE": "PRECONTACT_DYNAMICS_INCREMENT",
+  "next_step_if_FALSE": "temporal regime / WF1 drift study"
+}

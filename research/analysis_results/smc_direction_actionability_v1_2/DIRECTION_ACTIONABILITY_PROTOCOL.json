@@ -1,0 +1,109 @@
+{
+  "experiment": "SMC Direction Actionability Architecture v1.2",
+  "base_commit": "26f4785aed7f78abaa6b6b080aed39ea8a186287",
+  "no_new_features": true,
+  "primary_risk": 1.0,
+  "oos_boundary_excluded": "2026-09-07",
+  "wf": [
+    [
+      "WF1",
+      [
+        "TB1"
+      ],
+      [
+        "TB2"
+      ]
+    ],
+    [
+      "WF2",
+      [
+        "TB1",
+        "TB2"
+      ],
+      [
+        "TB3"
+      ]
+    ],
+    [
+      "WF3",
+      [
+        "TB1",
+        "TB2",
+        "TB3"
+      ],
+      [
+        "TB4"
+      ]
+    ]
+  ],
+  "symbols": [
+    "AG",
+    "AU",
+    "CU",
+    "AL",
+    "SN",
+    "NI",
+    "RB",
+    "I",
+    "SC",
+    "RU",
+    "MA",
+    "TA",
+    "M",
+    "P",
+    "CF"
+  ],
+  "p1_feature_sets": {
+    "G4_ONLY": [
+      "nearest_above_R",
+      "nearest_below_R",
+      "nearest_ahead_R",
+      "nearest_behind_R"
+    ],
+    "G4_BASE": [
+      "symbol",
+      "side",
+      "nearest_above_R",
+      "nearest_below_R",
+      "nearest_ahead_R",
+      "nearest_behind_R"
+    ],
+    "G4_D1": "M_GLOBAL4 (D1+GLOBAL4)"
+  },
+  "p2": {
+    "clear": "C_GLOBAL4 logistic",
+    "direction": "N_GLOBAL4 hgb",
+    "target_clear_precision": 0.85,
+    "min_oof_selection_rate": 0.05,
+    "dir_tail": [
+      0.1,
+      0.9
+    ]
+  },
+  "p3": {
+    "model": "3-class HGB/logistic",
+    "labels": "0=CONT 1=REV 2=TRADEOFF",
+    "coverages": [
+      0.1,
+      0.2,
+      0.3
+    ],
+    "primary_coverage": 0.2
+  },
+  "p4": "product diagnostic (not gate)",
+  "p5_gate": "ACTIONABLE_DIRECTION_PRESENT",
+  "forbidden": [
+    "FVG",
+    "external/internal",
+    "pre-contact dynamics",
+    "OB扩展",
+    "新risk搜索",
+    "PnL",
+    "stop/target优化",
+    "LightGBM调参",
+    "SHAP",
+    "LC",
+    "prospective OOS"
+  ],
+  "trading_metrics": "NOT_APPLICABLE"
+}
