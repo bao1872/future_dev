@@ -1,0 +1,10 @@
+﻿stage,n
+liquidity identity (VALID_AHEAD),80289
+liquidity with >=1 contact,76147
+liquidity consumed (首次严格穿透),75598
+contact events,96959
+contact_type=TOUCH_ONLY,21361
+contact_type=PENETRATE_RECLAIM,22816
+contact_type=PENETRATE_CLOSE_AT,6324
+contact_type=PENETRATE_CLOSE_BEYOND,30272
+contact_type=GAP_CROSS,16186

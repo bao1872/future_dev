@@ -1,0 +1,9 @@
+﻿variable,n,p10,p25,median,p75,p90,missing_rate
+nearest_opposing_ob_distance_R,85162.0,0.0943,0.2,0.4348,1.5,41.7231,0.1217
+nearest_opposing_ob_width_R,85162.0,0.3571,0.5556,0.8824,1.3462,2.0,0.1217
+nearest_same_direction_ob_distance_R,79390.0,0.1008,0.2083,0.5,1.875,43.2247,0.1812
+nearest_opposing_ob_source_tf=5m,,,,,,,0.9198
+nearest_opposing_ob_source_tf=15m,,,,,,,0.0708
+nearest_opposing_ob_source_tf=1h,,,,,,,0.0094
+nearest_opposing_ob_freshness=FRESH,,,,,,,0.8575
+nearest_opposing_ob_freshness=RETESTED,,,,,,,0.1425

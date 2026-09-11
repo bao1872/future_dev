@@ -1,0 +1,38 @@
+{
+  "n_liquidity": 80289,
+  "n_contacts": 96959,
+  "n_consumed": 75598,
+  "contacts_per_liquidity": 1.2076,
+  "contact_type_counts": {
+    "PENETRATE_CLOSE_BEYOND": 30272,
+    "PENETRATE_RECLAIM": 22816,
+    "TOUCH_ONLY": 21361,
+    "GAP_CROSS": 16186,
+    "PENETRATE_CLOSE_AT": 6324
+  },
+  "contact_number_top5": {
+    "1": 76147,
+    "2": 12425,
+    "3": 4541,
+    "4": 2010,
+    "5": 912
+  },
+  "oracle_direction_counts": {
+    "MIXED": 50348,
+    "LONG_DOMINATES": 23382,
+    "SHORT_DOMINATES": 22535,
+    "NO_CLEAR_ACTION": 694
+  },
+  "risk_atr_grid": [
+    0.25,
+    0.5,
+    0.75,
+    1.0,
+    1.5,
+    2.0,
+    3.0
+  ],
+  "n_oracle_rows": 1357426,
+  "n_pareto_points": 240118,
+  "max_scan_bars": 500
+}

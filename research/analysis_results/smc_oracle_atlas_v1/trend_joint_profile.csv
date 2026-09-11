@@ -1,0 +1,15 @@
+﻿pair,var_a,var_b,n
+trend_struct_1h x trend_struct_15m,-1.0,-1.0,27774
+trend_struct_1h x trend_struct_15m,-1.0,1.0,16334
+trend_struct_1h x trend_struct_15m,0.0,-1.0,2042
+trend_struct_1h x trend_struct_15m,0.0,0.0,2039
+trend_struct_1h x trend_struct_15m,0.0,1.0,2002
+trend_struct_1h x trend_struct_15m,1.0,-1.0,14931
+trend_struct_1h x trend_struct_15m,1.0,1.0,31837
+trend_struct_15m x trend_struct_5m,-1.0,-1.0,29615
+trend_struct_15m x trend_struct_5m,-1.0,1.0,15132
+trend_struct_15m x trend_struct_5m,0.0,-1.0,796
+trend_struct_15m x trend_struct_5m,0.0,0.0,307
+trend_struct_15m x trend_struct_5m,0.0,1.0,936
+trend_struct_15m x trend_struct_5m,1.0,-1.0,15351
+trend_struct_15m x trend_struct_5m,1.0,1.0,34822
