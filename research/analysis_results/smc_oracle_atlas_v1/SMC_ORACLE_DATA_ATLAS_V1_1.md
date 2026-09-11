@@ -1,6 +1,30 @@
 # SMC 市场状态—流动性场—路径 Oracle Atlas v1.1 —— 数据语义审计与修复
 
 Base: `3b7d1be9ea26d802ba209d1e81f42f135bf5e56d`
+> ## ⚠️ v1.1 部分结果已被 v1.2 取代（PROVISIONAL / SEMANTICALLY_REPLACED）
+>
+> 1. **`rr_direction`（LONG 34.32% / SHORT 32.65% / MIXED 29.94%）作废。**
+>    v1.1 逐档比较 `conservative_best_R`，把大量"双方都 0"的情形
+>    判成支配。v1.2 改为同 risk 成对比较并要求 `lower > upper` 才可判
+>    支配后，v1.1 LONG_RR_DOMINATES 有 60.9% 改判 NO_DIRECTION，
+>    MIXED_RR 有 62.8% 改判 RISK_DEPENDENT。
+>
+> 2. **`pareto_direction` 正式废弃（SEMANTICALLY_REPLACED）。**
+>    实现是在 LONG / SHORT **各自内部**求 Pareto 再按"前沿是否含两个
+>    方向"判定，并未真正比较跨方向支配；且把 `risk_ATR` 当作"越小
+>    越优"目标，隐含固定手数假设。44.97% 的 MIXED_PARETO 不可解释为
+>    "两方向互不支配"。
+>
+> 3. **active density / 56.93% overlap 被 v1.2 再次修正**
+>    （同 bar 消费修复）：density 降至 v1.1 的 25–35%，
+>    multi-identity 降至 13.62%。
+>
+> 以下 v1.1 结果仍然有效：roll censor、decision_time 修复、
+> first_mR 相对 stop、censor 状态、contact hazard、
+> 三级表结构与规模框架。
+>
+> 正式标签请用 `SMC_ORACLE_DATA_ATLAS_V1_2.md`。
+
 
 本轮**不训练模型、不筛选状态、不做 PnL**。目标是确认 v1.0 的
 事实层是否可信。结论：**v1.0 的核心画像大部分作废**，见第二节。

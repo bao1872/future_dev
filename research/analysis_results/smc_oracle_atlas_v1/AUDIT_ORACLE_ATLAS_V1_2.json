@@ -1,0 +1,292 @@
+{
+  "active_density": [
+    {
+      "scope": "5m",
+      "pm05_mean_v1_2": 0.136,
+      "pm05_mean_v1_1": 0.4609,
+      "ratio_v12_over_v11": 0.2951
+    },
+    {
+      "scope": "15m",
+      "pm05_mean_v1_2": 0.0451,
+      "pm05_mean_v1_1": 0.1794,
+      "ratio_v12_over_v11": 0.2514
+    },
+    {
+      "scope": "1h",
+      "pm05_mean_v1_2": 0.0152,
+      "pm05_mean_v1_1": 0.0611,
+      "ratio_v12_over_v11": 0.2488
+    },
+    {
+      "scope": "CONTIG_SESSION",
+      "pm05_mean_v1_2": 0.4396,
+      "pm05_mean_v1_1": 1.2481,
+      "ratio_v12_over_v11": 0.3522
+    },
+    {
+      "scope": "TRADING_DAY",
+      "pm05_mean_v1_2": 0.146,
+      "pm05_mean_v1_1": 0.4721,
+      "ratio_v12_over_v11": 0.3093
+    },
+    {
+      "scope": "TRADING_WEEK",
+      "pm05_mean_v1_2": 0.0343,
+      "pm05_mean_v1_1": 0.1261,
+      "ratio_v12_over_v11": 0.272
+    }
+  ],
+  "pct_multi_v1_2": 0.1362,
+  "pct_multi_v1_1": 0.5693,
+  "resolution_class": {
+    "EXACT_RESOLVED": 1260826,
+    "CENSORED_LOWER_BOUND": 37060,
+    "AMBIGUOUS_INTERVAL": 33934,
+    "NO_ACTIVE_TARGET": 24780
+  },
+  "risk_direction": [
+    {
+      "risk_ATR": 0.25,
+      "n": 96900,
+      "LONG_DOMINATES": 13774,
+      "SHORT_DOMINATES": 13490,
+      "TRADEOFF_OR_OVERLAP": 64965,
+      "UNRESOLVED_CENSOR": 1131,
+      "NO_COMPARABLE_TARGET": 3540,
+      "pct_resolved": 0.9518
+    },
+    {
+      "risk_ATR": 0.5,
+      "n": 96900,
+      "LONG_DOMINATES": 23243,
+      "SHORT_DOMINATES": 23571,
+      "TRADEOFF_OR_OVERLAP": 44398,
+      "UNRESOLVED_CENSOR": 2148,
+      "NO_COMPARABLE_TARGET": 3540,
+      "pct_resolved": 0.9413
+    },
+    {
+      "risk_ATR": 0.75,
+      "n": 96900,
+      "LONG_DOMINATES": 28984,
+      "SHORT_DOMINATES": 29406,
+      "TRADEOFF_OR_OVERLAP": 31783,
+      "UNRESOLVED_CENSOR": 3187,
+      "NO_COMPARABLE_TARGET": 3540,
+      "pct_resolved": 0.9306
+    },
+    {
+      "risk_ATR": 1.0,
+      "n": 96900,
+      "LONG_DOMINATES": 31847,
+      "SHORT_DOMINATES": 33161,
+      "TRADEOFF_OR_OVERLAP": 24225,
+      "UNRESOLVED_CENSOR": 4127,
+      "NO_COMPARABLE_TARGET": 3540,
+      "pct_resolved": 0.9209
+    },
+    {
+      "risk_ATR": 1.5,
+      "n": 96900,
+      "LONG_DOMINATES": 35253,
+      "SHORT_DOMINATES": 37452,
+      "TRADEOFF_OR_OVERLAP": 14584,
+      "UNRESOLVED_CENSOR": 6071,
+      "NO_COMPARABLE_TARGET": 3540,
+      "pct_resolved": 0.9008
+    },
+    {
+      "risk_ATR": 2.0,
+      "n": 96900,
+      "LONG_DOMINATES": 37206,
+      "SHORT_DOMINATES": 38908,
+      "TRADEOFF_OR_OVERLAP": 9409,
+      "UNRESOLVED_CENSOR": 7837,
+      "NO_COMPARABLE_TARGET": 3540,
+      "pct_resolved": 0.8826
+    },
+    {
+      "risk_ATR": 3.0,
+      "n": 96900,
+      "LONG_DOMINATES": 37867,
+      "SHORT_DOMINATES": 40104,
+      "TRADEOFF_OR_OVERLAP": 4311,
+      "UNRESOLVED_CENSOR": 11078,
+      "NO_COMPARABLE_TARGET": 3540,
+      "pct_resolved": 0.8491
+    }
+  ],
+  "direction_stability": {
+    "NO_DIRECTION": 51836,
+    "RISK_DEPENDENT": 18495,
+    "ROBUST_SHORT": 9477,
+    "ROBUST_LONG": 9425,
+    "UNRESOLVED": 7667
+  },
+  "target_scope_top": [
+    {
+      "scope_combination": "CONTIG_SESSION",
+      "n": 256370,
+      "share": 0.4704
+    },
+    {
+      "scope_combination": "CONTIG_SESSION|TRADING_DAY",
+      "n": 60928,
+      "share": 0.1118
+    },
+    {
+      "scope_combination": "15m|1h|5m|CONTIG_SESSION|TRADING_DAY|TRADING_WEEK",
+      "n": 51298,
+      "share": 0.0941
+    },
+    {
+      "scope_combination": "5m|CONTIG_SESSION|TRADING_DAY",
+      "n": 44635,
+      "share": 0.0819
+    },
+    {
+      "scope_combination": "5m|CONTIG_SESSION",
+      "n": 27638,
+      "share": 0.0507
+    },
+    {
+      "scope_combination": "15m|5m|CONTIG_SESSION|TRADING_DAY",
+      "n": 20869,
+      "share": 0.0383
+    },
+    {
+      "scope_combination": "15m|5m|CONTIG_SESSION|TRADING_DAY|TRADING_WEEK",
+      "n": 20390,
+      "share": 0.0374
+    },
+    {
+      "scope_combination": "5m",
+      "n": 15971,
+      "share": 0.0293
+    },
+    {
+      "scope_combination": "CONTIG_SESSION|TRADING_DAY|TRADING_WEEK",
+      "n": 9193,
+      "share": 0.0169
+    },
+    {
+      "scope_combination": "5m|CONTIG_SESSION|TRADING_DAY|TRADING_WEEK",
+      "n": 8746,
+      "share": 0.016
+    },
+    {
+      "scope_combination": "TRADING_DAY",
+      "n": 7311,
+      "share": 0.0134
+    },
+    {
+      "scope_combination": "15m|CONTIG_SESSION",
+      "n": 3705,
+      "share": 0.0068
+    }
+  ],
+  "pct_best_target_has_day_or_above": 0.9663,
+  "hazard": [
+    {
+      "contact_number": 1,
+      "n_at_risk": 76099,
+      "penetration_hazard": 0.8326
+    },
+    {
+      "contact_number": 2,
+      "n_at_risk": 12415,
+      "penetration_hazard": 0.6244
+    },
+    {
+      "contact_number": 3,
+      "n_at_risk": 4541,
+      "penetration_hazard": 0.5461
+    },
+    {
+      "contact_number": 4,
+      "n_at_risk": 2009,
+      "penetration_hazard": 0.5296
+    },
+    {
+      "contact_number": "1/15m",
+      "n_at_risk": 3670,
+      "penetration_hazard": 0.8708
+    },
+    {
+      "contact_number": "1/1h",
+      "n_at_risk": 977,
+      "penetration_hazard": 0.8864
+    },
+    {
+      "contact_number": "1/5m",
+      "n_at_risk": 12098,
+      "penetration_hazard": 0.829
+    },
+    {
+      "contact_number": "1/CONTIG_SESSION",
+      "n_at_risk": 45915,
+      "penetration_hazard": 0.8203
+    },
+    {
+      "contact_number": "1/TRADING_DAY",
+      "n_at_risk": 11232,
+      "penetration_hazard": 0.8581
+    },
+    {
+      "contact_number": "1/TRADING_WEEK",
+      "n_at_risk": 2207,
+      "penetration_hazard": 0.8903
+    },
+    {
+      "contact_number": "2/15m",
+      "n_at_risk": 455,
+      "penetration_hazard": 0.6505
+    },
+    {
+      "contact_number": "2/1h",
+      "n_at_risk": 108,
+      "penetration_hazard": 0.6296
+    },
+    {
+      "contact_number": "2/5m",
+      "n_at_risk": 2006,
+      "penetration_hazard": 0.6216
+    },
+    {
+      "contact_number": "2/CONTIG_SESSION",
+      "n_at_risk": 8060,
+      "penetration_hazard": 0.6243
+    },
+    {
+      "contact_number": "2/TRADING_DAY",
+      "n_at_risk": 1552,
+      "penetration_hazard": 0.6231
+    },
+    {
+      "contact_number": "2/TRADING_WEEK",
+      "n_at_risk": 234,
+      "penetration_hazard": 0.6068
+    },
+    {
+      "contact_number": "3/15m",
+      "n_at_risk": 157,
+      "penetration_hazard": 0.5478
+    },
+    {
+      "contact_number": "3/5m",
+      "n_at_risk": 738,
+      "penetration_hazard": 0.5772
+    },
+    {
+      "contact_number": "3/CONTIG_SESSION",
+      "n_at_risk": 2952,
+      "penetration_hazard": 0.543
+    },
+    {
+      "contact_number": "3/TRADING_DAY",
+      "n_at_risk": 566,
+      "penetration_hazard": 0.5212
+    }
+  ]
+}
