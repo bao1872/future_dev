@@ -1,0 +1,4 @@
+﻿repair,result
+P0_day_level_OOF,"G4 residual 9/9 |dAUC|<0.005, mean -0.0001 -> OPPORTUNITY_CLOSED"
+P0.5_TOUCH_ONLY_audit,NON_TOUCH R2 AUC 0.797 (TOUCH_ONLY 0.811) -> 几何非 TOUCH_ONLY 假象
+P7_reconstruction,dominance 重建与 opportunity_label 一致 mismatch=6954

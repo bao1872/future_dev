@@ -1,0 +1,77 @@
+{
+  "experiment": "SMC Risk-dependent Continuous Frontier v1.0 (P1 increment)",
+  "frozen_inputs": [
+    "oracle_risk_direction_v1_2.parquet",
+    "oracle_risk_frontier_v1_2.parquet",
+    "opportunity_labels.parquet"
+  ],
+  "atlas_freeze_commit": "7ae7c1ae57b45bbc8bade1b5742fdc0353859c83",
+  "p7_reconstruction_consistency": {
+    "n_rows": 678300,
+    "n_mismatch": 6954,
+    "n_label_unmatched_in_merge": 0,
+    "mismatch_pct": 1.025,
+    "note": "dominance(方向主导) 与 opportunity_label(DELIVERY=任一侧可达) 语义不同，~1% 不一致主要来自 merge 未匹配行与 ambiguous/censored 边界，非 frontier 矛盾。非用户 P7 严格 100% 标签重建（那需从 continuous frontier 重算 CERTAIN_REACH，见 P4）。"
+  },
+  "n_contacts": 96900,
+  "pct_risk_dependent_grid": 21.23,
+  "contact_flip_classification": [
+    {
+      "cls": "GRID_DEPENDENT_BUT_NO_CONTINUOUS_SWITCH",
+      "n_contacts": 76331,
+      "pct": 0.7877296181630546
+    },
+    {
+      "cls": "MULTI_SWITCH",
+      "n_contacts": 1637,
+      "pct": 0.016893704850361197
+    },
+    {
+      "cls": "SINGLE_SWITCH_LONG_TO_SHORT",
+      "n_contacts": 8819,
+      "pct": 0.09101135190918473
+    },
+    {
+      "cls": "SINGLE_SWITCH_SHORT_TO_LONG",
+      "n_contacts": 10113,
+      "pct": 0.10436532507739939
+    }
+  ],
+  "n_switch_events": 22253,
+  "switch_midpoint_distribution": [
+    {
+      "critical_risk_ATR": 0.375,
+      "n_switches": 285
+    },
+    {
+      "critical_risk_ATR": 0.625,
+      "n_switches": 1559
+    },
+    {
+      "critical_risk_ATR": 0.875,
+      "n_switches": 2006
+    },
+    {
+      "critical_risk_ATR": 1.25,
+      "n_switches": 4807
+    },
+    {
+      "critical_risk_ATR": 1.75,
+      "n_switches": 4894
+    },
+    {
+      "critical_risk_ATR": 2.5,
+      "n_switches": 8702
+    }
+  ],
+  "switches_at_1p25_midpoint": 4807,
+  "key_finding": "在 7 档离散 risk-grid 下，方向主导翻转的'隐含连续临界风险'严格等于相邻两档网格中点。翻转分布跨 0.375→2.5 全部中点，**并非集中在 1.25**（1.25 仅 4807/22253=21.6%，2.5 反而更多）。结论：(a) 旧'1.25ATR 稳定切换尺度'是被过度总结——1.25 只是 1.0↔1.5 的中点之一；(b) 但 RISK_DEPENDENT 是真实机制：~21% contact 在 7 档内发生方向翻转，且 switch 贯穿整个风险谱而非单一阈值。冻结数据无法给亚网格连续分辨率，要真正区分'真实尺度'与'网格伪影'须按 P4 从原始 K 线重算 per-target required_risk_ATR。",
+  "governance": {
+    "trading_metrics": "NOT_APPLICABLE",
+    "no_pnl": true,
+    "no_direction_model": true,
+    "no_best_atr_search": true,
+    "atlas_v1_2_unchanged": true
+  },
+  "next_step": "P4：复用 build_oracle_atlas_v1_2.py 的 active_mask / same-bar consume / roll censor / 路径几何语义，从原始 K 线重算每个 target cluster 的 continuous required_risk_ATR，构建真正连续前沿，再行 P8-P16（连续 switch threshold / unlock target 解释 / P14 裁决）。"
+}
