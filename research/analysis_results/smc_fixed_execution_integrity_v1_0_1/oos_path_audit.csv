@@ -1,0 +1,7 @@
+﻿wf,setup,n_old_executed,n_old_trade_paths_touch_oos,n_old_trades_exit_on_or_after_oos,n_new_executed,n_new_trade_paths_touch_oos,n_new_trades_exit_on_or_after_oos
+WF1,CONT,614,0,0,614,0,0
+WF1,REV,364,0,0,364,0,0
+WF2,CONT,856,0,0,856,0,0
+WF2,REV,725,0,0,725,0,0
+WF3,CONT,848,0,0,848,0,0
+WF3,REV,572,0,0,572,0,0

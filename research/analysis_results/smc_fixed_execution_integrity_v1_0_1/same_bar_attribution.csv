@@ -1,0 +1,7 @@
+﻿wf,setup,same_bar_ambiguous_rate,stop_first_expectancy_R,target_first_expectancy_R,delta
+WF1,CONT,0.0212,-0.042,-0.0085,0.0335
+WF1,REV,0.0275,0.0435,0.1081,0.0646
+WF2,CONT,0.0187,0.0253,0.068,0.0427
+WF2,REV,0.0179,0.0481,0.087,0.0389
+WF3,CONT,0.0189,-0.0376,0.0009,0.0385
+WF3,REV,0.021,-0.0032,0.0302,0.0334

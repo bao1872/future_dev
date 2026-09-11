@@ -1,0 +1,4 @@
+﻿wf,trades,actual_hit_rate,breakeven_hit_rate,hit_minus_breakeven,gross_expectancy_R
+WF1,364,0.6126,0.5876,0.025,0.0435
+WF2,725,0.6207,0.5925,0.0282,0.0481
+WF3,572,0.6101,0.612,-0.0019,-0.0032

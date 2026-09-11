@@ -685,6 +685,16 @@ def write_report(df_fun, df_col, df_cont, df_rev, df_cmp, df_ts, df_sym,
     g = audit["gate"]
     md = f"""# SMC Fixed Execution Baseline v1.0
 
+> ## 状态：`PROVISIONAL_PENDING_OOS_PATH_AUDIT`
+>
+> v1.0 的 `path_end()` **只截 discontinuity / raw data end，没有截
+> `OOS_START = 2026-09-07`**；v1.0 的 `test_no_prospective_oos()` 只验证
+> **signal/contact date**，**没有验证 entry / exit path**。
+> 因此持仓路径可能读取 prospective OOS bar。
+>
+> 修复与审计见 **v1.0.1** (`smc_fixed_execution_integrity_v1_0_1/`)。
+> **在此之前本文件所有 PnL 数字均为 provisional，不得作为最终执行基线收口。**
+
 **base**: `2006fcb` (v1.5) &nbsp; **脚本**: `run_fixed_execution_baseline_v1.py`
 **第一次真实执行层实验**：把通过 label-availability + full-live-universe 审计的
 方向 selector 转为严格事前可执行的固定规则，测真实 win rate / payoff / expectancy。

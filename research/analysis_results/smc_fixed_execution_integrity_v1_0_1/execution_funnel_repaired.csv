@@ -1,0 +1,7 @@
+﻿wf,setup,n_raw_selected_contacts,n_collapsed_signals,n_conflict_abstained,n_after_target_gate,n_after_entry_gap_gate,n_executed_trades,skip_open_position
+WF1,CONT,1159,649,0,644,632,614,18
+WF1,REV,749,404,0,404,376,364,12
+WF2,CONT,1813,927,0,917,891,856,35
+WF2,REV,1773,768,0,768,740,725,15
+WF3,CONT,1720,895,0,891,877,848,29
+WF3,REV,1266,604,0,604,581,572,9

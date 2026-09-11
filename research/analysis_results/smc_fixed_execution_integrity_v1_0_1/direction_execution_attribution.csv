@@ -1,0 +1,7 @@
+﻿wf,setup,n_executed,n_labeled,A_direction_correct_target_hit,B_direction_correct_loss,C_direction_wrong_target_hit,D_direction_wrong_loss,P_hit_given_direction_correct,P_hit_given_direction_wrong,E_R_given_direction_correct,E_R_given_direction_wrong
+WF1,CONT,614,485,284,110,17,74,0.7208,0.1868,0.3624,-0.74
+WF1,REV,364,315,168,0,38,109,1.0,0.2585,0.7871,-0.6596
+WF2,CONT,856,688,438,111,28,111,0.7978,0.2014,0.4687,-0.7117
+WF2,REV,725,570,365,0,55,150,1.0,0.2683,0.7208,-0.6129
+WF3,CONT,848,640,409,119,19,93,0.7746,0.1696,0.4322,-0.8891
+WF3,REV,572,441,278,0,39,124,1.0,0.2393,0.6868,-0.6639

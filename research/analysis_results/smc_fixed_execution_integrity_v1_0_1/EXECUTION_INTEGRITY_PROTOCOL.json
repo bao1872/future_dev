@@ -1,0 +1,49 @@
+{
+  "experiment": "SMC Fixed Execution Baseline v1.0.1 Integrity Repair + Geometry Attribution",
+  "base_commit": "4c37cb8de3cad517e1d32aa1367310380c8b82bc",
+  "v1_0_status": "PROVISIONAL_PENDING_OOS_PATH_AUDIT",
+  "oos_start": "2026-09-07",
+  "repairs": [
+    "P1/P2 execution path hard cutoff at OOS_START",
+    "P3 OOS hard audit (old vs new)"
+  ],
+  "unchanged": [
+    "selector threshold",
+    "stop",
+    "risk",
+    "target policy",
+    "no min-RR filter",
+    "no symbol filtering"
+  ],
+  "geometry_bins": {
+    "bins": [
+      "-inf",
+      0.5,
+      0.75,
+      1.0,
+      1.5,
+      "inf"
+    ],
+    "labels": [
+      "<0.50",
+      "0.50-0.75",
+      "0.75-1.00",
+      "1.00-1.50",
+      ">=1.50"
+    ],
+    "note": "fixed economic bins, NOT test quantiles"
+  },
+  "forbidden": [
+    "调threshold",
+    "调stop",
+    "改risk",
+    "改target policy",
+    "最低RR筛选",
+    "删symbol",
+    "新feature",
+    "FVG/OB/trend",
+    "手续费假设",
+    "prospective OOS"
+  ],
+  "cost": "COST_METADATA_DEFERRED_UNTIL_GROSS_EDGE"
+}

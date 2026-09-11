@@ -1,0 +1,37 @@
+{
+  "experiment": "SMC Fixed Execution Baseline v1.0.1",
+  "base_commit": "4c37cb8",
+  "oos": {
+    "status": "OOS_PATH_BUG_NO_NUMERICAL_IMPACT",
+    "n_old_trades_exit_on_or_after_oos": 0,
+    "n_new_trades_exit_on_or_after_oos": 0,
+    "new_must_be_zero": true
+  },
+  "continuation": {
+    "per_wf_gross_expectancy_R": [
+      -0.042,
+      0.0253,
+      -0.0376
+    ],
+    "pooled_gross_expectancy_R": -0.0156
+  },
+  "reversal": {
+    "pooled_gross_expectancy_R": 0.0294,
+    "three_of_three_above_breakeven": false,
+    "verdict": "SECONDARY_DIAGNOSTIC (not promoted)"
+  },
+  "verdicts": {
+    "EXECUTION_BASELINE_VALID_NEGATIVE": true,
+    "TARGET_GEOMETRY_PRIMARY_BOTTLENECK": false,
+    "verdict": "NO_SINGLE_EXECUTION_BOTTLENECK",
+    "components": {
+      "entry_degradation_small": true,
+      "samebar_optimistic_not_fixed": true,
+      "direction_correct_still_loss": false,
+      "geometry_structure_present": false
+    },
+    "note": "VALID_NEGATIVE 不等同于 DIRECTION_EDGE_FALSE：只证明现有方向 edge 未被当前固定 execution mapping 转化为正 expectancy。"
+  },
+  "next_step": "RISK_COUPLED_EXECUTION (0.5/1.0/2.0, own frozen direction label & model per risk)",
+  "cost": "COST_METADATA_DEFERRED_UNTIL_GROSS_EDGE"
+}
