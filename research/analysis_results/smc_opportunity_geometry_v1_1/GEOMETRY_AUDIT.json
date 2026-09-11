@@ -1,0 +1,67 @@
+{
+  "study": "SMC Opportunity Geometry Decomposition v1.1",
+  "baseline_commit": "a746e3e5402e71a44cf57dbf1b718f4610f8e2bd",
+  "atlas_freeze_commit": "7ae7c1ae57b45bbc8bade1b5742fdc0353859c83",
+  "tb_hash": "b51fe7952bc1311aed83409889cd6706a6bc173cd4ed2f6e96570340183ac3d6",
+  "feature_manifest_hash": "55de426492f0f96b370bb7507348cb52f9cbd972e299c26c2df15704e51e2135",
+  "prospective_oos_start": "2026-09-07",
+  "evidence_level": "internal_causal_temporal_walk_forward_TB1_to_TB4",
+  "is_independent_oos": false,
+  "verdict": "SIMPLE_GEOMETRY",
+  "verdict_summary": "Opportunity 可预测性几乎全部来自最近 target 距离（G1）。多周期 liquidity field（G4）在冻结 Atlas 中不存在，本轮无法测试；event-relative(G3)/same-price(G5) 在 G1 之上增量≈0；target 数量(G2) 为负贡献。机械基准（最近 target 距离/stop）复现大部分效果。",
+  "subblock_findings": {
+    "G1_nearest_price": {
+      "delta_auc_vs_M0": "+0.125 to +0.181",
+      "standalone_auc": "0.668 to 0.882",
+      "note": "单一子块 AUC 已 ≥ M_B2_full 与 M_full；是全部信号来源。跨 WF 稳定 (0.794/0.784/0.783)，跨15品种 15/15 正向。"
+    },
+    "G2_target_count": {
+      "delta_auc_vs_M0": "-0.011 to -0.061",
+      "note": "n_targets_L/S 为负贡献，加入反而略降 AUC。'目标多=易 delivery' 直觉不成立。"
+    },
+    "G3_event_relative": {
+      "delta_auc_vs_M0": "+0.086 to +0.166",
+      "conditional_drop_when_removed": "≈0 (+0.000 to +0.004)",
+      "note": "单块强，但加入 G1 后增量≈0（与 G1 高度共线）。"
+    },
+    "G4_multitf_field": {
+      "status": "UNAVAILABLE",
+      "reason": "冻结 Atlas v1.2 无任何 per-scope (5m/15m/1h/session/day/week) 距离分箱列。扫描全部 20 个冻结 parquet 确认。v1.0 的 B2_BIN_COLS 为手写列名，从未匹配真实数据，故 G4 一直是空块（其 60 个列名在 features 中全部恒为 0）。",
+      "implication": "case B（多周期 liquidity field 提供额外结构信息）本轮无法测试。鉴于 G1 已饱和信号，case B 不太可能显著，但需在冻结原始 liquidity 账簿重建 G4 后才能定论。"
+    },
+    "G5_same_price": {
+      "delta_auc_vs_M0": "+0.017 to +0.034",
+      "conditional_drop_when_removed": "≈0 (-0.001)",
+      "note": "微弱增量，非主信号。"
+    }
+  },
+  "model_comparisons": {
+    "M_simple_vs_M0": "M_simple(G1+G2) ≈ M_B2_full：因 G2 负贡献，M_simple 与 full 几乎相同",
+    "M_field_vs_M_simple": "≈0 (G4 空，定义上 M_field==M_simple)",
+    "M_B2_full_vs_M_field": "≈0 (G3+G5 在 G1 之上增量≈0)"
+  },
+  "ob_freshness_fix": {
+    "bug": "nearest_opposing_ob_freshness / nearest_same_direction_ob_freshness 曾被 pd.to_numeric 强制转为 NaN（错误归类数值）",
+    "fix": "改为 categorical (FRESH/RETESTED/missing)，重新进入 OneHotEncoder",
+    "result_after_fix": "M_ob / M_full / M_full_minus_ob 与 v1.0 相比 ΔAUC 仅 ±0.013（多数 <0.01），bottom20_gain 差异 <0.03",
+    "conclusion": "修复 freshness 后 OB 仍无稳定独立增量 → B4 正式收口为 'no stable independent increment'"
+  },
+  "mechanical_baseline": {
+    "definition": "geometry_ratio = min(nearest_above_R, nearest_below_R) / risk_ATR（目标距/止损距）",
+    "finding": "delivery_rate 随 geometry_ratio 单调下降；例 1.0ATR：≤0.25桶 94.7% vs >2桶 43.2%；3.0ATR：99.2% vs 49.4%。单一维比值即复现模型大部分效果。",
+    "implication": "模型主要重新发现 '目标近则易在止损前触及' 的简单几何关系，而非复杂 SMC 理论。"
+  },
+  "governance": {
+    "no_pnl": true,
+    "no_direction_model": true,
+    "no_best_atr_selection": true,
+    "no_lightgbm_shap": true,
+    "frozen_atlas_unchanged": true,
+    "forbidden_conclusions": [
+      "liquidity 产生 alpha",
+      "SMC 被证明有效",
+      "复杂多周期 liquidity 理论被证明"
+    ]
+  },
+  "next_step_g4": "若需测试 case B，须从冻结原始 liquidity 账簿（liquidity_field_snapshot / master）重建 per-scope 距离分箱特征。此为 NEW FEATURE ENGINEERING，需用户显式授权，不在本轮禁止新增字段的范围内。"
+}

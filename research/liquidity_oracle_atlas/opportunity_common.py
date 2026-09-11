@@ -198,13 +198,16 @@ def build_features() -> pd.DataFrame:
                 "close_relative_to_level_R", "bar_range_R", "abs_return_R",
                 "n_targets_L", "n_targets_S", "nearest_above_R", "nearest_below_R",
                 "nearest_ahead_R", "nearest_behind_R", "same_price_identity_count"]
-               + B2_BIN_COLS
+               # 注：B2_BIN_COLS（5m/15m/1h/session/day/week 距离分箱）在冻结 Atlas v1.2
+               # 中不存在（已扫描全部 20 个冻结文件确认），不进入特征。
                + ["nearest_opposing_ob_distance_R", "nearest_opposing_ob_width_R",
-                  "nearest_opposing_ob_freshness", "nearest_opposing_ob_prior_enter_count",
+                  "nearest_opposing_ob_prior_enter_count",
                   "nearest_same_direction_ob_distance_R",
                   "nearest_same_direction_ob_width_R",
-                  "nearest_same_direction_ob_freshness",
                   "nearest_same_direction_ob_prior_enter_count"])
+    # 分类列（保持 object，交 OneHotEncoder）：symbol/side/liquidity_type/
+    # liquidity_scope/contact_type/sweep_vs_*/trend_*_vs_*/ob_source_tf，
+    # 以及修复后的 OB freshness（FRESH/RETESTED/missing）。
     for c in NUMERIC:
         if c in F.columns:
             F[c] = pd.to_numeric(F[c], errors="coerce")

@@ -1,0 +1,17 @@
+{
+  "study": "SMC Opportunity Geometry Decomposition v1.1",
+  "baseline_commit": "a746e3e5402e71a44cf57dbf1b718f4610f8e2bd",
+  "atlas_freeze_commit": "7ae7c1ae57b45bbc8bade1b5742fdc0353859c83",
+  "tb_hash": "b51fe7952bc1311aed83409889cd6706a6bc173cd4ed2f6e96570340183ac3d6",
+  "prospective_oos_start": "2026-09-07",
+  "feature_manifest_hash": "55de426492f0f96b370bb7507348cb52f9cbd972e299c26c2df15704e51e2135",
+  "models": "fixed LogisticRegression(penalty=l2,C=1.0,solver=lbfgs,max_iter=3000); OneHotEncoder(handle_unknown=ignore); median impute + StandardScaler (numeric); SplineTransformer(n_knots=4,degree=2,knots=quantile) for nonlinear distances",
+  "walk_forward": {
+    "WF1": "train TB1 / test TB2",
+    "WF2": "train TB1+TB2 / test TB3",
+    "WF3": "train TB1+TB2+TB3 / test TB4"
+  },
+  "bootstrap": "canonical trading_day block, 500 resamples, 95% CI",
+  "g4_status": "UNAVAILABLE: no per-scope (5m/15m/1h/CONTIG_SESSION/TRADING_DAY/TRADING_WEEK) distance-bin-count columns exist in frozen Atlas v1.2 (verified across all 20 frozen parquet files). v1.0 B2_BIN_COLS were hand-named and never matched real columns, so G4 was silently empty. Cannot test multitf liquidity field vs simple geometry this round.",
+  "note": "Primary risk for mechanism audit: 0.25/0.50/0.75/1.00 ATR; 1.5/2/3 ATR secondary. No best-stop selection. No PnL."
+}
