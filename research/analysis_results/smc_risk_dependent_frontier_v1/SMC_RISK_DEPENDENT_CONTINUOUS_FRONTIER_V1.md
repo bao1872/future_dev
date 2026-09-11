@@ -1,5 +1,7 @@
 # SMC Risk-dependent Continuous Frontier v1.0
 
+> ⚠️ **PROVISIONAL（提交 `0b8c85d` 部分措辞暂标）**：以下第 2–3 节中"21.23% 是真实 RISK_DEPENDENT 机制""1.25 不是特殊尺度因为 2.5 更多""SINGLE_SWITCH 约 19.5%"三处结论，系用 **lower-bound dominance**（`long_R_lower`/`short_R_lower` 直接比较）得出，**绕过了 v1.2 的 uncertainty 语义**，已被 P1.5 推翻/修正。正式结论以 **P1.5**（`run_risk_dependent_frontier_p1_5.py` + `RISK_FRONTIER_P1_5_AUDIT.json`）为准。
+
 > 实验：Risk-dependent Continuous Frontier（主线第一增量）
 > 仓库：bao1872/future_dev　分支：main
 > 前置：77061a9（Opportunity 收口）+ b51930c（P0 day-level OOF 修复 + P0.5）
@@ -65,6 +67,41 @@ dominance（方向主导 = 哪侧 `best_R_lower` 更大）与 `opportunity_label
 1. **旧的"1.25ATR 稳定切换尺度"是被过度总结**。在 7 档网格下，`risk=1.0 SHORT → 1.5 LONG` 的翻转点定义上就是中点 1.25；但翻转本身发生在 0.375/0.625/0.875/1.25/1.75/2.5 各处，1.25 只是其中一个中点，并不特殊。
 2. **但 RISK_DEPENDENT 是真实机制**，不是单一网格伪影：~21% contact 在风险尺度变化时确实翻转方向，且 switch 贯穿整个风险谱而非单一阈值。
 3. 因此继续把研究锚定在"1.25 这一个神奇尺度"是错的；真正该问的是"每一条 switch 由哪一级真实 liquidity target 的 unlock 触发"（P8–P9）。
+
+> **上述第 2–3 节为 `0b8c85d` 的 lower-bound dominance 结果，已标 PROVISIONAL；P1.5 见下。**
+
+---
+
+## 3.5 P1.5：Frozen Direction Semantics Gate（修正 `0b8c85d`）
+
+直接复用冻结 `oracle_risk_direction_v1_2.parquet` 的 `rr_direction`（枚举：`LONG_DOMINATES / SHORT_DOMINATES / TRADEOFF_OR_OVERLAP / UNRESOLVED_CENSOR / NO_COMPARABLE_TARGET`），**仅当相邻两档均为明确 LONG/SHORT 才定义 DIRECT switch**，不重扫 K 线。
+
+**Contact 分类（冻结语义，N=96,900）：**
+
+| cls | n | pct |
+|---|---:|---:|
+| NO_DIRECT_GRID_SWITCH | 78,390 | 80.9% |
+| SINGLE_DIRECT_LONG_TO_SHORT | 8,621 | 8.9% |
+| SINGLE_DIRECT_SHORT_TO_LONG | 8,425 | 8.7% |
+| MULTI_DIRECT_SWITCH | 1,360 | 1.4% |
+| UNRESOLVED_GRID_PATTERN | 104 | 0.1% |
+
+**直接 L↔S 翻转 contact = 18,406（18.99%）**，与冻结 `direction_stability=RISK_DEPENDENT`（18,495）**精确对应**（RD 内部拆解 8613+8418+1360+104=18,495）。即：冻结 RISK_DEPENDENT 本质上就是这 18,406 个直接翻转 contact——**机制真实存在，且与旧 19% 量级吻合（非巧合，是同一语义的两个视角）**。
+
+**Grid midpoint（仅描述，非连续临界风险）：** 各相邻档中点 direct switch 数随区间宽度增加（0.375→265、0.625→1376、0.875→1806、1.25→4314、1.75→4341、2.5→7702）；`switches_per_ATR_width`（n/区间宽）反而前段更高（0.375 段密度 1060/ATR，2.5 段 7702/ATR 因区间宽 1.0 而密度最低）。→ 旧"2.5 比 1.25 多"**不能**证明市场偏好 2.5（区间更宽），反过来也不能否定 1.25；正确结论仍是"旧 1.25 是网格中点，连续阈值待 P4 求"。
+
+**对账 / 诊断：**
+- Gate D 自洽：`ROBUST_LONG`/`ROBUST_SHORT` 含相反 direct switch = **0**（语义一致）。
+- 旧 P1 的 6954 mismatch **全部**来自 `NO_COMPARABLE_TARGET × NO_TARGET_ENVIRONMENT` 且 `lb_reach=True 但 label≠DELIVERY`（6954/6954）→ 证实 lower-bound dominance 在"无可见可比较 target"时仍按正 lower-bound 误判可达，**绕过 uncertainty 语义**，非数据损坏。
+- 血缘：四层 contact key 在当前冻结 v1.2 均为 **96,900**（union=96,900），用户记忆的 96,899 不复现（早期 pre-fix 中间计数）。
+
+**P4 ROI Gate A–D 全 PASS → `CONTINUE_TO_CONTINUOUS_FRONTIER_P4`：**
+- A：18,406 direct-switch contacts ≥ 5000（且 ≥5%）✓
+- B：15/15 品种均 ≥100 direct switch ✓
+- C：TB1–TB4 均有 switch，最大块占比 29.7% ≤ 60% ✓
+- D：ROBUST_LONG/SHORT 无相反 switch ✓
+
+> **结论**：按冻结语义，Risk-dependent 是**真实且大规模（~19%）**的结构现象，P4 连续前沿 ROI 高。下一步按 P4 从原始 K 线重算 per-target `required_risk_ATR`（复用 `build_oracle_atlas_v1_2.py` 的 `active_mask`/same-bar consume/roll censor/ATR0 语义），回答"连续 switch 阈值是否仍在 ~1.2–1.3 集中、由哪级 target unlock 触发"。
 
 ---
 

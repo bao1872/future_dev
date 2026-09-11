@@ -1,0 +1,5 @@
+﻿layer,n_unique_contacts,missing_vs_union,extra_vs_union
+liquidity_contacts_v1_1.parquet,96900,0,0
+liquidity_state_snapshot_v1_2.parquet,96900,0,0
+oracle_risk_direction_v1_2.parquet,96900,0,0
+oracle_direction_stability_v1_2.parquet,96900,0,0

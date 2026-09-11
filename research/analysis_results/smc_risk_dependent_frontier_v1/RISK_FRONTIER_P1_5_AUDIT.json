@@ -1,0 +1,74 @@
+{
+  "experiment": "SMC Risk-dependent Frontier P1.5 Frozen Direction Semantics Gate",
+  "frozen_inputs": [
+    "oracle_risk_direction_v1_2.parquet",
+    "oracle_direction_stability_v1_2.parquet",
+    "opportunity_labels.parquet"
+  ],
+  "atlas_freeze_commit": "7ae7c1ae57b45bbc8bade1b5742fdc0353859c83",
+  "rr_direction_enum": {
+    "SHORT_DOMINATES": 216092,
+    "LONG_DOMINATES": 208174,
+    "TRADEOFF_OR_OVERLAP": 193675,
+    "UNRESOLVED_CENSOR": 35579,
+    "NO_COMPARABLE_TARGET": 24780
+  },
+  "contact_classification": {
+    "NO_DIRECT_GRID_SWITCH": 78390,
+    "SINGLE_DIRECT_LONG_TO_SHORT": 8621,
+    "SINGLE_DIRECT_SHORT_TO_LONG": 8425,
+    "MULTI_DIRECT_SWITCH": 1360,
+    "UNRESOLVED_GRID_PATTERN": 104
+  },
+  "n_direct_switch_contacts": 18406,
+  "n_total_contacts": 96900,
+  "risk_dependent_internal_breakdown": {
+    "SINGLE_DIRECT_LONG_TO_SHORT": 8613,
+    "SINGLE_DIRECT_SHORT_TO_LONG": 8418,
+    "MULTI_DIRECT_SWITCH": 1360,
+    "UNRESOLVED_GRID_PATTERN": 104
+  },
+  "mismatch_6954_diagnosis": {
+    "total": 6954,
+    "lb_reach_true_but_label_not_delivery": 6954,
+    "label_delivery_but_lb_reach_false": 0,
+    "root_cause": "旧 P1 用 long_R_lower/short_R_lower 的 lower-bound dominance 绕过 v1.2 的 uncertainty 语义（TRADEOFF/UNRESOLVED_CENSOR/NO_COMPARABLE_TARGET），与冻结标签 DELIVERY(任一侧可达) 非同一语义；P1.5 已改用冻结 rr_direction，不再用 lower-bound。"
+  },
+  "contact_lineage": {
+    "union_unique_contacts": 96900,
+    "all_layers_agree_on_96900": true,
+    "note": "四层 contact key 在当前冻结 v1.2 中完全一致=96900，无 missing/extra；用户记忆的 96,899 在当前冻结产物中不复现，应为早期 pre-fix 中间计数。"
+  },
+  "gates": {
+    "gate_A_sample_sufficient": {
+      "pass_": true,
+      "n_direct_switch_contacts": 18406,
+      "threshold_contacts_ge": 5000,
+      "pct_of_total": 18.99
+    },
+    "gate_B_not_single_symbol": {
+      "pass_": true,
+      "n_symbols_ge_100_switch": 15,
+      "threshold_symbols_ge": 12,
+      "total_symbols": 15
+    },
+    "gate_C_time_exists": {
+      "pass_": true,
+      "n_tb_with_switch": 4,
+      "max_tb_share": 0.29665724096142193,
+      "threshold_max_share_le": 0.6
+    },
+    "gate_D_semantic_consistent": {
+      "pass_": true,
+      "robust_long_with_opp_switch": 0,
+      "robust_short_with_opp_switch": 0
+    }
+  },
+  "verdict": "CONTINUE_TO_CONTINUOUS_FRONTIER_P4",
+  "governance": {
+    "trading_metrics": "NOT_APPLICABLE",
+    "no_pnl": true,
+    "no_direction_model": true,
+    "atlas_v1_2_unchanged": true
+  }
+}
