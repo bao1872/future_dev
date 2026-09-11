@@ -1,0 +1,16 @@
+﻿stratum,value,n,reversal_rate
+liquidity_scope,15m,845,0.3692
+liquidity_scope,1h,213,0.3662
+liquidity_scope,5m,3041,0.3949
+liquidity_scope,CONTIG_SESSION,11616,0.4063
+liquidity_scope,TRADING_DAY,2699,0.3887
+liquidity_scope,TRADING_WEEK,488,0.3402
+contact_type,GAP_CROSS,3120,0.4
+contact_type,PENETRATE_CLOSE_AT,1191,0.4383
+contact_type,PENETRATE_CLOSE_BEYOND,5698,0.4191
+contact_type,PENETRATE_RECLAIM,4050,0.4032
+contact_type,TOUCH_ONLY,4843,0.3582
+contact_number,1,14706,0.3964
+contact_number,2,2481,0.3918
+contact_number,3,850,0.4188
+contact_number,4,455,0.4044

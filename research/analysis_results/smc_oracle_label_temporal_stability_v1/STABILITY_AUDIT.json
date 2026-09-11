@@ -1,0 +1,97 @@
+{
+  "protocol": "SMC_ORACLE_LABEL_TEMPORAL_STABILITY_V1_0",
+  "atlas_version": "v1.2",
+  "atlas_frozen_commit": "7ae7c1ae57b45bbc8bade1b5742fdc0353859c83",
+  "block_definition_frozen": true,
+  "temporal_block_definition_hash": "b51fe7952bc1311aed83409889cd6706a6bc173cd4ed2f6e96570340183ac3d6",
+  "n_unique_days": 407,
+  "time_order_ok": true,
+  "evidence_level": "descriptive_time_stability_audit_on_full_history_NOT_independent_OOS",
+  "forbidden_claims": [
+    "独立验证",
+    "真正OOS",
+    "未见数据确认"
+  ],
+  "core_finding_stability": [
+    {
+      "finding": "A. NO_REACH / NO_DIRECTION 跨块稳定",
+      "TB": [
+        0.8783,
+        0.8448,
+        0.8542,
+        0.8647
+      ],
+      "verdict": "STABLE"
+    },
+    {
+      "finding": "B. ROBUST (L+S) 跨块稳定",
+      "TB": [
+        0.1885,
+        0.20700000000000002,
+        0.19090000000000001,
+        0.19269999999999998
+      ],
+      "verdict": "STABLE"
+    },
+    {
+      "finding": "C. ROBUST 中 reversal rate 跨块稳定",
+      "TB": [
+        0.4263,
+        0.3766,
+        0.4127,
+        0.3823
+      ],
+      "verdict": "STABLE"
+    },
+    {
+      "finding": "D. align_1h delta_pp 跨块稳定",
+      "TB": [
+        0.0073,
+        -0.0006,
+        -0.0049,
+        0.0219
+      ],
+      "verdict": "STABLE"
+    },
+    {
+      "finding": "D. align_4h delta_pp 跨块稳定",
+      "TB": [
+        0.0044,
+        -0.0173,
+        -0.0261,
+        -0.0089
+      ],
+      "verdict": "STABLE"
+    },
+    {
+      "finding": "E. HTF pullback+sweep(LONG) delta_pp 跨块稳定",
+      "TB": [
+        -0.0037,
+        0.0,
+        -0.0034,
+        -0.0055
+      ],
+      "verdict": "STABLE"
+    },
+    {
+      "finding": "F. S->L 与 L->S 对称且跨块稳定",
+      "TB": [
+        0.9314671814671814,
+        0.9006823351023503,
+        1.0423377818683848,
+        1.0635903207653348
+      ],
+      "verdict": "STABLE"
+    },
+    {
+      "finding": "G. switch ATR median 跨块稳定",
+      "TB": [
+        1.25,
+        1.25,
+        1.25,
+        1.25
+      ],
+      "verdict": "STABLE"
+    }
+  ]
+}
