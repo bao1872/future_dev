@@ -1,0 +1,4 @@
+﻿wf,n_executed_trades,trade_frequency_per_day,trades_per_symbol,target_hit_rate,stop_hit_rate,roll_exit_rate,same_bar_ambiguous_rate,median_target_R_exec,mean_win_R,mean_loss_R,payoff_ratio,gross_expectancy_R,profit_factor_R,gross_expectancy_R_ideal_close_fill,gross_expectancy_R_target_first
+WF1,614,6.0196,40.93,0.5065,0.4935,0.0,0.0212,0.8889,0.9525,-1.0629,0.8962,-0.042,0.9199,-0.0376,-0.0085
+WF2,856,8.3922,57.07,0.5666,0.4334,0.0,0.0187,0.7487,0.8291,-1.0255,0.8085,0.0253,1.0569,0.0287,0.068
+WF3,848,8.396,56.53,0.5401,0.4575,0.0,0.0189,0.75,0.8349,-1.065,0.7839,-0.0376,0.9229,-0.0282,0.0009

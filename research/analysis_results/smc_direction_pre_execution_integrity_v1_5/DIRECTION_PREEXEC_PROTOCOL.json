@@ -50,9 +50,11 @@
   "gate": {
     "per_wf_evaluable_actionable": 0.58,
     "mean": 0.6,
-    "per_wf_selection": 0.05,
     "pooled_long_short": 0.58
   },
+  "coverage_reference": 0.05,
+  "coverage_reference_note": "coverage 不是 v1.5 gate。contact 不是执行计量单位：duplicate collapse 后应以 unique signal / trade frequency 报告（见 v1.0 execution）。",
+  "target_caveat": "v1.5 nearest_exante_target 只验证 active target availability，不是冻结 execution target 语义。TOUCH_ONLY 下当前 attacked level 仍 active，故大量 target==attack/contact price；真正的 execution target 须 beyond attacked boundary（v1.0）。",
   "p0_v14_corrections": [
     "S1 = strongest development selector (not independently validated)",
     "v1.4 test cohort excluded UNRESOLVED_CENSOR and NO_COMPARABLE_TARGET (~7.9%)",

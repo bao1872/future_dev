@@ -1,0 +1,42 @@
+{
+  "experiment": "SMC Fixed Execution Baseline v1.0",
+  "base_commit": "2006fcb61201873bae44b516a994f1e8e17c8917",
+  "primary": "S1 Continuation-only",
+  "secondary": "S2 Reversal-only",
+  "risk": 1.0,
+  "selector": {
+    "clear": "C_GLOBAL4 Logistic, availability-safe OOF 0.85",
+    "direction": "G4_BASE HGB, availability-safe OOF",
+    "cont_threshold": "q10 of availability-safe direction OOF",
+    "rev_threshold": "q90 of availability-safe direction OOF",
+    "test_inference": "ALL contacts"
+  },
+  "collapse": "by (symbol, decision_time, setup); conflict -> abstain",
+  "attack_boundary": "outermost contacted liquidity along direction",
+  "cont_target": "active AND ahead_of_entry AND beyond_attack",
+  "rev_target": "active AND ahead_of_entry (opposing side)",
+  "entry": "next valid 5m bar open (not contact close)",
+  "stop": "decision_close - direction*atr0 (frozen, not re-anchored)",
+  "same_bar": "Primary STOP_FIRST; Secondary TARGET_FIRST",
+  "roll": "no crossing discontinuity; exit last trusted close",
+  "position": "max one open position per symbol",
+  "p0_v15_fixes": [
+    "coverage moved out of gate -> coverage_reference",
+    "v1.5 target is availability-only, not frozen exec target"
+  ],
+  "forbidden": [
+    "优化stop",
+    "优化target",
+    "调threshold",
+    "新feature",
+    "FVG",
+    "OB",
+    "trend",
+    "pre-contact",
+    "删品种",
+    "新risk",
+    "prospective OOS",
+    "按PnL筛品种"
+  ],
+  "trading_metrics": "GROSS R only (REALISTIC_NET_PNL=UNAVAILABLE_COST_METADATA)"
+}

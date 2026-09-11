@@ -1,0 +1,20 @@
+{
+  "scanned": [
+    "tick_size",
+    "contract_multiplier",
+    "commission",
+    "exchange_fee",
+    "broker_fee",
+    "slippage"
+  ],
+  "canonical_table_found": false,
+  "evidence": [
+    "research/exports/strategy_s1/s1_config.json: 'simple gross returns, no fees, no slippage'",
+    "research/analysis_results/phase1_tradability_v1/symbol_universe.csv: no tick_size/multiplier/commission"
+  ],
+  "REALISTIC_NET_PNL": "UNAVAILABLE_COST_METADATA",
+  "rule": "禁止凭记忆填写手续费/滑点；只报 GROSS R 与 break-even cost",
+  "break_even_round_trip_cost_R": -0.0156,
+  "interpretation": "每笔交易总往返成本（R）超过该值则 gross edge 消失；不得声称 net profitable。",
+  "break_even_note": "gross expectancy<=0 → break-even cost<=0：在扣除任何成本之前 edge 已为负，没有任何成本承受空间。"
+}

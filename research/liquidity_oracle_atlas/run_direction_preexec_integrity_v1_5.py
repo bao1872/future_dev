@@ -555,7 +555,15 @@ def main():
         label_available_time_rule="bar_start_time[contact_bar_index + "
         "max(long_bars_to_stop, short_bars_to_stop)] + 5min",
         gate=dict(per_wf_evaluable_actionable=GATE_ACT, mean=GATE_MEAN,
-                  per_wf_selection=GATE_SEL, pooled_long_short=GATE_ACT),
+                  pooled_long_short=GATE_ACT),
+        coverage_reference=GATE_SEL,
+        coverage_reference_note=("coverage 不是 v1.5 gate。contact 不是执行计量单位："
+                                 "duplicate collapse 后应以 unique signal / "
+                                 "trade frequency 报告（见 v1.0 execution）。"),
+        target_caveat=("v1.5 nearest_exante_target 只验证 active target availability，"
+                       "不是冻结 execution target 语义。TOUCH_ONLY 下当前 attacked "
+                       "level 仍 active，故大量 target==attack/contact price；"
+                       "真正的 execution target 须 beyond attacked boundary（v1.0）。"),
         p0_v14_corrections=[
             "S1 = strongest development selector (not independently validated)",
             "v1.4 test cohort excluded UNRESOLVED_CENSOR and NO_COMPARABLE_TARGET (~7.9%)",
@@ -701,6 +709,12 @@ Test inference 在 **ALL test contacts** 上运行（不要求 `y_clear` notna�
 
 只用 decision-time active liquidity（`active_mask`），`trade_direction = side`
 （Continuation）。报告 availability，**不做 outcome，不做最小 RR 筛选**。
+
+> **P0 target caveat**：这里的 `nearest_exante_target` **只验证 active target
+> availability，不是冻结 execution target 语义**。TOUCH_ONLY 的 contact 不会产生
+> `first_penetration_time`，当前 attacked level 在 decision_time 仍 active，
+> 因此大量 `target == attack/contact price`（见 §5 `target==contact` 列）。
+> 真正的 execution target 必须是 **beyond attacked boundary**（v1.0 冻结）。
 
 | wf | selected | no_target | no_target_rate | exec_candidate | exec_rate | target==contact |
 |---|---:|---:|---:|---:|---:|---:|

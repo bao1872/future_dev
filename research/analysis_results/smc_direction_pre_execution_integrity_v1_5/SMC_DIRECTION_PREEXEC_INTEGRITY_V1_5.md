@@ -99,6 +99,12 @@ Test inference 在 **ALL test contacts** 上运行（不要求 `y_clear` notna�
 只用 decision-time active liquidity（`active_mask`），`trade_direction = side`
 （Continuation）。报告 availability，**不做 outcome，不做最小 RR 筛选**。
 
+> **P0 target caveat**：这里的 `nearest_exante_target` **只验证 active target
+> availability，不是冻结 execution target 语义**。TOUCH_ONLY 的 contact 不会产生
+> `first_penetration_time`，当前 attacked level 在 decision_time 仍 active，
+> 因此大量 `target == attack/contact price`（见 §5 `target==contact` 列）。
+> 真正的 execution target 必须是 **beyond attacked boundary**（v1.0 冻结）。
+
 | wf | selected | no_target | no_target_rate | exec_candidate | exec_rate | target==contact |
 |---|---:|---:|---:|---:|---:|---:|
 | WF1 | 1159 | 0 | 0.0 | 1159 | 1.0 | 646 |
