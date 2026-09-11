@@ -1,0 +1,83 @@
+{
+  "experiment": "SMC Direction Temporal Stability & Tail Drift Audit v1.3",
+  "base_commit": "3da5e68",
+  "v12_gate_repair": {
+    "experiment": "SMC Direction Actionability v1.2 — Gate Aggregation Repair",
+    "base_commit": "3da5e68",
+    "bug": "gate_eval 用 extra['side'](+1/-1) 比较 'LONG_DOMINATES' 字符串，pooled LONG/SHORT 恒为 0 / 0.85（错误）。",
+    "fix": "改用 selected+actual_clear+correct_direction 计算 pooled actionable；pred_long 已由 side/pred_rev 正确编码。",
+    "GATE_REPAIRED_ACTIONABLE_DIRECTION_PRESENT": false,
+    "CALIBRATED_TWO_STAGE_pass": false,
+    "T3_HGB_20pct_pass": false,
+    "repaired_two_stage": {
+      "wf_actionable": [
+        0.560463832136941,
+        0.6196519216823785,
+        0.6456128371457835
+      ],
+      "wf_selection": [
+        0.1469430808552071,
+        0.12317999106744082,
+        0.13385430947810986
+      ],
+      "pooled_LONG_actionable": 0.6025848142164781,
+      "pooled_SHORT_actionable": 0.6062555853440572,
+      "mean_actionable": 0.6085761969883676
+    },
+    "repaired_three_class": {
+      "wf_actionable": [
+        0.5600858369098712,
+        0.6104979811574697,
+        0.6316936488169365
+      ],
+      "wf_selection": [
+        0.18905432269057568,
+        0.1659222867351496,
+        0.14678731377387808
+      ],
+      "pooled_LONG_actionable": 0.5772357723577236,
+      "pooled_SHORT_actionable": 0.6133509583608724,
+      "mean_actionable": 0.6007591556280925
+    },
+    "v12_buggy_reference_for_comparison_only": {
+      "pooled_LONG_actionable": 0.0,
+      "pooled_SHORT_actionable": 0.8518
+    },
+    "note": "Gate 仍 FALSE：因 WF1 per-WF actionable<0.58（0.560），与 pooled LONG/SHORT 无关；修正后 pooled LONG/SHORT 均约 0.60，为双边模型。"
+  },
+  "p0_5_product_diagnostic": "RETRACTED_INVALID_OOF_ALIGNMENT (old CSV kept as bug evidence)",
+  "verdict": "RANK_STABLE_TAIL_DRIFT",
+  "next_step": "rank-based adaptive abstention（非 FVG）",
+  "evidence": {
+    "TB1_model_weak_to_all_future": false,
+    "TB2_target_regime_shift": false,
+    "train_history_helps": false,
+    "rank_stable_tail_drift": true,
+    "broad_nonstationarity": false,
+    "aucs": {
+      "TB1_TB2": 0.6336,
+      "TB2_TB3": 0.6534,
+      "TB3_TB4": 0.64,
+      "TB1_TB3": 0.6451,
+      "TB1_TB4": 0.6392,
+      "TB2_TB4": 0.6462,
+      "E123": 0.6591,
+      "E1234": 0.6627,
+      "R23_4": 0.654
+    },
+    "tail_macro": {
+      "TB1_TB2": 0.6691,
+      "TB2_TB3": 0.7234,
+      "TB3_TB4": 0.6793,
+      "TB1_TB3": 0.6926,
+      "TB1_TB4": 0.7147,
+      "TB2_TB4": 0.7164,
+      "E123": 0.7274,
+      "E1234": 0.7522,
+      "R23_4": 0.7384
+    },
+    "best_tail_macro": 0.7522
+  },
+  "interpretation_note": "仅当 WF1 actionable<0.58 时不得写 regime drift；必须以 rolling/expanding/cross-block AUC + tail transfer + PSI + decile + symbol 联合证据裁决。",
+  "trading_metrics": "NOT_APPLICABLE"
+}

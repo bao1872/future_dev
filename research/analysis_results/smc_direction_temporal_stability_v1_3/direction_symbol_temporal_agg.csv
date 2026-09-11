@@ -1,0 +1,7 @@
+﻿config,eligible_symbol_count,macro_median_auc,macro_auc_iqr,n_symbols_auc_gt_05
+TB1_TB2,15,0.6405,0.0327,15
+TB1_TB3,15,0.6559,0.0285,15
+TB1_TB4,15,0.6427,0.0483,15
+TB2_TB3,15,0.6539,0.0473,15
+TB2_TB4,15,0.6508,0.0625,15
+TB3_TB4,15,0.6427,0.0824,15

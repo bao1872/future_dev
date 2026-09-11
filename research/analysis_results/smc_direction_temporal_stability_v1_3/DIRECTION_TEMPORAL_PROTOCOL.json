@@ -1,0 +1,152 @@
+{
+  "experiment": "SMC Direction Temporal Stability & Tail Drift Audit v1.3",
+  "base_commit": "3da5e6822425e80ff21b44f9df796e3302dd9f79",
+  "repairs": [
+    "P0_gate_aggregation_bug_fixed",
+    "P0.5_product_diagnostic_RETRACTED"
+  ],
+  "TWO_STAGE_PRODUCT_DIAGNOSTIC": "RETRACTED_INVALID_OOF_ALIGNMENT",
+  "no_new_features": true,
+  "primary_direction_feature": "G4_BASE",
+  "G4_BASE": [
+    "symbol",
+    "side",
+    "nearest_above_R",
+    "nearest_below_R",
+    "nearest_ahead_R",
+    "nearest_behind_R"
+  ],
+  "G4_ONLY": [
+    "nearest_above_R",
+    "nearest_below_R",
+    "nearest_ahead_R",
+    "nearest_behind_R"
+  ],
+  "primary_direction_model": "HistGradientBoostingClassifier(max_depth=3,learning_rate=0.05,max_iter=200,l2_regularization=1.0,random_state=42)",
+  "primary_risk": 1.0,
+  "oos_boundary_excluded": "2026-09-07",
+  "train_window_configs": {
+    "TB1_TB2": {
+      "train": [
+        "TB1"
+      ],
+      "test": [
+        "TB2"
+      ],
+      "type": "ONE_BLOCK_ROLLING"
+    },
+    "TB2_TB3": {
+      "train": [
+        "TB2"
+      ],
+      "test": [
+        "TB3"
+      ],
+      "type": "ONE_BLOCK_ROLLING"
+    },
+    "TB3_TB4": {
+      "train": [
+        "TB3"
+      ],
+      "test": [
+        "TB4"
+      ],
+      "type": "ONE_BLOCK_ROLLING"
+    },
+    "TB1_TB3": {
+      "train": [
+        "TB1"
+      ],
+      "test": [
+        "TB3"
+      ],
+      "type": "ROLLING_CROSS"
+    },
+    "TB1_TB4": {
+      "train": [
+        "TB1"
+      ],
+      "test": [
+        "TB4"
+      ],
+      "type": "ROLLING_CROSS"
+    },
+    "TB2_TB4": {
+      "train": [
+        "TB2"
+      ],
+      "test": [
+        "TB4"
+      ],
+      "type": "ROLLING_CROSS"
+    },
+    "E123": {
+      "train": [
+        "TB1",
+        "TB2"
+      ],
+      "test": [
+        "TB3"
+      ],
+      "type": "EXPANDING"
+    },
+    "E1234": {
+      "train": [
+        "TB1",
+        "TB2",
+        "TB3"
+      ],
+      "test": [
+        "TB4"
+      ],
+      "type": "EXPANDING"
+    },
+    "R23_4": {
+      "train": [
+        "TB2",
+        "TB3"
+      ],
+      "test": [
+        "TB4"
+      ],
+      "type": "RECENT_TWO_BLOCK"
+    }
+  },
+  "causal_cross_block_pairs": [
+    "TB1_TB2",
+    "TB1_TB3",
+    "TB1_TB4",
+    "TB2_TB3",
+    "TB2_TB4",
+    "TB3_TB4"
+  ],
+  "dir_tail": [
+    0.1,
+    0.9
+  ],
+  "p5_verdict_definitions": {
+    "TRAIN_HISTORY_LIMITED": "rolling 1-block 明显弱于 expanding",
+    "TB2_TARGET_REGIME_SHIFT": "TB1->TB2 弱但 TB1->TB3/TB4 恢复",
+    "SOURCE_TB1_RELATION_DRIFT": "TB1 模型对所有未来都弱",
+    "RANK_STABLE_TAIL_DRIFT": "AUC>=0.62 但 tail macro 比后续低>=0.07",
+    "BROAD_TEMPORAL_NONSTATIONARITY": "多数 pair AUC 明显<0.62",
+    "NO_SINGLE_DRIFT_MECHANISM": "无单一机制可解释"
+  },
+  "forbidden": [
+    "FVG",
+    "external/internal",
+    "pre-contact dynamics",
+    "OB扩展",
+    "trend",
+    "新risk",
+    "PnL",
+    "stop/target",
+    "参数搜索",
+    "prospective OOS",
+    "删品种",
+    "LightGBM调参",
+    "SHAP",
+    "LC"
+  ],
+  "trading_metrics": "NOT_APPLICABLE"
+}
