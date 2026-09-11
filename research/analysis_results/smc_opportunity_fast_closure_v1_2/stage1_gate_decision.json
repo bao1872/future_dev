@@ -9,13 +9,13 @@
   },
   "stage1_B_g4_residual": {
     "mean_dAUC_meta": -0.0001,
-    "n_cells_dAUC_gt_0p005": 0,
+    "all_cells_abs_dAUC_lt_0p005": true,
     "n_cells_total": 9,
     "risks_with_all3WF_positive": [],
-    "threshold_mean_dAUC": 0.01,
-    "threshold_risks_allpos": ">=2/3",
-    "decision": "G4_RESIDUAL_NOT_MATERIAL",
-    "detail": "G4 在 G1 之上无稳定正增量 -> 停止 Opportunity"
+    "threshold_all_cells_abs": 0.005,
+    "threshold_mean_dAUC": 0.005,
+    "decision": "OPPORTUNITY_CLOSED_G4_RESIDUAL_NOT_MATERIAL",
+    "detail": "G4 在 G1 之上 9/9 |ΔAUC|<0.005 且均值<0.005 -> 正式冻结 OPPORTUNITY_CLOSED, G4_RESIDUAL_NOT_MATERIAL"
   },
   "overall": "STOP_OPPORTUNITY_TWO_SIDED_GEOMETRY_SUFFICIENT",
   "note": "低成本 Gate：单条 R0 规则不够（Δ=0.026），但 R2(上下两条距离) 即封顶且 R3-R2≈0、G4 残余≈0 -> Opportunity 压缩为 2 特征几何规则，无 ML/metadata/G4 增量；研究收口，资源转 RISK_DEPENDENT。"

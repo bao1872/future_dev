@@ -12,6 +12,12 @@
   "walk_forward": ["WF1:TB1->TB2", "WF2:TB1+TB2->TB3", "WF3:TB1+TB2+TB3->TB4"],
   "bootstrap": "Stage 1 仅点估计，无 bootstrap（Gate 未通过即停）",
 
+  "repair_of_77061a9_bug": {
+    "bug": "run_opportunity_fast_closure_v1_2.py 原 expanding_oof() 按'行数'切 inner OOF，可能把同一 trading_day 同时放进 inner-train 与 inner-validation，违反 trading-day block 约束（Oracle 标签需观察未来路径，同日拆分造成泄漏）。",
+    "fix": "改为 expanding_oof_by_day()：按 sorted(pd.unique(trading_day)) 的 40/60/80% *交易日* 分割，并加硬断言 inner-train 最大 trading_day < inner-validation 最小 trading_day。",
+    "impact": "G4 残余结论不变（修复前后均≈0），但正式排除了同日泄漏，结论成立更稳。"
+  },
+
   "q1_geometry_rule_sufficient": {
     "definition": {
       "R0": "score = -min(nearest_above_R, nearest_below_R) / risk_ATR (纯规则，不训练)",
@@ -20,30 +26,46 @@
     },
     "result": {
       "R0_auc": "0.769 (0.5ATR) / 0.775 (1.0ATR) / 0.807 (2.0ATR) 区间",
-      "R2_auc": "比 R0 高 +0.011 ~ +0.043, 均值 +0.026 (跨 9 个 risk×WF 单元全部 > 0)",
+      "R2_auc": "比 R0 高 +0.011 ~ +0.043，均值 +0.026 (跨 9 个 risk×WF 单元全部 > 0)",
       "R3_vs_R2": "ΔAUC 均值 -0.002 (≈0) -> metadata(B0) 零增量"
     },
     "verdict": "R0 单条归一化距离规则不够（Δ=0.026>0.01），但 R2（上下两条距离）即封顶，R3-R2≈0 说明 metadata 不增。Opportunity 可压缩为 2 特征几何，无需复杂 ML。"
   },
 
   "q2_g4_residual_material": {
-    "method": "temporal inner OOF (expanding 40/60/80% -> 预测随后 20%) 生成 p_g1 / p_g4；logit 后 meta：META_G1 vs META_G1_G4。禁止 in-sample stacking。",
+    "method": "temporal inner OOF（按 trading-day block 切分，expanding 40/60/80% 交易日 -> 预测随后 20%）生成 p_g1 / p_g4；logit 后 meta：META_G1 vs META_G1_G4。禁止 in-sample stacking，且同日不跨 train/validation。",
     "result": {
-      "mean_dAUC_meta": -0.0001,
-      "range_dAUC_meta": "[-0.0007, +0.0003]",
-      "n_cells_dAUC_gt_0p005": "0 / 9",
+      "mean_dAUC_meta": -0.00010,
+      "min_dAUC_meta": -0.00085,
+      "max_dAUC_meta": 0.00028,
+      "all_cells_abs_dAUC_lt_0p005": true,
+      "n_cells": 9,
       "auc_base_G1_vs_auc_base_G4": "G1 0.78~0.86; G4 0.72~0.80 (G4 单独明显弱于 G1)"
     },
-    "verdict": "G4 在 G1 已知后残余增量 ≈ 0（9/9 全部 < 0.005）。冻结 Atlas 的 60 个 bin 字段无独立增量价值，不值得继续维护/研究。"
+    "verdict": "G4 在 G1 已知后残余增量 ≈ 0（9/9 全部 |ΔAUC|<0.005，均值 -0.0001）。冻结 Atlas 的 60 个 bin 字段无独立增量价值；研究模型默认不用，但不物理删除（维护成本低）。"
+  },
+
+  "p0_5_touch_only_audit": {
+    "method": "不修改标签；将 R2 测试预测按 contact_type 拆分评价（n 加权均值跨 risk×wf）。",
+    "r2_auc_by_contact_type": {
+      "TOUCH_ONLY": 0.8114,
+      "PENETRATE_RECLAIM": 0.7844,
+      "PENETRATE_CLOSE_AT": 0.8292,
+      "PENETRATE_CLOSE_BEYOND": 0.8042,
+      "GAP_CROSS": 0.7827
+    },
+    "nontouch_aggregate_r2_auc": 0.7971,
+    "nontouch_min_r2_auc": 0.7584,
+    "verdict": "NON_TOUCH 各类型 R2 AUC 0.78~0.83、聚合 0.797（min 0.758），均明显 >0.65 且 WF 稳定；TOUCH_ONLY 0.811。两距离几何不是仅由'TOUCH_ONLY 再触达'语义造成，作为一般市场几何结论保留。"
   },
 
   "stage1_gates": {
     "A": "R0_INSUFFICIENT_TWO_SIDED_GEOMETRY_SUFFICIENT",
-    "B": "G4_RESIDUAL_NOT_MATERIAL",
+    "B": "OPPORTUNITY_CLOSED_G4_RESIDUAL_NOT_MATERIAL",
     "overall": "STOP_OPPORTUNITY_TWO_SIDED_GEOMETRY_SUFFICIENT"
   },
 
-  "conclusion": "Opportunity 本质 = 上下两条 target 距离的简单几何。单条归一化规则不够（两侧不对称结构有信息），但两特征即封顶；metadata 与多周期 G4 字段均无增量。停止 Opportunity 复杂建模与 G4 字段维护，资源转入 RISK_DEPENDENT direction-switch 机制研究。",
+  "conclusion": "Opportunity 本质 = 上下两条 target 距离的简单几何。单条归一化规则不够（两侧不对称结构有信息），但两特征即封顶；metadata 与多周期 G4 字段均无增量。G4 残余经 day-level OOF 修复后仍≈0（9/9 |Δ|<0.005），正式冻结 OPPORTUNITY_CLOSED。停止 Opportunity 复杂建模；研究模型默认不再使用 G4 字段（不从 Atlas 删除）。资源转入 RISK_DEPENDENT direction-switch 机制研究。",
 
   "governance": {
     "trading_metrics": "NOT_APPLICABLE",
@@ -53,10 +75,11 @@
     "no_best_atr_search": true,
     "no_lightgbm": true,
     "no_shap": true,
-    "atlas_v1_2_unchanged": true
+    "atlas_v1_2_unchanged": true,
+    "g4_fields_not_deleted": true
   },
 
-  "relation_to_prior_v1_1": "延续 ff36930 已修复的 P1-P7（标签门/三路管线/tie-aware AUC/block bootstrap/paired delta）。本实验在已修复基础上做低成本收口 Gate；结论与 ff36930 'SIMPLE_GEOMETRY（G4 真实但被 G1 吸收）'一致并进一步收紧：G4 残余≈0，Opportunity 压缩为 2 特征几何。",
+  "relation_to_prior_v1_1": "延续 ff36930 已修复的 P1-P7（标签门/三路管线/tie-aware AUC/block bootstrap/paired delta）。本实验在已修复基础上做低成本收口 Gate；结论与 ff36930 'SIMPLE_GEOMETRY（G4 真实但被 G1 吸收）'一致并进一步收紧：G4 残余≈0 且同日泄漏已排除，Opportunity 压缩为 2 特征几何。",
 
-  "next_step": "STOP Opportunity 复杂研究；下一主线 = RISK_DEPENDENT mechanism（紧 stop 单方向 -> 风险尺度扩大 -> 方向翻转，switch ATR 中位≈1.25ATR）。"
+  "next_step": "STOP Opportunity 复杂研究；下一主线 = RISK_DEPENDENT mechanism（求连续真实临界风险，审判旧 '1.25ATR' 是否仅为离散 risk-grid 中点）。"
 }

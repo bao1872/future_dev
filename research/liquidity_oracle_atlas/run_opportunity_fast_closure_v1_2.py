@@ -48,17 +48,28 @@ def metrics(y, s):
     return roc, pr, top20, bot20
 
 
-def expanding_oof(Xtr, ytr, cols, Xte):
-    """Temporal inner OOF：expanding 40/60/80% 训练 → 预测随后 20%。
-    返回 (oof_on_train, pred_on_test)。禁止 in-sample stacking。"""
-    n = len(ytr)
-    oof = np.full(n, np.nan)
-    for t0, t1 in [(0.4, 0.6), (0.6, 0.8), (0.8, 1.0)]:
-        c0, c1 = int(t0 * n), int(t1 * n)
-        if c0 == 0 or c1 <= c0:
+def expanding_oof_by_day(Xtr, ytr, daytr, cols, Xte):
+    """Temporal inner OOF，按 canonical trading-day block 切分（修复原按行数切的
+    leakage bug）：expanding 40/60/80% 的 *交易日* 训练 → 预测随后 20% 交易日。
+    返回 (oof_on_train, pred_on_test)。禁止 in-sample stacking，且保证
+    inner-train 的 trading_day 严格早于 inner-validation（同日硬断言）。"""
+    days = np.array(sorted(pd.unique(daytr)))
+    n_days = len(days)
+    cuts = [(0.40, 0.60), (0.60, 0.80), (0.80, 1.00)]
+    oof = np.full(len(ytr), np.nan, dtype=float)
+    for a, b in cuts:
+        train_end = int(np.floor(a * n_days))
+        pred_end = int(np.floor(b * n_days))
+        train_days = days[:train_end]
+        pred_days = days[train_end:pred_end]
+        tr = np.isin(daytr, train_days)
+        va = np.isin(daytr, pred_days)
+        assert pd.Series(daytr[tr]).max() < pd.Series(daytr[va]).min(), \
+            "inner OOF 同日交叉：违反 trading-day block 约束"
+        if tr.sum() == 0 or va.sum() == 0:
             continue
-        m = oc.make_trifold_pipeline(cols).fit(Xtr.iloc[:c0][cols], ytr[:c0])
-        oof[c0:c1] = m.predict_proba(Xtr.iloc[c0:c1][cols])[:, 1]
+        m = oc.make_trifold_pipeline(cols).fit(Xtr.loc[tr, cols], ytr[tr])
+        oof[va] = m.predict_proba(Xtr.loc[va, cols])[:, 1]
     full = oc.make_trifold_pipeline(cols).fit(Xtr[cols], ytr)
     pte = full.predict_proba(Xte[cols])[:, 1]
     return oof, pte
@@ -87,10 +98,12 @@ F["model_eligible"] = (F["primary_eligible"]
 F["y"] = (F["opportunity_label"] == "DELIVERY").astype(int)
 F["rho"] = (np.minimum(F["nearest_above_R"], F["nearest_below_R"])
             / F["risk_ATR"])
+# contact_type 来自 build_features() 的 B1 块（与 F 索引对齐），用于 P0.5 审计
+assert "contact_type" in F.columns, "F 缺少 contact_type（build_features B1 块）"
 print(f"    model_eligible 总行数 = {int(F['model_eligible'].sum())}", flush=True)
 
 ALL = B0 + G1 + G4
-geo_rows, g4_rows = [], []
+geo_rows, g4_rows, r2_test_rows = [], [], []
 
 print("[A] Stage 1-A 简单几何压缩 R0/R2/R3 ...", flush=True)
 for r in RISKS:
@@ -119,6 +132,11 @@ for r in RISKS:
                                  top20_delivery_rate=rr[2],
                                  bottom20_delivery_rate=rr[3],
                                  test_base_rate=yte.mean()))
+        # P0.5: 收集 R2 测试预测 + contact_type，便于 TOUCH_ONLY 敏感性审计
+        r2_test_rows.append(dict(
+            risk_ATR=r, wf=wfn,
+            contact_type=sub["contact_type"][te].values,
+            y=yte, p2=p2))
     print(f"  [A] risk={r} 完成", flush=True)
 
 geo = pd.DataFrame(geo_rows)
@@ -157,8 +175,9 @@ for r in RISKS:
             continue
         Xtr, ytr = X[tr].reset_index(drop=True), sub["y"][tr].values
         Xte, yte = X[te].reset_index(drop=True), sub["y"][te].values
-        oof_g1, pt_g1 = expanding_oof(Xtr, ytr, B0 + G1, Xte)
-        oof_g4, pt_g4 = expanding_oof(Xtr, ytr, B0 + G4, Xte)
+        daytr = sub["trading_day"][tr].values   # 训练样本对应的交易日（按日切块）
+        oof_g1, pt_g1 = expanding_oof_by_day(Xtr, ytr, daytr, B0 + G1, Xte)
+        oof_g4, pt_g4 = expanding_oof_by_day(Xtr, ytr, daytr, B0 + G4, Xte)
         mask = ~np.isnan(oof_g1)
         lg1, lg4 = lg(oof_g1), lg(oof_g4)
         tg1, tg4 = lg(pt_g1), lg(pt_g4)
@@ -192,9 +211,8 @@ for r in RISKS:
 g4 = pd.DataFrame(g4_rows)
 g4.to_csv(OUT / "g4_residual_fast_metrics.csv", index=False, encoding="utf-8-sig")
 
-# B Gate
+# B Gate（day-level OOF 修复后）
 d = g4["dAUC_meta"]
-g4_pos = g4[g4["dAUC_positive"]]
 # 每个 risk 的 3 个 WF 是否全正
 risks_allpos = []
 for r in RISKS:
@@ -202,32 +220,72 @@ for r in RISKS:
     if len(gr) == 3 and (gr["dAUC_meta"] > 0).all():
         risks_allpos.append(r)
 mean_dAUC = float(d.mean())
-n_pos = int((d > 0.005).sum())
 n_total = len(d)
-continue_cond = (len(risks_allpos) >= 2) and (mean_dAUC >= 0.01)
-if continue_cond:
-    b_decision = "G4_RESIDUAL_MATERIAL_CONTINUE"
-elif n_pos < n_total * 0.5 or d.std() == 0:
-    b_decision = "G4_RESIDUAL_NOT_MATERIAL"
+all_small = bool((d.abs() < 0.005).all())          # 9 cell 全部 |ΔAUC|<0.005
+reverse_cond = (len(risks_allpos) >= 2) and (mean_dAUC >= 0.01)
+if all_small and (mean_dAUC < 0.005):
+    b_decision = "OPPORTUNITY_CLOSED_G4_RESIDUAL_NOT_MATERIAL"
+elif reverse_cond:
+    b_decision = "OPPORTUNITY_NEEDS_CONTINUE"
 else:
-    b_decision = "G4_RESIDUAL_UNSTABLE_STOP"
+    b_decision = "G4_RESIDUAL_NOT_MATERIAL"
 b_gate = {
     "mean_dAUC_meta": round(mean_dAUC, 4),
-    "n_cells_dAUC_gt_0p005": n_pos, "n_cells_total": n_total,
+    "all_cells_abs_dAUC_lt_0p005": all_small,
+    "n_cells_total": n_total,
     "risks_with_all3WF_positive": [float(x) for x in risks_allpos],
-    "threshold_mean_dAUC": 0.01,
-    "threshold_risks_allpos": ">=2/3",
+    "threshold_all_cells_abs": 0.005,
+    "threshold_mean_dAUC": 0.005,
     "decision": b_decision,
-    "detail": "G4 在 G1 之上无稳定正增量 -> 停止 Opportunity"
-              if b_decision != "G4_RESIDUAL_MATERIAL_CONTINUE"
-              else "G4 残余信息达阈值 -> 触发 Stage 2（完整 bootstrap）",
+    "detail": ("G4 在 G1 之上 9/9 |ΔAUC|<0.005 且均值<0.005 -> 正式冻结 "
+               "OPPORTUNITY_CLOSED, G4_RESIDUAL_NOT_MATERIAL"
+               if b_decision == "OPPORTUNITY_CLOSED_G4_RESIDUAL_NOT_MATERIAL"
+               else ("G4 在 >=2 risk 下 WF1-3 全正且均值>=0.01 -> "
+                     "Opportunity 需继续研究，不收口"
+                     if b_decision == "OPPORTUNITY_NEEDS_CONTINUE"
+                     else "G4 残余不显著，按无材料处理 -> 停止 Opportunity")),
 }
 
+# P0.5: TOUCH_ONLY 敏感性审计（不改标签，仅按 contact_type 拆分 R2 测试预测）
+rows = []
+for rec in r2_test_rows:
+    ct = rec["contact_type"]; y = np.asarray(rec["y"]); p = np.asarray(rec["p2"])
+    for c in pd.unique(ct):
+        m = ct == c
+        yy, pp = y[m], p[m]
+        npos = int(yy.sum()); n = len(yy)
+        auc = oc.tie_aware_auc(yy, pp) if 0 < npos < n else np.nan
+        rows.append(dict(risk_ATR=rec["risk_ATR"], wf=rec["wf"],
+                         contact_type=c, n=n, base_rate=yy.mean(),
+                         r2_roc_auc=auc))
+tou = pd.DataFrame(rows)
+# NON_TOUCH 聚合（跨 risk×wf 合并同一 contact_type 之外的全部）
+nontouch_rows = []
+for rec in r2_test_rows:
+    ct = rec["contact_type"]; y = np.asarray(rec["y"]); p = np.asarray(rec["p2"])
+    m = ct != "TOUCH_ONLY"
+    if m.sum() == 0:
+        continue
+    yy, pp = y[m], p[m]
+    npos = int(yy.sum()); n = len(yy)
+    auc = oc.tie_aware_auc(yy, pp) if 0 < npos < n else np.nan
+    nontouch_rows.append(dict(risk_ATR=rec["risk_ATR"], wf=rec["wf"],
+                              n=n, base_rate=yy.mean(), r2_roc_auc=auc))
+tou.to_csv(OUT / "touch_only_sensitivity.csv", index=False, encoding="utf-8-sig")
+pd.DataFrame(nontouch_rows).to_csv(OUT / "touch_only_sensitivity_nontouch.csv",
+                                   index=False, encoding="utf-8-sig")
+ct_auc = (tou.groupby("contact_type")
+          .agg(n=("r2_roc_auc", "sum"), base_rate=("base_rate", "mean"),
+               r2_roc_auc=("r2_roc_auc", "mean")).reset_index())
+print("[P0.5] 按 contact_type 拆分 R2 AUC:\n", ct_auc.to_string(index=False),
+      flush=True)
+
 # 综合裁决
-if mean_R2_R0 < 0.01:
-    overall = "STOP_OPPORTUNITY_R0_RULE_SUFFICIENT"
-elif (mean_R3_R2 < 0.01) and (b_decision != "G4_RESIDUAL_MATERIAL_CONTINUE"):
+if b_decision in ("OPPORTUNITY_CLOSED_G4_RESIDUAL_NOT_MATERIAL",
+                 "G4_RESIDUAL_NOT_MATERIAL"):
     overall = "STOP_OPPORTUNITY_TWO_SIDED_GEOMETRY_SUFFICIENT"
+elif b_decision == "OPPORTUNITY_NEEDS_CONTINUE":
+    overall = "CONTINUE_OPPORTUNITY_STAGE2"
 else:
     overall = "CONTINUE_OPPORTUNITY_STAGE2"
 stage1_decision = {

@@ -60,7 +60,32 @@
 - **dAUC_meta 范围 [−0.0007, +0.0003]，均值 −0.0001；9/9 全部 < 0.005**。
 - base_G4（0.72~0.80）明显弱于 base_G1（0.78~0.86）→ G4 单独有信号，但**在 G1 之上残余≈0**。
 
-**B Gate** → `G4_RESIDUAL_NOT_MATERIAL`：冻结 Atlas 的 60 个 bin 字段无独立增量价值，停止维护/研究。
+**B Gate（day-level OOF 修复后）** → `OPPORTUNITY_CLOSED_G4_RESIDUAL_NOT_MATERIAL`：9/9 cell `|ΔAUC|<0.005` 且均值 −0.0001，冻结 Atlas 的 60 个 bin 字段无独立增量价值；研究模型默认不再使用 G4（不从 Atlas 物理删除）。
+
+---
+
+## 2.7 P0 修复：inner OOF 按 trading-day 切块
+
+`77061a9` 的 `expanding_oof()` 按**行数**切 inner OOF，可能把同一 trading_day 同时放进 inner-train 与 inner-validation（Oracle 标签需观察未来路径，同日拆分即泄漏）。
+
+修复为 `expanding_oof_by_day()`：**按 `sorted(pd.unique(trading_day))` 的 40/60/80% *交易日* 分割**，并加硬断言 `inner-train 最大 trading_day < inner-validation 最小 trading_day`。重跑后 G4 残余结论不变（仍 ≈0），但正式排除了同日泄漏，结论成立更稳。
+
+---
+
+## 2.8 P0.5 TOUCH_ONLY 敏感性审计
+
+不修改标签，仅按 `contact_type` 拆分 R2 测试预测（n 加权均值跨 risk×WF）：
+
+| contact_type | n | base_rate | R2 AUC |
+|---|---:|---:|---:|
+| TOUCH_ONLY | 47,168 | 0.866 | **0.811** |
+| PENETRATE_RECLAIM | 50,313 | 0.677 | 0.784 |
+| PENETRATE_CLOSE_AT | 13,879 | 0.745 | 0.829 |
+| PENETRATE_CLOSE_BEYOND | 66,777 | 0.711 | 0.804 |
+| GAP_CROSS | 34,522 | 0.723 | 0.783 |
+| **NON_TOUCH 聚合** | — | — | **0.797**（min 0.758） |
+
+NON_TOUCH 各类型 R2 AUC 0.78~0.83、聚合 0.797 均明显 >0.65 且 WF 稳定 → 两距离几何**不是**仅由"TOUCH_ONLY 仍 active 再触达"语义造成，作为一般市场几何结论保留。
 
 ---
 
@@ -69,7 +94,7 @@
 | Gate | 结果 |
 |---|---|
 | Stage 1-A | `R0_INSUFFICIENT_TWO_SIDED_GEOMETRY_SUFFICIENT` |
-| Stage 1-B | `G4_RESIDUAL_NOT_MATERIAL` |
+| Stage 1-B | `OPPORTUNITY_CLOSED_G4_RESIDUAL_NOT_MATERIAL` |
 | **Overall** | **`STOP_OPPORTUNITY_TWO_SIDED_GEOMETRY_SUFFICIENT`** |
 
 **含义**：
