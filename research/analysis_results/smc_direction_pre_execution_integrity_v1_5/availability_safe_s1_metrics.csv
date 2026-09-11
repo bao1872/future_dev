@@ -1,0 +1,4 @@
+﻿wf,n_clear_train_before,n_clear_train_after,clear_removed_share,n_dir_train_before,n_dir_train_after,dir_removed_share,clear_thr_avail,cont_thr,test_start,direction_auc_evaluable,n_test_all,n_selected,selection_rate,selected_clear_rate,continuation_precision_given_clear,evaluable_actionable_precision,live_conservative_actionable_lower_bound,predicted_LONG_actionable,predicted_SHORT_actionable
+WF1,20312,19050,0.0621,14779,13556,0.0828,0.7587,0.2011,2025-06-09 21:05:00,0.63,25903,1159,0.0447,0.7912,0.8059,0.654,0.6376,0.646,0.6652
+WF2,44961,43661,0.0289,33168,31881,0.0388,0.6805,0.218,2025-11-06 21:05:00,0.6601,24440,1813,0.0742,0.7987,0.7914,0.6526,0.6321,0.6515,0.6538
+WF3,67351,66461,0.0132,49431,48568,0.0175,0.6661,0.2258,2026-04-10 21:05:00,0.6553,23869,1720,0.0721,0.7558,0.8446,0.685,0.6384,0.7048,0.6735

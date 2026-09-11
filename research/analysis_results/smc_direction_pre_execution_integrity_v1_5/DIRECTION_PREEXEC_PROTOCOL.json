@@ -1,0 +1,76 @@
+{
+  "experiment": "SMC Direction Pre-Execution Integrity Gate v1.5",
+  "base_commit": "2117cb132fe4fbc4726677f196ea3350fce37caf",
+  "no_new_features": true,
+  "primary_risk": 1.0,
+  "oos_boundary_excluded": "2026-09-07",
+  "selector": "S1_CONTINUATION_ONLY_10",
+  "clear": {
+    "model": "C_GLOBAL4 Logistic",
+    "target_precision": 0.85,
+    "min_oof_selection": 0.05
+  },
+  "direction": {
+    "feature": "G4_BASE",
+    "model": "HGB(depth3,lr0.05,iter200,l2 1.0,seed42)"
+  },
+  "wf": [
+    {
+      "name": "WF1",
+      "train": [
+        "TB1"
+      ],
+      "test": [
+        "TB2"
+      ]
+    },
+    {
+      "name": "WF2",
+      "train": [
+        "TB1",
+        "TB2"
+      ],
+      "test": [
+        "TB3"
+      ]
+    },
+    {
+      "name": "WF3",
+      "train": [
+        "TB1",
+        "TB2",
+        "TB3"
+      ],
+      "test": [
+        "TB4"
+      ]
+    }
+  ],
+  "label_available_time_rule": "bar_start_time[contact_bar_index + max(long_bars_to_stop, short_bars_to_stop)] + 5min",
+  "gate": {
+    "per_wf_evaluable_actionable": 0.58,
+    "mean": 0.6,
+    "per_wf_selection": 0.05,
+    "pooled_long_short": 0.58
+  },
+  "p0_v14_corrections": [
+    "S1 = strongest development selector (not independently validated)",
+    "v1.4 test cohort excluded UNRESOLVED_CENSOR and NO_COMPARABLE_TARGET (~7.9%)",
+    "selector_by_symbol only n_selected>=50 -> pooled/sufficient-sample double-sided only"
+  ],
+  "forbidden": [
+    "新特征",
+    "FVG",
+    "OB",
+    "trend",
+    "pre-contact dynamics",
+    "新risk",
+    "stop/target优化",
+    "PnL",
+    "手续费假设",
+    "删品种",
+    "prospective OOS",
+    "LC"
+  ],
+  "trading_metrics": "NOT_APPLICABLE"
+}

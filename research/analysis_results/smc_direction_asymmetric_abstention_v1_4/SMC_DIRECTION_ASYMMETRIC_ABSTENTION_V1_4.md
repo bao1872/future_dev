@@ -17,6 +17,18 @@ TRADING_METRICS=NOT_APPLICABLE。
 - `RANK_STABLE_TAIL_DRIFT` 是 **descriptive protocol verdict**，
   **不是 independent OOS statistical proof**。
 
+### 0b. v1.5 对 v1.4 报告的收紧（P0）
+
+- 允许结论：**S1 是当前最强的 development selector**。
+- **不得写：已独立验证可执行。**
+- v1.4 test cohort **excluded** `UNRESOLVED_CENSOR`（~4,127）与
+  `NO_COMPARABLE_TARGET`（~3,540），合计约 **7.9% contacts**；因此
+  actionable ≈65.4% 是"在事后可解析约 92% contact universe 上"的开发结果，
+  不等于实盘全部 contact 的水平。（v1.5 专门修此项。）
+- `selector_by_symbol.csv` 只含 `n_selected >= 50` 的 symbol-cell，因此只能写：
+  **pooled 层面双边；足量 symbol-cell 中普遍双边**；
+  **不得写：所有 15 品种每个 WF 均验证双边 LONG/SHORT**。
+
 ---
 
 ## 1. P1 冻结模型
@@ -160,7 +172,10 @@ pooled predicted LONG/SHORT actionable≥0.58。
 
 ## 7. P13 按 symbol（S3 / S1，n_selected>=50，不删品种）
 
-见 `selector_by_symbol.csv`。
+见 `selector_by_symbol.csv`。**只含 n_selected>=50 的 symbol-cell**：
+结论只能是 **pooled 层面双边 + 足量 symbol-cell 中普遍双边**，
+**不得写"所有 15 品种每个 WF 都验证双边"**（有 WF 存在 n_selected&lt;50 的品种，
+如 S1 WF1 的 I）。
 
 ---
 

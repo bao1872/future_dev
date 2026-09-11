@@ -1,0 +1,63 @@
+{
+  "experiment": "SMC Direction Pre-Execution Integrity Gate v1.5",
+  "base_commit": "2117cb1",
+  "label_availability_checks": {
+    "frozen_clear_tradeoff_n": 89233,
+    "frozen_rows_missing_bars_to_stop": 0,
+    "frozen_rows_censored_lower_bound": 0,
+    "frozen_rows_label_avail_nat": 0,
+    "availability_index_out_of_range": 0,
+    "FATAL_LABEL_AVAILABILITY_SEMANTIC_FAIL": false,
+    "all_label_avail_ge_decision_time": true
+  },
+  "gate": {
+    "LABEL_AVAILABILITY_SAFE_DIRECTION": true,
+    "LIVE_UNIVERSE_SELECTOR_AUDITED": true,
+    "per_wf_evaluable_actionable": [
+      0.6539823008849558,
+      0.6526195899772209,
+      0.6849656893325016
+    ],
+    "mean_evaluable_actionable": 0.6638558600648927,
+    "pooled_LONG_actionable": 0.6643421664342166,
+    "pooled_SHORT_actionable": 0.6646706586826348,
+    "per_wf_selection_rate": [
+      0.04474385206346755,
+      0.07418166939443535,
+      0.07205999413465164
+    ],
+    "selection_ge_5pct_per_wf": false,
+    "LABEL_AVAILABILITY_SAFE_DIRECTION_STRICT_WITH_COVERAGE": false,
+    "coverage_caveat": "WF1 full-universe selection_rate=4.47% < 5%：P11 未把 coverage 列入 gate，故主 gate 仍 TRUE；若沿用 v1.2-v1.4 的 >=5% 规则则为 FALSE。请 reviewer 裁决。"
+  },
+  "live_readiness": {
+    "live_conservative_lower_bound": [
+      0.6376,
+      0.6321,
+      0.6384
+    ],
+    "selected_unknown_rate": [
+      0.025,
+      0.0314,
+      0.068
+    ],
+    "no_target_rate": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "duplicate_contact_rate": [
+      0.6437,
+      0.6784,
+      0.6884
+    ],
+    "conflict_contact_rate": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "note": "lower bound 只是完整 live-universe 的保守标签边界，不代表真实 execution precision；不做 profitability 结论。"
+  },
+  "next_step": "FIXED_EXECUTION_BASELINE_V1",
+  "trading_metrics": "NOT_APPLICABLE"
+}

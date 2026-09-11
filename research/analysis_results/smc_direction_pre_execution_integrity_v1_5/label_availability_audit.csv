@@ -1,0 +1,6 @@
+﻿rr_direction,n,n_label_avail_nat,n_long_bars_to_stop_null,n_short_bars_to_stop_null,median_lag_days
+LONG_DOMINATES,31847,0,0,0,0.9618
+SHORT_DOMINATES,33161,0,0,0,0.9583
+TRADEOFF_OR_OVERLAP,24225,0,0,0,0.184
+UNRESOLVED_CENSOR,4127,4127,3325,816,
+NO_COMPARABLE_TARGET,3540,3540,2676,978,
