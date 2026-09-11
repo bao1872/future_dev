@@ -1,0 +1,45 @@
+{
+  "experiment": "SMC Direction Identity & Feasibility Gate v1.0",
+  "base_commit": "647f9ad843e64e60aff14f7ef5103254b3848dbd",
+  "primary_risk": 1.0,
+  "oos_start": "2026-09-07",
+  "eligible_in_sample": 65008,
+  "rr_direction_at_risk1": {
+    "LONG_DOMINATES": 31847,
+    "SHORT_DOMINATES": 33161,
+    "TRADEOFF_OR_OVERLAP": 24225,
+    "UNRESOLVED_CENSOR": 4127,
+    "NO_COMPARABLE_TARGET": 3540
+  },
+  "roi_gate": {
+    "mean_WF_Lfull_AUC": 0.6161,
+    "per_WF_Lfull_AUC": {
+      "WF1": 0.5905,
+      "WF2": 0.6138,
+      "WF3": 0.6439
+    },
+    "top20_abs_dir_acc": 0.6046,
+    "n_symbols_auc_gt_05": 45,
+    "n_symbols_total": 15,
+    "macro_median_symbol_auc": 0.6216,
+    "DIRECTION_LEARNABLE": true,
+    "STRONG_DIRECTION_SIGNAL": false,
+    "WEAK_DIRECTION_SIGNAL": false,
+    "verdict": "DIRECTION_LEARNABLE"
+  },
+  "identity_enum_summary": {
+    "liquidity_type": 10,
+    "liquidity_scope": 6,
+    "contact_type": 5,
+    "side": 2,
+    "is_first_contact": 2
+  },
+  "governance": {
+    "trading_metrics": "NOT_APPLICABLE",
+    "no_pnl": true,
+    "no_fvg": true,
+    "no_external_internal": true,
+    "no_lc": true,
+    "atlas_v1_2_unchanged": true
+  }
+}

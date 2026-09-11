@@ -1,0 +1,128 @@
+{
+  "experiment": "SMC Direction Identity & Feasibility Gate v1.0",
+  "base_commit": "647f9ad843e64e60aff14f7ef5103254b3848dbd",
+  "primary_risk_ATR": 1.0,
+  "primary_label": "REVERSAL vs CONTINUATION",
+  "label_definition": "y_reversal=1 if outcome is reversal; reversal=SHORT when side=+1, reversal=LONG when side=-1",
+  "eligible": "rr_direction in {LONG_DOMINATES,SHORT_DOMINATES} @ risk=1.0",
+  "universe": [
+    "AG",
+    "AU",
+    "CU",
+    "AL",
+    "SN",
+    "NI",
+    "RB",
+    "I",
+    "SC",
+    "RU",
+    "MA",
+    "TA",
+    "M",
+    "P",
+    "CF"
+  ],
+  "blocks": [
+    "TB1",
+    "TB2",
+    "TB3",
+    "TB4"
+  ],
+  "walk_forward": [
+    {
+      "WF1": [
+        "TB1->TB2"
+      ]
+    },
+    {
+      "WF2": [
+        "TB1+TB2->TB3"
+      ]
+    },
+    {
+      "WF3": [
+        "TB1+TB2+TB3->TB4"
+      ]
+    }
+  ],
+  "oos_start": "2026-09-07 (prospective, excluded from all fit/threshold/gate)",
+  "feature_blocks": [
+    "D0_symbol_side",
+    "D1_contact_identity",
+    "D2_identity_aware_two_side_map",
+    "D3_interaction",
+    "D4_multitf_field(60bins)",
+    "D5_trend",
+    "D6_OB_context"
+  ],
+  "models": [
+    "L0",
+    "L_identity",
+    "L_map",
+    "L_core",
+    "L_core_field",
+    "L_core_trend",
+    "L_core_ob",
+    "L_full",
+    "N_core(HGB)",
+    "N_full(HGB)"
+  ],
+  "nonlinear": "HistGradientBoostingClassifier(max_depth=3,lr=0.05,max_iter=200,l2=1.0)",
+  "baselines": [
+    "ALWAYS_REVERSAL",
+    "ALWAYS_CONTINUATION",
+    "1H_TREND_ABSOLUTE",
+    "SIDE_REVERSAL",
+    "SIDE_CONTINUATION"
+  ],
+  "metrics": [
+    "ROC_AUC",
+    "PR_AUC",
+    "Balanced_Acc",
+    "Acc",
+    "LogLoss",
+    "Brier",
+    "abs_direction_accuracy"
+  ],
+  "gate": {
+    "DIRECTION_LEARNABLE": [
+      "mean WF L_full AUC>=0.58",
+      "all WF1/2/3 AUC>=0.54",
+      "Top20% test abs dir acc>=0.60",
+      ">=10/15 symbols AUC>0.5"
+    ],
+    "STRONG_DIRECTION_SIGNAL": [
+      "mean AUC>=0.62",
+      "Top20 abs dir acc>=0.65",
+      "macro median symbol AUC>=0.58"
+    ],
+    "WEAK_DIRECTION_SIGNAL": [
+      "full/core Logistic+nonlinear mean AUC<0.55",
+      "Top20 abs dir acc<0.58"
+    ]
+  },
+  "actual_gate_result": {
+    "mean_WF_Lfull_AUC": 0.6161,
+    "per_WF_Lfull_AUC": {
+      "WF1": 0.5905,
+      "WF2": 0.6138,
+      "WF3": 0.6439
+    },
+    "top20_abs_dir_acc": 0.6046,
+    "n_symbols_auc_gt_05": 45,
+    "n_symbols_total": 15,
+    "macro_median_symbol_auc": 0.6216,
+    "DIRECTION_LEARNABLE": true,
+    "STRONG_DIRECTION_SIGNAL": false,
+    "WEAK_DIRECTION_SIGNAL": false,
+    "verdict": "DIRECTION_LEARNABLE"
+  },
+  "governance": {
+    "trading_metrics": "NOT_APPLICABLE",
+    "no_pnl": true,
+    "no_fvg": true,
+    "no_external_internal": true,
+    "no_lc": true,
+    "atlas_v1_2_unchanged": true
+  }
+}

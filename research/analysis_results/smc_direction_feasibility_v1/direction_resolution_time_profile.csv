@@ -1,0 +1,2 @@
+field,status,note
+bars_to_best_lower / winning_side_reach_time,UNAVAILABLE_CANONICAL,"frozen oracle_risk_direction_v1_2 has only RR lower/upper, no reach-time. Computing requires path replay; per section 20 this is descriptive only and must NOT drive horizon/sample selection, so it is not produced this round."

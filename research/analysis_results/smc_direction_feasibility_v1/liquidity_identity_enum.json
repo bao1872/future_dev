@@ -1,0 +1,37 @@
+{
+  "liquidity_type": {
+    "PREV_CONTIG_SESSION_HIGH": 30209,
+    "PREV_CONTIG_SESSION_LOW": 29283,
+    "PREV_TRADING_DAY_HIGH": 7173,
+    "PREV_TRADING_DAY_LOW": 6671,
+    "CONFIRMED_SWING_HIGH": 5841,
+    "CONFIRMED_SWING_LOW": 5294,
+    "CANONICAL_EQH": 5034,
+    "CANONICAL_EQL": 4787,
+    "PREV_TRADING_WEEK_HIGH": 1413,
+    "PREV_TRADING_WEEK_LOW": 1195
+  },
+  "liquidity_scope": {
+    "CONTIG_SESSION": 59492,
+    "5m": 15395,
+    "TRADING_DAY": 13844,
+    "15m": 4406,
+    "TRADING_WEEK": 2608,
+    "1h": 1155
+  },
+  "contact_type": {
+    "PENETRATE_CLOSE_BEYOND": 30245,
+    "PENETRATE_RECLAIM": 22801,
+    "TOUCH_ONLY": 21359,
+    "GAP_CROSS": 16174,
+    "PENETRATE_CLOSE_AT": 6321
+  },
+  "side": {
+    "1": 49670,
+    "-1": 47230
+  },
+  "is_first_contact": {
+    "true": 76099,
+    "false": 20801
+  }
+}
