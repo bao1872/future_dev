@@ -1,0 +1,85 @@
+{
+  "liquidity_scope": [
+    "5m",
+    "15m",
+    "1h",
+    "CONTIG_SESSION",
+    "TRADING_DAY",
+    "TRADING_WEEK"
+  ],
+  "liquidity_type": [
+    "CANONICAL_EQH",
+    "CANONICAL_EQL",
+    "CONFIRMED_SWING_HIGH",
+    "CONFIRMED_SWING_LOW",
+    "PREV_CONTIG_SESSION_HIGH",
+    "PREV_CONTIG_SESSION_LOW",
+    "PREV_TRADING_DAY_HIGH",
+    "PREV_TRADING_DAY_LOW",
+    "PREV_TRADING_WEEK_HIGH",
+    "PREV_TRADING_WEEK_LOW"
+  ],
+  "n_liquidity_type": 10,
+  "type_column_map": {
+    "CANONICAL_EQH": {
+      "above": "nearest_above_type_CANONICAL_EQH_R",
+      "below": "nearest_below_type_CANONICAL_EQH_R",
+      "has_above": "has_above_type_CANONICAL_EQH",
+      "has_below": "has_below_type_CANONICAL_EQH"
+    },
+    "CANONICAL_EQL": {
+      "above": "nearest_above_type_CANONICAL_EQL_R",
+      "below": "nearest_below_type_CANONICAL_EQL_R",
+      "has_above": "has_above_type_CANONICAL_EQL",
+      "has_below": "has_below_type_CANONICAL_EQL"
+    },
+    "CONFIRMED_SWING_HIGH": {
+      "above": "nearest_above_type_CONFIRMED_SWING_HIGH_R",
+      "below": "nearest_below_type_CONFIRMED_SWING_HIGH_R",
+      "has_above": "has_above_type_CONFIRMED_SWING_HIGH",
+      "has_below": "has_below_type_CONFIRMED_SWING_HIGH"
+    },
+    "CONFIRMED_SWING_LOW": {
+      "above": "nearest_above_type_CONFIRMED_SWING_LOW_R",
+      "below": "nearest_below_type_CONFIRMED_SWING_LOW_R",
+      "has_above": "has_above_type_CONFIRMED_SWING_LOW",
+      "has_below": "has_below_type_CONFIRMED_SWING_LOW"
+    },
+    "PREV_CONTIG_SESSION_HIGH": {
+      "above": "nearest_above_type_PREV_CONTIG_SESSION_HIGH_R",
+      "below": "nearest_below_type_PREV_CONTIG_SESSION_HIGH_R",
+      "has_above": "has_above_type_PREV_CONTIG_SESSION_HIGH",
+      "has_below": "has_below_type_PREV_CONTIG_SESSION_HIGH"
+    },
+    "PREV_CONTIG_SESSION_LOW": {
+      "above": "nearest_above_type_PREV_CONTIG_SESSION_LOW_R",
+      "below": "nearest_below_type_PREV_CONTIG_SESSION_LOW_R",
+      "has_above": "has_above_type_PREV_CONTIG_SESSION_LOW",
+      "has_below": "has_below_type_PREV_CONTIG_SESSION_LOW"
+    },
+    "PREV_TRADING_DAY_HIGH": {
+      "above": "nearest_above_type_PREV_TRADING_DAY_HIGH_R",
+      "below": "nearest_below_type_PREV_TRADING_DAY_HIGH_R",
+      "has_above": "has_above_type_PREV_TRADING_DAY_HIGH",
+      "has_below": "has_below_type_PREV_TRADING_DAY_HIGH"
+    },
+    "PREV_TRADING_DAY_LOW": {
+      "above": "nearest_above_type_PREV_TRADING_DAY_LOW_R",
+      "below": "nearest_below_type_PREV_TRADING_DAY_LOW_R",
+      "has_above": "has_above_type_PREV_TRADING_DAY_LOW",
+      "has_below": "has_below_type_PREV_TRADING_DAY_LOW"
+    },
+    "PREV_TRADING_WEEK_HIGH": {
+      "above": "nearest_above_type_PREV_TRADING_WEEK_HIGH_R",
+      "below": "nearest_below_type_PREV_TRADING_WEEK_HIGH_R",
+      "has_above": "has_above_type_PREV_TRADING_WEEK_HIGH",
+      "has_below": "has_below_type_PREV_TRADING_WEEK_HIGH"
+    },
+    "PREV_TRADING_WEEK_LOW": {
+      "above": "nearest_above_type_PREV_TRADING_WEEK_LOW_R",
+      "below": "nearest_below_type_PREV_TRADING_WEEK_LOW_R",
+      "has_above": "has_above_type_PREV_TRADING_WEEK_LOW",
+      "has_below": "has_below_type_PREV_TRADING_WEEK_LOW"
+    }
+  }
+}

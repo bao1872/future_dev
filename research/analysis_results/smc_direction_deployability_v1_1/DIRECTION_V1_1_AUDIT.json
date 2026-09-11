@@ -1,0 +1,63 @@
+{
+  "experiment": "SMC Direction Deployability & Liquidity Map Decomposition v1.1",
+  "base_commit": "e7ee07937681c89f6da60c2264381085840b36ce",
+  "roi_gate": {
+    "DIRECTION_SIGNAL_CONFIRMED": true,
+    "DEPLOYABLE_DIRECTION_SELECTOR": false,
+    "LIQUIDITY_IDENTITY_INCREMENTAL": false,
+    "n_map_core_mean_auc": 0.6416,
+    "n_map_core_per_wf": {
+      "WF1": 0.6209,
+      "WF2": 0.6454,
+      "WF3": 0.6585
+    },
+    "cov20_macro_tail_accuracy": 0.6566,
+    "n_symbols_auc_gt_05": 45,
+    "macro_median_symbol_auc": 0.645,
+    "clear_gate_mean_auc": 0.7708,
+    "joint_actionable_precision": 0.4485,
+    "identity_incremental_point_delta": -0.0201,
+    "identity_incremental_wf_ci_lower_gt0": 0,
+    "verdict": "DIRECTION_SIGNAL_CONFIRMED"
+  },
+  "repair_audit": {
+    "v10_bugs_fixed": [
+      "reversal_label 非 clear 标签原返回错误值；现返回 NaN（P0.1）",
+      "by-symbol balanced_accuracy 原公式错误（k=0 仍在算 pred==1）；现用 sklearn（P0.2）",
+      "Gate Top20 原误用 L_full 全样本 accuracy；现删除，改用 P7 两尾 macro_tail（P0.3）",
+      "direction_feature_block_deltas 原 ad-hoc 修改未入脚本；现写回正式脚本（P0.4）",
+      "liquidity_type 真实为 10 种（原报告误写 9）（P0.5）"
+    ],
+    "reproducibility": "checkout e7ee079 + 本脚本一键重建所有小型输出"
+  },
+  "identity_enum_summary": {
+    "liquidity_type": 10,
+    "liquidity_scope": 6,
+    "contact_type": 5,
+    "side": 2,
+    "is_first_contact": 2
+  },
+  "reproducibility": {
+    "script_sha256": "b701aedbc3a4ea85",
+    "input_artifacts": {
+      "liquidity_master_v1_1.parquet": "9a48cc35987b8597",
+      "liquidity_contacts_v1_1.parquet": "e172c39dccb8f4c7",
+      "liquidity_state_snapshot_v1_2.parquet": "7937b4127dcebab8",
+      "oracle_risk_direction_v1_2.parquet": "a057eb581bbfd39b"
+    },
+    "output_rowcounts": {
+      "map_decomposition_metrics": 39,
+      "map_decomposition_paired_ci": 21,
+      "direction_by_symbol_corrected": 585,
+      "confidence_two_tail_metrics": 12,
+      "clear_direction_metrics": 12,
+      "joint_selector_metrics": 3,
+      "robust_direction_diagnostic": 12,
+      "risk_sensitivity_05_10_20": 18
+    },
+    "primary_risk": 1.0,
+    "oos_start": "2026-09-07",
+    "eligible_in_sample_risk1_clear": 65008,
+    "eligible_in_sample_risk1_robust": 65498
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "v10_bugs_fixed": [
+    "reversal_label 非 clear 标签原返回错误值；现返回 NaN（P0.1）",
+    "by-symbol balanced_accuracy 原公式错误（k=0 仍在算 pred==1）；现用 sklearn（P0.2）",
+    "Gate Top20 原误用 L_full 全样本 accuracy；现删除，改用 P7 两尾 macro_tail（P0.3）",
+    "direction_feature_block_deltas 原 ad-hoc 修改未入脚本；现写回正式脚本（P0.4）",
+    "liquidity_type 真实为 10 种（原报告误写 9）（P0.5）"
+  ],
+  "reproducibility": "checkout e7ee079 + 本脚本一键重建所有小型输出"
+}

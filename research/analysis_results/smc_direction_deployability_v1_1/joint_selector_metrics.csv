@@ -1,0 +1,4 @@
+﻿wf,selection_rate,n_selected,selected_clear_rate,direction_accuracy_given_clear,actionable_precision,LONG_actionable_precision,SHORT_actionable_precision
+WF1,0.1245,3070,0.9352,0.4466,0.4466,0.5117,0.4408
+WF2,0.0698,1562,0.9526,0.459,0.459,0.5301,0.4325
+WF3,0.0666,1457,0.9465,0.4399,0.4399,0.5053,0.4239

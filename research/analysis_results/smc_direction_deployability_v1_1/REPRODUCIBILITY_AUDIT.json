@@ -1,0 +1,23 @@
+{
+  "script_sha256": "b701aedbc3a4ea85",
+  "input_artifacts": {
+    "liquidity_master_v1_1.parquet": "9a48cc35987b8597",
+    "liquidity_contacts_v1_1.parquet": "e172c39dccb8f4c7",
+    "liquidity_state_snapshot_v1_2.parquet": "7937b4127dcebab8",
+    "oracle_risk_direction_v1_2.parquet": "a057eb581bbfd39b"
+  },
+  "output_rowcounts": {
+    "map_decomposition_metrics": 39,
+    "map_decomposition_paired_ci": 21,
+    "direction_by_symbol_corrected": 585,
+    "confidence_two_tail_metrics": 12,
+    "clear_direction_metrics": 12,
+    "joint_selector_metrics": 3,
+    "robust_direction_diagnostic": 12,
+    "risk_sensitivity_05_10_20": 18
+  },
+  "primary_risk": 1.0,
+  "oos_start": "2026-09-07",
+  "eligible_in_sample_risk1_clear": 65008,
+  "eligible_in_sample_risk1_robust": 65498
+}

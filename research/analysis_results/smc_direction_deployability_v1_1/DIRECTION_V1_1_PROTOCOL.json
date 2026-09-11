@@ -1,0 +1,58 @@
+{
+  "experiment": "SMC Direction Deployability & Liquidity Map Decomposition v1.1",
+  "base_commit": "e7ee07937681c89f6da60c2264381085840b36ce",
+  "primary_risk": 1.0,
+  "oos_start": "2026-09-07",
+  "liquidity_type_count": 10,
+  "liquidity_scope_count": 6,
+  "models": [
+    "M_ID",
+    "M_GLOBAL2",
+    "M_GLOBAL4",
+    "M_SCOPE12",
+    "M_GLOBAL_SCOPE",
+    "M_CORE",
+    "M_TYPE20",
+    "M_GLOBAL_TYPE",
+    "M_IDENTITY_MAP",
+    "M_MAP_CORE",
+    "N_GLOBAL4",
+    "N_IDENTITY_MAP",
+    "N_MAP_CORE",
+    "C_GLOBAL4",
+    "C_IDENTITY_MAP",
+    "C_MAP_CORE",
+    "CN_MAP_CORE",
+    "M_GLOBAL4",
+    "M_IDENTITY_MAP",
+    "M_MAP_CORE"
+  ],
+  "nonlinear": "HistGradientBoostingClassifier(max_depth=3,lr=0.05,max_iter=200,l2=1.0)",
+  "governance": {
+    "trading_metrics": "NOT_APPLICABLE",
+    "no_pnl": true,
+    "no_fvg": true,
+    "no_external_internal": true,
+    "no_lc": true,
+    "atlas_v1_2_unchanged": true
+  },
+  "gate": {
+    "DIRECTION_SIGNAL_CONFIRMED": true,
+    "DEPLOYABLE_DIRECTION_SELECTOR": false,
+    "LIQUIDITY_IDENTITY_INCREMENTAL": false,
+    "n_map_core_mean_auc": 0.6416,
+    "n_map_core_per_wf": {
+      "WF1": 0.6209,
+      "WF2": 0.6454,
+      "WF3": 0.6585
+    },
+    "cov20_macro_tail_accuracy": 0.6566,
+    "n_symbols_auc_gt_05": 45,
+    "macro_median_symbol_auc": 0.645,
+    "clear_gate_mean_auc": 0.7708,
+    "joint_actionable_precision": 0.4485,
+    "identity_incremental_point_delta": -0.0201,
+    "identity_incremental_wf_ci_lower_gt0": 0,
+    "verdict": "DIRECTION_SIGNAL_CONFIRMED"
+  }
+}
