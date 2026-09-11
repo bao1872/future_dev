@@ -1,0 +1,69 @@
+{
+  "experiment": "SMC Direction Deployability v1.1.1 Audit Repair",
+  "base_commit": "c3030c82341ea0604c7118b296223f17e0318584",
+  "retracted_v1_1": [
+    "DEPLOYABLE_DIRECTION_SELECTOR=FALSE (was artifact of P9 bug)",
+    "joint actionable_precision=0.4485 (clear-label model reused as direction)",
+    "'direction collapses on clear subset' (never actually tested)",
+    "v1.1 ROBUST diagnostic (used ad-hoc robust_dir, not frozen semantics)",
+    "by-symbol gate n_sym_auc_gt05=45 (counted WF-cells, not symbols)",
+    "risk-sensitivity abs_direction_accuracy at r0.5/r2.0 (used r1.0 rr)"
+  ],
+  "repairs": [
+    "P9 rewritten: clear (y_clear) and direction (y_rev) trained/predicted independently; assert not allclose",
+    "ROBUST uses frozen oracle_direction_stability_v1_2.parquet direction_stability; count audit enforced",
+    "by-symbol gate counts 15 symbols (macro AUC), keeps 45 WF-cells as secondary",
+    "risk sensitivity drops abs_direction_accuracy; AUC only",
+    "added J0/J1/J2 selectors; J0=v1.1 exact repair, J1/J2 post-hoc mechanism diagnostics"
+  ],
+  "frozen_robust": {
+    "NO_DIRECTION": 51836,
+    "RISK_DEPENDENT": 18495,
+    "ROBUST_SHORT": 9477,
+    "ROBUST_LONG": 9425,
+    "UNRESOLVED": 7667
+  },
+  "frozen_robust_contacts": 18902,
+  "rederived_y_rev_robust_notna": 18902,
+  "count_audit_pass": true,
+  "j0_actionable_precision": 0.4962,
+  "gate": {
+    "DEPLOYABLE_DIRECTION_SELECTOR": false,
+    "DIRECTION_SIGNAL_CONFIRMED": true,
+    "LIQUIDITY_IDENTITY_INCREMENTAL": false,
+    "RETRACTED_v1_1_DEPLOYABLE_FALSE": true,
+    "n_map_core_mean_auc": 0.6416,
+    "n_map_core_per_wf": {
+      "WF1": 0.6209,
+      "WF2": 0.6454,
+      "WF3": 0.6585
+    },
+    "cov20_macro_tail_accuracy": 0.6566,
+    "n_symbols_auc_gt_05": 15,
+    "n_symbols_total": 15,
+    "n_symbol_wf_cells_auc_gt05": 45,
+    "clear_gate_mean_auc": 0.7708,
+    "joint_actionable_precision_J0": 0.4962,
+    "joint_actionable_precision_J0_min_wf": 0.398,
+    "identity_incremental_point_delta": -0.0201,
+    "identity_incremental_wf_ci_lower_gt0": 0,
+    "verdict": "DIRECTION_SIGNAL_CONFIRMED"
+  },
+  "not_rerun_v1_1_conclusions": [
+    "GLOBAL geometry carries direction info",
+    "liquidity identity scope/type adds no stable increment",
+    "clear gate strong (AUC~0.78)",
+    "direction learnable (N_MAP_CORE~0.642, N_GLOBAL4~0.651)"
+  ],
+  "input_artifacts": {
+    "direction_features_v1_1.parquet": "b457d00f4666e750",
+    "oracle_direction_stability_v1_2.parquet": "b9370f190465747d"
+  },
+  "old_outputs_reused_for_gate": [
+    "map_decomposition_metrics.csv",
+    "direction_by_symbol_corrected.csv",
+    "confidence_two_tail_metrics.csv",
+    "clear_direction_metrics.csv",
+    "map_decomposition_paired_ci.csv"
+  ]
+}
