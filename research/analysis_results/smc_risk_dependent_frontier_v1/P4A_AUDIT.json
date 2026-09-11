@@ -1,0 +1,97 @@
+{
+  "experiment": "SMC Risk-dependent Frontier P4a Semantic Pilot",
+  "pilot_symbols": [
+    "AG",
+    "RB",
+    "I"
+  ],
+  "n_contacts_pilot": 22276,
+  "rr_direction_confusion": {
+    "LONG_DOMINATES": {
+      "LONG_DOMINATES": 51945,
+      "NO_COMPARABLE_TARGET": 0,
+      "SHORT_DOMINATES": 0,
+      "TRADEOFF_OR_OVERLAP": 0,
+      "UNRESOLVED_CENSOR": 0
+    },
+    "NO_COMPARABLE_TARGET": {
+      "LONG_DOMINATES": 0,
+      "NO_COMPARABLE_TARGET": 4802,
+      "SHORT_DOMINATES": 0,
+      "TRADEOFF_OR_OVERLAP": 0,
+      "UNRESOLVED_CENSOR": 0
+    },
+    "SHORT_DOMINATES": {
+      "LONG_DOMINATES": 0,
+      "NO_COMPARABLE_TARGET": 0,
+      "SHORT_DOMINATES": 51985,
+      "TRADEOFF_OR_OVERLAP": 0,
+      "UNRESOLVED_CENSOR": 0
+    },
+    "TRADEOFF_OR_OVERLAP": {
+      "LONG_DOMINATES": 0,
+      "NO_COMPARABLE_TARGET": 0,
+      "SHORT_DOMINATES": 0,
+      "TRADEOFF_OR_OVERLAP": 39739,
+      "UNRESOLVED_CENSOR": 0
+    },
+    "UNRESOLVED_CENSOR": {
+      "LONG_DOMINATES": 0,
+      "NO_COMPARABLE_TARGET": 0,
+      "SHORT_DOMINATES": 0,
+      "TRADEOFF_OR_OVERLAP": 0,
+      "UNRESOLVED_CENSOR": 7461
+    }
+  },
+  "class_match_rate": {
+    "LONG_DOMINATES": {
+      "frozen_n": 51945,
+      "match": 51945,
+      "rate": 1.0
+    },
+    "SHORT_DOMINATES": {
+      "frozen_n": 51985,
+      "match": 51985,
+      "rate": 1.0
+    },
+    "TRADEOFF_OR_OVERLAP": {
+      "frozen_n": 39739,
+      "match": 39739,
+      "rate": 1.0
+    },
+    "UNRESOLVED_CENSOR": {
+      "frozen_n": 7461,
+      "match": 7461,
+      "rate": 1.0
+    },
+    "NO_COMPARABLE_TARGET": {
+      "frozen_n": 4802,
+      "match": 4802,
+      "rate": 1.0
+    }
+  },
+  "hard_gate_long_short_100pct": true,
+  "oracle_field_match": {
+    "best_R_lower": {
+      "n": 311864,
+      "match": 311864,
+      "rate": 1.0
+    },
+    "best_R_upper": {
+      "n": 311864,
+      "match": 311864,
+      "rate": 1.0
+    },
+    "resolution_class": {
+      "n": 311864,
+      "match": 311864,
+      "rate": 1.0
+    }
+  },
+  "verdict": "P4A_PASS",
+  "governance": {
+    "trading_metrics": "NOT_APPLICABLE",
+    "no_pnl": true,
+    "atlas_v1_2_unchanged": true
+  }
+}

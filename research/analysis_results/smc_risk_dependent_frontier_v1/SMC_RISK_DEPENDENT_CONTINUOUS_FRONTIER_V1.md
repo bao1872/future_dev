@@ -86,7 +86,15 @@ dominance（方向主导 = 哪侧 `best_R_lower` 更大）与 `opportunity_label
 | MULTI_DIRECT_SWITCH | 1,360 | 1.4% |
 | UNRESOLVED_GRID_PATTERN | 104 | 0.1% |
 
-**直接 L↔S 翻转 contact = 18,406（18.99%）**，与冻结 `direction_stability=RISK_DEPENDENT`（18,495）**精确对应**（RD 内部拆解 8613+8418+1360+104=18,495）。即：冻结 RISK_DEPENDENT 本质上就是这 18,406 个直接翻转 contact——**机制真实存在，且与旧 19% 量级吻合（非巧合，是同一语义的两个视角）**。
+**直接 L↔S 翻转 contact = 18,406（18.99%）**，与冻结 `direction_stability=RISK_DEPENDENT`（18,495）**高度一致、但非逐 contact 完全等价**：
+
+- 冻结 `RISK_DEPENDENT` 中 direct switch = **18,391**（8613+8418+1360），另有 **104** 个 `UNRESOLVED_GRID_PATTERN`；
+- 冻结 `UNRESOLVED` 类中还有 **15** 个 direct switch（8+7）；
+- 故 P1.5 的 18,406 = 18,391（RD direct）+ 15（UNRESOLVED direct）。
+
+两套定义都基于冻结 `rr_direction`，给出几乎相同的约 19% 规模，但边界处有差异（UNRESOLVED_GRID_PATTERN vs 跨类的 direct switch）。这不影响 P1.5 Gate。
+
+> **P1.5 正式结论**：在冻结七档 Oracle 标签中，**约 19% 的 contact 表现出明确的 risk-dependent direction change**。此结论仅限离散七档标签上的结构事实，**尚未证明**是连续风险空间中的真实市场机制——那正是 P4 要验证的。
 
 **Grid midpoint（仅描述，非连续临界风险）：** 各相邻档中点 direct switch 数随区间宽度增加（0.375→265、0.625→1376、0.875→1806、1.25→4314、1.75→4341、2.5→7702）；`switches_per_ATR_width`（n/区间宽）反而前段更高（0.375 段密度 1060/ATR，2.5 段 7702/ATR 因区间宽 1.0 而密度最低）。→ 旧"2.5 比 1.25 多"**不能**证明市场偏好 2.5（区间更宽），反过来也不能否定 1.25；正确结论仍是"旧 1.25 是网格中点，连续阈值待 P4 求"。
 
@@ -101,7 +109,7 @@ dominance（方向主导 = 哪侧 `best_R_lower` 更大）与 `opportunity_label
 - C：TB1–TB4 均有 switch，最大块占比 29.7% ≤ 60% ✓
 - D：ROBUST_LONG/SHORT 无相反 switch ✓
 
-> **结论**：按冻结语义，Risk-dependent 是**真实且大规模（~19%）**的结构现象，P4 连续前沿 ROI 高。下一步按 P4 从原始 K 线重算 per-target `required_risk_ATR`（复用 `build_oracle_atlas_v1_2.py` 的 `active_mask`/same-bar consume/roll censor/ATR0 语义），回答"连续 switch 阈值是否仍在 ~1.2–1.3 集中、由哪级 target unlock 触发"。
+> **结论**：按冻结的 uncertainty-aware 七档语义，约 **19% 的 contact 在离散风险标签中表现出明确且大规模的 risk-dependent direction change**——但这仍是离散七档 Oracle 标签上的结构事实，尚未证明是连续市场机制。下一步按 P4a（3 品种语义复现试跑）→ P4b（15 品种连续前沿）从原始 K 线重算 per-target `required_risk_ATR`，回答"这些翻转在连续 risk 空间里还剩多少、由哪级 target unlock 触发"。
 
 ---
 
