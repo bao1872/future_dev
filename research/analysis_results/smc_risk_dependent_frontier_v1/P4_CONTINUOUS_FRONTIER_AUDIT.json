@@ -1,0 +1,82 @@
+{
+  "experiment": "SMC Risk-dependent Frontier P4b Continuous Frontier (15-symbol)",
+  "symbols": [
+    "AG",
+    "AU",
+    "CU",
+    "AL",
+    "SN",
+    "NI",
+    "RB",
+    "I",
+    "SC",
+    "RU",
+    "MA",
+    "TA",
+    "M",
+    "P",
+    "CF"
+  ],
+  "n_symbols": 15,
+  "rr_direction_full15_reproduced_100pct": true,
+  "n_contacts_total": 96900,
+  "classification_distribution_all": {
+    "AMBIGUOUS_SWITCH": 87708,
+    "NO_CONTINUOUS_SWITCH": 6031,
+    "DATA_END_CENSORED": 3093,
+    "CLEAR_SINGLE_CONTINUOUS_SWITCH": 42,
+    "CLEAR_MULTI_CONTINUOUS_SWITCH": 26
+  },
+  "primary_cohort": "RISK_DEPENDENT (frozen v1.2, 18495)",
+  "rd_classification": {
+    "AMBIGUOUS_SWITCH": 15789,
+    "DATA_END_CENSORED": 2647,
+    "CLEAR_SINGLE_CONTINUOUS_SWITCH": 39,
+    "CLEAR_MULTI_CONTINUOUS_SWITCH": 20
+  },
+  "rd_total": 18495,
+  "n_symbols_with_switch": 15,
+  "n_tb_with_switch": 4,
+  "continuous_threshold_overall": {
+    "n": 42258,
+    "median": 2.2,
+    "p25": 1.7647,
+    "p75": 2.6,
+    "p90": 2.8125,
+    "mean": 2.1196
+  },
+  "verdict": "OVERLAP_MEDIATED_RISK_DEPENDENT_TRANSITION",
+  "grid_vs_continuous": [
+    {
+      "estimate": "GRID_MIDPOINT_SWITCH_ESTIMATE (old, P1.5)",
+      "value": 1.25
+    },
+    {
+      "estimate": "continuous_critical_risk_median",
+      "value": 2.2
+    },
+    {
+      "estimate": "continuous_critical_risk_p25",
+      "value": 1.7647
+    },
+    {
+      "estimate": "continuous_critical_risk_p75",
+      "value": 2.6
+    },
+    {
+      "estimate": "continuous_critical_risk_p90",
+      "value": 2.8125
+    },
+    {
+      "estimate": "continuous_critical_risk_mean",
+      "value": 2.1196
+    }
+  ],
+  "governance": {
+    "trading_metrics": "NOT_APPLICABLE",
+    "no_pnl": true,
+    "atlas_v1_2_unchanged": true
+  },
+  "verdict_note": "不是 STRUCTURAL（无清晰 switch 主导，CLEAR 仅 0.3%）；也不是纯 GRID_ARTIFACT（方向确实随风险变化，NO_SWITCH=0%）；最接近 HETEROGENEOUS/OVERLAP_MEDIATED：方向敏感性真实、跨15品种/TB1-4复现，但表现为重叠中介的过渡而非干净 dominance 翻转。冻结7档 RISK_DEPENDENT 是粗采样假象（抓住了主导岛但漏掉岛间 overlap）。建议用户定夺：停线 / 转 regime 研究。",
+  "clear_pct_rd": 0.32
+}

@@ -330,3 +330,208 @@ def classify_rr_direction(O):
                  "best_R_lower_s": "short_R_lower",
                  "best_R_upper_s": "short_R_upper"})
     return RD
+
+
+def replay_contact(sym, r, ms, mp, mscope, hi, lo, disc, n):
+    """单 contact：返回 (oracle_rows, long_targets, short_targets, path_censored)。
+
+    long_targets/short_targets = 紧凑 per-target 列表
+    [{req_through, dist, price, cluster_size, scopes}]（仅已触达）。
+    供连续前沿 staircase 使用，避免物化巨型 target 表。
+    """
+    j = int(r.contact_bar_index)
+    if j >= n:
+        return None
+    entry = float(r.entry_reference)
+    a0 = float(r.atr0)
+    if not (np.isfinite(a0) and a0 > 0):
+        return None
+    dt = pd.Timestamp(r.decision_time)
+    dtn = np.datetime64(dt)
+    am = active_mask(ms, dtn)
+    vp, vs = mp[am], mscope[am]
+    di = np.flatnonzero(disc[j + 1:])
+    end_i = (j + 1 + int(di[0])) if len(di) else n
+    path_censored = "ROLL_CENSORED" if len(di) else "DATA_END_CENSORED"
+    H, L = hi[j + 1:end_i], lo[j + 1:end_i]
+    plen = len(H)
+    oracle_rows, long_targets, short_targets = [], [], []
+    for d, dname in ((+1, "LONG"), (-1, "SHORT")):
+        sgn = d * (vp - entry)
+        ok = sgn > 0
+        if not ok.any():
+            for risk in RISK_ATR_GRID:
+                oracle_rows.append(dict(
+                    liquidity_id=r.liquidity_id, contact_number=r.contact_number,
+                    symbol=sym, direction=dname, risk_ATR=risk,
+                    best_R_lower=np.nan, best_R_upper=np.nan,
+                    best_R_is_exact=False, resolution_class="NO_ACTIVE_TARGET",
+                    conservative_best_R=0.0, optimistic_best_R=0.0,
+                    stop_hit=False, bars_to_stop=None, ambiguous_intrabar=False,
+                    status="NO_ACTIVE_TARGET", path_censor=path_censored,
+                    path_len=plen, n_targets=0, best_target_price=None,
+                    best_target_cluster_size=0, best_target_scopes="",
+                    best_target_scope_count=0, best_target_min_scope=None,
+                    best_target_max_scope=None,
+                    **{f"best_target_has_{s_.lower()}": False
+                       for s_ in ("5m", "15m", "1h", "CONTIG_SESSION",
+                                  "TRADING_DAY", "TRADING_WEEK")}))
+            continue
+        tp, ts_ = vp[ok], vs[ok]
+        up_, inv = np.unique(tp, return_inverse=True)
+        order = np.argsort(d * (up_ - entry))
+        up_s = up_[order]
+        for row in reconstruct_oracle_grid(
+                H, L, entry, a0, d, up_s, ts_, inv, order, path_censored):
+            row.update(dict(liquidity_id=r.liquidity_id,
+                            contact_number=r.contact_number, symbol=sym,
+                            path_len=plen))
+            oracle_rows.append(row)
+        # 紧凑 target 表（连续前沿 staircase）
+        fav, adv = path_geometry(H, L, entry, a0, d)
+        target_dist = np.abs(up_s - entry) / a0
+        reach = np.searchsorted(fav, target_dist, side="left")
+        reached = reach < len(H)
+        req_through = np.full(len(up_s), np.nan)
+        req_through[reached] = adv[reach[reached]]
+        for k in range(len(up_s)):
+            if not reached[k]:
+                continue
+            gi = int(order[k])
+            m = inv == gi
+            scopes = sorted(set(ts_[m]))
+            tgt = dict(req_through=float(req_through[k]),
+                       dist=float(target_dist[k]), price=float(up_s[k]),
+                       cluster_size=int(m.sum()),
+                       scopes="|".join(scopes))
+            (long_targets if d == 1 else short_targets).append(tgt)
+    return dict(symbol=sym, liquidity_id=r.liquidity_id,
+                contact_number=r.contact_number, path_censor=path_censored,
+                oracle_rows=oracle_rows,
+                long_targets=long_targets, short_targets=short_targets)
+
+
+def replay_symbol_continuous(sym, contacts, master):
+    """全品种连续前沿 pilot 入口：返回 (oracle_df, contact_targets_list)。"""
+    five = load_raw_5m(sym).sort_values("bar_start_time").reset_index(drop=True)
+    t = pd.to_datetime(five["bar_start_time"]).to_numpy()
+    hi = five["high"].to_numpy(float)
+    lo = five["low"].to_numpy(float)
+    cl = five["close"].to_numpy(float)
+    atr = compute_atr5(dict(open=five["open"].to_numpy(float), high=hi,
+                            low=lo, close=cl, time=t, n=len(five)))
+    disc = discontinuity_flags(sym)
+    n = len(five)
+    ms = master[master["symbol"] == sym].reset_index(drop=True)
+    mp = ms["price"].to_numpy(float)
+    mscope = ms["liquidity_scope"].astype(str).to_numpy()
+    cc = contacts[contacts["symbol"] == sym].copy()
+    cc["interaction_time"] = pd.to_datetime(cc["decision_time"])
+    oracle_parts, cparts = [], []
+    for r in cc.itertuples(index=False):
+        rec = replay_contact(sym, r, ms, mp, mscope, hi, lo, disc, n)
+        if rec is None:
+            continue
+        oracle_parts.append(pd.DataFrame(rec["oracle_rows"]))
+        cparts.append({k: rec[k] for k in
+                       ("symbol", "liquidity_id", "contact_number",
+                        "path_censor", "long_targets", "short_targets")})
+    O = pd.concat(oracle_parts, ignore_index=True) if oracle_parts else \
+        pd.DataFrame()
+    return O, cparts
+
+
+def continuous_frontier_from_targets(long_targets, short_targets, path_censor,
+                                     risk_max=None):
+    """用户 P4b-2/3/4/5：从 per-target required_risk_through 建连续前沿。
+
+    严格复刻冻结 rr_direction 的 DOMINATES 语义：
+      LONG  ⇔  long_R_lower  > short_R_upper   （保守 LONG 仍胜过乐观 SHORT）
+      SHORT ⇔  short_R_lower > long_R_upper
+      否则 TIE（重叠 / 任一侧在 regime 内不可达）
+    - 真实 breakpoint = target 的 required_risk_through（不离散到人为网格）；
+    - 仅在与冻结 7 档同区间 risk ∈ [0, risk_max]（默认 = max RISK_ATR_GRID=3.0）
+      内判定，超出该 regime 的远处 target 不参与（那里未研究 direction）；
+    - 相邻开区间 LONG↔SHORT 翻转 = CONTINUOUS_DIRECTION_SWITCH，记录解锁 target；
+    - DATA_END 单 switch 记 DATA_END_CENSORED（不能确认）。
+    """
+    import bisect
+    if risk_max is None:
+        risk_max = float(max(RISK_ATR_GRID))
+    lt = sorted([x for x in long_targets if np.isfinite(x["req_through"])],
+                key=lambda x: x["req_through"])
+    st = sorted([x for x in short_targets if np.isfinite(x["req_through"])],
+                key=lambda x: x["req_through"])
+    if not lt and not st:
+        return dict(n_switch=0, classification="NO_CONTINUOUS_SWITCH",
+                    events=[], frontier=[])
+    lt_r = [x["req_through"] for x in lt]
+    lt_d = [x["dist"] for x in lt]
+    st_r = [x["req_through"] for x in st]
+    st_d = [x["dist"] for x in st]
+    # 前缀 max（lower 用 <r，upper 用 <=r，共用同一前缀 max 数组）
+    pm_l = []; cp = 0.0
+    for x in lt_d:
+        cp = max(cp, x); pm_l.append(cp)
+    pm_s = []; cs = 0.0
+    for x in st_d:
+        cs = max(cs, x); pm_s.append(cs)
+    bps = sorted({x for x in (lt_r + st_r) if x <= risk_max})
+
+    def best_lr(r, arr_r, pm):
+        # 返回 (lower, upper) best distance at risk r
+        ilo = bisect.bisect_left(arr_r, r)    # first req >= r  -> lower uses < r
+        ihi = bisect.bisect_right(arr_r, r)   # first req > r   -> upper uses <= r
+        lo = None if ilo == 0 else pm[ilo - 1]
+        hi = None if ihi == 0 else pm[ihi - 1]
+        return lo, hi
+
+    edges = [0.0] + bps + [risk_max]
+    seq = []
+    for i in range(len(edges) - 1):
+        a, b = edges[i], edges[i + 1]
+        r = (a + b) / 2.0
+        ll, lu = best_lr(r, lt_r, pm_l)
+        sl, su = best_lr(r, st_r, pm_s)
+        if ll is None and sl is None:
+            d = "NO_DIRECTION"
+        elif ll is None or sl is None:
+            d = "TIE"
+        elif ll > su:
+            d = "LONG"
+        elif sl > lu:
+            d = "SHORT"
+        else:
+            d = "TIE"
+        seq.append((a, b, d, ll, sl))
+
+    clean, changes = 0, 0
+    events = []
+    for i in range(len(seq) - 1):
+        d1, d2 = seq[i][2], seq[i + 1][2]
+        if d1 != d2:
+            changes += 1
+        if (d1 == "LONG" and d2 == "SHORT") or (d1 == "SHORT" and d2 == "LONG"):
+            crit = seq[i + 1][0]
+            unl = [x for x in lt + st if abs(x["req_through"] - crit) < 1e-9]
+            events.append(dict(
+                critical_risk_ATR=crit, switch_type=f"{d1}_TO_{d2}",
+                before_long_distance=seq[i][3], before_short_distance=seq[i][4],
+                after_long_distance=seq[i + 1][3],
+                after_short_distance=seq[i + 1][4],
+                unlock_targets=unl))
+            clean += 1
+
+    if clean == 0:
+        classification = "AMBIGUOUS_SWITCH" if changes > 0 \
+            else "NO_CONTINUOUS_SWITCH"
+    elif clean == 1:
+        classification = ("DATA_END_CENSORED"
+                         if path_censor == "DATA_END_CENSORED"
+                         else "CLEAR_SINGLE_CONTINUOUS_SWITCH")
+    else:
+        classification = ("AMBIGUOUS_SWITCH"
+                         if any(s[2] == "TIE" for s in seq)
+                         else "CLEAR_MULTI_CONTINUOUS_SWITCH")
+    return dict(n_switch=clean, classification=classification,
+                events=events, frontier=seq)
