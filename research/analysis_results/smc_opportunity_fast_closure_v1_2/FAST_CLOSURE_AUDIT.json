@@ -1,0 +1,62 @@
+{
+  "experiment": "SMC Opportunity Fast Closure Audit v1.2-lite (two-stage Gate)",
+  "base_commit": "a746e3e5402e71a44cf57dbf1b718f4610f8e2bd",
+  "prior_repaired_study": "SMC Opportunity Geometry Decomposition v1.1 (ff36930)",
+  "atlas_freeze_commit": "7ae7c1ae57b45bbc8bade1b5742fdc0353859c83",
+  "evidence_level": "internal_causal_temporal_walk_forward_TB1_to_TB4",
+  "is_independent_oos": false,
+  "prospective_oos_start": "2026-09-07",
+  "scope": "低成本终局 Gate：仅回答两个问题，不扩展复杂模型",
+  "risks_used": [0.5, 1.0, 2.0],
+  "primary_risk": 1.0,
+  "walk_forward": ["WF1:TB1->TB2", "WF2:TB1+TB2->TB3", "WF3:TB1+TB2+TB3->TB4"],
+  "bootstrap": "Stage 1 仅点估计，无 bootstrap（Gate 未通过即停）",
+
+  "q1_geometry_rule_sufficient": {
+    "definition": {
+      "R0": "score = -min(nearest_above_R, nearest_below_R) / risk_ATR (纯规则，不训练)",
+      "R2": "train on [nearest_above_R, nearest_below_R] (两特征几何)",
+      "R3": "B0 + G1 = [metadata] + [nearest_above_R, nearest_below_R]"
+    },
+    "result": {
+      "R0_auc": "0.769 (0.5ATR) / 0.775 (1.0ATR) / 0.807 (2.0ATR) 区间",
+      "R2_auc": "比 R0 高 +0.011 ~ +0.043, 均值 +0.026 (跨 9 个 risk×WF 单元全部 > 0)",
+      "R3_vs_R2": "ΔAUC 均值 -0.002 (≈0) -> metadata(B0) 零增量"
+    },
+    "verdict": "R0 单条归一化距离规则不够（Δ=0.026>0.01），但 R2（上下两条距离）即封顶，R3-R2≈0 说明 metadata 不增。Opportunity 可压缩为 2 特征几何，无需复杂 ML。"
+  },
+
+  "q2_g4_residual_material": {
+    "method": "temporal inner OOF (expanding 40/60/80% -> 预测随后 20%) 生成 p_g1 / p_g4；logit 后 meta：META_G1 vs META_G1_G4。禁止 in-sample stacking。",
+    "result": {
+      "mean_dAUC_meta": -0.0001,
+      "range_dAUC_meta": "[-0.0007, +0.0003]",
+      "n_cells_dAUC_gt_0p005": "0 / 9",
+      "auc_base_G1_vs_auc_base_G4": "G1 0.78~0.86; G4 0.72~0.80 (G4 单独明显弱于 G1)"
+    },
+    "verdict": "G4 在 G1 已知后残余增量 ≈ 0（9/9 全部 < 0.005）。冻结 Atlas 的 60 个 bin 字段无独立增量价值，不值得继续维护/研究。"
+  },
+
+  "stage1_gates": {
+    "A": "R0_INSUFFICIENT_TWO_SIDED_GEOMETRY_SUFFICIENT",
+    "B": "G4_RESIDUAL_NOT_MATERIAL",
+    "overall": "STOP_OPPORTUNITY_TWO_SIDED_GEOMETRY_SUFFICIENT"
+  },
+
+  "conclusion": "Opportunity 本质 = 上下两条 target 距离的简单几何。单条归一化规则不够（两侧不对称结构有信息），但两特征即封顶；metadata 与多周期 G4 字段均无增量。停止 Opportunity 复杂建模与 G4 字段维护，资源转入 RISK_DEPENDENT direction-switch 机制研究。",
+
+  "governance": {
+    "trading_metrics": "NOT_APPLICABLE",
+    "reason": "机制/去混淆实验，只回答'机制是否独立'，不产出交易指标、不定义交易动作。",
+    "no_pnl": true,
+    "no_direction_model": true,
+    "no_best_atr_search": true,
+    "no_lightgbm": true,
+    "no_shap": true,
+    "atlas_v1_2_unchanged": true
+  },
+
+  "relation_to_prior_v1_1": "延续 ff36930 已修复的 P1-P7（标签门/三路管线/tie-aware AUC/block bootstrap/paired delta）。本实验在已修复基础上做低成本收口 Gate；结论与 ff36930 'SIMPLE_GEOMETRY（G4 真实但被 G1 吸收）'一致并进一步收紧：G4 残余≈0，Opportunity 压缩为 2 特征几何。",
+
+  "next_step": "STOP Opportunity 复杂研究；下一主线 = RISK_DEPENDENT mechanism（紧 stop 单方向 -> 风险尺度扩大 -> 方向翻转，switch ATR 中位≈1.25ATR）。"
+}

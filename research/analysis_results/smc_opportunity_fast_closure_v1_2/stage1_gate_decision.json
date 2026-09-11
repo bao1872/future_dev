@@ -1,0 +1,22 @@
+{
+  "experiment": "SMC Opportunity Fast Closure Audit v1.2-lite",
+  "stage1_A_geometry": {
+    "mean_dAUC_R2_minus_R0": 0.0257,
+    "mean_dAUC_R3_minus_R2": -0.0021,
+    "threshold": 0.01,
+    "decision": "R0_INSUFFICIENT_TWO_SIDED_GEOMETRY_SUFFICIENT",
+    "detail": "R0 不够（ΔAUC=0.026>0.01），但 R2(上下两条距离) 即封顶，R3-R2=-0.002≈0 说明 metadata 零增量 -> 模型压缩为 2 特征几何，无需复杂 ML"
+  },
+  "stage1_B_g4_residual": {
+    "mean_dAUC_meta": -0.0001,
+    "n_cells_dAUC_gt_0p005": 0,
+    "n_cells_total": 9,
+    "risks_with_all3WF_positive": [],
+    "threshold_mean_dAUC": 0.01,
+    "threshold_risks_allpos": ">=2/3",
+    "decision": "G4_RESIDUAL_NOT_MATERIAL",
+    "detail": "G4 在 G1 之上无稳定正增量 -> 停止 Opportunity"
+  },
+  "overall": "STOP_OPPORTUNITY_TWO_SIDED_GEOMETRY_SUFFICIENT",
+  "note": "低成本 Gate：单条 R0 规则不够（Δ=0.026），但 R2(上下两条距离) 即封顶且 R3-R2≈0、G4 残余≈0 -> Opportunity 压缩为 2 特征几何规则，无 ML/metadata/G4 增量；研究收口，资源转 RISK_DEPENDENT。"
+}

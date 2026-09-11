@@ -269,11 +269,21 @@ for (r, wf_name), rb in roc_boot.items():
 pd.DataFrame(boot_rows).to_csv(OUT / "subblock_bootstrap_ci.csv", index=False,
                                encoding="utf-8-sig")
 
+# paired Δ CI —— 点估计必须用 ORIGINAL test sample（非 bootstrap 均值）
+point_delta = {}
+for (r, wf_name, yte, day_te, Pmat) in boot_req:
+    roc, pr, br, ll = metrics_vec(yte, Pmat)
+    for pk in PAIRED_KEYS:
+        num, den = PAIRED[pk]
+        ni, di = MIDX[num], MIDX[den]
+        point_delta[(r, wf_name, pk)] = dict(
+            dROC=roc[ni] - roc[di], dPR=pr[ni] - pr[di],
+            dBrier=br[ni] - br[di], dLL=ll[ni] - ll[di])
 # paired Δ CI
 pd_rows = []
 for (r, wf_name), rb in roc_boot.items():
     pb = pr_boot[(r, wf_name)]; bb = br_boot[(r, wf_name)]
-    gb = gain_boot[(r, wf_name)]
+    gb = gain_boot[(r, wf_name)]; lb = ll_boot[(r, wf_name)]
     for pk in PAIRED_KEYS:
         num, den = PAIRED[pk]
         ni, di = MIDX[num], MIDX[den]
@@ -281,18 +291,25 @@ for (r, wf_name), rb in roc_boot.items():
         d_pr = pb[:, ni] - pb[:, di]
         d_br = bb[:, ni] - bb[:, di]
         d_gain = gb[:, ni] - gb[:, di]
+        d_ll = lb[:, ni] - lb[:, di]
+        pt = point_delta[(r, wf_name, pk)]
         pd_rows.append(dict(
             risk_ATR=r, wf=wf_name, pair=pk,
             numerator=num, denominator=den,
+            dROC_point=pt["dROC"],
             dROC_lo=np.nanpercentile(d_roc, 2.5),
             dROC_hi=np.nanpercentile(d_roc, 97.5),
-            dROC_point=float(d_roc.mean()),
+            dPR_point=pt["dPR"],
             dPR_lo=np.nanpercentile(d_pr, 2.5),
             dPR_hi=np.nanpercentile(d_pr, 97.5),
+            dBrier_point=pt["dBrier"],
             dBrier_lo=np.nanpercentile(d_br, 2.5),
             dBrier_hi=np.nanpercentile(d_br, 97.5),
             dBottom20gain_lo=np.nanpercentile(d_gain, 2.5),
-            dBottom20gain_hi=np.nanpercentile(d_gain, 97.5)))
+            dBottom20gain_hi=np.nanpercentile(d_gain, 97.5),
+            dLogLoss_point=pt["dLL"],
+            dLogLoss_lo=np.nanpercentile(d_ll, 2.5),
+            dLogLoss_hi=np.nanpercentile(d_ll, 97.5)))
 pd.DataFrame(pd_rows).to_csv(OUT / "paired_delta_bootstrap_ci.csv", index=False,
                              encoding="utf-8-sig")
 
