@@ -4,6 +4,15 @@
 > 在离散标签中真实且规模大（~19%）；P4a 验证连续 path_geometry 与冻结 producer 逐位
 > 等价；P4b 在连续 risk 空间重建前沿并审判"离散翻转在连续空间还剩多少"。
 
+> ⚠️ **P4b 结论全部 PROVISIONAL / 已撤回（见 P4c）**。用户代码审计发现 P4b 的连续
+> evaluator 只存了 `req_through`、漏用 `req_before`，且"100% 复现"验证的是 7 档
+> `reconstruct_oracle_grid` 而非连续 evaluator 本身；2.2 统计被 unlock target 数加权、
+> scope 未做 enrichment。P4c 修复后结论见 **`P4C_RISK_DEPENDENT_FINAL.md`**：连续
+> evaluator 与冻结 `rr_direction` **100% 一致（678,300 行）**，主队列
+> RISK_DEPENDENT(18,495) 中 **99.26% 为 DIRECT_CONTINUOUS_SWITCH**，真实连续临界 risk
+> 中位 **~1.74 ATR**（非 1.25、非 2.2），overlap 过渡带罕见且窄，scope enrichment ≈ 1.0。
+> **裁决 = DIRECT_STRUCTURAL_SWITCH**。本文件保留为 P4b 原始过程记录，最终结论以 P4c 为准。
+
 ## 0. 方法（关键修正）
 
 - **连续前沿基础设施**：`cf_common.path_geometry()` 产出 `favorable/adverse`（ATR 单位）；

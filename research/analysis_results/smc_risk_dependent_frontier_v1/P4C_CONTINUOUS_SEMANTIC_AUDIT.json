@@ -1,0 +1,181 @@
+{
+  "experiment": "SMC Risk-dependent Frontier P4c Continuous Semantic Repair",
+  "symbols": [
+    "AG",
+    "AU",
+    "CU",
+    "AL",
+    "SN",
+    "NI",
+    "RB",
+    "I",
+    "SC",
+    "RU",
+    "MA",
+    "TA",
+    "M",
+    "P",
+    "CF"
+  ],
+  "n_symbols": 15,
+  "gate_overall_match_pct": 100.0,
+  "gate_pass": true,
+  "gate_per_symbol": [
+    [
+      "AG",
+      39193,
+      100.0
+    ],
+    [
+      "AU",
+      39025,
+      100.0
+    ],
+    [
+      "CU",
+      40348,
+      100.0
+    ],
+    [
+      "AL",
+      48930,
+      100.0
+    ],
+    [
+      "SN",
+      37891,
+      100.0
+    ],
+    [
+      "NI",
+      40411,
+      100.0
+    ],
+    [
+      "RB",
+      55615,
+      100.0
+    ],
+    [
+      "I",
+      61124,
+      100.0
+    ],
+    [
+      "SC",
+      42448,
+      100.0
+    ],
+    [
+      "RU",
+      41769,
+      100.0
+    ],
+    [
+      "MA",
+      44989,
+      100.0
+    ],
+    [
+      "TA",
+      44702,
+      100.0
+    ],
+    [
+      "M",
+      48412,
+      100.0
+    ],
+    [
+      "P",
+      38661,
+      100.0
+    ],
+    [
+      "CF",
+      54782,
+      100.0
+    ]
+  ],
+  "gate_mismatch_examples": [],
+  "primary_cohort": "RISK_DEPENDENT (frozen v1.2, 18495)",
+  "rd_total": 18495,
+  "rd_contact_class_distribution": {
+    "DIRECT_CONTINUOUS_SWITCH": 18358,
+    "OVERLAP_MEDIATED_TRANSITION": 137
+  },
+  "all_contact_class_distribution": {
+    "SINGLE_SIDE_DOMINANCE": 64927,
+    "DIRECT_CONTINUOUS_SWITCH": 19242,
+    "NO_CONTINUOUS_DIRECTION_CHANGE": 12585,
+    "OVERLAP_MEDIATED_TRANSITION": 146
+  },
+  "rd_transition_type_distribution": {
+    "DIRECT": 19846,
+    "OVERLAP_MEDIATED": 15924,
+    "CENSOR_MEDIATED": 589
+  },
+  "direct_switch_threshold_stats": {
+    "n": 19846,
+    "median": 1.7391,
+    "p25": 1.1538,
+    "p75": 2.3333,
+    "p90": 2.7143
+  },
+  "overlap_band_stats": {
+    "n": 184,
+    "start_median": 0.9938,
+    "end_median": 1.5529,
+    "width_median": 0.5373,
+    "center_median": 1.3235,
+    "center_p25": 0.9844,
+    "center_p75": 1.8
+  },
+  "censor_transition_count": 589,
+  "scope_enrichment": [
+    {
+      "scope": "5m",
+      "background_share": 0.1601,
+      "transition_share": 0.1637,
+      "enrichment": 1.022
+    },
+    {
+      "scope": "15m",
+      "background_share": 0.0798,
+      "transition_share": 0.071,
+      "enrichment": 0.89
+    },
+    {
+      "scope": "1h",
+      "background_share": 0.0373,
+      "transition_share": 0.0299,
+      "enrichment": 0.802
+    },
+    {
+      "scope": "CONTIG_SESSION",
+      "background_share": 0.4465,
+      "transition_share": 0.4751,
+      "enrichment": 1.064
+    },
+    {
+      "scope": "TRADING_DAY",
+      "background_share": 0.1987,
+      "transition_share": 0.1958,
+      "enrichment": 0.985
+    },
+    {
+      "scope": "TRADING_WEEK",
+      "background_share": 0.0777,
+      "transition_share": 0.0645,
+      "enrichment": 0.83
+    }
+  ],
+  "verdict": "DIRECT_STRUCTURAL_SWITCH",
+  "provisional_note": "P4b 的 CLEAR=0.32%/AMBIGUOUS=85.4%/2.2ATR/CONTIG_SESSION 主导 均 PROVISIONAL；P4c 已修正连续 evaluator 并重新分类。",
+  "governance": {
+    "trading_metrics": "NOT_APPLICABLE",
+    "no_pnl": true,
+    "no_predict": true,
+    "atlas_v1_2_unchanged": true
+  }
+}

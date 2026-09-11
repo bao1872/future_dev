@@ -333,11 +333,15 @@ def classify_rr_direction(O):
 
 
 def replay_contact(sym, r, ms, mp, mscope, hi, lo, disc, n):
-    """单 contact：返回 (oracle_rows, long_targets, short_targets, path_censored)。
+    """单 contact：返回 oracle_rows + 紧凑 per-target 表（含 req_before/req_through）。
 
-    long_targets/short_targets = 紧凑 per-target 列表
-    [{req_through, dist, price, cluster_size, scopes}]（仅已触达）。
-    供连续前沿 staircase 使用，避免物化巨型 target 表。
+    紧凑 target 字段（用户 P4c-1，reached 与 unreached 都保存）：
+      reached, dist, price, cluster_size, scopes,
+      required_before_ATR, required_through_ATR
+    - required_through = adv[reach_i]      （保守：risk>它⇒target 先于 stop）
+    - required_before  = adv[reach_i-1]    （乐观：risk>它⇒target bar 前未 stop）
+    二者独立；连续 evaluator 必须分别使用。
+    另返回 long_max_adverse / short_max_adverse（= adv[-1]，ATR 单位）。
     """
     j = int(r.contact_bar_index)
     if j >= n:
@@ -356,6 +360,7 @@ def replay_contact(sym, r, ms, mp, mscope, hi, lo, disc, n):
     H, L = hi[j + 1:end_i], lo[j + 1:end_i]
     plen = len(H)
     oracle_rows, long_targets, short_targets = [], [], []
+    long_max_adverse = short_max_adverse = 0.0
     for d, dname in ((+1, "LONG"), (-1, "SHORT")):
         sgn = d * (vp - entry)
         ok = sgn > 0
@@ -387,26 +392,44 @@ def replay_contact(sym, r, ms, mp, mscope, hi, lo, disc, n):
                             contact_number=r.contact_number, symbol=sym,
                             path_len=plen))
             oracle_rows.append(row)
-        # 紧凑 target 表（连续前沿 staircase）
+        # 紧凑 target 表（P4c：两个临界值都保存，reached/unreached 都保留）
         fav, adv = path_geometry(H, L, entry, a0, d)
+        max_adverse = float(adv[-1]) if len(adv) else 0.0
+        if d == 1:
+            long_max_adverse = max_adverse
+        else:
+            short_max_adverse = max_adverse
         target_dist = np.abs(up_s - entry) / a0
         reach = np.searchsorted(fav, target_dist, side="left")
         reached = reach < len(H)
+        req_before = np.where(reached & (reach > 0),
+                              adv[np.maximum(reach - 1, 0)], 0.0)
         req_through = np.full(len(up_s), np.nan)
         req_through[reached] = adv[reach[reached]]
+        tlist = long_targets if d == 1 else short_targets
         for k in range(len(up_s)):
-            if not reached[k]:
-                continue
             gi = int(order[k])
             m = inv == gi
             scopes = sorted(set(ts_[m]))
-            tgt = dict(req_through=float(req_through[k]),
-                       dist=float(target_dist[k]), price=float(up_s[k]),
-                       cluster_size=int(m.sum()),
-                       scopes="|".join(scopes))
-            (long_targets if d == 1 else short_targets).append(tgt)
+            if reached[k]:
+                tlist.append(dict(
+                    reached=True, dist=float(target_dist[k]),
+                    price=float(up_s[k]), cluster_size=int(m.sum()),
+                    scopes="|".join(scopes),
+                    required_before_ATR=float(req_before[k]),
+                    required_through_ATR=float(req_through[k])))
+            else:
+                # 有 active target 但没达到 != NO_ACTIVE；保留以备完整语义
+                tlist.append(dict(
+                    reached=False, dist=float(target_dist[k]),
+                    price=float(up_s[k]), cluster_size=int(m.sum()),
+                    scopes="|".join(scopes),
+                    required_before_ATR=np.nan,
+                    required_through_ATR=np.nan))
     return dict(symbol=sym, liquidity_id=r.liquidity_id,
                 contact_number=r.contact_number, path_censor=path_censored,
+                long_max_adverse=long_max_adverse,
+                short_max_adverse=short_max_adverse,
                 oracle_rows=oracle_rows,
                 long_targets=long_targets, short_targets=short_targets)
 
@@ -435,103 +458,204 @@ def replay_symbol_continuous(sym, contacts, master):
         oracle_parts.append(pd.DataFrame(rec["oracle_rows"]))
         cparts.append({k: rec[k] for k in
                        ("symbol", "liquidity_id", "contact_number",
-                        "path_censor", "long_targets", "short_targets")})
+                        "path_censor", "long_max_adverse", "short_max_adverse",
+                        "long_targets", "short_targets")})
     O = pd.concat(oracle_parts, ignore_index=True) if oracle_parts else \
         pd.DataFrame()
     return O, cparts
 
 
-def continuous_frontier_from_targets(long_targets, short_targets, path_censor,
-                                     risk_max=None):
-    """用户 P4b-2/3/4/5：从 per-target required_risk_through 建连续前沿。
+# ---------------------------------------------------------------------------
+# P4c 连续 evaluator（用户 P4c-2/3/4）：逐位复刻冻结 v1.2 uncertainty/censor 语义
+# ---------------------------------------------------------------------------
+def prep_side(targets, max_adverse):
+    """预计算单方向阈值数组，供 bounds_at 快速查询。
 
-    严格复刻冻结 rr_direction 的 DOMINATES 语义：
-      LONG  ⇔  long_R_lower  > short_R_upper   （保守 LONG 仍胜过乐观 SHORT）
-      SHORT ⇔  short_R_lower > long_R_upper
-      否则 TIE（重叠 / 任一侧在 regime 内不可达）
-    - 真实 breakpoint = target 的 required_risk_through（不离散到人为网格）；
-    - 仅在与冻结 7 档同区间 risk ∈ [0, risk_max]（默认 = max RISK_ATR_GRID=3.0）
-      内判定，超出该 regime 的远处 target 不参与（那里未研究 direction）；
-    - 相邻开区间 LONG↔SHORT 翻转 = CONTINUOUS_DIRECTION_SWITCH，记录解锁 target；
-    - DATA_END 单 switch 记 DATA_END_CENSORED（不能确认）。
+    - 若有 active target（targets 非空）则 has_active=True，即使全 unreached；
+      仅当 targets 为空（无 active liquidity）才 NO_ACTIVE_TARGET。
+    - thr/bef 仅来自 reached target 的 required_through / required_before。
+    """
+    if not targets:
+        return dict(has_active=False, max_adverse=float(max_adverse))
+    reached = [t for t in targets if t["reached"]]
+    thr = sorted((float(t["required_through_ATR"]), float(t["dist"]))
+                 for t in reached
+                 if np.isfinite(t.get("required_through_ATR")))
+    bef = sorted((float(t["required_before_ATR"]), float(t["dist"]))
+                 for t in reached
+                 if np.isfinite(t.get("required_before_ATR")))
+
+    def pm(arr):
+        out, c = [], 0.0
+        for _, d in arr:
+            c = max(c, d)
+            out.append(c)
+        return out
+
+    return dict(has_active=True, max_adverse=float(max_adverse),
+                thr=[x[0] for x in thr], thr_pm=pm(thr),
+                bef=[x[0] for x in bef], bef_pm=pm(bef))
+
+
+def bounds_at(prep, r):
+    """单方向在 risk=r 的 (state, lower, upper)，复刻冻结 oracle_direction。
+
+    - r > max_adverse ⇒ stop 未在观测路径内发生 ⇒ CENSORED_LOWER_BOUND，
+      lower = 已达最大 target 距离，upper = NaN。
+    - 否则 lower = max{ dist : required_through < r }（保守），
+      upper = max{ dist : required_before < r }（乐观）。
+    因 adv 单调非减，required_through<r ⇔ reach<stop_idx，
+    required_before<r ⇔ reach<=stop_idx，与冻结一致。
     """
     import bisect
+    if not prep["has_active"]:
+        return dict(state="NO_ACTIVE_TARGET", lower=np.nan, upper=np.nan)
+    if r > prep["max_adverse"]:
+        low = prep["thr_pm"][-1] if prep["thr_pm"] else 0.0
+        return dict(state="CENSORED_LOWER_BOUND", lower=low, upper=np.nan)
+    ilo = bisect.bisect_left(prep["thr"], r)
+    lo = prep["thr_pm"][ilo - 1] if ilo > 0 else 0.0
+    ihi = bisect.bisect_left(prep["bef"], r)
+    up = prep["bef_pm"][ihi - 1] if ihi > 0 else 0.0
+    state = "EXACT_RESOLVED" if lo == up else "AMBIGUOUS_INTERVAL"
+    return dict(state=state, lower=lo, upper=up)
+
+
+def continuous_pair_direction(bl, bs, r):
+    """复刻冻结 np.select（用户 P4c-4）。比较用 4 位 RR rounding 以匹配冻结。"""
+    if (bl["state"] == "NO_ACTIVE_TARGET"
+            or bs["state"] == "NO_ACTIVE_TARGET"):
+        return "NO_COMPARABLE_TARGET"
+    ll = round(bl["lower"] / r, 4) if np.isfinite(bl["lower"]) else np.nan
+    lu = round(bl["upper"] / r, 4) if np.isfinite(bl["upper"]) else np.nan
+    sl = round(bs["lower"] / r, 4) if np.isfinite(bs["lower"]) else np.nan
+    su = round(bs["upper"] / r, 4) if np.isfinite(bs["upper"]) else np.nan
+    if np.isnan(lu) or np.isnan(su):
+        return "UNRESOLVED_CENSOR"
+    if ll > su:
+        return "LONG_DOMINATES"
+    if sl > lu:
+        return "SHORT_DOMINATES"
+    return "TRADEOFF_OR_OVERLAP"
+
+
+def _transition_type(f, t):
+    if {f, t} == {"LONG_DOMINATES", "SHORT_DOMINATES"}:
+        return "DIRECT"
+    if "UNRESOLVED_CENSOR" in (f, t):
+        return "CENSOR_MEDIATED"
+    if ("TRADEOFF_OR_OVERLAP" in (f, t)
+            or "NO_COMPARABLE_TARGET" in (f, t)):
+        return "OVERLAP_MEDIATED"
+    return "OTHER"
+
+
+def continuous_frontier_analyze(long_targets, short_targets,
+                                long_max_adverse, short_max_adverse,
+                                path_censor, risk_max=None):
+    """用户 P4c-5..14：连续方向前沿 + transition 分类（5 态序列）。
+
+    返回 dict：seq（开区间 5 态）、transitions（每对相邻态变化）、
+    contact_class、overlap_bands、各标志位。
+    """
     if risk_max is None:
         risk_max = float(max(RISK_ATR_GRID))
-    lt = sorted([x for x in long_targets if np.isfinite(x["req_through"])],
-                key=lambda x: x["req_through"])
-    st = sorted([x for x in short_targets if np.isfinite(x["req_through"])],
-                key=lambda x: x["req_through"])
-    if not lt and not st:
-        return dict(n_switch=0, classification="NO_CONTINUOUS_SWITCH",
-                    events=[], frontier=[])
-    lt_r = [x["req_through"] for x in lt]
-    lt_d = [x["dist"] for x in lt]
-    st_r = [x["req_through"] for x in st]
-    st_d = [x["dist"] for x in st]
-    # 前缀 max（lower 用 <r，upper 用 <=r，共用同一前缀 max 数组）
-    pm_l = []; cp = 0.0
-    for x in lt_d:
-        cp = max(cp, x); pm_l.append(cp)
-    pm_s = []; cs = 0.0
-    for x in st_d:
-        cs = max(cs, x); pm_s.append(cs)
-    bps = sorted({x for x in (lt_r + st_r) if x <= risk_max})
+    lp = prep_side(long_targets, long_max_adverse)
+    sp = prep_side(short_targets, short_max_adverse)
 
-    def best_lr(r, arr_r, pm):
-        # 返回 (lower, upper) best distance at risk r
-        ilo = bisect.bisect_left(arr_r, r)    # first req >= r  -> lower uses < r
-        ihi = bisect.bisect_right(arr_r, r)   # first req > r   -> upper uses <= r
-        lo = None if ilo == 0 else pm[ilo - 1]
-        hi = None if ihi == 0 else pm[ihi - 1]
-        return lo, hi
+    def side_at(side_prep, r):
+        return bounds_at(side_prep, r)
 
+    # breakpoint = 所有 required_before/through + max_adverse，限 (0, risk_max)
+    bps = []
+    for t in long_targets + short_targets:
+        for key in ("required_before_ATR", "required_through_ATR"):
+            v = t.get(key)
+            if np.isfinite(v) and 0.0 < v < risk_max:
+                bps.append(v)
+    for mv in (long_max_adverse, short_max_adverse):
+        if 0.0 < mv < risk_max:
+            bps.append(mv)
+    bps = sorted(set(round(x, 9) for x in bps))
     edges = [0.0] + bps + [risk_max]
+
     seq = []
     for i in range(len(edges) - 1):
         a, b = edges[i], edges[i + 1]
         r = (a + b) / 2.0
-        ll, lu = best_lr(r, lt_r, pm_l)
-        sl, su = best_lr(r, st_r, pm_s)
-        if ll is None and sl is None:
-            d = "NO_DIRECTION"
-        elif ll is None or sl is None:
-            d = "TIE"
-        elif ll > su:
-            d = "LONG"
-        elif sl > lu:
-            d = "SHORT"
+        bl = side_at(lp, r)
+        bs = side_at(sp, r)
+        st = continuous_pair_direction(bl, bs, r)
+        seq.append(dict(a=a, b=b, state=st,
+                        ll=bl["lower"], lu=bl["upper"],
+                        sl=bs["lower"], su=bs["upper"]))
+
+    transitions = []
+    n = len(seq)
+    for i in range(n - 1):
+        s1, s2 = seq[i]["state"], seq[i + 1]["state"]
+        if s1 == s2:
+            continue
+        bp = seq[i + 1]["a"]
+        unl = []
+        for side, tlist in (("LONG", long_targets), ("SHORT", short_targets)):
+            for t in tlist:
+                for key, tt in (("required_before_ATR", "before"),
+                                ("required_through_ATR", "through")):
+                    v = t.get(key)
+                    if np.isfinite(v) and abs(v - bp) < 1e-9:
+                        unl.append(dict(side=side, price=t["price"],
+                                        dist=t["dist"],
+                                        cluster_size=t["cluster_size"],
+                                        scopes=t["scopes"],
+                                        threshold_type=tt,
+                                        threshold_ATR=v))
+        transitions.append(dict(from_state=s1, to_state=s2,
+                               critical_risk_ATR=bp,
+                               transition_type=_transition_type(s1, s2),
+                               unlock_targets=unl))
+
+    # overlap band：TRADEOFF 连续区间，且左右邻均为 dominance
+    overlap_bands = []
+    i = 0
+    while i < n:
+        if seq[i]["state"] == "TRADEOFF_OR_OVERLAP":
+            j = i
+            while j < n and seq[j]["state"] == "TRADEOFF_OR_OVERLAP":
+                j += 1
+            start, end = seq[i]["a"], seq[j - 1]["b"]
+            left = seq[i - 1]["state"] if i > 0 else None
+            right = seq[j]["state"] if j < n else None
+            if left in ("LONG_DOMINATES", "SHORT_DOMINATES") and \
+               right in ("LONG_DOMINATES", "SHORT_DOMINATES"):
+                overlap_bands.append(dict(start=start, end=end,
+                                          width=end - start,
+                                          center=(start + end) / 2.0,
+                                          left=left, right=right))
+            i = j
         else:
-            d = "TIE"
-        seq.append((a, b, d, ll, sl))
+            i += 1
 
-    clean, changes = 0, 0
-    events = []
-    for i in range(len(seq) - 1):
-        d1, d2 = seq[i][2], seq[i + 1][2]
-        if d1 != d2:
-            changes += 1
-        if (d1 == "LONG" and d2 == "SHORT") or (d1 == "SHORT" and d2 == "LONG"):
-            crit = seq[i + 1][0]
-            unl = [x for x in lt + st if abs(x["req_through"] - crit) < 1e-9]
-            events.append(dict(
-                critical_risk_ATR=crit, switch_type=f"{d1}_TO_{d2}",
-                before_long_distance=seq[i][3], before_short_distance=seq[i][4],
-                after_long_distance=seq[i + 1][3],
-                after_short_distance=seq[i + 1][4],
-                unlock_targets=unl))
-            clean += 1
-
-    if clean == 0:
-        classification = "AMBIGUOUS_SWITCH" if changes > 0 \
-            else "NO_CONTINUOUS_SWITCH"
-    elif clean == 1:
-        classification = ("DATA_END_CENSORED"
-                         if path_censor == "DATA_END_CENSORED"
-                         else "CLEAR_SINGLE_CONTINUOUS_SWITCH")
+    states = [s["state"] for s in seq]
+    has_long = "LONG_DOMINATES" in states
+    has_short = "SHORT_DOMINATES" in states
+    has_trade = "TRADEOFF_OR_OVERLAP" in states
+    has_cens = "UNRESOLVED_CENSOR" in states
+    direct = any(tr["transition_type"] == "DIRECT" for tr in transitions)
+    if not has_long and not has_short:
+        contact_class = "NO_CONTINUOUS_DIRECTION_CHANGE"
+    elif has_long and has_short:
+        if direct:
+            contact_class = "DIRECT_CONTINUOUS_SWITCH"
+        elif has_cens and not has_trade:
+            contact_class = "CENSOR_MEDIATED_UNRESOLVED"
+        else:
+            contact_class = "OVERLAP_MEDIATED_TRANSITION"
     else:
-        classification = ("AMBIGUOUS_SWITCH"
-                         if any(s[2] == "TIE" for s in seq)
-                         else "CLEAR_MULTI_CONTINUOUS_SWITCH")
-    return dict(n_switch=clean, classification=classification,
-                events=events, frontier=seq)
+        contact_class = "SINGLE_SIDE_DOMINANCE"
+
+    return dict(seq=seq, transitions=transitions,
+                contact_class=contact_class, overlap_bands=overlap_bands,
+                has_long=has_long, has_short=has_short,
+                has_tradeoff=has_trade, has_censor=has_cens,
+                direct=direct, n_transitions=len(transitions))
