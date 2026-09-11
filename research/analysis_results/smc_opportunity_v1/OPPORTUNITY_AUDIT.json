@@ -1,0 +1,70 @@
+{
+  "study": "SMC Structural Delivery Opportunity Study v1.0",
+  "atlas_freeze_commit": "7ae7c1ae57b45bbc8bade1b5742fdc0353859c83",
+  "temporal_block_definition_hash": "b51fe7952bc1311aed83409889cd6706a6bc173cd4ed2f6e96570340183ac3d6",
+  "feature_manifest_hash": "dd459be75d68c487",
+  "risk_grid": [0.25, 0.50, 0.75, 1.00, 1.50, 2.00, 3.00],
+  "evidence_level": "internal_causal_temporal_walk_forward_TB1_to_TB4",
+  "is_independent_oos": false,
+  "prospective_oos_start_trading_day": "2026-09-07",
+  "legacy_semantic_correction": {
+    "old_field": "NO_REACH",
+    "true_definition": "n_both_pos == 0 (no risk band with LONG and SHORT both CERTAIN_REACH)",
+    "renamed_to": "LEGACY_NO_BIDIRECTIONAL_REACH",
+    "unconditional_share_of_contacts": 0.7004,
+    "conditional_share_within_NO_DIRECTION": 0.4599,
+    "within_original_86pct_cohort_contacts": 44569,
+    "within_original_86pct_cohort_has_single_sided_delivery": 0.9063,
+    "within_original_86pct_cohort_truly_no_delivery_all_risk": 0.0921,
+    "truly_no_delivery_all_risk_count": 4103,
+    "verdict": "old '86% no path' claim WITHDRAWN; true never-delivery is ~9% of that cohort"
+  },
+  "learnability_verdict": "LEARNABLE",
+  "verdict_criteria_met": {
+    "full_vs_M0_direction_consistent_across_WF": true,
+    "brier_logloss_not_systematically_worse": true,
+    "bottom20_delivery_rate_stable_below_base_CI_positive": true,
+    "majority_symbols_direction_consistent": true,
+    "bootstrap_delta_not_single_period": true
+  },
+  "dominant_information_block": "B2_liquidity_target_geometry",
+  "block_marginal_dROC_vs_M0_summary": {
+    "M_liquidity": "+0.08 to +0.17",
+    "M_contact": "+0.01 to +0.03",
+    "M_trend": "~0 (slightly negative)",
+    "M_ob": "~0 (slightly negative)"
+  },
+  "conditional_increment_Full_minus_block_summary": {
+    "remove_liquidity": "+0.06 to +0.14 (the whole gain)",
+    "remove_contact": "~0",
+    "remove_trend": "~0",
+    "remove_ob": "~0"
+  },
+  "cross_symbol": {
+    "M_liquidity_per_symbol_AUC_delta_positive_symbols": "15/15 at every risk",
+    "M_liquidity_macro_median_delta": "0.10 to 0.26",
+    "M_trend_M_ob_per_symbol_delta": "~0"
+  },
+  "bootstrap_CI_M_full_AUC": {
+    "min_lo": 0.594, "max_hi": 0.866,
+    "note": "all CIs far above 0.5"
+  },
+  "bottom20_avoidance_gain_CI": {
+    "range": "0.07 to 0.30",
+    "note": "all CIs positive; filtering bottom-20% predicted cuts delivery rate by 7-30pp"
+  },
+  "hypotheses": {
+    "H1_liquidity_main_block": "CONFIRMED",
+    "H2_contact_extra_info": "WEAK (small positive)",
+    "H3_trend_no_preset": "CONFIRMED no increment (direction-neutral negative result)",
+    "H4_OB_proxies_liquidity": "CONFIRMED (OB adds ~0 beyond liquidity)"
+  },
+  "priority_recommendation": "Opportunity > Risk-dependent mechanism > Robust Direction (unchanged), but Opportunity value is concentrated in liquidity/target geometry, not SMC trend/OB narrative",
+  "next_steps": [
+    "Decompose B2 sub-features (nearest distance vs same_price_identity_count vs n_targets vs scope distance bins) to locate the carrying signal",
+    "Focus low-delivery filtering on tight stops 0.25-1.0 ATR where NO_DELIVERY prevalence is 25-53%",
+    "Do not build separate trend/OB models for this question",
+    "Validate with true prospective OOS once trading_day>=2026-09-07 Oracle paths are resolvable"
+  ],
+  "excluded_claims": ["PnL", "strategy backtest", "best stop", "Long/Short direction model", "LightGBM/CatBoost/SHAP/auto-feature-search"]
+}

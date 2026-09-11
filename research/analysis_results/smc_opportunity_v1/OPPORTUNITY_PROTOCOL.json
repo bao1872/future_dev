@@ -1,0 +1,35 @@
+{
+  "study": "SMC Structural Delivery Opportunity Study v1.0",
+  "atlas_freeze_commit": "7ae7c1ae57b45bbc8bade1b5742fdc0353859c83",
+  "temporal_block_definition_hash": "b51fe7952bc1311aed83409889cd6706a6bc173cd4ed2f6e96570340183ac3d6",
+  "feature_manifest_hash": "dd459be75d68c487aaef6b9d15deeb309283b8f628635b8c4cc3dc98a9f6edb4",
+  "risk_grid": [
+    0.25,
+    0.5,
+    0.75,
+    1.0,
+    1.5,
+    2.0,
+    3.0
+  ],
+  "prospective_oos_start_trading_day": "2026-09-07",
+  "evidence_level": "描述性 + 内部因果时间泛化(walk-forward TB1->TB4)；非独立 OOS validation。",
+  "preregistered_hypotheses": {
+    "H1": "B2(liquidity/target geometry) 应是 Opportunity 最主要信息块之一。",
+    "H2": "B1(contact geometry) 应提供额外信息。",
+    "H3": "B3(trend) 对‘有没有 delivery’的增量不作预设（方向未知）。",
+    "H4": "若 M_ob-M0>0 但 Full-Full_minus_OB≈0，则 OB 主要代理 liquidity/geometry，无独立上下文价值。"
+  },
+  "verdict_criteria": {
+    "LEARNABLE": "Full 相对 M0 主要 ranking metric 跨 WF 方向一致；Brier/LogLoss 不系统恶化；Bottom20 delivery rate 稳定低于 base；多数品种方向一致；bootstrap delta 非单一时期贡献。",
+    "WEAK": "存在少量增量但不跨时期/品种稳定。",
+    "NOT_LEARNABLE": "Full≈M0 且 Bottom20 几乎不能富集 NO_DELIVERY。",
+    "REGIME_DEPENDENT": "不同 TB/WF 明显方向变化。"
+  },
+  "forbidden_claims": [
+    "PnL / 策略回测",
+    "最佳止损",
+    "Long/Short 正式方向模型",
+    "LightGBM/CatBoost/SHAP/自动特征搜索"
+  ]
+}
