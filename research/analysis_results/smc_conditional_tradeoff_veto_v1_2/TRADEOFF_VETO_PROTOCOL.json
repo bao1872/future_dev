@@ -1,0 +1,110 @@
+{
+  "experiment": "SMC Conditional Tradeoff Veto v1.2",
+  "base_commit": "1c16a08141fc4aabbbafad5f2ebffdc73013f04d",
+  "question": "在进入高置信 Continuation candidate 的事件里，能否事前识别 TRADEOFF toxic cases 并 veto，且不损伤 clear trades？",
+  "frozen": {
+    "risk": 1.0,
+    "baseline_selector": "CLEAR85 AND Continuation q10",
+    "clear": "C_GLOBAL4 Logistic availability-safe OOF precision=0.85, min_sel=0.05",
+    "direction": "G4_BASE HGB availability-safe OOF q10",
+    "execution": "v1.0.1 repaired semantics (next 5m open, decision_close-1ATR stop, beyond-attack target, STOP_FIRST, OOS hard cutoff)"
+  },
+  "stage_A": {
+    "models": [
+      "T0_LOGIT",
+      "T0_HGB"
+    ],
+    "features": [
+      "symbol",
+      "side",
+      "nearest_above_R",
+      "nearest_below_R",
+      "nearest_ahead_R",
+      "nearest_behind_R"
+    ]
+  },
+  "stage_B": {
+    "model": "T1_HGB",
+    "features": [
+      "symbol",
+      "side",
+      "nearest_above_R",
+      "nearest_below_R",
+      "nearest_ahead_R",
+      "nearest_behind_R",
+      "approach_return_R_3",
+      "approach_return_R_6",
+      "approach_return_R_12",
+      "path_length_R_3",
+      "path_length_R_6",
+      "path_length_R_12",
+      "efficiency_3",
+      "efficiency_6",
+      "efficiency_12",
+      "toward_fraction_3",
+      "toward_fraction_6",
+      "toward_fraction_12",
+      "mean_range_R_3",
+      "mean_range_R_6",
+      "mean_range_R_12",
+      "range_ratio_3_12",
+      "approach_efficiency_3"
+    ],
+    "rule": "只用 bar <= contact_bar_index-1；horizons 3/6/12"
+  },
+  "toxic_definition": {
+    "positive": "TRADEOFF_OR_OVERLAP",
+    "training_classes": [
+      "LONG_DOMINATES",
+      "SHORT_DOMINATES",
+      "TRADEOFF_OR_OVERLAP"
+    ],
+    "excluded": [
+      "UNRESOLVED_CENSOR",
+      "NO_COMPARABLE_TARGET"
+    ]
+  },
+  "toxic_threshold": {
+    "target_toxic_precision": 0.5,
+    "min_veto_coverage": 0.03,
+    "rationale": "TRADEOFF base rate ~15-18% 且 execution loss ~-1R；50% toxic precision 明显高于 base rate，是 conservative development gate，不是按 test PnL 调出来的"
+  },
+  "gates": {
+    "stageA_mechanism": {
+      "tradeoff_share_down": "3/3",
+      "expectancy_up": "3/3",
+      "clear_retention": ">=0.65 3/3"
+    },
+    "execution": {
+      "per_wf": "post-veto E[R]>0 3/3",
+      "pooled": ">0",
+      "min_trades": 200
+    },
+    "stageB_incremental": {
+      "dPR_auc_mean": 0.03,
+      "dPR_auc_2of3": 0.02,
+      "tradeoff_share_better": ">=2/3"
+    }
+  },
+  "p0_structural_finding": "y_reversal 在全部 24,225 条 TRADEOFF_OR_OVERLAP 行上均为 NaN，因此 P3 字面伪代码 (p_rev_oof <= q10(p_rev_oof) 再打 y_toxic) 结构上无法产生任何 toxic 正样本。本实现改为：fold-wise 用 availability-safe 训练得到的 direction 模型对全部 validation 行打分，阈值仍为 clear 行 OOF 的 q10，cohort 再限定 frozen resolved 类。cohort 不含 clear gate，故其 toxic base rate 高于 baseline-selected 分布——这是本轮已记录的 train/test 分布差异。",
+  "p0_wording_correction": "v1.1 报告不得写 'TRADEOFF 定义上必然打不到 target'；正确表述是 '在 S1 Continuation + 当前固定执行定义下，TRADEOFF 是跨 3/3 WF 稳定的 empirical toxic class（target_hit=0, E[R]≈-1R）'，TRADEOFF_OR_OVERLAP 的定义本身（两侧 Oracle R 无严格支配）并不构成数学恒等式。",
+  "forbidden": [
+    "调 selector threshold",
+    "clear threshold scan",
+    "risk scan",
+    "新 feature（FVG/OB/trend/pre-contact taxonomy）",
+    "RR filter",
+    "target/stop 优化",
+    "删 symbol",
+    "手续费/成本假设",
+    "prospective OOS",
+    "Reversal promotion"
+  ],
+  "risk_values": [
+    1.0
+  ],
+  "clear_precision_values": [
+    0.85
+  ],
+  "trading_metrics": "NOT_APPLICABLE"
+}

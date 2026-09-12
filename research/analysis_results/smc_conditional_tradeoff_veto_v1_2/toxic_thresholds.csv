@@ -1,0 +1,10 @@
+﻿wf,stage,model,target_toxic_precision,min_veto_coverage,available,threshold,oof_precision,oof_veto_coverage,n_vetoed_contacts,veto_rate_of_selected
+WF1,A,T0_LOGIT,0.5,0.03,True,0.559215,0.5,0.1065,0,0.0
+WF1,A,T0_HGB,0.5,0.03,True,0.494206,0.5,0.1332,16,0.0138
+WF2,A,T0_LOGIT,0.5,0.03,False,,,,0,0.0
+WF2,A,T0_HGB,0.5,0.03,False,,,,0,0.0
+WF3,A,T0_LOGIT,0.5,0.03,True,0.388888,0.5,0.1673,15,0.0087
+WF3,A,T0_HGB,0.5,0.03,True,0.448738,0.5,0.1425,58,0.0337
+WF1,B,T1_HGB,0.5,0.03,True,0.547061,0.5,0.0959,12,0.0104
+WF2,B,T1_HGB,0.5,0.03,False,,,,0,0.0
+WF3,B,T1_HGB,0.5,0.03,True,0.506821,0.5,0.1129,37,0.0215

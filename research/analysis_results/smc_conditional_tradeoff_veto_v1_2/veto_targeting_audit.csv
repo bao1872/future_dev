@@ -1,0 +1,10 @@
+﻿wf,model,n_baseline_groups,n_baseline_toxic_groups,n_post_veto_groups,n_post_veto_toxic_groups,n_baseline_toxic_groups_deactivated,n_groups_newly_toxic,n_vetoed_contacts,n_vetoed_tradeoff_contacts,n_vetoed_clear_contacts,n_vetoed_unknown_contacts,vetoed_toxic_precision,note
+WF1,T0_LOGIT,649,118,649,118,0,0,0,0,0,0,,contact-level veto cannot remove group-level toxicity unless it removes the outermost attacked contact of the whole group
+WF1,T0_HGB,649,118,637,115,3,0,16,3,13,0,0.1875,contact-level veto cannot remove group-level toxicity unless it removes the outermost attacked contact of the whole group
+WF2,T0_LOGIT,927,147,927,147,0,0,0,0,0,0,,contact-level veto cannot remove group-level toxicity unless it removes the outermost attacked contact of the whole group
+WF2,T0_HGB,927,147,927,147,0,0,0,0,0,0,,contact-level veto cannot remove group-level toxicity unless it removes the outermost attacked contact of the whole group
+WF3,T0_LOGIT,895,164,887,162,2,0,15,4,11,0,0.2667,contact-level veto cannot remove group-level toxicity unless it removes the outermost attacked contact of the whole group
+WF3,T0_HGB,895,164,870,160,4,0,58,10,42,6,0.1724,contact-level veto cannot remove group-level toxicity unless it removes the outermost attacked contact of the whole group
+WF1,T1_HGB,649,118,643,117,1,0,12,3,6,3,0.25,contact-level veto cannot remove group-level toxicity unless it removes the outermost attacked contact of the whole group
+WF2,T1_HGB,927,147,927,147,0,0,0,0,0,0,,contact-level veto cannot remove group-level toxicity unless it removes the outermost attacked contact of the whole group
+WF3,T1_HGB,895,164,882,161,3,0,37,7,29,1,0.1892,contact-level veto cannot remove group-level toxicity unless it removes the outermost attacked contact of the whole group

@@ -1,0 +1,234 @@
+{
+  "experiment": "SMC Conditional Tradeoff Veto v1.2",
+  "base_commit": "1c16a08",
+  "p0_frozen_v11": {
+    "per_wf_clear85_continuation_E_R": [
+      -0.042,
+      0.0253,
+      -0.0376
+    ],
+    "tradeoff_empirical_toxic_class": {
+      "per_wf_n": [
+        113,
+        137,
+        152
+      ],
+      "per_wf_target_hit_rate": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "per_wf_E_R": [
+        -1.0182,
+        -1.0026,
+        -1.0518
+      ],
+      "wording": "empirical toxic class（非定义上必然）"
+    }
+  },
+  "p1_oracle_ceiling": {
+    "per_wf_original": [
+      -0.042,
+      0.0253,
+      -0.0376
+    ],
+    "per_wf_oracle_no_tradeoff": [
+      0.1781,
+      0.2211,
+      0.1838
+    ],
+    "per_wf_delta": [
+      0.2202,
+      0.1959,
+      0.2215
+    ],
+    "status": "ORACLE_DIAGNOSTIC_ONLY / NOT_DEPLOYABLE"
+  },
+  "p5_stageA": {
+    "metrics": [
+      0.4042,
+      0.3728,
+      0.265,
+      0.2886,
+      0.4322,
+      0.4045
+    ],
+    "roc_auc": [
+      0.6677,
+      0.6553,
+      0.5772,
+      0.6224,
+      0.6684,
+      0.6504
+    ],
+    "by_model": {
+      "T0_LOGIT": {
+        "pr_auc": [
+          0.4042,
+          0.265,
+          0.4322
+        ],
+        "roc_auc": [
+          0.6677,
+          0.5772,
+          0.6684
+        ],
+        "brier": [
+          0.1649,
+          0.1732,
+          0.1753
+        ],
+        "logloss": [
+          0.5147,
+          0.535,
+          0.5352
+        ]
+      },
+      "T0_HGB": {
+        "pr_auc": [
+          0.3728,
+          0.2886,
+          0.4045
+        ],
+        "roc_auc": [
+          0.6553,
+          0.6224,
+          0.6504
+        ],
+        "brier": [
+          0.1689,
+          0.1716,
+          0.1818
+        ],
+        "logloss": [
+          0.5503,
+          0.5274,
+          0.5527
+        ]
+      }
+    }
+  },
+  "stageA_gates": {
+    "STAGE_A_EXECUTION_PASS": false,
+    "mechanism": {
+      "T0_LOGIT": {
+        "passed": false,
+        "detail": {
+          "tradeoff_share_down": false,
+          "expectancy_up": false,
+          "clear_retention_ok": true
+        }
+      },
+      "T0_HGB": {
+        "passed": false,
+        "detail": {
+          "tradeoff_share_down": false,
+          "expectancy_up": false,
+          "clear_retention_ok": true
+        }
+      }
+    },
+    "execution": {
+      "T0_LOGIT": {
+        "passed": false,
+        "detail": {
+          "per_wf_e_R": [
+            -0.042,
+            0.0253,
+            -0.037
+          ],
+          "pooled_E_R": -0.015267620281868267,
+          "per_wf_trades": [
+            614.0,
+            856.0,
+            840.0
+          ]
+        }
+      },
+      "T0_HGB": {
+        "passed": false,
+        "detail": {
+          "per_wf_e_R": [
+            -0.0303,
+            0.0253,
+            -0.0369
+          ],
+          "pooled_E_R": -0.01184605355518335,
+          "per_wf_trades": [
+            602.0,
+            856.0,
+            824.0
+          ]
+        }
+      }
+    }
+  },
+  "stageB": {
+    "run": true,
+    "PRECONTACT_ADDS_TRADEOFF_INFORMATION": false,
+    "PRECONTACT_INCREMENT_VERDICT": "PRECONTACT_INCREMENT_WEAK",
+    "per_wf_delta_pr_auc": [
+      -0.014600000000000002,
+      -0.01930000000000004,
+      -0.02410000000000001
+    ],
+    "per_wf_delta_roc_auc": [
+      -0.0363,
+      -0.025999999999999912,
+      -0.006900000000000017
+    ],
+    "execution_pass": false,
+    "execution_detail": {
+      "per_wf_e_R": [
+        -0.0432,
+        0.0253,
+        -0.0388
+      ],
+      "pooled_E_R": -0.016122308621487697,
+      "per_wf_trades": [
+        608.0,
+        856.0,
+        838.0
+      ]
+    }
+  },
+  "veto_mechanism": {
+    "contact_level_veto_only": true,
+    "n_baseline_toxic_groups": [
+      118,
+      147,
+      164,
+      118,
+      147,
+      164
+    ],
+    "n_baseline_toxic_groups_deactivated": [
+      3,
+      0,
+      4,
+      0,
+      0,
+      2
+    ],
+    "conclusion": "contact-level veto 无法移除 signal-level toxic trade，除非它同时 veto 掉该组最外沿 attacked contact 且该组全部 selected contact 被 veto"
+  },
+  "final": {
+    "pre_registered_architecture": "NO_TRADEOFF_VETO_EDGE",
+    "architecture_rule": "StageA PASS->T0_HGB; else StageB incr PASS->T1_HGB; else NO_TRADEOFF_VETO_EDGE",
+    "detail": {
+      "per_wf_e_R": [],
+      "pooled_E_R": NaN,
+      "per_wf_trades": []
+    },
+    "TRADEOFF_VETO_GROSS_EDGE_PRESENT": false
+  },
+  "reversal": {
+    "status": "REVERSAL_CLEAR90_CANDIDATE frozen",
+    "note": "本轮不重新调、不 promote；见 v1.1 产物"
+  },
+  "oos_guard": {
+    "max_exit_on_or_after_oos": 0
+  },
+  "next_step": "RISK_COUPLED_EXECUTION (0.5/1.0/2.0，各自独立 frozen direction label/model)",
+  "trading_metrics": "NOT_APPLICABLE"
+}
