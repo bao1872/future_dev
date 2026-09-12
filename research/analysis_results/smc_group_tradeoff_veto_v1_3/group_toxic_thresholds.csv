@@ -1,0 +1,13 @@
+﻿wf,block,model,available,threshold,oof_precision,oof_veto_coverage,group_toxic_veto_unavailable
+WF1,G0_OUTERMOST,LOGIT,False,,,,True
+WF1,G0_OUTERMOST,HGB,False,,,,True
+WF2,G0_OUTERMOST,LOGIT,False,,,,True
+WF2,G0_OUTERMOST,HGB,False,,,,True
+WF3,G0_OUTERMOST,LOGIT,False,,,,True
+WF3,G0_OUTERMOST,HGB,False,,,,True
+WF1,G1_ARCH_AGG,LOGIT,False,,,,True
+WF1,G1_ARCH_AGG,HGB,False,,,,True
+WF2,G1_ARCH_AGG,LOGIT,False,,,,True
+WF2,G1_ARCH_AGG,HGB,False,,,,True
+WF3,G1_ARCH_AGG,LOGIT,False,,,,True
+WF3,G1_ARCH_AGG,HGB,False,,,,True

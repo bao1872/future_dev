@@ -1,0 +1,16 @@
+[ENV] loaded + oos_end (9.5s)
+[WF1] base_groups=649 base_trades=614 E_R=-0.0420 tox_share=0.1840
+[WF2] base_groups=927 base_trades=856 E_R=0.0253 tox_share=0.1600
+[WF3] base_groups=895 base_trades=848 E_R=-0.0376 tox_share=0.1792
+[WF1] cohort_groups=379 resolved=369 toxic_base_rate=0.1762
+[WF2] cohort_groups=1007 resolved=986 toxic_base_rate=0.1846
+[WF3] cohort_groups=1367 resolved=1326 toxic_base_rate=0.1855
+
+=== FINAL ===
+{
+  "pre_registered_architecture": "NO_GROUP_TRADEOFF_VETO_EDGE",
+  "rule": "G0 execution PASS -> G0_HGB; else G1 exec PASS -> G1_HGB; else NO_GROUP_TRADEOFF_VETO_EDGE",
+  "GROUP_LEVEL_TRADEOFF_VETO_EDGE": false,
+  "next_step": "RISK_COUPLED_EXECUTION (0.5/1.0/2.0, each with own frozen direction label/model)"
+}
+[DONE] 177.3s -> research/analysis_results/smc_group_tradeoff_veto_v1_3

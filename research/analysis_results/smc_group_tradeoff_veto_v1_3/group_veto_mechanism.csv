@@ -1,0 +1,13 @@
+﻿wf,block,model,n_baseline_groups,n_baseline_toxic_groups,n_baseline_clear_groups,n_vetoed_groups,n_vetoed_toxic_groups,n_vetoed_clear_groups,n_post_veto_groups,n_post_veto_toxic_groups,toxic_precision_among_vetoed,toxic_recall,clear_retention,threshold
+WF1,G0_OUTERMOST,LOGIT,649,118,515,0,0,0,649,118,,0.0,1.0,
+WF1,G0_OUTERMOST,HGB,649,118,515,0,0,0,649,118,,0.0,1.0,
+WF2,G0_OUTERMOST,LOGIT,927,147,745,0,0,0,927,147,,0.0,1.0,
+WF2,G0_OUTERMOST,HGB,927,147,745,0,0,0,927,147,,0.0,1.0,
+WF3,G0_OUTERMOST,LOGIT,895,164,673,0,0,0,895,164,,0.0,1.0,
+WF3,G0_OUTERMOST,HGB,895,164,673,0,0,0,895,164,,0.0,1.0,
+WF1,G1_ARCH_AGG,LOGIT,649,118,515,0,0,0,649,118,,0.0,1.0,
+WF1,G1_ARCH_AGG,HGB,649,118,515,0,0,0,649,118,,0.0,1.0,
+WF2,G1_ARCH_AGG,LOGIT,927,147,745,0,0,0,927,147,,0.0,1.0,
+WF2,G1_ARCH_AGG,HGB,927,147,745,0,0,0,927,147,,0.0,1.0,
+WF3,G1_ARCH_AGG,LOGIT,895,164,673,0,0,0,895,164,,0.0,1.0,
+WF3,G1_ARCH_AGG,HGB,895,164,673,0,0,0,895,164,,0.0,1.0,

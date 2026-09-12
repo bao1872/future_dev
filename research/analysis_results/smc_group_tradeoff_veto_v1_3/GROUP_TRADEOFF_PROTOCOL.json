@@ -1,0 +1,47 @@
+{
+  "experiment": "GROUP_TRADEOFF_VETO_V1_3",
+  "verdict_scope": "signal/group-level conditional veto only. If this fails, next step is RISK_COUPLED_EXECUTION 0.5/1/2 ATR (each risk re-derives its own direction label/model).",
+  "target_toxic_precision": 0.5,
+  "min_veto_coverage": 0.03,
+  "veto_denominator": "baseline candidate GROUPS",
+  "blocks": {
+    "G0_OUTERMOST": [
+      "symbol",
+      "side",
+      "nearest_above_R",
+      "nearest_below_R",
+      "nearest_ahead_R",
+      "nearest_behind_R"
+    ],
+    "G1_ARCH_AGG": [
+      "symbol",
+      "side",
+      "nearest_above_R",
+      "nearest_below_R",
+      "nearest_ahead_R",
+      "nearest_behind_R",
+      "n_selected_contacts",
+      "outer_p_clear",
+      "outer_p_rev",
+      "min_p_clear",
+      "mean_p_clear",
+      "max_p_clear",
+      "min_p_rev",
+      "mean_p_rev",
+      "max_p_rev"
+    ]
+  },
+  "g0_gate": {
+    "tradeoff_share_down_3of3": true,
+    "clear_retention_ge_0_75_3of3": true,
+    "gross_expectancy_up_3of3": true,
+    "exec_E_R_gt_0_3of3": true,
+    "pooled_gt_0": true,
+    "trades_ge_200_per_wf": true
+  },
+  "g1_gate": {
+    "mean_dpr_auc_ge_0_03_vs_G0": true,
+    "ge_2of3_wf_dpr_auc_gt_0_02": true,
+    "post_veto_tradeoff_share_below_G0_ge_2of3": true
+  }
+}

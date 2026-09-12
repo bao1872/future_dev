@@ -1,0 +1,4 @@
+﻿wf,n_raw_contacts,n_baseline_groups,n_baseline_toxic_groups,n_baseline_clear_groups,n_executed,baseline_E_R,baseline_tradeoff_share
+WF1,1159,649,118,515,614,-0.042,0.184
+WF2,1813,927,147,745,856,0.0253,0.16
+WF3,1720,895,164,673,848,-0.0376,0.1792

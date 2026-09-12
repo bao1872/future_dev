@@ -1,0 +1,13 @@
+﻿wf,block,model,variant,n_exit_on_or_after_oos
+WF1,G0_OUTERMOST,LOGIT,post_veto,0
+WF1,G0_OUTERMOST,HGB,post_veto,0
+WF2,G0_OUTERMOST,LOGIT,post_veto,0
+WF2,G0_OUTERMOST,HGB,post_veto,0
+WF3,G0_OUTERMOST,LOGIT,post_veto,0
+WF3,G0_OUTERMOST,HGB,post_veto,0
+WF1,G1_ARCH_AGG,LOGIT,post_veto,0
+WF1,G1_ARCH_AGG,HGB,post_veto,0
+WF2,G1_ARCH_AGG,LOGIT,post_veto,0
+WF2,G1_ARCH_AGG,HGB,post_veto,0
+WF3,G1_ARCH_AGG,LOGIT,post_veto,0
+WF3,G1_ARCH_AGG,HGB,post_veto,0

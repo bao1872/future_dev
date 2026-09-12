@@ -1,0 +1,93 @@
+{
+  "experiment": "SMC Group-Level Conditional Tradeoff Veto v1.3",
+  "base_commit": "7107f16",
+  "fixes_vs_v1_2": [
+    "toxicity train cohort now includes CLEAR85 gate (nested-causal cross-fitted baseline group OOF) -> deployment-cohort match",
+    "veto unit changed from contact to signal/group: collapse first, then KEEP entire signal or VETO entire signal; no re-collapse",
+    "signal-level label = outermost selected contact's rr_direction; group_label_available_time = max over group contacts"
+  ],
+  "frozen": [
+    "CLEAR85",
+    "Continuation q10",
+    "risk=1 ATR",
+    "next-open entry",
+    "decision-close anchored 1ATR stop",
+    "selected-boundary beyond-attack target",
+    "STOP_FIRST",
+    "v1.0.1 OOS cutoff",
+    "15 symbols"
+  ],
+  "forbidden": [
+    "risk 0.5/2.0",
+    "clear threshold scan",
+    "direction threshold scan",
+    "target/stop modify",
+    "RR filter",
+    "precontact dynamics",
+    "FVG/OB/trend",
+    "volume",
+    "symbol filtering",
+    "cost",
+    "prospective OOS",
+    "Reversal promotion"
+  ],
+  "baseline_reproduction": {
+    "FATAL_BASELINE_REPRODUCTION_FAIL": false,
+    "per_wf_E_R": [
+      -0.042,
+      0.0253,
+      -0.0376
+    ],
+    "per_wf_trades": [
+      614,
+      856,
+      848
+    ],
+    "matches_v1_0_1": true
+  },
+  "G0_gate": {
+    "mechanism_pass": false,
+    "execution_pass": false,
+    "detail": [
+      {
+        "wf": "WF1",
+        "baseline_tradeoff_share": 0.184,
+        "post_veto_tradeoff_share": 0.184,
+        "clear_retention_rate": 1.0,
+        "baseline_E_R": -0.042,
+        "post_veto_E_R": -0.042
+      },
+      {
+        "wf": "WF2",
+        "baseline_tradeoff_share": 0.16,
+        "post_veto_tradeoff_share": 0.16,
+        "clear_retention_rate": 1.0,
+        "baseline_E_R": 0.0253,
+        "post_veto_E_R": 0.0253
+      },
+      {
+        "wf": "WF3",
+        "baseline_tradeoff_share": 0.1792,
+        "post_veto_tradeoff_share": 0.1792,
+        "clear_retention_rate": 1.0,
+        "baseline_E_R": -0.0376,
+        "post_veto_E_R": -0.0376
+      }
+    ]
+  },
+  "G1_gate": {
+    "ran": true,
+    "architecture_adds_info": false,
+    "execution_pass": false
+  },
+  "final": {
+    "pre_registered_architecture": "NO_GROUP_TRADEOFF_VETO_EDGE",
+    "rule": "G0 execution PASS -> G0_HGB; else G1 exec PASS -> G1_HGB; else NO_GROUP_TRADEOFF_VETO_EDGE",
+    "GROUP_LEVEL_TRADEOFF_VETO_EDGE": false,
+    "next_step": "RISK_COUPLED_EXECUTION (0.5/1.0/2.0, each with own frozen direction label/model)"
+  },
+  "oos_guard": {
+    "max_n_exit_on_or_after_oos": 0
+  },
+  "reversal": "REVERSAL_CLEAR90_CANDIDATE frozen (not promoted)"
+}

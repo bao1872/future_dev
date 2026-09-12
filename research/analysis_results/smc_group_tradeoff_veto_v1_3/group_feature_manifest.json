@@ -1,0 +1,41 @@
+{
+  "G0_OUTERMOST": [
+    "symbol",
+    "side",
+    "nearest_above_R",
+    "nearest_below_R",
+    "nearest_ahead_R",
+    "nearest_behind_R"
+  ],
+  "G1_ARCH_AGG": [
+    "symbol",
+    "side",
+    "nearest_above_R",
+    "nearest_below_R",
+    "nearest_ahead_R",
+    "nearest_behind_R",
+    "n_selected_contacts",
+    "outer_p_clear",
+    "outer_p_rev",
+    "min_p_clear",
+    "mean_p_clear",
+    "max_p_clear",
+    "min_p_rev",
+    "mean_p_rev",
+    "max_p_rev"
+  ],
+  "G0_route": "symbol/side categorical; 4 distances spline (same as G4_BASE)",
+  "G1_route": "G0 + 9 architecture aggregates routed ORDINARY_NUMERIC (NOT new market features)",
+  "G1_agg_columns": [
+    "n_selected_contacts",
+    "outer_p_clear",
+    "outer_p_rev",
+    "min_p_clear",
+    "mean_p_clear",
+    "max_p_clear",
+    "min_p_rev",
+    "mean_p_rev",
+    "max_p_rev"
+  ],
+  "note": "G0 = outermost selected contact's frozen G4_BASE (same info, different statistical unit). G1 = decision-time selector metadata only."
+}
