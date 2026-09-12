@@ -1,0 +1,8 @@
+{
+  "LIMIT_RR3_REDUNDANT_FOR_ORACLE": true,
+  "reduced_equals_full_oracle": true,
+  "unique_LIMIT_RR3_count": 0,
+  "n": 9015,
+  "max_abs_diff": 0.0,
+  "note": "LIMIT_RR3 excluded from the learned action set"
+}

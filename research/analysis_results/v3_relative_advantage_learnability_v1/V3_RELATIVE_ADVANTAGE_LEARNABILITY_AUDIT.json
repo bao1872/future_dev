@@ -1,0 +1,166 @@
+{
+  "experiment": "V3-A2 Relative Execution Advantage Learnability Audit",
+  "base_commit": "c905b3cd168ba891a789b99966d18917aab54411",
+  "tasks": {
+    "E": "delta_market_vs_reassess",
+    "V": "delta_skip_vs_reassess"
+  },
+  "learnable": {
+    "market": false,
+    "veto": false
+  },
+  "gates": {
+    "E": {
+      "task": "E",
+      "A_ranking": false,
+      "B_positive_subset": false,
+      "C_precision_lift": true,
+      "passed": false,
+      "detail": {
+        "spearman": {
+          "WF1": 0.014044140028273052,
+          "WF2": -0.04337461848890347,
+          "WF3": 0.06356630589872643
+        },
+        "mean_delta_predpos": {
+          "WF1": -0.007548039358976855,
+          "WF2": -0.05217338420439756,
+          "WF3": -0.024050308062595383
+        },
+        "baseline_rate": {
+          "WF1": 0.32531645569620254,
+          "WF2": 0.3445732349841939,
+          "WF3": 0.34674202127659576
+        },
+        "precision": {
+          "WF1": 0.3350456621004566,
+          "WF2": 0.3205221174764322,
+          "WF3": 0.3983244478293983
+        }
+      }
+    },
+    "V": {
+      "task": "V",
+      "A_ranking": false,
+      "B_positive_subset": false,
+      "C_precision_lift": true,
+      "passed": false,
+      "detail": {
+        "spearman": {
+          "WF1": -0.00807079673131032,
+          "WF2": 0.041039078477357285,
+          "WF3": 0.04440151780921873
+        },
+        "mean_delta_predpos": {
+          "WF1": -0.02310093218732444,
+          "WF2": -0.011568290914119934,
+          "WF3": -0.08406036792950781
+        },
+        "baseline_rate": {
+          "WF1": 0.20632911392405062,
+          "WF2": 0.20337197049525815,
+          "WF3": 0.21110372340425532
+        },
+        "precision": {
+          "WF1": 0.18635043562439496,
+          "WF2": 0.21253229974160207,
+          "WF3": 0.22259136212624583
+        }
+      }
+    }
+  },
+  "verdict": "NO_LEARNABLE_RELATIVE_ADVANTAGE",
+  "limit_redundant": true,
+  "models": [
+    "Ridge",
+    "HistGBR"
+  ],
+  "blocks": [
+    "S1",
+    "S2"
+  ],
+  "seed": 20260912,
+  "bootstrap_n": 2000,
+  "equal_weight_only": true,
+  "no_time_decay": true,
+  "tests": [
+    {
+      "id": "T1",
+      "desc": "n=9015 / WF counts exact",
+      "passed": true
+    },
+    {
+      "id": "T2",
+      "desc": "frozen Market/Reassess parity",
+      "passed": true
+    },
+    {
+      "id": "T3",
+      "desc": "LIMIT redundant: reduced oracle == full oracle",
+      "passed": true
+    },
+    {
+      "id": "T4",
+      "desc": "unique LIMIT oracle == 0",
+      "passed": true
+    },
+    {
+      "id": "T5",
+      "desc": "delta_market exact arithmetic",
+      "passed": true
+    },
+    {
+      "id": "T6",
+      "desc": "delta_skip == -reward_reassess",
+      "passed": true
+    },
+    {
+      "id": "T7",
+      "desc": "train/validation temporal order",
+      "passed": true
+    },
+    {
+      "id": "T8",
+      "desc": "purge exact (reward_end < val_start)",
+      "passed": true
+    },
+    {
+      "id": "T9",
+      "desc": "train/test zero gid overlap",
+      "passed": true
+    },
+    {
+      "id": "T10",
+      "desc": "preprocessing fit train only",
+      "passed": true
+    },
+    {
+      "id": "T11",
+      "desc": "no time decay (equal weight only)",
+      "passed": true
+    },
+    {
+      "id": "T12",
+      "desc": "only 4 registered candidates per task",
+      "passed": true
+    },
+    {
+      "id": "T13",
+      "desc": "prediction reproducibility",
+      "passed": true
+    },
+    {
+      "id": "T14",
+      "desc": "P1_read == false",
+      "passed": true
+    },
+    {
+      "id": "T15",
+      "desc": "no policy outcome calculated",
+      "passed": true
+    }
+  ],
+  "all_tests_pass": true,
+  "p1_read": false,
+  "no_policy": true
+}
