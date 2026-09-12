@@ -1,0 +1,75 @@
+{
+  "experiment": "ENTER / SKIP Selection Gate v1.0",
+  "authoritative_base_commit": "8438456982e9be6999a57fee75212fe21771f6bf",
+  "status": "FROZEN_CANDIDATE_POLICY",
+  "primary_regions": [
+    {
+      "region": "R1",
+      "action": "OUTWARD",
+      "h": 2,
+      "scale": 1.2,
+      "target_lo": 3.0,
+      "target_hi": 5.0,
+      "risk_lo": 1.0,
+      "risk_hi": 2.0
+    },
+    {
+      "region": "R2",
+      "action": "OUTWARD",
+      "h": 5,
+      "scale": 1.2,
+      "target_lo": 0.5,
+      "target_hi": 1.0,
+      "risk_lo": 1.0,
+      "risk_hi": 2.0
+    },
+    {
+      "region": "R3",
+      "action": "INWARD",
+      "h": 5,
+      "scale": 1.2,
+      "target_lo": 0.5,
+      "target_hi": 1.0,
+      "risk_lo": 1.0,
+      "risk_hi": 2.0
+    },
+    {
+      "region": "R4",
+      "action": "OUTWARD",
+      "h": 8,
+      "scale": 1.2,
+      "target_lo": 0.5,
+      "target_hi": 1.0,
+      "risk_lo": 1.0,
+      "risk_hi": 2.0
+    }
+  ],
+  "auxiliary_plane": "SHADOW_ONLY",
+  "policy_definition": {
+    "order": [
+      "h2:R1",
+      "h5:R2/R3 conflict",
+      "h8:R4"
+    ],
+    "max_trades_per_contact": 1,
+    "dual_action": "SKIP_DUAL_ACTION_CONFLICT",
+    "no_match": "SKIP_NO_GEOMETRY_EDGE"
+  },
+  "cost_R_grid": [
+    0.0,
+    0.01,
+    0.02,
+    0.03,
+    0.05,
+    0.1
+  ],
+  "region_definition_sha": "2b4010c864765f66c8e28662912e67ba6b8e3f30e4c846ec226cfa700b8a1b1c",
+  "policy_sha": "241e5e1e938bdd864ea5caebaa5d58a9856be8fae58a16404ce8ebdf0cad3cc8",
+  "forbidden": [
+    "bin search",
+    "ML",
+    "new features",
+    "DP",
+    "RL"
+  ]
+}

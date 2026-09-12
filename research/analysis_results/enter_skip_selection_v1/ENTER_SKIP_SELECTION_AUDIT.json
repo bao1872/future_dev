@@ -1,0 +1,22 @@
+{
+  "experiment": "ENTER / SKIP Selection Gate v1.0",
+  "base_commit": "8438456982e9be6999a57fee75212fe21771f6bf",
+  "stage4a_reproduction": {
+    "n_cells": 144,
+    "max_abs_diff": 0.0
+  },
+  "n_surface_rows": 3546480,
+  "n_contacts": 73885,
+  "n_enter": 9015,
+  "n_skip": 64870,
+  "n_dual_action_conflict": 0,
+  "n_multiple_region_match": 504,
+  "min_gross_E_R_lower_across_wf": 0.012635080869326389,
+  "min_censor_worst_E_R_lower_across_wf": -0.0019480024870636302,
+  "censoring_sensitive": true,
+  "whole_policy_cost_capacity_R": 0.01,
+  "cost_metadata": "NO_AUTHORITATIVE_METADATA; generic R-cost sensitivity only",
+  "prospective_verdict": "NO_UNTOUCHED_PROSPECTIVE_BLOCK",
+  "final_verdict": "FROZEN_CANDIDATE_POLICY",
+  "elapsed_seconds": 54.381
+}

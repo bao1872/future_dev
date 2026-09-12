@@ -1,0 +1,32 @@
+{
+  "verdict": "NO_UNTOUCHED_PROSPECTIVE_BLOCK",
+  "exists": false,
+  "reason": "TB1-TB4 are four equal chronological partitions of all current frozen contacts",
+  "current_data_start": "2025-01-02 10:45:00",
+  "current_data_end": "2026-09-04 14:55:00",
+  "latest_block": "TB4",
+  "blocks": {
+    "TB1": {
+      "start_time": "2025-01-02 10:45:00",
+      "end_time": "2025-06-10 23:40:00",
+      "n_contacts": 23015
+    },
+    "TB2": {
+      "start_time": "2025-06-11 00:15:00",
+      "end_time": "2025-11-05 23:35:00",
+      "n_contacts": 25383
+    },
+    "TB3": {
+      "start_time": "2025-11-06 00:00:00",
+      "end_time": "2026-04-10 23:40:00",
+      "n_contacts": 24692
+    },
+    "TB4": {
+      "start_time": "2026-04-11 00:10:00",
+      "end_time": "2026-09-04 14:55:00",
+      "n_contacts": 23810
+    }
+  },
+  "policy_sha": "241e5e1e938bdd864ea5caebaa5d58a9856be8fae58a16404ce8ebdf0cad3cc8",
+  "region_definition_sha": "2b4010c864765f66c8e28662912e67ba6b8e3f30e4c846ec226cfa700b8a1b1c"
+}
