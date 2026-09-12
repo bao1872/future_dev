@@ -11,6 +11,7 @@ Evaluates:
 """
 from __future__ import annotations
 import json
+import inspect
 import os
 import sys
 import time
@@ -56,6 +57,10 @@ P1_CUTOFF = pd.Timestamp("2026-09-04 14:55:00")
 HALF_LIFE_DAYS = [None, 60, 120, 240, 480]
 COST_R_GRID = [0.00, 0.01, 0.02, 0.03, 0.05, 0.10]
 ACTIONS = ["SKIP", "MARKET", "LIMIT_RR3", "REASSESS_RR3"]
+HARDENING_VERSION = "bar-index-purge-v1"
+PURGE_TRACE = []
+PREPROCESS_TRACE = []
+REPRO_TRACE = []
 
 OUTER_WFS = [
     ("WF1", ["TB1"], ["TB2"]),
@@ -116,6 +121,60 @@ def conservative_reward(filled: np.ndarray, r_lower: np.ndarray, censored: np.nd
     out[resolved] = r_lower[resolved]
     out[filled & censored] = -1.0
     return out
+
+
+def attach_exact_reward_end(df: pd.DataFrame, bars_by_sym: Dict[str, Any]) -> pd.DataFrame:
+    """Map the most conservative candidate-action path end through actual bars.
+
+    MARKET consumes entry..entry+33, a TTL2 limit may fill on entry+1 and then
+    consumes 34 outcome bars, and REASSESS may activate R4 at contact+10 and
+    fill one bar later.  Thus the all-action maximum is contact+44.
+    """
+    x=df.copy()
+    x["reward_end_bar_MARKET"]=x["entry_bar_index"].astype(int)+33
+    x["reward_end_bar_LIMIT_RR3"]=x["entry_bar_index"].astype(int)+34
+    x["reward_end_bar_REASSESS_RR3"]=x["contact_bar_index"].astype(int)+44
+    x["reward_end_bar_index"]=x[["reward_end_bar_MARKET","reward_end_bar_LIMIT_RR3","reward_end_bar_REASSESS_RR3"]].max(axis=1).astype(int)
+    end=pd.Series(pd.NaT,index=x.index,dtype="datetime64[ns]")
+    for sym,idx in x.groupby("symbol").groups.items():
+        B=bars_by_sym[sym];ii=x.loc[idx,"reward_end_bar_index"].to_numpy(int)
+        ii=np.minimum(ii,B["n"]-1)  # data-end censored actions terminate at last observed bar
+        end.loc[idx]=pd.to_datetime(B["t"][ii]).to_numpy(dtype="datetime64[ns]")
+    x["reward_end_time"]=end
+    x["reward_end_semantics"]=HARDENING_VERSION
+    assert (x.reward_end_time>=pd.to_datetime(x.entry_time)).all()
+    return x
+
+def map_bar_end_time(df, end_index, bars_by_sym):
+    out=pd.Series(pd.NaT,index=df.index,dtype="datetime64[ns]")
+    for sym,idx in df.groupby("symbol").groups.items():
+        ii=np.asarray(end_index.loc[idx],int);B=bars_by_sym[sym]
+        ii=np.minimum(ii,B["n"]-1);out.loc[idx]=pd.to_datetime(B["t"][ii]).to_numpy()
+    return out
+
+def nested_half_life_selection(outer_train, feats, target, task, wf, bars_by_sym, classification):
+    """Select recency strictly inside outer train; outer test is never inspected."""
+    d=outer_train.copy().sort_values("decision_time");days=np.sort(pd.to_datetime(d.decision_time).dt.normalize().unique())
+    cut=days[max(1,(len(days)*3)//4)];itr=d[pd.to_datetime(d.decision_time).dt.normalize()<cut].copy();iv=d[pd.to_datetime(d.decision_time).dt.normalize()>=cut].copy()
+    val_start=pd.to_datetime(iv.decision_time).min();itr=itr[pd.to_datetime(itr.label_end_time)<val_start].copy()
+    assert len(itr) and len(iv) and pd.to_datetime(itr.label_end_time).max()<val_start
+    X=itr[feats].to_numpy(float);Z=iv[feats].to_numpy(float);med=np.nanmedian(X,axis=0);med=np.where(np.isfinite(med),med,0.);X=np.where(np.isfinite(X),X,med);Z=np.where(np.isfinite(Z),Z,med);sc=StandardScaler().fit(X)
+    rows=[]
+    for model in ["Linear","GBDT"]:
+      scores=[]
+      for hl in HALF_LIFE_DAYS:
+        w=recency_weights(itr.decision_time,pd.to_datetime(itr.decision_time).max(),hl)
+        if classification:
+          y=itr[target].astype(int);yt=iv[target].astype(int)
+          m=(LogisticRegression(C=1.,max_iter=200,random_state=SEED) if model=="Linear" else HistGradientBoostingClassifier(learning_rate=.05,max_iter=100,max_leaf_nodes=15,l2_regularization=1.,min_samples_leaf=500,early_stopping=False,random_state=SEED))
+          m.fit(sc.transform(X) if model=="Linear" else X,y,sample_weight=w);p=m.predict_proba(sc.transform(Z) if model=="Linear" else Z)[:,1];score=log_loss(yt,p)
+        else:
+          y=itr[target].to_numpy(float);yt=iv[target].to_numpy(float);ok=np.isfinite(y);ov=np.isfinite(yt)
+          m=(Ridge(alpha=1.,random_state=SEED) if model=="Linear" else HistGradientBoostingRegressor(learning_rate=.05,max_iter=100,max_leaf_nodes=15,l2_regularization=1.,min_samples_leaf=100,early_stopping=False,random_state=SEED))
+          m.fit((sc.transform(X) if model=="Linear" else X)[ok],y[ok],sample_weight=w[ok]);p=m.predict((sc.transform(Z) if model=="Linear" else Z)[ov]);score=-r2_score(yt[ov],p)
+        scores.append(score)
+      best=int(np.argmin(scores));rows.append(dict(task=task,wf=wf,model=model,selected_half_life=str(HALF_LIFE_DAYS[best]),inner_metric="log_loss" if classification else "r2",inner_metric_value=float(scores[best] if classification else -scores[best]),inner_train_n=len(itr),inner_validation_n=len(iv),outer_test_used_for_selection=False))
+    return rows
 
 
 # ---------------------------------------------------------------------------
@@ -179,13 +238,16 @@ def build_multi_action_dataset(D, master_by_sym, bars_by_sym, trades: pd.DataFra
     if cache_path.exists():
         print(f"[CACHE] Loading cached multi-action dataset from {cache_path}...")
         df = pd.read_parquet(cache_path)
-        feature_blocks = {
+        if "reward_end_semantics" not in df or not (df.reward_end_semantics==HARDENING_VERSION).all():
+            print("[CACHE] stale wall-clock reward end; rebuilding")
+        else:
+          feature_blocks = {
             "S1": json.loads((OUT_DIR / "feature_block_S1.json").read_text()),
             "S2": json.loads((OUT_DIR / "feature_block_S2.json").read_text()),
             "S3": json.loads((OUT_DIR / "feature_block_S3.json").read_text()),
             "S4": json.loads((OUT_DIR / "feature_block_S4.json").read_text()),
-        }
-        return df, feature_blocks
+          }
+          return df, feature_blocks
 
     print("[STAGE B1] Constructing unified multi-action dataset (TB1 + TB2-TB4)...")
     surface, gmap = s4b.compute_action_surface_all_blocks(D, master_by_sym, bars_by_sym)
@@ -330,7 +392,6 @@ def build_multi_action_dataset(D, master_by_sym, bars_by_sym, trades: pd.DataFra
     df_test["R_lower_REASSESS_RR3"] = np.where(rea_filled, rea_rlow, 0.0)
     df_test["R_upper_REASSESS_RR3"] = np.where(rea_filled, rea_rupp, 0.0)
     df_test["censored_REASSESS_RR3"] = rea_censored
-    df_test["reward_end_time"] = pd.to_datetime(df_test["entry_time"]) + pd.Timedelta(minutes=46 * 5)
 
     # Assemble TB1
     df_tb1 = attempts_tb1.copy().sort_values("gid").reset_index(drop=True)
@@ -370,11 +431,15 @@ def build_multi_action_dataset(D, master_by_sym, bars_by_sym, trades: pd.DataFra
     df_tb1["R_lower_REASSESS_RR3"] = np.where(tb1_rea_filled, tb1_rea_rlow, 0.0)
     df_tb1["R_upper_REASSESS_RR3"] = np.where(tb1_rea_filled, tb1_rea_rupp, 0.0)
     df_tb1["censored_REASSESS_RR3"] = tb1_rea_cens
-    df_tb1["reward_end_time"] = pd.to_datetime(df_tb1["entry_time"]) + pd.Timedelta(minutes=46 * 5)
+    # Every signal has a causal activation timestamp, including non-filled rows.
+    # Realized entry_time is NaT for non-entry and cannot key folds/recency.
+    df_test["entry_time"]=map_bar_end_time(df_test,df_test.entry_bar_index.astype(int),bars_by_sym)
+    df_test=attach_exact_reward_end(df_test,bars_by_sym)
+    df_tb1=attach_exact_reward_end(df_tb1,bars_by_sym)
 
     # Common columns to concatenate
     common_cols = [
-        "gid", "block", "wf", "symbol", "region", "h", "direction", "entry_time", "reward_end_time",
+        "gid", "block", "wf", "symbol", "region", "h", "direction", "entry_time", "reward_end_time", "reward_end_bar_index", "reward_end_semantics",
         "target_price", "stop_price", "reference_entry", "contact_bar_index", "signal_bar_index", "entry_bar_index",
         "liquidity_id", "contact_number", "atr0", "liquidity_price",
         "target_atr", "risk_atr", "rr", "structure_scale", "action_is_outward",
@@ -454,10 +519,11 @@ def run_information_gate(D, master_by_sym, bars_by_sym) -> Dict[str, Any]:
     S1_ACT = S0_ACT + REACTION_FEATURES + LIQUIDITY_FEATURES
 
     F = D["F"]
-    dt_map = F.drop_duplicates(["symbol", "liquidity_id", "contact_number"])[["symbol", "liquidity_id", "contact_number", "decision_time"]]
+    dt_map = F.drop_duplicates(["symbol", "liquidity_id", "contact_number"])[["symbol", "liquidity_id", "contact_number", "decision_time", "contact_bar_index"]]
     eval_actions = eval_actions.merge(dt_map, on=["symbol", "liquidity_id", "contact_number"], how="left")
+    eval_actions["label_end_time"]=map_bar_end_time(eval_actions,eval_actions.contact_bar_index.astype(int)+1+eval_actions.h.astype(int)+33,bars_by_sym)
 
-    factorial_rows = []
+    factorial_rows = []; nested_rows=[]
 
     for wf, trb, teb in OUTER_WFS:
         tr_mask = eval_actions["wf"].isin([s4b.BLOCK_TO_WF[b] for b in trb]).to_numpy()
@@ -465,6 +531,8 @@ def run_information_gate(D, master_by_sym, bars_by_sym) -> Dict[str, Any]:
         
         tr_df = eval_actions[tr_mask].copy()
         te_df = eval_actions[te_mask].copy()
+        nested_rows += nested_half_life_selection(tr_df,S1_ACT,"target_first","action_target_first",wf,bars_by_sym,True)
+        tr_df=tr_df[pd.to_datetime(tr_df.label_end_time)<pd.to_datetime(te_df.decision_time).min()].copy()
 
         tr_df = deterministic_cap(tr_df, MAX_ACTION_TRAIN_ROWS)
         train_cutoff = pd.to_datetime(tr_df["decision_time"]).max()
@@ -523,6 +591,7 @@ def run_information_gate(D, master_by_sym, bars_by_sym) -> Dict[str, Any]:
     S1_WAIT = WAIT_GEO + REACTION_FEATURES + LIQUIDITY_FEATURES
 
     wait_pairs = wait_pairs.merge(dt_map, on=["symbol", "liquidity_id", "contact_number"], how="left")
+    wait_pairs["label_end_time"]=map_bar_end_time(wait_pairs,wait_pairs.contact_bar_index.astype(int)+1+wait_pairs.later_h.astype(int)+33,bars_by_sym)
 
     for wf, trb, teb in OUTER_WFS:
         tr_mask = wait_pairs["wf"].isin([s4b.BLOCK_TO_WF[b] for b in trb]).to_numpy()
@@ -530,6 +599,8 @@ def run_information_gate(D, master_by_sym, bars_by_sym) -> Dict[str, Any]:
 
         tr_df = wait_pairs[tr_mask].copy()
         te_df = wait_pairs[te_mask].copy()
+        nested_rows += nested_half_life_selection(tr_df,S1_WAIT,"delta_E_R_lower","wait_value",wf,bars_by_sym,False)
+        tr_df=tr_df[pd.to_datetime(tr_df.label_end_time)<pd.to_datetime(te_df.decision_time).min()].copy()
 
         train_cutoff = pd.to_datetime(tr_df["decision_time"]).max()
 
@@ -587,28 +658,6 @@ def run_information_gate(D, master_by_sym, bars_by_sym) -> Dict[str, Any]:
 
     fact_df.to_csv(OUT_DIR / "recency_fixed_half_life_by_wf.csv", index=False)
 
-    nested_rows = []
-    for (task, wf, model_name), grp in fact_df.groupby(["task", "wf", "model"]):
-        if task == "action_target_first":
-            min_ll = grp["log_loss"].min()
-            candidates = grp[grp["log_loss"] <= min_ll + 1e-4]
-            def hl_rank(h):
-                return 0 if h == "None" else int(h)
-            best_r = candidates.sort_values("half_life", key=lambda s: s.map(hl_rank), ascending=False).iloc[0]
-            nested_rows.append(dict(
-                task=task, wf=wf, model=model_name, selected_half_life=best_r["half_life"],
-                metric_name="log_loss", metric_value=best_r["log_loss"], auc=best_r["auc"], brier=best_r["brier"]
-            ))
-        else:
-            max_r2 = grp["r2"].max()
-            candidates = grp[grp["r2"] >= max_r2 - 1e-4]
-            def hl_rank(h):
-                return 0 if h == "None" else int(h)
-            best_r = candidates.sort_values("half_life", key=lambda s: s.map(hl_rank), ascending=False).iloc[0]
-            nested_rows.append(dict(
-                task=task, wf=wf, model=model_name, selected_half_life=best_r["half_life"],
-                metric_name="r2", metric_value=best_r["r2"], spearman=best_r["spearman"], mae=best_r["mae"]
-            ))
     nest_df = pd.DataFrame(nested_rows)
     nest_df.to_csv(OUT_DIR / "recency_nested_selection.csv", index=False)
     print(f"  [SAVED] recency_nested_selection.csv ({len(nest_df)} rows)")
@@ -714,6 +763,9 @@ def run_multi_action_grid(df_comb: pd.DataFrame, feature_blocks: Dict[str, List[
                 purged_tr = sub_tr[sub_tr["reward_end_time"] < val_start].copy()
                 if len(purged_tr) == 0:
                     continue
+                PURGE_TRACE.append(dict(scope="inner",wf=wf,fold=if_idx,
+                    train_max_reward_end=pd.to_datetime(purged_tr.reward_end_time).max(),
+                    validation_start=val_start,n_before=len(sub_tr),n_after=len(purged_tr)))
 
                 train_cutoff = pd.to_datetime(purged_tr["entry_time"]).max()
                 w_tr = recency_weights(purged_tr["entry_time"], train_cutoff, hl)
@@ -724,6 +776,8 @@ def run_multi_action_grid(df_comb: pd.DataFrame, feature_blocks: Dict[str, List[
                 med = np.where(np.isfinite(med), med, 0.0)
                 X_tr = np.where(np.isfinite(X_tr_raw), X_tr_raw, med)
                 X_val = np.where(np.isfinite(X_val_raw), X_val_raw, med)
+                PREPROCESS_TRACE.append(dict(scope="inner",wf=wf,fold=if_idx,
+                    fit_rows=len(X_tr_raw),validation_rows=len(X_val_raw),fit_source="purged_train_only"))
 
                 rewards_tr = {
                     "MARKET": purged_tr["reward_MARKET"].to_numpy(),
@@ -774,6 +828,9 @@ def run_multi_action_grid(df_comb: pd.DataFrame, feature_blocks: Dict[str, List[
 
         # Outer Evaluation
         purged_outer_tr = outer_tr_full[outer_tr_full["reward_end_time"] < outer_test_start].copy()
+        PURGE_TRACE.append(dict(scope="outer",wf=wf,fold=-1,
+            train_max_reward_end=pd.to_datetime(purged_outer_tr.reward_end_time).max(),
+            validation_start=outer_test_start,n_before=len(outer_tr_full),n_after=len(purged_outer_tr)))
         train_cutoff = pd.to_datetime(purged_outer_tr["entry_time"]).max()
         w_outer_tr = recency_weights(purged_outer_tr["entry_time"], train_cutoff, selected_cand["half_life"])
 
@@ -784,6 +841,8 @@ def run_multi_action_grid(df_comb: pd.DataFrame, feature_blocks: Dict[str, List[
         med = np.where(np.isfinite(med), med, 0.0)
         X_tr = np.where(np.isfinite(X_tr_raw), X_tr_raw, med)
         X_te = np.where(np.isfinite(X_te_raw), X_te_raw, med)
+        PREPROCESS_TRACE.append(dict(scope="outer",wf=wf,fold=-1,fit_rows=len(X_tr_raw),
+            validation_rows=len(X_te_raw),fit_source="purged_train_only"))
 
         rewards_outer_tr = {
             "MARKET": purged_outer_tr["reward_MARKET"].to_numpy(),
@@ -793,6 +852,10 @@ def run_multi_action_grid(df_comb: pd.DataFrame, feature_blocks: Dict[str, List[
 
         final_models = fit_action_q_models(selected_cand["model_type"], X_tr, rewards_outer_tr, w_outer_tr, feats)
         q_te = predict_action_q(final_models, X_te)
+        repeat_models = fit_action_q_models(selected_cand["model_type"], X_tr, rewards_outer_tr, w_outer_tr, feats)
+        q_repeat = predict_action_q(repeat_models, X_te)
+        REPRO_TRACE.append(dict(wf=wf,max_abs_diff=float(np.max(np.abs(q_te-q_repeat)))))
+        assert REPRO_TRACE[-1]["max_abs_diff"]==0.0,"PREDICTION_REPRODUCIBILITY_FAIL"
         action_te = apply_action_policy(q_te)
         outer_predictions[wf] = (outer_te_full, q_te, action_te)
 
@@ -1026,11 +1089,12 @@ def run_post_evaluation(df_comb: pd.DataFrame, outer_preds: Dict[str, Tuple[pd.D
     # 7. Synthetic & Leakage Tests (T1 - T14)
     print("  [TESTS] Running T1 - T14 verification suite...")
     test_signals = df_comb[df_comb["block"].isin(["TB2", "TB3", "TB4"])].copy()
-    t1_pass = (test_signals["gid"].nunique() == 9015)
+    t1_pass = (test_signals["gid"].nunique() == 9015 and not test_signals.duplicated("gid").any()
+               and test_signals[[f"reward_{a}" for a in ACTIONS]].notna().all().all())
     t2_pass = (df_comb["reward_SKIP"] == 0.0).all()
-    t3_pass = all(v < 1e-4 for v in b0_audit["e1_market"].values())
-    t4_pass = all(v < 1e-4 for v in b0_audit["e2_single"].values())
-    t5_pass = all(v < 1e-4 for v in b0_audit["e2_reassess"].values())
+    t3_pass = all(abs(test_signals.loc[test_signals.wf==w,"reward_MARKET"].mean()-BASELINE_E1_MARKET[w]["EV_cw"])<1e-4 for w in ["WF1","WF2","WF3"])
+    t4_pass = all(abs(test_signals.loc[test_signals.wf==w,"reward_LIMIT_RR3"].mean()-BASELINE_E2_SINGLE_RR3[w]["EV_cw"])<1e-4 for w in ["WF1","WF2","WF3"])
+    t5_pass = all(abs(test_signals.loc[test_signals.wf==w,"reward_REASSESS_RR3"].mean()-BASELINE_E2_REASSESS_RR3[w]["EV_cw"])<1e-4 for w in ["WF1","WF2","WF3"])
 
     forbidden = ["R_lower", "R_upper", "actual_fill", "status", "censored", "reward", "post_entry"]
     all_features = set()
@@ -1042,8 +1106,14 @@ def run_post_evaluation(df_comb: pd.DataFrame, outer_preds: Dict[str, Tuple[pd.D
     w_test = recency_weights(dummy_times, pd.Timestamp("2025-01-01"), 60.0)
     t7_pass = np.isclose(w_test[1] / w_test[0], 0.5, atol=1e-5)
 
-    t8_pass = True
-    t9_pass = True
+    purge_df=pd.DataFrame(PURGE_TRACE)
+    purge_df.to_csv(OUT_DIR/"purge_boundary_audit.csv",index=False)
+    prep_df=pd.DataFrame(PREPROCESS_TRACE)
+    prep_df.to_csv(OUT_DIR/"preprocessing_fit_scope_audit.csv",index=False)
+    repro_df=pd.DataFrame(REPRO_TRACE)
+    repro_df.to_csv(OUT_DIR/"prediction_reproducibility_audit.csv",index=False)
+    t8_pass = bool(len(purge_df) and (pd.to_datetime(purge_df.train_max_reward_end)<pd.to_datetime(purge_df.validation_start)).all())
+    t9_pass = bool((df_comb.reward_end_semantics==HARDENING_VERSION).all() and t8_pass)
 
     t10_pass = True
     for wf, trb, teb in OUTER_WFS:
@@ -1052,9 +1122,11 @@ def run_post_evaluation(df_comb: pd.DataFrame, outer_preds: Dict[str, Tuple[pd.D
         if len(tr_gids.intersection(te_gids)) > 0:
             t10_pass = False
 
-    t11_pass = True
-    t12_pass = True
-    t13_pass = True
+    t11_pass = bool(len(prep_df) and (prep_df.fit_source=="purged_train_only").all()
+                    and (prep_df.fit_rows>0).all() and (prep_df.validation_rows>0).all())
+    q_probe=np.array([[0.,.1,.2,.3],[0.,-.1,-.2,-.3]])
+    t12_pass = np.array_equal(apply_action_policy(q_probe),np.array([3,0])) and "reward" not in inspect.getsource(apply_action_policy)
+    t13_pass = bool(len(repro_df)==3 and (repro_df.max_abs_diff==0.).all())
     t14_pass = (pd.to_datetime(df_comb["entry_time"]).max() <= P1_CUTOFF)
 
     tests = [
@@ -1076,7 +1148,7 @@ def run_post_evaluation(df_comb: pd.DataFrame, outer_preds: Dict[str, Tuple[pd.D
     all_tests_pass = all(t["passed"] for t in tests)
     (OUT_DIR / "synthetic_and_leakage_tests.json").write_text(json.dumps(dict(all_passed=all_tests_pass, tests=tests), indent=2))
     assert all_tests_pass, "SYNTHETIC_LEAKAGE_TEST_FAILURE"
-    print(f"  [PASSED] All 14 tests (T1 - T14) verified")
+    print(f"  [PASSED] All 14 tests (T1 - T14) verified by executable assertions")
 
     # 8. Decision Gates & Verdict
     outer_df = pd.read_csv(OUT_DIR / "multi_action_outer_by_wf.csv")
@@ -1100,8 +1172,8 @@ def run_post_evaluation(df_comb: pd.DataFrame, outer_preds: Dict[str, Tuple[pd.D
         verdict = "MULTI_ACTION_Q_V2_CANDIDATE"
     elif g3:
         verdict = "MULTI_ACTION_Q_V2_CANDIDATE"
-    elif g1 and not g3:
-        verdict = "MULTI_ACTION_Q_EDGE_SURVIVES_BUT_DOES_NOT_BEAT_FIXED_REASSESS"
+    elif not g3:
+        verdict = "STOP_CURRENT_MULTI_ACTION_ML"
     else:
         verdict = "NO_MATERIAL_ML_OR_RECENCY_INCREMENT"
 
@@ -1144,6 +1216,12 @@ def run_post_evaluation(df_comb: pd.DataFrame, outer_preds: Dict[str, Tuple[pd.D
         "selected_architecture": sel_df.to_dict(orient="records"),
         "P1_read": False,
         "P1_untouched": True,
+        "hardening": {"reward_end_semantics": HARDENING_VERSION,
+                      "purge_checks": int(len(purge_df)),
+                      "preprocessing_scope_checks": int(len(prep_df)),
+                      "prediction_reproducibility": repro_df.to_dict("records"),
+                      "tests_passed": int(sum(t["passed"] for t in tests)),
+                      "tests_total": len(tests)},
     }
     (OUT_DIR / "V2_ML_RECENCY_MULTI_ACTION_AUDIT.json").write_text(json.dumps(audit_json, indent=2))
 
@@ -1190,7 +1268,7 @@ Action distribution across test splits:
 
 ## 4. Verification and Governance
 - P1 read: `False` (all sample times <= {P1_CUTOFF})
-- Tests passed: 14/14
+- Tests passed: 14/14 via executable assertions (see purge, preprocessing-scope, and prediction-reproducibility audits)
 """
     (OUT_DIR / "V2_ML_RECENCY_MULTI_ACTION_V1.md").write_text(md_content)
     print("  [SAVED] V2_ML_RECENCY_MULTI_ACTION_V1.md")
