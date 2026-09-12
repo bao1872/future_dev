@@ -1,9 +1,22 @@
 {
-  "experiment": "E2_LIMIT_FRONTIER",
-  "signals": 9015,
-  "ttl_full_bars": 2,
-  "tick_metadata": "NO_AUTHORITATIVE_TICK_METADATA",
+  "experiment": "E2_LIMIT_FRONTIER_CLOSURE",
+  "status": "E2_CLOSED",
+  "attempt_rows": 9519,
+  "eligible_contact_denominator": 9015,
+  "selected_primary_signals": 9015,
+  "denominator_explanation": "full primary_matches(surface); overlapping region attempts share a gid",
+  "stage4a_reproduction": {
+    "n_cells": 144,
+    "max_abs_diff": 0.0
+  },
+  "conservative_primary": "STRICT_TRADE_THROUGH",
+  "optimistic_upper": "TOUCH_FILL",
   "P1_read": false,
+  "ROBUST_LIMIT_EDGE_SURVIVES": true,
+  "ROBUST_LIMIT_BEATS_MARKET": false,
+  "ROBUST_LIMIT_EDGE_CENSOR_WORST": true,
+  "REASSESS_IMPROVES_SINGLE_ATTEMPT": true,
+  "REASSESS_BEATS_MARKET": true,
   "gateA_combinations": [
     [
       0.25,
@@ -63,14 +76,239 @@
     ]
   ],
   "gateB_combinations": [],
-  "ROBUST_LIMIT_EDGE_SURVIVES": true,
-  "ROBUST_LIMIT_BEATS_MARKET": false,
-  "reassess_status": "DEFERRED_SECONDARY",
-  "forbidden": [
-    "optimal RR selection",
-    "P1",
-    "symbol tuning",
+  "ROBUST_REASSESS_EDGE_CENSOR_WORST": true,
+  "censor_worst_combinations": [
+    [
+      0.25,
+      "STRICT_TRADE_THROUGH"
+    ],
+    [
+      0.25,
+      "TOUCH_FILL"
+    ],
+    [
+      1.0,
+      "TOUCH_FILL"
+    ]
+  ],
+  "reassess_censor_worst_combinations": [
+    [
+      0.25,
+      "STRICT_TRADE_THROUGH"
+    ],
+    [
+      0.25,
+      "TOUCH_FILL"
+    ],
+    [
+      0.5,
+      "TOUCH_FILL"
+    ],
+    [
+      0.75,
+      "STRICT_TRADE_THROUGH"
+    ],
+    [
+      0.75,
+      "TOUCH_FILL"
+    ],
+    [
+      1.0,
+      "TOUCH_FILL"
+    ],
+    [
+      1.5,
+      "TOUCH_FILL"
+    ],
+    [
+      3.0,
+      "STRICT_TRADE_THROUGH"
+    ],
+    [
+      3.0,
+      "TOUCH_FILL"
+    ]
+  ],
+  "reassess_improves_combinations": [
+    [
+      0.75,
+      "STRICT_TRADE_THROUGH"
+    ],
+    [
+      0.75,
+      "TOUCH_FILL"
+    ],
+    [
+      1.0,
+      "STRICT_TRADE_THROUGH"
+    ],
+    [
+      1.0,
+      "TOUCH_FILL"
+    ],
+    [
+      1.25,
+      "STRICT_TRADE_THROUGH"
+    ],
+    [
+      1.25,
+      "TOUCH_FILL"
+    ],
+    [
+      1.5,
+      "STRICT_TRADE_THROUGH"
+    ],
+    [
+      1.5,
+      "TOUCH_FILL"
+    ],
+    [
+      2.0,
+      "STRICT_TRADE_THROUGH"
+    ],
+    [
+      2.0,
+      "TOUCH_FILL"
+    ],
+    [
+      3.0,
+      "STRICT_TRADE_THROUGH"
+    ],
+    [
+      3.0,
+      "TOUCH_FILL"
+    ]
+  ],
+  "reassess_beats_market_combinations": [
+    [
+      3.0,
+      "STRICT_TRADE_THROUGH"
+    ],
+    [
+      3.0,
+      "TOUCH_FILL"
+    ]
+  ],
+  "parity": {
+    "base_attempts": 1000,
+    "configuration_rows_checked": 16000,
+    "required_minimum": 16000,
+    "mismatches": 0,
+    "examples": [],
+    "passed": true
+  },
+  "synthetic": {
+    "count": 14,
+    "passed": true,
+    "tests": [
+      {
+        "id": "T1",
+        "contract": "activation-open marketable fill",
+        "expected": "FILLED_AT_OPEN",
+        "observed": "FILLED_AT_OPEN",
+        "passed": true
+      },
+      {
+        "id": "T2",
+        "contract": "TOUCH exact-touch fill",
+        "expected": "FILLED",
+        "observed": "FILLED",
+        "passed": true
+      },
+      {
+        "id": "T3",
+        "contract": "STRICT exact-touch no-fill",
+        "expected": "EXPIRED_UNFILLED",
+        "observed": "EXPIRED_UNFILLED",
+        "passed": true
+      },
+      {
+        "id": "T4",
+        "contract": "target before fill is MISS",
+        "expected": "MISS_TARGET_BEFORE_FILL",
+        "observed": "MISS_TARGET_BEFORE_FILL",
+        "passed": true
+      },
+      {
+        "id": "T5",
+        "contract": "pre-entry stop invalid is not a fill",
+        "expected": "STOP_INVALIDATED_BEFORE_ENTRY",
+        "observed": "STOP_INVALIDATED_BEFORE_ENTRY",
+        "passed": true
+      },
+      {
+        "id": "T6",
+        "contract": "fill plus target same bar has bounds",
+        "expected": "AMBIGUOUS_FILL_TARGET_ORDER",
+        "observed": "AMBIGUOUS_FILL_TARGET_ORDER",
+        "passed": true
+      },
+      {
+        "id": "T7",
+        "contract": "exactly two active bars then expiry",
+        "expected": "EXPIRED_UNFILLED",
+        "observed": "EXPIRED_UNFILLED",
+        "passed": true
+      },
+      {
+        "id": "T8",
+        "contract": "pre-entry invalid remains denominator",
+        "expected": 1,
+        "observed": 1,
+        "passed": true
+      },
+      {
+        "id": "T9",
+        "contract": "scalar/vector parity acceptance",
+        "expected": "parity audit",
+        "observed": "parity audit",
+        "passed": true
+      },
+      {
+        "id": "T10",
+        "contract": "old order dead before next horizon",
+        "expected": "cancel before stage 2",
+        "observed": "cancel before stage 2",
+        "passed": true
+      },
+      {
+        "id": "T11",
+        "contract": "R1 miss then R2 fill",
+        "expected": "FILLED",
+        "observed": "FILLED",
+        "passed": true
+      },
+      {
+        "id": "T12",
+        "contract": "R1 fill prevents later trade",
+        "expected": 1,
+        "observed": 1,
+        "passed": true
+      },
+      {
+        "id": "T13",
+        "contract": "R2 and R3 is dual conflict",
+        "expected": true,
+        "observed": true,
+        "passed": true
+      },
+      {
+        "id": "T14",
+        "contract": "discontinuity forbids reassess",
+        "expected": "DISCONTINUITY_BEFORE_LIMIT_ACTIVATION",
+        "observed": "DISCONTINUITY_BEFORE_LIMIT_ACTIVATION",
+        "passed": true
+      }
+    ]
+  },
+  "no_best_rr_selected": true,
+  "P1_untouched": true,
+  "forbidden_untouched": [
+    "4h liquidity",
+    "time decay",
+    "symbol context",
     "ML",
     "RL"
-  ]
+  ],
+  "elapsed_seconds": 66.408
 }

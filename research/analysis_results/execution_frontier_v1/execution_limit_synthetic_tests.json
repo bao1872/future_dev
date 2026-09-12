@@ -1,0 +1,104 @@
+{
+  "count": 14,
+  "passed": true,
+  "tests": [
+    {
+      "id": "T1",
+      "contract": "activation-open marketable fill",
+      "expected": "FILLED_AT_OPEN",
+      "observed": "FILLED_AT_OPEN",
+      "passed": true
+    },
+    {
+      "id": "T2",
+      "contract": "TOUCH exact-touch fill",
+      "expected": "FILLED",
+      "observed": "FILLED",
+      "passed": true
+    },
+    {
+      "id": "T3",
+      "contract": "STRICT exact-touch no-fill",
+      "expected": "EXPIRED_UNFILLED",
+      "observed": "EXPIRED_UNFILLED",
+      "passed": true
+    },
+    {
+      "id": "T4",
+      "contract": "target before fill is MISS",
+      "expected": "MISS_TARGET_BEFORE_FILL",
+      "observed": "MISS_TARGET_BEFORE_FILL",
+      "passed": true
+    },
+    {
+      "id": "T5",
+      "contract": "pre-entry stop invalid is not a fill",
+      "expected": "STOP_INVALIDATED_BEFORE_ENTRY",
+      "observed": "STOP_INVALIDATED_BEFORE_ENTRY",
+      "passed": true
+    },
+    {
+      "id": "T6",
+      "contract": "fill plus target same bar has bounds",
+      "expected": "AMBIGUOUS_FILL_TARGET_ORDER",
+      "observed": "AMBIGUOUS_FILL_TARGET_ORDER",
+      "passed": true
+    },
+    {
+      "id": "T7",
+      "contract": "exactly two active bars then expiry",
+      "expected": "EXPIRED_UNFILLED",
+      "observed": "EXPIRED_UNFILLED",
+      "passed": true
+    },
+    {
+      "id": "T8",
+      "contract": "pre-entry invalid remains denominator",
+      "expected": 1,
+      "observed": 1,
+      "passed": true
+    },
+    {
+      "id": "T9",
+      "contract": "scalar/vector parity acceptance",
+      "expected": "parity audit",
+      "observed": "parity audit",
+      "passed": true
+    },
+    {
+      "id": "T10",
+      "contract": "old order dead before next horizon",
+      "expected": "cancel before stage 2",
+      "observed": "cancel before stage 2",
+      "passed": true
+    },
+    {
+      "id": "T11",
+      "contract": "R1 miss then R2 fill",
+      "expected": "FILLED",
+      "observed": "FILLED",
+      "passed": true
+    },
+    {
+      "id": "T12",
+      "contract": "R1 fill prevents later trade",
+      "expected": 1,
+      "observed": 1,
+      "passed": true
+    },
+    {
+      "id": "T13",
+      "contract": "R2 and R3 is dual conflict",
+      "expected": true,
+      "observed": true,
+      "passed": true
+    },
+    {
+      "id": "T14",
+      "contract": "discontinuity forbids reassess",
+      "expected": "DISCONTINUITY_BEFORE_LIMIT_ACTIVATION",
+      "observed": "DISCONTINUITY_BEFORE_LIMIT_ACTIVATION",
+      "passed": true
+    }
+  ]
+}

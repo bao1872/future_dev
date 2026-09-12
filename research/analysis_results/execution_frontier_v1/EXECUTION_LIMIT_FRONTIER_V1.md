@@ -1,80 +1,9 @@
-# E2 Limit Execution Frontier
+# E2 Limit Execution Frontier — Closure
 
-{
-  "experiment": "E2_LIMIT_FRONTIER",
-  "signals": 9015,
-  "ttl_full_bars": 2,
-  "tick_metadata": "NO_AUTHORITATIVE_TICK_METADATA",
-  "P1_read": false,
-  "gateA_combinations": [
-    [
-      0.25,
-      "STRICT_TRADE_THROUGH"
-    ],
-    [
-      0.25,
-      "TOUCH_FILL"
-    ],
-    [
-      0.5,
-      "STRICT_TRADE_THROUGH"
-    ],
-    [
-      0.5,
-      "TOUCH_FILL"
-    ],
-    [
-      0.75,
-      "STRICT_TRADE_THROUGH"
-    ],
-    [
-      0.75,
-      "TOUCH_FILL"
-    ],
-    [
-      1.0,
-      "STRICT_TRADE_THROUGH"
-    ],
-    [
-      1.0,
-      "TOUCH_FILL"
-    ],
-    [
-      1.25,
-      "STRICT_TRADE_THROUGH"
-    ],
-    [
-      1.25,
-      "TOUCH_FILL"
-    ],
-    [
-      1.5,
-      "STRICT_TRADE_THROUGH"
-    ],
-    [
-      1.5,
-      "TOUCH_FILL"
-    ],
-    [
-      2.0,
-      "TOUCH_FILL"
-    ],
-    [
-      3.0,
-      "TOUCH_FILL"
-    ]
-  ],
-  "gateB_combinations": [],
-  "ROBUST_LIMIT_EDGE_SURVIVES": true,
-  "ROBUST_LIMIT_BEATS_MARKET": false,
-  "reassess_status": "DEFERRED_SECONDARY",
-  "forbidden": [
-    "optimal RR selection",
-    "P1",
-    "symbol tuning",
-    "ML",
-    "RL"
-  ]
-}
+**E2_CLOSED**. Strict-through is conservative; Touch is the upper view.
 
-Primary SINGLE_ATTEMPT only; no RR selected.
+- `SINGLE_ATTEMPT`: Market > fixed Limit (`ROBUST_LIMIT_BEATS_MARKET=False`).
+- `REASSESS_NEXT_H`: continuation is separate (`REASSESS_IMPROVES_SINGLE_ATTEMPT=True`, `REASSESS_BEATS_MARKET=True`).
+- Full universe: 9,519 gid-region attempts / 9,015 eligible contacts.
+- Scalar/vector parity: 16,000 rows, 0 mismatches.
+- Synthetic: T1-T11 passed. No best RR selected. P1 and post-E2 axes untouched.

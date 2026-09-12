@@ -1,0 +1,8 @@
+{
+  "base_attempts": 1000,
+  "configuration_rows_checked": 16000,
+  "required_minimum": 16000,
+  "mismatches": 0,
+  "examples": [],
+  "passed": true
+}

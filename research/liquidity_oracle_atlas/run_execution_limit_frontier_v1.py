@@ -18,16 +18,18 @@ def run_block(g,B,rr,model):
     limit=(target+rr*stop)/(1+rr); ei=g.entry_bar_index.to_numpy(int)
     o=B['o'][ei]; H=np.column_stack([B['h'][ei+k] for k in range(2)]); L=np.column_stack([B['l'][ei+k] for k in range(2)])
     O=np.column_stack([B['o'][ei+k] for k in range(2)])
-    pre=g.status.isin(PRE).to_numpy(); gap=(d*(target-o)<=0)|(d*(o-stop)<=0)|B['disc'][ei]
-    market=(~pre)&(~gap)&np.where(d>0,o<=limit,o>=limit)
+    pre=g.status.isin(PRE).to_numpy(); disc0=B['disc'][ei]
+    gap=(d*(target-o)<=0)|(d*(o-stop)<=0)
+    market=(~pre)&(~gap)&(~disc0)&np.where(d>0,o<=limit,o>=limit)
     fill=np.where(d[:,None]>0,L<limit[:,None] if model.startswith('STRICT') else L<=limit[:,None],
                   H>limit[:,None] if model.startswith('STRICT') else H>=limit[:,None])
     tt=np.where(d[:,None]>0,H>=target[:,None],L<=target[:,None]); ss=np.where(d[:,None]>0,L<=stop[:,None],H>=stop[:,None])
-    active=(~pre)&(~gap); status=np.full(n,"EXPIRED_UNFILLED",object); status[pre]=g.status.to_numpy()[pre]; status[gap&~pre]="GAP_INVALID_BEFORE_LIMIT_ACTIVATION"
+    active=(~pre)&(~gap)&(~disc0); status=np.full(n,"EXPIRED_UNFILLED",object); status[pre]=g.status.to_numpy()[pre]; status[gap&~pre]="GAP_INVALID_BEFORE_LIMIT_ACTIVATION"; status[disc0&~pre]="DISCONTINUITY_BEFORE_LIMIT_ACTIVATION"
     fill_i=np.full(n,-1); fill_px=np.full(n,np.nan); lower=np.zeros(n); upper=np.zeros(n); amb=np.zeros(n,bool)
     fill_i[market]=0; fill_px[market]=o[market]; status[market]="FILLED_AT_OPEN"
     for k in range(2):
         pending=active&(fill_i<0)&(status=="EXPIRED_UNFILLED")
+        dk=B['disc'][ei+k]; status[pending&dk]="DISCONTINUITY_BEFORE_LIMIT_ACTIVATION"; pending &= ~dk
         f=pending&fill[:,k]; t=pending&tt[:,k]; s=pending&ss[:,k]
         ft=f&t; fs=f&s&~t; status[t&~f]="MISS_TARGET_BEFORE_FILL"; status[s&~f&~t]="STOP_INVALIDATED_BEFORE_FILL"; status[t&s&~f]="BOTH_BOUNDARIES_BEFORE_FILL"
         status[ft]="AMBIGUOUS_FILL_TARGET_ORDER"; amb[ft]=True; upper[ft]=rr
