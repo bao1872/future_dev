@@ -1,0 +1,64 @@
+{
+  "experiment": "Geometry Economic Frontier v1.0",
+  "base_commit": "7107f16",
+  "full_run": true,
+  "sample": null,
+  "n_surface_rows": 4651200,
+  "n_first_available_rows": 559841,
+  "n_cells": 6637,
+  "n_regions": 2459,
+  "n_robust_positive": 10,
+  "verdict": "ROBUST_POSITIVE_GEOMETRY",
+  "stage4a_reproduction": {
+    "n_cells": 144,
+    "max_abs_diff": 0.0
+  },
+  "preregistered": {
+    "target_bins": [
+      "<0.5",
+      "0.5-1",
+      "1-2",
+      "2-3",
+      "3-5",
+      ">=5"
+    ],
+    "risk_bins": [
+      "<0.25",
+      "0.25-0.5",
+      "0.5-1",
+      "1-2",
+      "2-3",
+      ">=3"
+    ],
+    "rr_bins": [
+      "<0.5",
+      "0.5-0.75",
+      "0.75-1",
+      "1-1.5",
+      "1.5-2",
+      "2-3",
+      ">=3"
+    ],
+    "min_n_per_wf": 200,
+    "max_ambiguity_gap_R": 0.25,
+    "positive_rule": "E_R_lower > 0 in WF1, WF2, WF3",
+    "planes": [
+      "target_x_risk",
+      "rr_x_target"
+    ],
+    "region_identity": [
+      "action",
+      "first_h",
+      "structure_scale"
+    ]
+  },
+  "forbidden": [
+    "ML",
+    "threshold search",
+    "best-cell optimization",
+    "new morphology/liquidity features",
+    "DP",
+    "RL"
+  ],
+  "elapsed_seconds": 62.371
+}

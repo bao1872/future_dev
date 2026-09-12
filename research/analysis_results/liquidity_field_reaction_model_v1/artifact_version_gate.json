@@ -1,0 +1,22 @@
+{
+  "field_join_contract": [
+    "symbol",
+    "liquidity_id",
+    "contact_number"
+  ],
+  "reaction_join_contract": [
+    "symbol",
+    "liquidity_id",
+    "contact_number",
+    "h"
+  ],
+  "contact_id_authoritative": false,
+  "producer_script_sha256": "1b448f185083f3cf3a48c113ad205d9906bb539050ca8c76ef765da6ff41e3f4",
+  "producer_git_sha": "12b75e90c8e400fc7b8aa4edc90c5712f3582ff3",
+  "generated_at": "2026-09-12T14:57:26",
+  "base_commit": "7107f16",
+  "n_field_rows": 96900,
+  "n_reaction_rows": 775200,
+  "field_key_unique": true,
+  "reaction_key_unique": true
+}

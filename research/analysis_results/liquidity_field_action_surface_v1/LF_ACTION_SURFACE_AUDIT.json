@@ -1,0 +1,38 @@
+{
+  "experiment": "Liquidity-Field Sequential Action Surface v1.0 (Stage 4A)",
+  "base_commit": "7107f16",
+  "frozen_controls": {
+    "atlas_v1_2": "smc_oracle_atlas_v1 (oracle_risk_frontier_v1_2)",
+    "risk_coupled_v1_0": "run_risk_coupled_execution_v1.py (PAUSED, not run)"
+  },
+  "active_mask_semantics": "available_time<=dt AND NOT(fp<=dt); contacted liq excluded by fp<=dt, no extra id-pop",
+  "n_action_rows": 3546480,
+  "n_contacts": 73885,
+  "synthetic_all_pass": true,
+  "wf_blocks": [
+    [
+      "WF1",
+      "TB2"
+    ],
+    [
+      "WF2",
+      "TB3"
+    ],
+    [
+      "WF3",
+      "TB4"
+    ]
+  ],
+  "roi_gate": "STOP_BEFORE_MODEL: no classifier/DP/RL until Gate A/B met",
+  "forbidden": [
+    "ML classifier",
+    "DP",
+    "RL",
+    "risk grid optimization",
+    "cluster",
+    "auto threshold search",
+    "best h/scale claim"
+  ],
+  "sample_mode": null,
+  "n_components": null
+}

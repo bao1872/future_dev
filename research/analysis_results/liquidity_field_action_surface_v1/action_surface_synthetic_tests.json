@@ -1,0 +1,38 @@
+{
+  "all_pass": true,
+  "checks": [
+    {
+      "check": "T1_outward_has_target",
+      "pass_": true
+    },
+    {
+      "check": "T1_long_confirmed_support_scarce_at_h1",
+      "pass_": true
+    },
+    {
+      "check": "T2_small_scale_more_structure_than_large",
+      "pass_": true
+    },
+    {
+      "check": "T3_large_scale_structure_can_form",
+      "pass_": true
+    },
+    {
+      "check": "T4_target_moves_to_next_level_while_waiting",
+      "pass_": true
+    },
+    {
+      "check": "T5_same_bar_lower_is_minus1",
+      "pass_": true
+    },
+    {
+      "check": "T6_no_confirmed_structure_means_unavailable",
+      "pass_": true
+    },
+    {
+      "check": "T7_vectorized_matches_scalar_reference",
+      "pass_": true
+    }
+  ],
+  "t7_match_rate": 1.0
+}

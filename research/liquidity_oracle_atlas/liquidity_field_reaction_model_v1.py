@@ -32,7 +32,10 @@
 from __future__ import annotations
 
 import argparse
+import datetime
+import hashlib
 import json
+import subprocess
 import sys
 import time
 import warnings
@@ -44,6 +47,20 @@ import pandas as pd
 
 warnings.filterwarnings("ignore")
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+
+def _script_sha256():
+    return hashlib.sha256(Path(__file__).resolve().read_bytes()).hexdigest()
+
+
+def _git_sha():
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            cwd=str(Path(__file__).resolve().parents[2]),
+            stderr=subprocess.DEVNULL).decode().strip()
+    except Exception:
+        return BASE_COMMIT
 
 from research.liquidity_oracle_atlas.run_fixed_execution_baseline_v1 import (
     load_env,
@@ -524,6 +541,8 @@ def build_episodes(D, master_by_sym, bars_by_sym, sample=None,
                + sub["liquidity_id"].to_numpy().astype(str) + "|"
                + sub["contact_number"].to_numpy().astype(str))
         sym_arr = np.full(len(sub), sym)
+        lid_arr = sub["liquidity_id"].to_numpy()
+        cn_arr = sub["contact_number"].to_numpy(int)
         side_arr = sub["side"].to_numpy(int)
         bp_arr = sub["liquidity_price"].to_numpy(float)
         atr_arr = sub["atr0"].to_numpy(float)
@@ -533,6 +552,9 @@ def build_episodes(D, master_by_sym, bars_by_sym, sample=None,
         fdf = pd.DataFrame(fld)
         fdf.insert(0, "contact_id", cid)
         fdf.insert(1, "symbol", sym_arr)
+        # 结构化主键（权威 join 键；liquidity_id 可能含 '|'，禁止再用字符串解析）
+        fdf.insert(2, "liquidity_id", lid_arr)
+        fdf.insert(3, "contact_number", cn_arr)
         fdf["decision_time"] = sub["decision_time"].to_numpy().astype(str)
         fdf["side"] = side_arr
         fdf["boundary_price"] = np.round(bp_arr, 5)
@@ -564,6 +586,10 @@ def build_episodes(D, master_by_sym, bars_by_sym, sample=None,
                 blk[k] = v
             for k, v in fp.items():
                 blk[k] = v
+            # 结构化主键 + 决策 horizon（权威 join 键；reaction 额外带 h）
+            blk["liquidity_id"] = lid_arr
+            blk["contact_number"] = cn_arr
+            blk["h"] = h
             rows.append(blk)
         react_blocks.append(pd.concat(rows, ignore_index=True))
 
@@ -738,6 +764,9 @@ def main():
     ap.add_argument("--symbols", type=str, default=None,
                     help="限制品种，逗号分隔，如 AGL8,CUL8")
     ap.add_argument("--max-symbols", type=int, default=None)
+    ap.add_argument("--features-only", action="store_true",
+                    help="仅执行 Stage 1+2 并写出 field/reaction artifact，"
+                         "STOP（不跑 Stage 3 OPTICS clustering）")
     args = ap.parse_args()
 
     t0 = time.perf_counter()
@@ -760,6 +789,12 @@ def main():
     print(f"[S1+S2] contacts={audit['n_contacts']} "
           f"field_rows={len(field_df)} react_rows={len(react_df)} "
           f"({time.perf_counter()-t0:.1f}s)")
+
+    # 主键唯一性 HARD ASSERT：artifact 漂移会立刻暴露
+    field_key = ["symbol", "liquidity_id", "contact_number"]
+    react_key = ["symbol", "liquidity_id", "contact_number", "h"]
+    assert not field_df.duplicated(field_key).any(), "FIELD_KEY_NOT_UNIQUE"
+    assert not react_df.duplicated(react_key).any(), "REACTION_KEY_NOT_UNIQUE"
 
     feat_def = dict(
         orientation="Y_h = s*(P[t0+h]-boundary)/ATR0; s=+1 upper, -1 lower",
@@ -788,6 +823,27 @@ def main():
         clustering_input="REACTION morphology only (no field/profit/direction)")
     json.dump(feat_def, open(OUT / "reaction_feature_definition.json", "w"),
               indent=2, ensure_ascii=False, default=str)
+
+    if args.features_only:
+        # ---- Artifact Version Gate：固定数据合同，杜绝 silent drift ----
+        version_gate = dict(
+            field_join_contract=field_key,
+            reaction_join_contract=react_key,
+            contact_id_authoritative=False,
+            producer_script_sha256=_script_sha256(),
+            producer_git_sha=_git_sha(),
+            generated_at=datetime.datetime.now().isoformat(timespec="seconds"),
+            base_commit=BASE_COMMIT,
+            n_field_rows=int(len(field_df)),
+            n_reaction_rows=int(len(react_df)),
+            field_key_unique=not bool(field_df.duplicated(field_key).any()),
+            reaction_key_unique=not bool(react_df.duplicated(react_key).any()),
+        )
+        json.dump(version_gate, open(OUT / "artifact_version_gate.json", "w"),
+                  indent=2, ensure_ascii=False, default=str)
+        print(f"[FEATURES-ONLY] artifact version gate written; "
+              f"STOP before Stage 3. git={version_gate['producer_git_sha']}")
+        return
 
     s3 = stage3_clustering(react_df)
     s3["assignments"].to_csv(OUT / "morphology_cluster_assignments.csv", index=False)

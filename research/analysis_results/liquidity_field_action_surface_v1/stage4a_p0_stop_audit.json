@@ -1,0 +1,43 @@
+{
+  "experiment": "Stage 4A P0 stop-semantics audit",
+  "code_review": "stop_abs = boundary + latest_confirmed_extreme(...) * atr0 (scale = δ-confirmation threshold, NOT fixed risk distance) → Case 1",
+  "P0_2_stop_price_match_rate": 1.0,
+  "P0_2_max_abs_diff": 0.0,
+  "P0_3_per_scale": {
+    "0.2": {
+      "n": 600,
+      "share_risk_norm_eq_scale": 0.011667,
+      "median_risk_norm": 0.52632,
+      "p25": 0.28242,
+      "p75": 0.92168,
+      "std": 0.79548
+    },
+    "0.4": {
+      "n": 554,
+      "share_risk_norm_eq_scale": 0.00361,
+      "median_risk_norm": 0.57022,
+      "p25": 0.34483,
+      "p75": 0.95946,
+      "std": 0.69264
+    },
+    "0.8": {
+      "n": 456,
+      "share_risk_norm_eq_scale": 0.008772,
+      "median_risk_norm": 0.72886,
+      "p25": 0.41667,
+      "p75": 1.07531,
+      "std": 0.77844
+    },
+    "1.2": {
+      "n": 390,
+      "share_risk_norm_eq_scale": 0.0,
+      "median_risk_norm": 1.04167,
+      "p25": 0.625,
+      "p75": 1.41944,
+      "std": 0.89274
+    }
+  },
+  "degraded_to_fixed_atr_stop": false,
+  "stop_semantics_valid": true,
+  "P0_pass": true
+}

@@ -1,0 +1,150 @@
+{
+  "experiment": "Stage 4B Latent-State Compression Gate v1.0",
+  "base_commit": "7107f16",
+  "state_key": [
+    "symbol",
+    "liquidity_id",
+    "contact_number",
+    "h"
+  ],
+  "n_state": 581400,
+  "n_action_rows": 4651200,
+  "reaction_features": [
+    "path_efficiency",
+    "total_variation_atr",
+    "amplitude_atr",
+    "cross_count",
+    "boundary_occupancy",
+    "boundary_touch_bars",
+    "dc_pivots_0p20",
+    "dc_pivots_0p40",
+    "dc_pivots_0p80",
+    "dc_pivots_1p20",
+    "outward_mfe_atr",
+    "inward_mae_atr"
+  ],
+  "reaction_log1p": [
+    "cross_count",
+    "boundary_touch_bars",
+    "dc_pivots_0p20",
+    "dc_pivots_0p40",
+    "dc_pivots_0p80",
+    "dc_pivots_1p20"
+  ],
+  "forbidden_reaction": [
+    "persistent_escape",
+    "persistent_escape_bar",
+    "post_escape_efficiency",
+    "retracement_ratio",
+    "fp_out_0.25",
+    "fp_out_0.50",
+    "fp_out_1.00",
+    "fp_in_0.25",
+    "fp_in_0.50",
+    "fp_in_1.00",
+    "target_first",
+    "future_target_hit"
+  ],
+  "liquidity_features": [
+    "density_0p5",
+    "density_1p0",
+    "density_2p0",
+    "density_4p0",
+    "imbalance_0p5",
+    "imbalance_1p0",
+    "imbalance_2p0",
+    "imbalance_4p0",
+    "room_up_atr",
+    "room_down_atr",
+    "depletion_share"
+  ],
+  "deferred_liquidity": [
+    "remaining_liq_imbalance_1p0"
+  ],
+  "nmf_features": [
+    "density_0p5",
+    "density_1p0",
+    "density_2p0",
+    "density_4p0",
+    "liq_intensity_up_0p5",
+    "liq_intensity_up_1p0",
+    "liq_intensity_up_2p0",
+    "liq_intensity_up_4p0",
+    "liq_intensity_dn_0p5",
+    "liq_intensity_dn_1p0",
+    "liq_intensity_dn_2p0",
+    "liq_intensity_dn_4p0"
+  ],
+  "nmf_ks": [
+    2,
+    3,
+    4
+  ],
+  "nmf_subsample": 150000,
+  "geometry_never_in_pca": [
+    "target_distance_atr",
+    "risk_distance_atr",
+    "rr",
+    "h",
+    "structure_scale",
+    "action_is_outward"
+  ],
+  "wf_scheme": {
+    "WF1": {
+      "train": [
+        "WF0"
+      ],
+      "test": "TB2"
+    },
+    "WF2": {
+      "train": [
+        "WF0",
+        "WF1"
+      ],
+      "test": "TB3"
+    },
+    "WF3": {
+      "train": [
+        "WF0",
+        "WF1",
+        "WF2"
+      ],
+      "test": "TB4"
+    }
+  },
+  "preprocessing": {
+    "log1p_then_standard": [
+      "cross_count",
+      "boundary_touch_bars",
+      "dc_pivots_0p20",
+      "dc_pivots_0p40",
+      "dc_pivots_0p80",
+      "dc_pivots_1p20"
+    ],
+    "density": "log1p(up+dn) constructed once; then StandardScaler(train)",
+    "imbalance": "(up-dn)/(up+dn+1e-12)",
+    "scaler_pca": "strict train-only per WF"
+  },
+  "join_match_rate": {
+    "reaction": 1.0,
+    "field": 1.0,
+    "depletion": 1.0,
+    "leaks_present": [
+      "persistent_escape",
+      "persistent_escape_bar",
+      "post_escape_efficiency",
+      "retracement_ratio",
+      "fp_out_0.25",
+      "fp_out_0.50",
+      "fp_out_1.00",
+      "fp_in_0.25",
+      "fp_in_0.50",
+      "fp_in_1.00"
+    ],
+    "n_state": 581400
+  },
+  "reproduction": {
+    "n_cells": 144,
+    "max_abs_diff": 0.0
+  }
+}

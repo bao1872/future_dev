@@ -1,0 +1,85 @@
+{
+  "experiment": "Stage 4A pre-gate: P1.1 + P1.2 + I1/I2/I3 integration",
+  "base_commit": "7107f16",
+  "artifact_producer": {
+    "field_join_contract": [
+      "symbol",
+      "liquidity_id",
+      "contact_number"
+    ],
+    "reaction_join_contract": [
+      "symbol",
+      "liquidity_id",
+      "contact_number",
+      "h"
+    ],
+    "contact_id_authoritative": false,
+    "producer_script_sha256": "1b448f185083f3cf3a48c113ad205d9906bb539050ca8c76ef765da6ff41e3f4",
+    "producer_git_sha": "12b75e90c8e400fc7b8aa4edc90c5712f3582ff3",
+    "generated_at": "2026-09-12T14:57:26",
+    "base_commit": "7107f16",
+    "n_field_rows": 96900,
+    "n_reaction_rows": 775200,
+    "field_key_unique": true,
+    "reaction_key_unique": true
+  },
+  "P1_1_t0_field_reproduction": {
+    "pass_": true,
+    "n_contacts": 96900,
+    "active_count_mismatch": 0,
+    "nearest_R_mismatch": 0,
+    "max_abs_R_diff": 0.0,
+    "frozen_field_reproduction_pass": true,
+    "artifact_structured_key_present": true,
+    "artifact_key_unique": true
+  },
+  "P1_2_prefix_causal_reproduction": {
+    "pass_": true,
+    "n_sampled_contacts": 500,
+    "n_feature_cells_compared": 3000,
+    "full_vs_prefix_invariant_rate": 1.0,
+    "csv_value_reproduction_mismatch": {
+      "total_variation_atr": 2481,
+      "path_efficiency": 2412,
+      "amplitude_atr": 2474,
+      "cross_count": 1155,
+      "dc_pivots_0p40": 2921,
+      "dc_pivots_0p80": 2884
+    },
+    "csv_value_reproduction_max_abs_diff": {
+      "total_variation_atr": 25.3358,
+      "path_efficiency": 1.0,
+      "amplitude_atr": 17.196,
+      "cross_count": 8.0,
+      "dc_pivots_0p40": 17.0,
+      "dc_pivots_0p80": 13.0
+    }
+  },
+  "I_integration_join": {
+    "pass_": true,
+    "field_join_match_rate": 1.0,
+    "reaction_join_match_rate": 1.0,
+    "reaction_join_match_rate_by_h": {
+      "1": 1.0,
+      "2": 1.0,
+      "3": 1.0,
+      "5": 1.0,
+      "8": 1.0,
+      "13": 1.0
+    },
+    "field_feature_coverage": {
+      "field_position": 0.9629205366357069,
+      "liq_imbalance_1p0": 1.0,
+      "room_up_atr": 0.9899277605779154
+    },
+    "reaction_feature_coverage": {
+      "path_efficiency": 0.8107241142070863,
+      "cross_count": 1.0,
+      "amplitude_atr": 1.0,
+      "dc_pivots_0p40": 1.0,
+      "dc_pivots_0p80": 1.0
+    },
+    "i3_all_columns_covered": true
+  },
+  "all_pass": true
+}

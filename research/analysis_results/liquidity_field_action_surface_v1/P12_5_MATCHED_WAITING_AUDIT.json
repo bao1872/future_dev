@@ -1,0 +1,103 @@
+{
+  "gate": "P12.5 Matched Waiting Consistency Gate",
+  "base_commit": "7107f16",
+  "wording_contract": "matched waiting effect (NOT causal)",
+  "reuse": "run_liquidity_field_action_surface_v1 (authoritative functions)",
+  "variants": {
+    "first_available": {
+      "n_raw": 1743614,
+      "verdict": "TRADEOFF_BROAD"
+    },
+    "h2_cohort": {
+      "n_raw": 1371591,
+      "verdict": "TRADEOFF_BROAD"
+    }
+  },
+  "verdicts": {
+    "first_available": {
+      "verdict": "TRADEOFF_BROAD",
+      "per_wf": [
+        {
+          "wf": "WF1",
+          "n": 598325,
+          "share_delta_RR_positive": 0.5875218317803869,
+          "share_delta_target_first_positive": 0.0635139765177788,
+          "share_delta_E_R_lower_positive": 0.1125959971587348,
+          "rr_up": true,
+          "tf_down": true,
+          "er_down": true
+        },
+        {
+          "wf": "WF2",
+          "n": 577549,
+          "share_delta_RR_positive": 0.5858654417200965,
+          "share_delta_target_first_positive": 0.06435990712476344,
+          "share_delta_E_R_lower_positive": 0.11255322059253847,
+          "rr_up": true,
+          "tf_down": true,
+          "er_down": true
+        },
+        {
+          "wf": "WF3",
+          "n": 567740,
+          "share_delta_RR_positive": 0.5871455243597421,
+          "share_delta_target_first_positive": 0.06001867051819495,
+          "share_delta_E_R_lower_positive": 0.10772360587592912,
+          "rr_up": true,
+          "tf_down": true,
+          "er_down": true
+        }
+      ],
+      "overall": {
+        "n": 1743614,
+        "share_delta_RR_positive": 0.5868506446954429,
+        "share_delta_target_first_positive": 0.06265606951997403,
+        "share_delta_E_R_lower_positive": 0.11099532350623476
+      }
+    },
+    "h2_cohort": {
+      "verdict": "TRADEOFF_BROAD",
+      "per_wf": [
+        {
+          "wf": "WF1",
+          "n": 469475,
+          "share_delta_RR_positive": 0.5918802918153256,
+          "share_delta_target_first_positive": 0.06465946003514564,
+          "share_delta_E_R_lower_positive": 0.11474945417753873,
+          "rr_up": true,
+          "tf_down": true,
+          "er_down": true
+        },
+        {
+          "wf": "WF2",
+          "n": 454456,
+          "share_delta_RR_positive": 0.5912761631489077,
+          "share_delta_target_first_positive": 0.06470153326174591,
+          "share_delta_E_R_lower_positive": 0.11451273610646576,
+          "rr_up": true,
+          "tf_down": true,
+          "er_down": true
+        },
+        {
+          "wf": "WF3",
+          "n": 447660,
+          "share_delta_RR_positive": 0.5893311888486799,
+          "share_delta_target_first_positive": 0.06122056918196846,
+          "share_delta_E_R_lower_positive": 0.11056158691864361,
+          "rr_up": true,
+          "tf_down": true,
+          "er_down": true
+        }
+      ],
+      "overall": {
+        "n": 1371591,
+        "share_delta_RR_positive": 0.590848146422658,
+        "share_delta_target_first_positive": 0.06355101484334616,
+        "share_delta_E_R_lower_positive": 0.11330418470229099
+      }
+    }
+  },
+  "no_bootstrap": true,
+  "no_threshold_tuning": true,
+  "stage4a_definitions_unchanged": true
+}
