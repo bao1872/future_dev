@@ -1,0 +1,115 @@
+{
+  "experiment": "V2-A 4h Liquidity Incremental Information Audit",
+  "base_commit": "c2fe8354ca1a9dfed5058a7417895f3355395caa",
+  "verdict": "NO_MATERIAL_4H_INCREMENT",
+  "n_levels": 484,
+  "level_types": {
+    "CONFIRMED_SWING_LOW": 154,
+    "CONFIRMED_SWING_HIGH": 142,
+    "CANONICAL_EQL": 103,
+    "CANONICAL_EQH": 85
+  },
+  "preexisting_same_price_share": 0.9979338842975206,
+  "active_coverage": 0.9554592363261094,
+  "causality": {
+    "n": 200,
+    "available_time_pass": 200,
+    "prefix_rebuild_pass": 200
+  },
+  "stage4a_reproduction": {
+    "n_cells": 144,
+    "max_abs_diff": 0.0
+  },
+  "baseline_M0_max_abs_diff": 0.0,
+  "action_gate": false,
+  "wait_gate": false,
+  "P1_read": false,
+  "policy_modified": false,
+  "timings": {
+    "baseline_seconds": 43.54170183400129,
+    "aggregation_smc_lifecycle_seconds": 8.730803584003297,
+    "field_seconds": 0.26798970800155075,
+    "action_model_seconds": 120.59330887500255,
+    "wait_model_seconds": 25.604016583005432,
+    "total_seconds": 210.33431679199566
+  },
+  "efficiency_contract": {
+    "smc_once_per_symbol": true,
+    "field_chunk": 4096,
+    "no_per_contact_smc": true,
+    "no_per_model_field_rebuild": true
+  },
+  "action": [
+    {
+      "wf": "WF1",
+      "M2_AUC": 0.8263685240748062,
+      "M3_AUC": 0.8240753861140078,
+      "delta_AUC": -0.0022931379607984415,
+      "delta_LogLoss": 0.003765412009819613,
+      "delta_Brier": 0.0003898063719300765,
+      "secondary_delta_AUC": -0.0017361930626275113,
+      "M0_AUC": 0.8241537638611931
+    },
+    {
+      "wf": "WF2",
+      "M2_AUC": 0.8195828337182305,
+      "M3_AUC": 0.81987128551973,
+      "delta_AUC": 0.0002884518014995008,
+      "delta_LogLoss": -0.00022566331315510002,
+      "delta_Brier": -9.22904779328132e-05,
+      "secondary_delta_AUC": 9.946664148008377e-05,
+      "M0_AUC": 0.8182332098195197
+    },
+    {
+      "wf": "WF3",
+      "M2_AUC": 0.8251004959554298,
+      "M3_AUC": 0.8249508002011477,
+      "delta_AUC": -0.00014969575428203097,
+      "delta_LogLoss": 9.589397799647514e-05,
+      "delta_Brier": 8.281514516537969e-05,
+      "secondary_delta_AUC": -0.00023662634846388642,
+      "M0_AUC": 0.8224290868448715
+    }
+  ],
+  "wait": [
+    {
+      "wf": "WF1",
+      "n_train": 464766,
+      "n_test": 543295,
+      "W0_R2": 0.0009172134885617744,
+      "W1_R2": -0.03015394061779486,
+      "delta_R2": -0.031071154106356635,
+      "W0_Spearman": 0.09750356183874574,
+      "W1_Spearman": 0.08346773275562262,
+      "delta_Spearman": -0.01403582908312312,
+      "W0_MAE": 0.922868208707875,
+      "W1_MAE": 0.9437973159896581
+    },
+    {
+      "wf": "WF2",
+      "n_train": 1008061,
+      "n_test": 527629,
+      "W0_R2": 0.0023768605975308388,
+      "W1_R2": 0.0015641815898304046,
+      "delta_R2": -0.0008126790077004342,
+      "W0_Spearman": 0.11632443499486372,
+      "W1_Spearman": 0.09987213217104796,
+      "delta_Spearman": -0.016452302823815768,
+      "W0_MAE": 0.9309450421929334,
+      "W1_MAE": 0.9333583896645223
+    },
+    {
+      "wf": "WF3",
+      "n_train": 1535690,
+      "n_test": 514289,
+      "W0_R2": 0.0018663472821883742,
+      "W1_R2": 0.0016680822751063973,
+      "delta_R2": -0.00019826500708197692,
+      "W0_Spearman": 0.1253570600993955,
+      "W1_Spearman": 0.11915469484509986,
+      "delta_Spearman": -0.006202365254295655,
+      "W0_MAE": 0.9578507086267171,
+      "W1_MAE": 0.9557763783467711
+    }
+  ]
+}
