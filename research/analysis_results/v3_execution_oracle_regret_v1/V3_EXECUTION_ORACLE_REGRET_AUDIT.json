@@ -1,0 +1,152 @@
+{
+  "experiment": "V3-A1 Execution Oracle / Regret Map",
+  "base_commit": "a33d4eba5dbe1a476d1b69b530547a04aa277b74",
+  "current_verdict": "STOP_CURRENT_MULTI_ACTION_ML",
+  "actions": [
+    "SKIP",
+    "MARKET",
+    "LIMIT_RR3",
+    "REASSESS_RR3"
+  ],
+  "primary_reward": "censor-worst R",
+  "n_test_signals": 9015,
+  "wf_n": {
+    "WF1": 3160,
+    "WF2": 2847,
+    "WF3": 3008
+  },
+  "frozen_parity": {
+    "MARKET": {
+      "WF1": {
+        "actual": 0.010376171415190495,
+        "expected": 0.010376171415,
+        "abs_diff": 1.9049518906744112e-13
+      },
+      "WF2": {
+        "actual": 0.03311778492054007,
+        "expected": 0.033117784921,
+        "abs_diff": 4.599307046326828e-13
+      },
+      "WF3": {
+        "actual": 0.043795014083593584,
+        "expected": 0.043795014084,
+        "abs_diff": 4.0641795484575027e-13
+      }
+    },
+    "LIMIT_RR3": {
+      "WF1": {
+        "actual": -0.005963576795068442,
+        "expected": -0.005963576795,
+        "abs_diff": 6.844178002118895e-14
+      },
+      "WF2": {
+        "actual": -0.01604594036651694,
+        "expected": -0.016045940367,
+        "abs_diff": 4.830615074613576e-13
+      },
+      "WF3": {
+        "actual": 0.058922314077136946,
+        "expected": 0.058922314077,
+        "abs_diff": 1.3694601008751306e-13
+      }
+    },
+    "REASSESS_RR3": {
+      "WF1": {
+        "actual": 0.03422629662265308,
+        "expected": 0.034226296623,
+        "abs_diff": 3.469238785136497e-13
+      },
+      "WF2": {
+        "actual": 0.044368531006858544,
+        "expected": 0.044368531007,
+        "abs_diff": 1.4145629112505276e-13
+      },
+      "WF3": {
+        "actual": 0.10413508003458376,
+        "expected": 0.104135080035,
+        "abs_diff": 4.16236489719779e-13
+      }
+    }
+  },
+  "tests": [
+    {
+      "id": "T1",
+      "desc": "signal count 9015 / WF counts exact",
+      "passed": true
+    },
+    {
+      "id": "T2",
+      "desc": "SKIP reward all zero",
+      "passed": true
+    },
+    {
+      "id": "T3",
+      "desc": "Market frozen parity",
+      "passed": true
+    },
+    {
+      "id": "T4",
+      "desc": "Single Limit frozen parity",
+      "passed": true
+    },
+    {
+      "id": "T5",
+      "desc": "Reassess frozen parity",
+      "passed": true
+    },
+    {
+      "id": "T6",
+      "desc": "oracle >= every candidate reward",
+      "passed": true
+    },
+    {
+      "id": "T7",
+      "desc": "oracle headroom >= 0",
+      "passed": true
+    },
+    {
+      "id": "T8",
+      "desc": "oracle_n_best >= 1",
+      "passed": true
+    },
+    {
+      "id": "T9",
+      "desc": "unique XOR tied covers 100%",
+      "passed": true
+    },
+    {
+      "id": "T10",
+      "desc": "n_best == sum(contains)",
+      "passed": true
+    },
+    {
+      "id": "T11",
+      "desc": "P1 not read (entry_time <= P1 cutoff)",
+      "passed": true
+    },
+    {
+      "id": "T12",
+      "desc": "no sklearn estimator / no fitted model",
+      "passed": true
+    }
+  ],
+  "all_tests_pass": true,
+  "verdict": "ORACLE_HEADROOM_MATERIAL",
+  "verdict_rules": {
+    "ORACLE_HEADROOM_INCONSISTENT": "max_wf_headroom / min_wf_headroom >= 2.0 (WFs disagree in magnitude)",
+    "ORACLE_HEADROOM_LOW": "max over WF of share(best_alt_advantage > 0.10R) < 0.10",
+    "ORACLE_HEADROOM_MATERIAL": "otherwise (all WF headroom > 0 and material share >= 0.10)",
+    "note": "thresholds declared a priori; no economic tuning performed",
+    "headroom_spread_ratio": 1.0702174330760044
+  },
+  "no_modeling": {
+    "sklearn_used": false,
+    "p1_read": false,
+    "feature_selection": false,
+    "tuning": false
+  },
+  "bootstrap": {
+    "n": 2000,
+    "seed": 20260912
+  }
+}

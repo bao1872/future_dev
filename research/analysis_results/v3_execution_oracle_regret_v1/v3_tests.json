@@ -1,0 +1,65 @@
+{
+  "all_passed": true,
+  "tests": [
+    {
+      "id": "T1",
+      "desc": "signal count 9015 / WF counts exact",
+      "passed": true
+    },
+    {
+      "id": "T2",
+      "desc": "SKIP reward all zero",
+      "passed": true
+    },
+    {
+      "id": "T3",
+      "desc": "Market frozen parity",
+      "passed": true
+    },
+    {
+      "id": "T4",
+      "desc": "Single Limit frozen parity",
+      "passed": true
+    },
+    {
+      "id": "T5",
+      "desc": "Reassess frozen parity",
+      "passed": true
+    },
+    {
+      "id": "T6",
+      "desc": "oracle >= every candidate reward",
+      "passed": true
+    },
+    {
+      "id": "T7",
+      "desc": "oracle headroom >= 0",
+      "passed": true
+    },
+    {
+      "id": "T8",
+      "desc": "oracle_n_best >= 1",
+      "passed": true
+    },
+    {
+      "id": "T9",
+      "desc": "unique XOR tied covers 100%",
+      "passed": true
+    },
+    {
+      "id": "T10",
+      "desc": "n_best == sum(contains)",
+      "passed": true
+    },
+    {
+      "id": "T11",
+      "desc": "P1 not read (entry_time <= P1 cutoff)",
+      "passed": true
+    },
+    {
+      "id": "T12",
+      "desc": "no sklearn estimator / no fitted model",
+      "passed": true
+    }
+  ]
+}
