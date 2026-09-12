@@ -14,6 +14,7 @@ import hashlib
 import json
 import shutil
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -23,7 +24,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from market_data.pytdx_source import connect, download_5m_l8, drop_incomplete_tail
+from market_data.pytdx_source import download_5m_l8, drop_incomplete_tail
 import research.export_ob_trigger_execution_v21 as rawmod
 import research.phase1_tradability.phase1_contract_v1 as phase1
 import research.liquidity_state_machine.build_liquidity_state_v1 as lsm
@@ -104,13 +105,23 @@ def download_and_seal_raw():
     NORM.mkdir(parents=True, exist_ok=False)
     ART.mkdir(parents=True, exist_ok=False)
     audits, hashes, total_new = [], {}, 0
-    api = connect()
-    try:
-        for sym in SYMBOLS:
-            # Adapter key is the root symbol; its fixed instrument table maps
-            # that key to the PyTDX *L8 continuous series.
-            fresh = drop_incomplete_tail(download_5m_l8(
-                sym, api=api, not_before=OVERLAP_START))
+    for sym in SYMBOLS:
+        last_error = None
+        for attempt in range(1, 4):
+            try:
+                # Adapter key is the root symbol; each attempt owns a fresh
+                # connection so one timeout cannot poison later instruments.
+                fresh = drop_incomplete_tail(download_5m_l8(
+                    sym, not_before=OVERLAP_START))
+                break
+            except Exception as exc:
+                last_error = exc
+                if attempt == 3:
+                    raise
+                time.sleep(attempt)
+        else:  # defensive: loop either breaks or raises
+            raise last_error
+        try:
             fresh = fresh[KEEP].copy()
             validate_frame(fresh, sym)
             old = pd.read_csv(FROZEN_RAW/f"{sym}_5m.csv", parse_dates=[
@@ -132,8 +143,9 @@ def download_and_seal_raw():
             combined = combined.sort_values("bar_start_time").reset_index(drop=True)
             validate_frame(combined, sym)
             combined.to_csv(NORM/f"{sym}_5m.csv", index=False)
-    finally:
-        api.close()
+        except Exception:
+            # Never resume a partially prepared block; caller discards it.
+            raise
     pd.DataFrame(audits).to_json(OUT/"prospective_data_continuity_audit.json",
                                  orient="records", indent=2)
     return hashes, total_new, audits
