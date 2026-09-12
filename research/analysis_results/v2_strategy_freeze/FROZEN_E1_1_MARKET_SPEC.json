@@ -1,0 +1,113 @@
+{
+  "candidate": "E1_1_HARDENED_MARKET",
+  "role": "P1_ADJUDICATION_BASELINE",
+  "status": "DEVELOPMENT_FROZEN_PENDING_P1",
+  "naming_constraint": "development baseline only; NOT 'optimal', 'final', 'validated' or 'live' strategy",
+  "source_commit": "7691ff21f3d9552151cf3df3ae48e2420aa3ae92",
+  "frozen_at": {
+    "relative_to_commit": "7691ff21f3d9552151cf3df3ae48e2420aa3ae92",
+    "note": "E1.1 的语义在源提交处被记录并锁定；本 spec 由 pre-P1 closure 生成，不读取 HEAD，也不覆盖 RR3 spec。"
+  },
+  "region_hash": null,
+  "region_hash_absent_reason": "E1.1 是 market-execution baseline，不存在 R1–R4 opportunity-policy regions，因此没有 region_hash；其身份由 execution/reward/timing + function hashes 构成的 policy_hash 定义。",
+  "market_execution_policy": {
+    "execution": "E1_1_HARDENED_MARKET",
+    "execution_lag_bars": 1,
+    "entry": "membership known at the next open -> executable entry delayed to the following full 5m bar open",
+    "signal_bar_index": "contact_bar_index + 1 + h",
+    "entry_bar_index": "signal_bar_index + 1",
+    "actionable_entry": "open of entry_bar_index",
+    "outcome_window_bars": 34,
+    "fill_model": "MARKET_AT_OPEN (no limit price, no fill simulation)",
+    "gate_a_waiting_bar": "during the one full waiting bar (signal_bar_index) the frozen thesis must remain alive; because no position exists yet, either boundary invalidates the signal with zero economic return, so ordering is irrelevant when both are touched",
+    "prefill_statuses": [
+      "BOTH_BOUNDARIES_TOUCHED_BEFORE_ENTRY",
+      "TARGET_CONSUMED_BEFORE_ENTRY",
+      "STOP_INVALIDATED_BEFORE_ENTRY",
+      "DISCONTINUITY_BEFORE_ENTRY"
+    ],
+    "geometry_invalid_status": "LAG1_GAP_ENTRY_INVALID",
+    "executed_status": "EXECUTED_LAG1",
+    "discontinuity_rule": "within the 34-bar outcome window, bars after the first discontinuity are nulled before first_hit_bounds",
+    "whole_policy_gate": "verdict=LAG1_HARDENED_EXECUTION_EDGE_SURVIVES requires EV_R_lower_per_signal > 0 AND EV_R_lower_censor_worst_per_signal > 0 in ALL three development WFs"
+  },
+  "reward_outcome_semantics": {
+    "reward_fn": "conservative_reward(filled, R_lower, censored)",
+    "filled": "trades.status == 'EXECUTED_LAG1'",
+    "resolved": "filled & ~censored -> R_lower",
+    "filled_and_censored": "-1.0",
+    "not_filled": "0.0",
+    "note": "conservative_reward 仅对 non-fill 携带 R_lower == 0 的 action 有效；不适用于 frozen E2 SINGLE_ATTEMPT limit（后者用 e2_single_limit_censor_worst）。"
+  },
+  "timing_contract": {
+    "t0": "contact decision_time (liquidity field frozen at t0)",
+    "signal_bar_index": "contact_bar_index + 1 + h",
+    "validation_bar": "signal_bar_index (E1.1 Gate A waiting bar)",
+    "entry_bar_index": "signal_bar_index + 1",
+    "actionable_entry": "open of entry_bar_index",
+    "reward_end_bar_index": "entry_bar_index + 33",
+    "reward_end_time": "authoritative BAR END of reward_end_bar_index (= bar_start_time + 5min; availability_time == bar_end_time)",
+    "purge": "train reward_end_time < validation_start",
+    "bar_label": "INTERVAL END; bar_start_time = bar_end - 5min"
+  },
+  "p1_generation_contract": {
+    "purpose": "拿到全新 P1 数据后，E1.1 必须按以下**不可变**规则生成结果；不允许任何搜索、优化或选择性重跑。",
+    "step_1_policy": "build_policy(surface, primary_matches(surface), meta) —— R1–R4 geometry 与 precedence 冻结不变",
+    "step_2_membership": "R1–R4 membership frozen and next-open-conditioned",
+    "step_3_execution": "entry delayed to the following full 5m bar open (execution_lag_bars=1)",
+    "step_4_prefill_gate": "E1.1 Gate A on the single waiting bar",
+    "step_5_outcome": "first_hit_bounds over 34 bars from entry bar; discontinuity truncation",
+    "step_6_reward": "conservative_reward(filled, R_lower, censored)",
+    "step_7_metric": "per-WF mean over ALL signals in that WF (not only executed)",
+    "forbidden": [
+      "any optimizer / parameter search",
+      "oracle or ML action selection",
+      "S2 / time-decay / best-symbol / region diagnostics",
+      "reading P1 before the preregistered adjudication contract is committed"
+    ]
+  },
+  "execution_hash": "04e116706853cfa860ba4083d83f0f16f4c3d42f95d06ac7778a3cee98d58bf2",
+  "reward_hash": "77fc1a6e3f6fbe8f64e16292138d16a299d921fb23898445cb01cd95c400e855",
+  "timing_hash": "0423f1e2b635bfa47fc984f5349f7422b4e58f12a514698cccc03b7d3cf281bb",
+  "policy_hash": "ed431df02d6b55d3810fe84866e1e03a02e2217b8def4f162113e8f7c127df42",
+  "critical_function_hashes": {
+    "conservative_reward": "7725e1d40d7416ab18d4f36d356424287876f4a27747b5e7e318499a8dc687fb",
+    "first_hit_bounds": "ae37061720aa537a0a22aa40df2ece50d6dd54403fd0f878e19c96ce0fdb8c58",
+    "surviving_field_and_target": "b181bcabed93f400a1f1e635eab3a1704c19e7265d3fa03e8d916c0556072ce8",
+    "latest_confirmed_extreme": "4dc1d3c74cf3fcaf1822e967524d0f5faf2728bcbed7c6d0b2e54e12be00a020",
+    "build_policy": "818cbc7093e6ccbe8e799151faf3a005c96926f70a755fdff90fe6e2be0ab9e6",
+    "primary_matches": "cf8126f51b822b8f3a151e737370029ad7c8dfbe6e1c52e4f3089ac6fe93b718"
+  },
+  "code_files": {
+    "research/liquidity_oracle_atlas/run_execution_frontier_v1.py": "24b1eaa7f3c91999169a464771c68e6b05a04c006814b080d6155c592c634073",
+    "research/liquidity_oracle_atlas/run_fixed_execution_baseline_v1.py": "b03f609e593d483c14272d156516923ceb785b9425dd635f24a8077732055446",
+    "research/liquidity_oracle_atlas/run_liquidity_field_action_surface_v1.py": "2df9448559af63fc5ad0dd2216c36a8f71f694d093018c2262298c3ddac9e00e",
+    "research/liquidity_oracle_atlas/run_enter_skip_selection_v1.py": "5dd7eae5dd96c2199c58051960a2ea1a2b01916bb68b7f471eb5f6d40b35d8d2",
+    "research/liquidity_oracle_atlas/run_v2_ml_recency_multi_action_v1.py": "30e59733c26abcf19ba1ad5544cb1525a4f4cc6c8b0d3dd88938d71d1b53e203"
+  },
+  "input_artifacts": {
+    "research/analysis_results/smc_oracle_atlas_v1/liquidity_master_v1_1.parquet": "9a48cc35987b85970dab60219ed5e276fb85096802ada4dd56578e9597cbda4f",
+    "research/analysis_results/smc_oracle_atlas_v1/liquidity_contacts_v1_1.parquet": "e172c39dccb8f4c71f6ec1643fa416f897320703801b4144d095d133655781ab",
+    "research/analysis_results/execution_frontier_v1/execution_lag1_trades.parquet": "b8a1189025da44f9820808ea17c2baa4ca6ac8a519715aeb5fbd9dbf863331c6"
+  },
+  "input_artifact_provenance": "worktree sha256 only —— 这三个 parquet 未被 git 跟踪，因此无法用 git blob 校验；hash 是唯一可用证据。",
+  "frozen_benchmark": {
+    "EV_cw": {
+      "WF1": 0.010376171415190495,
+      "WF2": 0.03311778492054007,
+      "WF3": 0.043795014083593584
+    },
+    "EV_lower": {
+      "WF1": 0.042021741035443656,
+      "WF2": 0.04751890891070517,
+      "WF3": 0.07637480131763613
+    },
+    "total_R": {
+      "WF1": 132.78870167200196,
+      "WF2": 135.28633366877762,
+      "WF3": 229.73540236344948
+    }
+  },
+  "benchmark_tolerance": 1e-09,
+  "P1_read": false
+}

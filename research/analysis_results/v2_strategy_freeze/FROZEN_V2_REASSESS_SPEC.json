@@ -94,6 +94,13 @@
     "strict_trade_through": "fill requires strict inequality (LONG: L < limit, SHORT: H > limit)",
     "marketable_open": "FILLED_AT_OPEN when bar-0 open crosses the limit (no prefill / gap / discontinuity)"
   },
+  "dual_conflict_scope": {
+    "build_policy": "TB1 / development opportunity-policy construction semantics. R2+R3 both matched -> SKIP_DUAL_ACTION_CONFLICT and the elif-chain ends, so R4 is NOT reachable in that branch.",
+    "route_reassess": "RR3 Strict Reassess execution lifecycle semantics. R2+R3 both available -> neither attempt is made (transition R2_R3_DUAL_CONFLICT recorded), but R4 IS still routed afterwards (separate `if R4 in avail` block).",
+    "unification_forbidden": true,
+    "p1_uses": "route_reassess",
+    "reason": "两种语义服务不同阶段：build_policy 决定开发期机会策略构造；route_reassess 决定 P1 候选策略的执行生命周期。在 P1 前统一二者等同于修改策略，禁止。"
+  },
   "reward_outcome_semantics": {
     "target": "frozen target_price",
     "stop": "frozen stop_price",
@@ -174,6 +181,11 @@
       "WF2": -0.016045940367,
       "WF3": 0.058922314077
     }
+  },
+  "benchmark_roles": {
+    "E1.1_MARKET": "P1_ADJUDICATION_BASELINE",
+    "V2_RR3_STRICT_REASSESS": "P1_ADJUDICATION_CANDIDATE",
+    "E2_RR3_STRICT_SINGLE_LIMIT": "HISTORICAL_SEMANTIC_REFERENCE"
   },
   "benchmark_tolerance": 1e-09,
   "superseded_oracle_ml": [

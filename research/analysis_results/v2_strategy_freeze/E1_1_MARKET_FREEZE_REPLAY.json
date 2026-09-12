@@ -1,0 +1,79 @@
+{
+  "replay_ok": true,
+  "n_signals_total": 9015,
+  "by_wf": {
+    "WF1": {
+      "n_signals": 3160,
+      "EV_cw": {
+        "actual": 0.010376171415190495,
+        "expected": 0.010376171415,
+        "abs_diff": 1.9049518906744112e-13,
+        "pass_": true
+      },
+      "EV_lower": {
+        "actual": 0.042021741035443656,
+        "expected": 0.042022,
+        "abs_diff": 2.5896455634055737e-07,
+        "pass_": true
+      },
+      "total_R": {
+        "actual": 132.78870167200196,
+        "expected": 132.788702,
+        "abs_diff": 3.2799803761918156e-07,
+        "pass_": true
+      },
+      "pass_": true
+    },
+    "WF2": {
+      "n_signals": 2847,
+      "EV_cw": {
+        "actual": 0.03311778492054007,
+        "expected": 0.033117784921,
+        "abs_diff": 4.599307046326828e-13,
+        "pass_": true
+      },
+      "EV_lower": {
+        "actual": 0.04751890891070517,
+        "expected": 0.047519,
+        "abs_diff": 9.108929482914974e-08,
+        "pass_": true
+      },
+      "total_R": {
+        "actual": 135.28633366877762,
+        "expected": 135.286334,
+        "abs_diff": 3.312223952889326e-07,
+        "pass_": true
+      },
+      "pass_": true
+    },
+    "WF3": {
+      "n_signals": 3008,
+      "EV_cw": {
+        "actual": 0.043795014083593584,
+        "expected": 0.043795014084,
+        "abs_diff": 4.0641795484575027e-13,
+        "pass_": true
+      },
+      "EV_lower": {
+        "actual": 0.07637480131763613,
+        "expected": 0.076375,
+        "abs_diff": 1.986823638666646e-07,
+        "pass_": true
+      },
+      "total_R": {
+        "actual": 229.73540236344948,
+        "expected": 229.735402,
+        "abs_diff": 3.634494873949734e-07,
+        "pass_": true
+      },
+      "pass_": true
+    }
+  },
+  "replay_purpose": "prove that re-running the E1.1 market-execution replay from the frozen input artifacts and the frozen reward function reproduces the accepted E1.1 benchmark",
+  "replay_scope_note": "仅重放 E1.1 所需的 Market baseline（与 run_stage_b0 的 Market 段同构）；不重建 ML dataset。",
+  "replay_command": ".venv/bin/python research/liquidity_oracle_atlas/run_pre_p1_freeze_closure_v1.py",
+  "tolerance": {
+    "parity": 1e-09,
+    "baseline": 0.0001
+  }
+}

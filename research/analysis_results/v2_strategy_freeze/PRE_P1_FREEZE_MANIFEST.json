@@ -1,0 +1,80 @@
+{
+  "manifest": "PRE_P1_FREEZE_MANIFEST",
+  "generated_by": "research/liquidity_oracle_atlas/run_pre_p1_freeze_closure_v1.py",
+  "verified_by": "research/liquidity_oracle_atlas/verify_frozen_specs_v1.py",
+  "source_commit": "7691ff21f3d9552151cf3df3ae48e2420aa3ae92",
+  "frozen_spec_files": {
+    "RR3": "research/analysis_results/v2_strategy_freeze/FROZEN_V2_REASSESS_SPEC.json",
+    "E1_1": "research/analysis_results/v2_strategy_freeze/FROZEN_E1_1_MARKET_SPEC.json"
+  },
+  "frozen_spec_sha256": {
+    "FROZEN_V2_REASSESS_SPEC.json": "73bae6ffd59ea47e8f537a34f5c976c93c2ab77017aaf5e1ebd3dbf3b7588362",
+    "FROZEN_E1_1_MARKET_SPEC.json": "a4b2cb7470a60eb228df26dd1599b67282178698130799ab06021c91d0371e7e"
+  },
+  "strategy_hashes": {
+    "RR3_STRICT_REASSESS": {
+      "region_hash": "7d488897be3e699410ebe6340d033f22d2431c5d89074c7efd0fbe076a3c23c7",
+      "policy_hash": "21adee821eb3c5278b35d1100e4ec071d9054e3e476fd06ca476073e205c4e42"
+    },
+    "E1_1_HARDENED_MARKET": {
+      "region_hash": null,
+      "policy_hash": "ed431df02d6b55d3810fe84866e1e03a02e2217b8def4f162113e8f7c127df42"
+    }
+  },
+  "code_hashes": {
+    "research/liquidity_oracle_atlas/run_enter_skip_selection_v1.py": "5dd7eae5dd96c2199c58051960a2ea1a2b01916bb68b7f471eb5f6d40b35d8d2",
+    "research/liquidity_oracle_atlas/run_execution_limit_frontier_v1.py": "226f6860e3828f3a1592f167acec4d7952a830eddcbb5671b15edd43a92218c8",
+    "research/liquidity_oracle_atlas/run_execution_limit_frontier_v1_closure.py": "7da37dbeae42137a50051c9c09e39ce80e18f5ad049166e7fcd1810769d43200",
+    "research/liquidity_oracle_atlas/run_liquidity_field_action_surface_v1.py": "2df9448559af63fc5ad0dd2216c36a8f71f694d093018c2262298c3ddac9e00e",
+    "research/liquidity_oracle_atlas/run_latent_state_compression_v1.py": "f2258fb85c1bef0ddf6c71e00318d027121eb009b7397d8af8736710c2038110",
+    "research/liquidity_oracle_atlas/run_fixed_execution_baseline_v1.py": "b03f609e593d483c14272d156516923ceb785b9425dd635f24a8077732055446",
+    "research/liquidity_oracle_atlas/run_v2_ml_recency_multi_action_v1.py": "30e59733c26abcf19ba1ad5544cb1525a4f4cc6c8b0d3dd88938d71d1b53e203",
+    "research/liquidity_oracle_atlas/build_oracle_atlas_v1_2.py": "9597b7517bad69ee763575ccc0f433728d929fee4076dbb8b473d4342ca1354d",
+    "research/liquidity_oracle_atlas/run_execution_frontier_v1.py": "24b1eaa7f3c91999169a464771c68e6b05a04c006814b080d6155c592c634073"
+  },
+  "input_hashes": {
+    "research/analysis_results/smc_oracle_atlas_v1/liquidity_master_v1_1.parquet": "9a48cc35987b85970dab60219ed5e276fb85096802ada4dd56578e9597cbda4f",
+    "research/analysis_results/smc_oracle_atlas_v1/liquidity_contacts_v1_1.parquet": "e172c39dccb8f4c71f6ec1643fa416f897320703801b4144d095d133655781ab",
+    "research/analysis_results/execution_frontier_v1/execution_lag1_trades.parquet": "b8a1189025da44f9820808ea17c2baa4ca6ac8a519715aeb5fbd9dbf863331c6"
+  },
+  "input_artifact_provenance": "worktree sha256 only (untracked parquet; no git blob available)",
+  "benchmark_roles": {
+    "E1.1_MARKET": "P1_ADJUDICATION_BASELINE",
+    "V2_RR3_STRICT_REASSESS": "P1_ADJUDICATION_CANDIDATE",
+    "E2_RR3_STRICT_SINGLE_LIMIT": "HISTORICAL_SEMANTIC_REFERENCE"
+  },
+  "benchmark_numbers": {
+    "V2_RR3_STRICT_REASSESS": {
+      "WF1": 0.034226296623,
+      "WF2": 0.044368531007,
+      "WF3": 0.104135080035
+    },
+    "E1.1_MARKET": {
+      "WF1": 0.010376171415,
+      "WF2": 0.033117784921,
+      "WF3": 0.043795014084
+    },
+    "E2_RR3_STRICT_SINGLE_LIMIT": {
+      "WF1": -0.005963576795,
+      "WF2": -0.016045940367,
+      "WF3": 0.058922314077
+    }
+  },
+  "freeze_manifest_hash": "c0b10c6ef3899b5a32ce8082128649ae8e63247d9a062f7af2b791c1253673d5",
+  "freeze_manifest_hash_inputs": [
+    "strategy_hashes",
+    "code_hashes",
+    "input_hashes",
+    "benchmark_roles",
+    "benchmark_numbers",
+    "source_commit"
+  ],
+  "P1_read": false,
+  "governance": {
+    "strategy_changes_in_closure": false,
+    "optimization_performed": false,
+    "numbers_changed": false,
+    "p1_allowed_only_after_freeze_review": true,
+    "verifier_is_read_only": true
+  }
+}

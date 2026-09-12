@@ -98,5 +98,10 @@
       "WF3": 0.058922314077
     }
   },
+  "benchmark_roles": {
+    "E1.1_MARKET": "P1_ADJUDICATION_BASELINE",
+    "V2_RR3_STRICT_REASSESS": "P1_ADJUDICATION_CANDIDATE",
+    "E2_RR3_STRICT_SINGLE_LIMIT": "HISTORICAL_SEMANTIC_REFERENCE"
+  },
   "next_step": "P1 adjudication contract (preregistered), then one-shot P1"
 }
