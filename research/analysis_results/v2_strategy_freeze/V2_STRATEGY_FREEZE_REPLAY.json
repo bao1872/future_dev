@@ -1,0 +1,67 @@
+{
+  "replay_ok": true,
+  "n_signals": 9015,
+  "by_metric": {
+    "E1.1_MARKET": {
+      "WF1": {
+        "actual": 0.010376171415190495,
+        "expected": 0.010376171415,
+        "abs_diff": 1.9049518906744112e-13,
+        "pass_": true
+      },
+      "WF2": {
+        "actual": 0.03311778492054007,
+        "expected": 0.033117784921,
+        "abs_diff": 4.599307046326828e-13,
+        "pass_": true
+      },
+      "WF3": {
+        "actual": 0.043795014083593584,
+        "expected": 0.043795014084,
+        "abs_diff": 4.0641795484575027e-13,
+        "pass_": true
+      }
+    },
+    "V2_RR3_STRICT_REASSESS": {
+      "WF1": {
+        "actual": 0.03422629662265308,
+        "expected": 0.034226296623,
+        "abs_diff": 3.469238785136497e-13,
+        "pass_": true
+      },
+      "WF2": {
+        "actual": 0.044368531006858544,
+        "expected": 0.044368531007,
+        "abs_diff": 1.4145629112505276e-13,
+        "pass_": true
+      },
+      "WF3": {
+        "actual": 0.10413508003458376,
+        "expected": 0.104135080035,
+        "abs_diff": 4.16236489719779e-13,
+        "pass_": true
+      }
+    },
+    "E2_RR3_STRICT_SINGLE_LIMIT": {
+      "WF1": {
+        "actual": -0.005963576795068442,
+        "expected": -0.005963576795,
+        "abs_diff": 6.844178002118895e-14,
+        "pass_": true
+      },
+      "WF2": {
+        "actual": -0.01604594036651694,
+        "expected": -0.016045940367,
+        "abs_diff": 4.830615074613576e-13,
+        "pass_": true
+      },
+      "WF3": {
+        "actual": 0.058922314077136946,
+        "expected": 0.058922314077,
+        "abs_diff": 1.3694601008751306e-13,
+        "pass_": true
+      }
+    }
+  },
+  "cache_rebuilt": true
+}
