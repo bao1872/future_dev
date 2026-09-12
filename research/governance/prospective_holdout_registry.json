@@ -3,7 +3,7 @@
     "start_exclusive": "2026-09-04 14:55:00",
     "end_inclusive": null,
     "role": "BURNED_PROSPECTIVE_HOLDOUT",
-    "status": "PREREGISTERED_NOT_YET_ACQUIRED",
+    "status": "ACQUISITION_BLOCKED_NOT_BURNED",
     "allowed_use": [
       "frozen_policy_evaluation",
       "data_quality_audit"

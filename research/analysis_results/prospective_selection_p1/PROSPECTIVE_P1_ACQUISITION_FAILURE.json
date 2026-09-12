@@ -1,0 +1,16 @@
+{
+  "block_id": "P1",
+  "stage": "ACQUISITION_BEFORE_SEAL",
+  "status": "BLOCKED_NOT_BURNED",
+  "adapter": "market_data.pytdx_source.download_5m_l8",
+  "fixed_server": "112.74.214.43:7727",
+  "failure": "pytdx.errors.TdxFunctionCallError caused by socket TimeoutError",
+  "failed_instrument": "AG",
+  "attempts_in_final_run": 3,
+  "raw_files_written": 0,
+  "manifest_written": false,
+  "policy_evaluated": false,
+  "outcome_viewed": false,
+  "holdout_burned": false,
+  "governance_action": "STOP; no fallback server or second provider permitted"
+}
