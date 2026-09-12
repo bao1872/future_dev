@@ -107,8 +107,10 @@ def download_and_seal_raw():
     api = connect()
     try:
         for sym in SYMBOLS:
+            # Adapter key is the root symbol; its fixed instrument table maps
+            # that key to the PyTDX *L8 continuous series.
             fresh = drop_incomplete_tail(download_5m_l8(
-                f"{sym}L8", api=api, not_before=OVERLAP_START))
+                sym, api=api, not_before=OVERLAP_START))
             fresh = fresh[KEEP].copy()
             validate_frame(fresh, sym)
             old = pd.read_csv(FROZEN_RAW/f"{sym}_5m.csv", parse_dates=[
