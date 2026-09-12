@@ -73,21 +73,40 @@ Validated TDX semantics -- do not change without re-validation
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import pandas as pd
 
+from pytdx.errors import TdxConnectionError, TdxFunctionCallError
 from pytdx.exhq import TdxExHq_API
 
 
 # ============================================================
-# Fixed connection
+# Connection & Server Pool
 # ============================================================
-#
-# One verified server only. No server pool, no speed test, no
-# circuit breaker. If it does not connect, the run fails.
+# Aligned with chanlun-pro candidate server pool and IP selection mechanism.
 
-TDX_HOST = "112.74.214.43"
+TDX_SERVERS = [
+    {"ip": "116.205.143.214", "port": 7727, "name": "扩展市场广州双线1"},
+    {"ip": "112.74.214.43", "port": 7727, "name": "扩展市场深圳双线1"},
+    {"ip": "120.25.218.6", "port": 7727, "name": "扩展市场深圳双线2"},
+    {"ip": "43.139.173.246", "port": 7727, "name": "扩展市场深圳双线3"},
+    {"ip": "159.75.90.107", "port": 7727, "name": "扩展市场深圳双线4"},
+    {"ip": "106.52.170.195", "port": 7727, "name": "扩展市场深圳双线5"},
+    {"ip": "139.9.191.175", "port": 7727, "name": "扩展市场广州双线3"},
+    {"ip": "175.24.47.69", "port": 7727, "name": "扩展市场上海双线7"},
+    {"ip": "150.158.9.199", "port": 7727, "name": "扩展市场上海双线1"},
+    {"ip": "150.158.20.127", "port": 7727, "name": "扩展市场上海双线2"},
+    {"ip": "49.235.119.116", "port": 7727, "name": "扩展市场上海双线3"},
+    {"ip": "49.234.13.160", "port": 7727, "name": "扩展市场上海双线4"},
+    {"ip": "124.71.223.19", "port": 7727, "name": "扩展市场广州双线2"},
+    {"ip": "113.45.175.47", "port": 7727, "name": "扩展市场广州双线4"},
+    {"ip": "123.60.173.210", "port": 7727, "name": "扩展市场上海双线5"},
+    {"ip": "118.89.69.202", "port": 7727, "name": "扩展市场上海双线6"},
+]
+
+TDX_HOST = "116.205.143.214"
 
 TDX_PORT = 7727
 
@@ -207,29 +226,116 @@ INSTRUMENTS = {
 
 
 # ============================================================
-# Connection
+# Connection & Server Failover
 # ============================================================
 
-def connect():
+def ping_server(
+    ip: str,
+    port: int = 7727,
+    timeout: float = 1.5,
+) -> float | None:
+    """Probe an extended-market server using live bar request.
+
+    Aligned with chanlun-pro tdx_best_ip.py: tests whether
+    get_instrument_bars responds with non-empty bar data within timeout.
+    """
+    t0 = time.perf_counter()
+    api = TdxExHq_API(raise_exception=True)
+    try:
+        if api.connect(ip, port, time_out=timeout):
+            bars = api.get_instrument_bars(9, 74, "AAPL", 0, 10)
+            if bars and len(bars) > 0:
+                return time.perf_counter() - t0
+    except Exception:
+        pass
+    finally:
+        try:
+            api.disconnect()
+        except Exception:
+            pass
+    return None
+
+
+def select_best_server(
+    servers: list[dict] | None = None,
+    timeout: float = 1.5,
+) -> tuple[str, int]:
+    """Select the fastest responsive TDX extended-market server.
+
+    Aligned with chanlun-pro commits cbb5075 and 89a0ae7.
+    Updates global TDX_HOST and TDX_PORT upon selection.
+    """
+    global TDX_HOST, TDX_PORT
+
+    candidates = servers or TDX_SERVERS
+    scored = []
+    for s in candidates:
+        latency = ping_server(s["ip"], s["port"], timeout=timeout)
+        if latency is not None:
+            scored.append((latency, s["ip"], s["port"], s.get("name", "")))
+
+    if not scored:
+        raise TdxConnectionError(
+            f"No responsive TDX server found among {len(candidates)} candidates."
+        )
+
+    scored.sort(key=lambda x: x[0])
+    best = scored[0]
+    TDX_HOST = best[1]
+    TDX_PORT = best[2]
+    return best[1], best[2]
+
+
+def connect(
+    host: str | None = None,
+    port: int | None = None,
+    time_out: int = TDX_TIMEOUT,
+    auto_failover: bool = True,
+):
     """Open a PyTDX extended-market API.
 
-    No retry pool and no fallback server. A connection failure is
-    a hard failure so the experiment never silently runs on stale
-    or partial data.
+    If the target server fails or raises TdxFunctionCallError/TdxConnectionError,
+    automatically reselects the optimal responsive server from TDX_SERVERS.
     """
+    global TDX_HOST, TDX_PORT
+
+    target_host = host or TDX_HOST
+    target_port = port or TDX_PORT
 
     api = TdxExHq_API(
         raise_exception=True,
         auto_retry=True,
     )
 
-    api.connect(
-        TDX_HOST,
-        TDX_PORT,
-        time_out=TDX_TIMEOUT,
-    )
-
-    return api
+    try:
+        api.connect(
+            target_host,
+            target_port,
+            time_out=time_out,
+        )
+        # Verify function call capability, aligned with chanlun-pro
+        probe = api.get_instrument_bars(9, 74, "AAPL", 0, 10)
+        if probe is None or len(probe) == 0:
+            raise TdxFunctionCallError("Probe bar call returned empty response")
+        return api
+    except (TdxConnectionError, TdxFunctionCallError, Exception):
+        if not auto_failover:
+            raise
+        try:
+            api.disconnect()
+        except Exception:
+            pass
+        best_host, best_port = select_best_server()
+        api = TdxExHq_API(
+            raise_exception=True,
+            auto_retry=True,
+        )
+        api.connect(
+            best_host,
+            best_port,
+            time_out=time_out,
+        )
+        return api
 
 
 # ============================================================
@@ -527,6 +633,7 @@ def fetch_bars(
     frequency: int = FREQ_5M,
     max_pages: int = 300,
     not_before=None,
+    max_retries: int = 3,
 ) -> pd.DataFrame:
     """Fetch bars page by page until the server stops returning.
 
@@ -535,7 +642,11 @@ def fetch_bars(
     short or empty page comes back, or when `not_before` has been
     reached. Pages come back newest-first, so early stopping is
     safe.
+
+    Retries on TdxFunctionCallError / TdxConnectionError, aligned with
+    chanlun-pro commit cbb5075.
     """
+    global TDX_HOST, TDX_PORT
 
     frames = []
 
@@ -543,13 +654,31 @@ def fetch_bars(
         max_pages
     ):
 
-        raw = api.get_instrument_bars(
-            frequency,
-            int(market),
-            str(code),
-            page * PAGE_SIZE,
-            PAGE_SIZE,
-        )
+        raw = None
+        for attempt in range(max_retries):
+            try:
+                raw = api.get_instrument_bars(
+                    frequency,
+                    int(market),
+                    str(code),
+                    page * PAGE_SIZE,
+                    PAGE_SIZE,
+                )
+                if raw is not None:
+                    break
+            except (TdxConnectionError, TdxFunctionCallError, Exception):
+                if attempt == max_retries - 1:
+                    raise
+                time.sleep(0.5 * (attempt + 1))
+                try:
+                    api.disconnect()
+                except Exception:
+                    pass
+                try:
+                    api.connect(TDX_HOST, TDX_PORT, time_out=TDX_TIMEOUT)
+                except Exception:
+                    best_host, best_port = select_best_server()
+                    api.connect(best_host, best_port, time_out=TDX_TIMEOUT)
 
         df = api.to_df(
             raw
