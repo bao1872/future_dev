@@ -71,6 +71,7 @@ def main():
         geometry=valid & (~B["disc"][np.minimum(entry_i,B["n"]-1)]) & (direction*(target-entry)>0) & (direction*(entry-stop)>0)
         for j,r in enumerate(gi.itertuples(index=False)):
             base=dict(gid=r.gid,wf=r.wf,symbol=sym,region=r.region,direction=direction[j],
+                signal_bar_index=int(signal_i[j]),entry_bar_index=int(entry_i[j]),
                 reference_entry=r.reference_entry,entry_price=entry[j],target_price=target[j],stop_price=stop[j])
             # E1.1 Gate A: during the one full waiting bar the frozen thesis
             # must remain alive.  Since no position exists yet, either boundary

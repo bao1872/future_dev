@@ -81,5 +81,5 @@
   "gate_E1_positive_3_of_3": true,
   "verdict": "LAG1_HARDENED_EXECUTION_EDGE_SURVIVES",
   "next_stage": "E2_LIMIT_FRONTIER_ALLOWED",
-  "elapsed_seconds": 72.631
+  "elapsed_seconds": 64.809
 }
