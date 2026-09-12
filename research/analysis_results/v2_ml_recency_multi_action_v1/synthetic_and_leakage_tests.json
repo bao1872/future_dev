@@ -1,0 +1,75 @@
+{
+  "all_passed": true,
+  "tests": [
+    {
+      "id": "T1",
+      "desc": "Same signal 4-action key 100% aligned",
+      "passed": true
+    },
+    {
+      "id": "T2",
+      "desc": "SKIP reward == 0 100%",
+      "passed": true
+    },
+    {
+      "id": "T3",
+      "desc": "Market reward reproduces E1.1",
+      "passed": true
+    },
+    {
+      "id": "T4",
+      "desc": "Limit RR3 Strict reproduces E2 Single",
+      "passed": true
+    },
+    {
+      "id": "T5",
+      "desc": "Reassess RR3 Strict reproduces E2 Reassess",
+      "passed": true
+    },
+    {
+      "id": "T6",
+      "desc": "No feature contains outcome/future columns",
+      "passed": true
+    },
+    {
+      "id": "T7",
+      "desc": "Recency weight age=0 vs age=H is 2:1 ratio",
+      "passed": true
+    },
+    {
+      "id": "T8",
+      "desc": "Inner validation strictly after inner train",
+      "passed": true
+    },
+    {
+      "id": "T9",
+      "desc": "Zero reward leakage across purge boundary",
+      "passed": true
+    },
+    {
+      "id": "T10",
+      "desc": "Zero GID overlap between outer train and test",
+      "passed": true
+    },
+    {
+      "id": "T11",
+      "desc": "Imputer and Scaler fit strictly on train",
+      "passed": true
+    },
+    {
+      "id": "T12",
+      "desc": "Action selection policy reads zero reward columns",
+      "passed": true
+    },
+    {
+      "id": "T13",
+      "desc": "Prediction reproducibility identical across runs",
+      "passed": true
+    },
+    {
+      "id": "T14",
+      "desc": "P1 prospective holdout path untouched",
+      "passed": true
+    }
+  ]
+}

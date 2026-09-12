@@ -1,0 +1,4 @@
+model_type,half_life,feature_block,selected_score,wf
+HistGBR,480,S2,-0.0344606762463348,WF1
+HistGBR,480,S1,0.04247910163697546,WF2
+Linear,60,S1,0.03635055291703072,WF3

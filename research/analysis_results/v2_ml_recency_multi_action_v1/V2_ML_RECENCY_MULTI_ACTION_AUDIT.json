@@ -1,0 +1,62 @@
+{
+  "experiment": "V2-B/V2-C/V2-D Nonlinear ML x Recency x Context x Multi-Action Value Experiment",
+  "verdict": "MULTI_ACTION_Q_EDGE_SURVIVES_BUT_DOES_NOT_BEAT_FIXED_REASSESS",
+  "gates": {
+    "G1_Q_POLICY_EDGE_SURVIVES": true,
+    "G2_Q_POLICY_BEATS_MARKET": false,
+    "G3_Q_POLICY_BEATS_FIXED_REASSESS": false,
+    "G4_ML_ACTION_SELECTION_ADDS_MATERIAL_VALUE": false
+  },
+  "policy_collapse": {
+    "collapsed": false,
+    "max_share_wf1": 0.3259493670886076,
+    "max_share_wf2": 0.3168247277836319,
+    "max_share_wf3": 0.39461436170212766
+  },
+  "performance_summary": {
+    "WF1": {
+      "Q_EV_cw": 0.0162413047027213,
+      "Market_EV_cw": 0.0103761714151905,
+      "Reassess_EV_cw": 0.034226296622653,
+      "delta_vs_Reassess": -0.017984991919931703
+    },
+    "WF2": {
+      "Q_EV_cw": 0.0302726966808287,
+      "Market_EV_cw": 0.03311778492054,
+      "Reassess_EV_cw": 0.0443685310068585,
+      "delta_vs_Reassess": -0.014095834326029802
+    },
+    "WF3": {
+      "Q_EV_cw": 0.0926162181483443,
+      "Market_EV_cw": 0.0437950140835935,
+      "Reassess_EV_cw": 0.1041350800345837,
+      "delta_vs_Reassess": -0.011518861886239407
+    },
+    "mean_delta_vs_Reassess": -0.014533229377400305
+  },
+  "selected_architecture": [
+    {
+      "model_type": "HistGBR",
+      "half_life": 480,
+      "feature_block": "S2",
+      "selected_score": -0.0344606762463348,
+      "wf": "WF1"
+    },
+    {
+      "model_type": "HistGBR",
+      "half_life": 480,
+      "feature_block": "S1",
+      "selected_score": 0.04247910163697546,
+      "wf": "WF2"
+    },
+    {
+      "model_type": "Linear",
+      "half_life": 60,
+      "feature_block": "S1",
+      "selected_score": 0.03635055291703072,
+      "wf": "WF3"
+    }
+  ],
+  "P1_read": false,
+  "P1_untouched": true
+}
