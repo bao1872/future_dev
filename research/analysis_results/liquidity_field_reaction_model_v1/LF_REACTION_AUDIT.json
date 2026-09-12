@@ -1,0 +1,23 @@
+{
+  "experiment": "Liquidity-Field Reaction Model v1.0 (Stage 1-3)",
+  "base_commit": "7107f16",
+  "frozen_controls": {
+    "atlas_v1_2": "smc_oracle_atlas_v1 (oracle_risk_frontier_v1_2)",
+    "risk1_baseline": "smc_fixed_execution_baseline_v1",
+    "tradeoff_veto_v1_3": "smc_group_tradeoff_veto_v1_3 (GROUP_LEVEL_TRADEOFF_VETO_EDGE=FALSE)",
+    "risk_coupled_v1_0": "run_risk_coupled_execution_v1.py (FROZEN, not run; audited)",
+    "status": "Risk-Coupled formal experiment PAUSED; new research line opened."
+  },
+  "NO_FUTURE_LIQUIDITY_IN_FIELD_SNAPSHOT": "PASS (active_mask excludes penetrated-by-dt; contacted liq explicitly popped in C×L matrix)",
+  "n_active_contains_contacted": 0,
+  "n_contacts": 96900,
+  "synthetic_all_pass": true,
+  "n_reaction_rows": 775200,
+  "clustering_method": "RobustScaler->PCA->OPTICS (hdbscan unavailable)",
+  "n_components": 6,
+  "n_clusters_base": 9,
+  "noise_fraction_base": 0.939,
+  "cluster_stable": false,
+  "sample_mode": null,
+  "conclusion_note": "NO_STABLE_DISCRETE_MORPHOLOGY_FOUND: no evidence for stable discrete morphology under current features/sample/OPTICS params; treat as continuous state space for ROI (does NOT prove morphology is inherently continuous). cluster x field relation remains OPEN (unstable clustering has no stable left-hand variable; cannot conclude 'morphology unrelated to liquidity field')."
+}

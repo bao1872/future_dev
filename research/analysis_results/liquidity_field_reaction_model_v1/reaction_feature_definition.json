@@ -1,0 +1,59 @@
+{
+  "orientation": "Y_h = s*(P[t0+h]-boundary)/ATR0; s=+1 upper, -1 lower",
+  "horizon_bars": [
+    1,
+    2,
+    3,
+    5,
+    8,
+    13,
+    21,
+    34
+  ],
+  "lambdas": [
+    0.5,
+    1.0,
+    2.0,
+    4.0
+  ],
+  "dc_scales": [
+    0.1,
+    0.2,
+    0.4,
+    0.8,
+    1.2
+  ],
+  "eps": 0.05,
+  "first_pass": [
+    0.25,
+    0.5,
+    1.0
+  ],
+  "field": {
+    "room_up_atr": "(nearest_active_above - price)/ATR",
+    "room_down_atr": "(price - nearest_active_below)/ATR",
+    "field_width_atr": "room_up+room_down",
+    "field_position": "room_down/(room_up+room_down) (not clipped)",
+    "liq_intensity_up": "sum exp(-d_i/lambda), d_i>0",
+    "liq_intensity_dn": "sum exp(-|d_i|/lambda), d_i<0",
+    "liq_imbalance": "(up-dn)/(up+dn+eps)"
+  },
+  "reaction": {
+    "cross_count": "hysteresis crossings (eps=0.05)",
+    "boundary_occupancy": "fraction |Y|<=eps",
+    "boundary_touch_bars": "bars low<=boundary<=high",
+    "total_variation_atr": "sum|dY|",
+    "path_efficiency": "|net|/TV",
+    "amplitude_atr": "max(Y)-min(Y)",
+    "outward_mfe_atr": "max oriented bar-max",
+    "inward_mae_atr": "min oriented bar-min",
+    "dc_pivots": "causal directional-change confirmed pivots/scale",
+    "fp_out": "first bar reaching +level",
+    "fp_in": "first bar reaching -level",
+    "persistent_escape": "first Y>=0.5 then 3 bars >=0.3",
+    "post_escape_efficiency": "|net|/TV after escape",
+    "retracement_ratio": "post max retrace/escape dist"
+  },
+  "exclusion": "contacted liquidity_id excluded from field; no future liquidity",
+  "clustering_input": "REACTION morphology only (no field/profit/direction)"
+}

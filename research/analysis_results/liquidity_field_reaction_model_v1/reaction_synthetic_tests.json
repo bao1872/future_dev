@@ -1,0 +1,59 @@
+{
+  "paths": {
+    "A": {
+      "efficiency": 1.0,
+      "cross": 0,
+      "amplitude": 0.6,
+      "dc_0p40": 1,
+      "dc_0p80": 1,
+      "persistent_escape": false
+    },
+    "B": {
+      "efficiency": 0.1266,
+      "cross": 7,
+      "amplitude": 0.25,
+      "dc_0p40": 0,
+      "dc_0p80": 0,
+      "persistent_escape": false
+    },
+    "C": {
+      "efficiency": 0.2836,
+      "cross": 4,
+      "amplitude": 1.5,
+      "dc_0p40": 4,
+      "dc_0p80": 1,
+      "persistent_escape": true
+    }
+  },
+  "checks": [
+    {
+      "check": "A_high_efficiency",
+      "pass_": true
+    },
+    {
+      "check": "B_low_efficiency",
+      "pass_": true
+    },
+    {
+      "check": "B_cross_gt_A_cross",
+      "pass_": true
+    },
+    {
+      "check": "C_medscale_gt_A_medscale",
+      "pass_": true
+    },
+    {
+      "check": "C_amplitude_gt_B_amplitude",
+      "pass_": true
+    },
+    {
+      "check": "A_low_complexity",
+      "pass_": true
+    },
+    {
+      "check": "C_persistent_escape",
+      "pass_": true
+    }
+  ],
+  "all_pass": true
+}

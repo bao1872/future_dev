@@ -1,0 +1,5 @@
+config,n_clusters,noise_fraction,n_components,arin_base
+"BASE(min_samples=15,xi=0.05)",9,0.939,6,1.0
+"min_samples=10,xi=0.05",28,0.8845,6,0.3647
+"min_samples=30,xi=0.05",2,0.7635,6,0.0241
+"min_samples=15,xi=0.10",1,0.994,6,0.1658
