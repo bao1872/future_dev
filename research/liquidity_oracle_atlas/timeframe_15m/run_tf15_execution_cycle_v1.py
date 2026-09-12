@@ -270,10 +270,12 @@ def build_tf15_surface(D, master_by_sym, bars15_by_sym, contacts):
                     geo_ok = (np.isfinite(target) & np.isfinite(stop_z)
                               & ok & np.isfinite(dclose) & np.isfinite(stop_abs)
                               & (target_atr > 0) & (risk_atr > 0))
+                    # geometry availability = geo_ok; gap is a POST-SELECTION
+                    # execution filter (reported separately as execution rate).
                     gap = geo_ok & ((~eb_ok) | entry_disc
                                     | (d * (target - entry_px) <= 0)
                                     | (d * (entry_px - stop_abs) <= 0))
-                    avail = geo_ok & ~gap
+                    exec_ok = geo_ok & ~gap
                     # 5m child execution path from the entry parent's first child
                     cf = B["child_first_index"][ebc]
                     win = cf[:, None] + np.arange(N_CHILD)[None, :]
@@ -291,14 +293,14 @@ def build_tf15_surface(D, master_by_sym, bars15_by_sym, contacts):
                         for r, fb in zip(bad, first_bad):
                             fh[r, fb + 1:] = np.nan
                             fl[r, fb + 1:] = np.nan
-                    tg = np.where(avail, target, np.nan)
-                    st = np.where(avail, stop_abs, np.nan)
+                    tg = np.where(exec_ok, target, np.nan)
+                    st = np.where(exec_ok, stop_abs, np.nan)
                     oc = s4a.first_hit_bounds(fh, fl, entry_px, tg, st, d)
-                    cens = oc["censored"] & avail
-                    rl = np.where(avail, oc["R_lower"], np.nan)
-                    ru = np.where(avail, oc["R_upper"], np.nan)
+                    cens = oc["censored"] & exec_ok
+                    rl = np.where(exec_ok, oc["R_lower"], np.nan)
+                    ru = np.where(exec_ok, oc["R_upper"], np.nan)
                     reward = np.zeros(C)
-                    res = avail & ~cens
+                    res = exec_ok & ~cens
                     reward[res] = oc["R_lower"][res]
                     reward[cens] = -1.0
                     frames.append(pd.DataFrame(dict(
@@ -308,7 +310,7 @@ def build_tf15_surface(D, master_by_sym, bars15_by_sym, contacts):
                         h=np.full(C, int(h)), scale=np.full(C, float(scale)),
                         action=np.full(C, action), d=d.astype(int),
                         target_atr=target_atr, risk_atr=risk_atr, rr=rr,
-                        available=avail, gap_invalid=gap,
+                        available=geo_ok, gap_invalid=gap,
                         target_first=oc["target_first"], stop_first=oc["stop_first"],
                         ambiguous=oc["ambiguous"], censored=cens,
                         R_lower=rl, R_upper=ru, reward=reward,
@@ -457,7 +459,7 @@ def market_frontier(policy, trans):
         g = policy[policy["wf"] == wf]
         if len(g) == 0:
             continue
-        ex = g[g["available"]]
+        ex = g[g["available"] & ~g["gap_invalid"]]
         rl = ex["R_lower"].to_numpy(float)
         cens = ex["censored"].to_numpy(bool)
         r = np.where(~np.isnan(rl), rl, np.where(cens, -1.0, 0.0))
