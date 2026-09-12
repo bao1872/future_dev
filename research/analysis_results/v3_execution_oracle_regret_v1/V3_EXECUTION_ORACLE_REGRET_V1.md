@@ -138,9 +138,16 @@ WF3     0.104135           0.535571                      0.423124
 ORACLE_HEADROOM_INCONSISTENT max_wf_headroom / min_wf_headroom >= 2.0 (WFs disagree in magnitude)
          ORACLE_HEADROOM_LOW              max over WF of share(best_alt_advantage > 0.10R) < 0.10
     ORACLE_HEADROOM_MATERIAL           otherwise (all WF headroom > 0 and material share >= 0.10)
-                        note           thresholds declared a priori; no economic tuning performed
+                        note  descriptive research label based on post-specified summary rules;
+                              NOT a preregistered hypothesis-test gate, no inferential status
+descriptive_label_not_preregistered                                                    True
        headroom_spread_ratio                                                   1.0702174330760044
 ```
+
+> **证据等级说明（重要）**：`ORACLE_HEADROOM_MATERIAL` 仅为**描述性研究标签**，
+> 用于概括 Oracle headroom 的量级与跨 WF 一致性；其中 `spread >= 2.0` 与
+> `share(>0.10R) < 0.10` 是**事后指定的汇总规则**，不属于预注册统计检验 Gate，
+> 不具有推断统计地位，也不据此单独决定策略。真正有意义的是上面的原始数字本身。
 
 ## 11. 结论要点
 

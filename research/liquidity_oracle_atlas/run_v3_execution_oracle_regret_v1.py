@@ -394,7 +394,10 @@ def main():
         "ORACLE_HEADROOM_LOW":
             "max over WF of share(best_alt_advantage > 0.10R) < 0.10",
         "ORACLE_HEADROOM_MATERIAL": "otherwise (all WF headroom > 0 and material share >= 0.10)",
-        "note": "thresholds declared a priori; no economic tuning performed",
+        "note": ("descriptive research label based on post-specified summary "
+                 "rules; NOT a preregistered hypothesis-test gate and carries "
+                 "no inferential status"),
+        "descriptive_label_not_preregistered": True,
         "headroom_spread_ratio": spread,
     }
 
