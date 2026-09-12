@@ -1,0 +1,100 @@
+{
+  "experiment": "TF15 — 15m Execution-Cycle Exploration v1",
+  "phase": "TF15-A/B/C/D (bar contract, contact mapping, action surface, geometry frontier, market frontier)",
+  "base_commit": "cd284d3",
+  "preregistered": {
+    "horizons_15m": [
+      1,
+      2,
+      3,
+      5,
+      8
+    ],
+    "structure_scales": [
+      0.2,
+      0.4,
+      0.8,
+      1.2
+    ],
+    "actions": [
+      "OUTWARD",
+      "INWARD"
+    ],
+    "eval_bars_15m": 12,
+    "n_child_slots": 36,
+    "target_bins": [
+      "<0.5",
+      "0.5-1",
+      "1-2",
+      "2-3",
+      "3-5",
+      ">=5"
+    ],
+    "risk_bins": [
+      "<0.25",
+      "0.25-0.5",
+      "0.5-1",
+      "1-2",
+      "2-3",
+      ">=3"
+    ],
+    "min_n_per_wf": 200,
+    "max_ambiguity_gap_R": 0.25,
+    "positive_rule": "E_R_lower > 0 in WF1/WF2/WF3",
+    "dual_conflict": "skip current stage only; later h still allowed",
+    "atr": "phase1_contract_v1.compute_atr5 (same algo/lookback, 15m input)"
+  },
+  "n_contacts": 96900,
+  "contact_mapping_coverage": 1.0,
+  "n_surface_rows": 3876000,
+  "n_geometry_cells": 4474,
+  "n_regions": 1120,
+  "n_robust_positive": 29,
+  "market_passing_scales": [],
+  "verdict": "STOP_15M_EXECUTION_LINE",
+  "balance_check_5m_ttl_minutes": 10,
+  "ttl_note": "5m E2 TTL=2 bars ≈ 10 min; 15m cannot express 10 min exactly, so Limit phase (if reached) will use pre-registered TTL=[1,2] parent bars = 15/30 min",
+  "freeze_integrity_start": {
+    "spec_sha256": "87126146f33ac4fdef9df1a68dd0114e91ed2bff2deae6bc6b02d588a8704d34",
+    "policy_hash": "21adee821eb3c5278b35d1100e4ec071d9054e3e476fd06ca476073e205c4e42",
+    "region_hash": "7d488897be3e699410ebe6340d033f22d2431c5d89074c7efd0fbe076a3c23c7"
+  },
+  "tests": {
+    "T2_ohlc_aggregation_exact": true,
+    "T3_trade_position_exact": true,
+    "T4_availability_eq_parent_end": true,
+    "T5_no_cross_session_aggregation": true,
+    "T6_atr15_prefix_causal": true,
+    "T1_every_15m_bar_3_children": true,
+    "T9_geometry_from_decision_close": true,
+    "T12_actual_entry_next_15m_open": true,
+    "T13_gap_invalid_detected": true,
+    "T14_outcome_window_le_36_child_slots": true,
+    "T15_same_child_ambiguous_bounds": true,
+    "T16_geometry_bins_complete": true,
+    "T17_no_5m_R1R4_imported": true,
+    "T18_dual_conflict_skips_stage_allows_later": true,
+    "T19_no_duplicate_attempt_per_h_scale_action": true,
+    "T26_no_model_training": true,
+    "T27_p1_not_read": true,
+    "T20_one_trade_per_contact": true,
+    "T28_5m_freeze_unchanged": true
+  },
+  "deferred_tests": [
+    "T21_limit_strict_exact_touch_no_fill",
+    "T22_touch_exact_touch_fill",
+    "T23_ttl1_3_child_bars",
+    "T24_ttl2_6_child_bars",
+    "T25_old_order_cancelled_before_reassess"
+  ],
+  "forbidden": [
+    "ML",
+    "RR tuning",
+    "threshold search",
+    "5m R1-R4 import",
+    "P1",
+    "time decay",
+    "symbol tuning"
+  ],
+  "elapsed_seconds": 121.836
+}
