@@ -1,0 +1,28 @@
+{
+  "block_id": "P1",
+  "role": "PROSPECTIVE_HOLDOUT",
+  "training_forbidden": true,
+  "historical_cutoff_inclusive": "2026-09-04 14:55:00",
+  "data_start_rule": "timestamp > historical_cutoff",
+  "policy_commit": "27a4786d65dfd95b41c9a58748df24e1e5bacd84",
+  "policy_status": "FROZEN_CANDIDATE_POLICY",
+  "policy_sha": "241e5e1e938bdd864ea5caebaa5d58a9856be8fae58a16404ce8ebdf0cad3cc8",
+  "region_definition_sha": "2b4010c864765f66c8e28662912e67ba6b8e3f30e4c846ec226cfa700b8a1b1c",
+  "outcome_horizon_bars": 34,
+  "cost_R_grid": [0.00, 0.01, 0.02, 0.03, 0.05, 0.10],
+  "maturity_rule": "34 complete bars after actual entry; administrative tail is PENDING_MATURITY",
+  "formal_min_resolved_trades": 200,
+  "forbidden": [
+    "training",
+    "threshold_search",
+    "region_modification",
+    "feature_discovery",
+    "model_selection",
+    "PCA",
+    "NMF",
+    "clustering",
+    "ML",
+    "DP",
+    "RL"
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "P1": {
+    "start_exclusive": "2026-09-04 14:55:00",
+    "end_inclusive": null,
+    "role": "BURNED_PROSPECTIVE_HOLDOUT",
+    "status": "PREREGISTERED_NOT_YET_ACQUIRED",
+    "allowed_use": [
+      "frozen_policy_evaluation",
+      "data_quality_audit"
+    ],
+    "forbidden_use": [
+      "training",
+      "research_pattern_discovery",
+      "feature_engineering_search",
+      "threshold_search",
+      "model_selection",
+      "PCA",
+      "NMF",
+      "clustering",
+      "ML",
+      "DP",
+      "RL"
+    ]
+  }
+}
