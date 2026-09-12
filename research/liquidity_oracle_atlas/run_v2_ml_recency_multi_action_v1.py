@@ -57,7 +57,8 @@ P1_CUTOFF = pd.Timestamp("2026-09-04 14:55:00")
 HALF_LIFE_DAYS = [None, 60, 120, 240, 480]
 COST_R_GRID = [0.00, 0.01, 0.02, 0.03, 0.05, 0.10]
 ACTIONS = ["SKIP", "MARKET", "LIMIT_RR3", "REASSESS_RR3"]
-HARDENING_VERSION = "bar-index-purge-v1"
+HARDENING_VERSION = "bar-index-purge-v2"   # v2: reward_end_time = BAR END (start+5min)
+BAR_MINUTES = 5                            # authoritative 5m bar scale
 PURGE_TRACE = []
 PREPROCESS_TRACE = []
 REPRO_TRACE = []
@@ -115,12 +116,38 @@ def deterministic_cap(df: pd.DataFrame, n: int) -> pd.DataFrame:
 
 
 def conservative_reward(filled: np.ndarray, r_lower: np.ndarray, censored: np.ndarray) -> np.ndarray:
-    """Conservative censor-worst return target."""
+    """Conservative censor-worst return target.
+
+    NOTE: only valid for actions whose non-fill states carry R_lower == 0.
+    It is NOT valid for the frozen E2 SINGLE_ATTEMPT limit, see below.
+    """
     out = np.zeros(len(filled), dtype=np.float64)
     resolved = filled & ~censored
     out[resolved] = r_lower[resolved]
     out[filled & censored] = -1.0
     return out
+
+
+def e2_single_limit_censor_worst(frame: pd.DataFrame) -> np.ndarray:
+    """精确复制 frozen E2 SINGLE_ATTEMPT 的 censor_worst_EV_per_signal semantics。
+
+    frozen E2 run_block 的权威定义（run_execution_limit_frontier_v1.py）：
+      - 普通 nonfill 状态              lower = 0
+      - AMBIGUOUS_FILL_TARGET_ORDER    lower = 0   （filled=False）
+      - AMBIGUOUS_FILL_STOP_ORDER      lower = -1  （filled=False，但必须记 -1R）
+      - filled 且 outcome censored     R_lower = NaN => -1
+
+    因此禁止 np.where(filled, R_lower, 0)：那会把 AMBIGUOUS_FILL_STOP_ORDER
+    的 -1R 错误抹成 0R（这正是 T4 抓到的 bug）。
+    """
+    filled = frame["status"].isin(["FILLED", "FILLED_AT_OPEN"]).to_numpy()
+    r = frame["R_lower"].to_numpy(dtype=np.float64).copy()
+    nan = np.isnan(r)
+    # Frozen E2 下 NaN 只能来自真正 filled 之后 outcome 被 censor。
+    assert np.all((~nan) | filled), "UNEXPECTED_NONFILLED_NAN_R_LOWER"
+    r[nan & filled] = -1.0
+    assert np.isfinite(r).all(), "NON_FINITE_LIMIT_REWARD"
+    return r
 
 
 def attach_exact_reward_end(df: pd.DataFrame, bars_by_sym: Dict[str, Any]) -> pd.DataFrame:
@@ -139,7 +166,11 @@ def attach_exact_reward_end(df: pd.DataFrame, bars_by_sym: Dict[str, Any]) -> pd
     for sym,idx in x.groupby("symbol").groups.items():
         B=bars_by_sym[sym];ii=x.loc[idx,"reward_end_bar_index"].to_numpy(int)
         ii=np.minimum(ii,B["n"]-1)  # data-end censored actions terminate at last observed bar
-        end.loc[idx]=pd.to_datetime(B["t"][ii]).to_numpy(dtype="datetime64[ns]")
+        # B["t"] is BAR START (authoritative load_env contract: t=raw["bar_start_time"]).
+        # The outcome of the last reward bar is only fully known at that bar's
+        # CLOSE, so the purge boundary must be BAR END (start + 5min), not start.
+        bar_start=pd.to_datetime(B["t"][ii]).to_numpy(dtype="datetime64[ns]")
+        end.loc[idx]=bar_start+np.timedelta64(BAR_MINUTES,"m")
     x["reward_end_time"]=end
     x["reward_end_semantics"]=HARDENING_VERSION
     assert (x.reward_end_time>=pd.to_datetime(x.entry_time)).all()
@@ -231,6 +262,121 @@ def run_stage_b0(trades: pd.DataFrame, single_primary: pd.DataFrame, rx: pd.Data
 
 
 # ---------------------------------------------------------------------------
+# Stage B0b: Frozen E2 Single-Primary Parity Bridge (mandatory before ML)
+# ---------------------------------------------------------------------------
+def e2_primary_parity_bridge(trades, attempts_test, single_primary_test,
+                             bars_by_sym, rr, model):
+    """Path A (frozen E2 primary) vs Path B (reconstructed primary) row-by-row.
+
+    Path A: execution_lag1_trades.parquet -> run_block(RR=3, STRICT_TRADE_THROUGH)
+    Path B: attempt_universe -> prefill -> merge frozen (gid, region) -> run_block
+    """
+    print("  [PARITY] Running E2 single-primary parity bridge (Path A vs Path B)...")
+    pathA = pd.concat([run_block(g, bars_by_sym[s], rr, model)
+                       for s, g in trades.groupby("symbol", sort=False)],
+                      ignore_index=True)
+    A = pathA.sort_values(["gid", "region"]).reset_index(drop=True)
+    B = single_primary_test.sort_values(["gid", "region"]).reset_index(drop=True)
+
+    checks = []
+    fail = []
+
+    def _exact(col):
+        a = A[col].to_numpy()
+        b = B[col].to_numpy()
+        mism = int((a != b).sum())
+        checks.append(dict(stage="run_block", field=col, kind="exact",
+                           n_mismatch=mism, max_abs_diff=np.nan))
+        return mism
+
+    def _num(col, tol=1e-12):
+        a = A[col].to_numpy(float)
+        b = B[col].to_numpy(float)
+        both_nan = np.isnan(a) & np.isnan(b)
+        d = np.where(both_nan, 0.0, np.abs(np.nan_to_num(a) - np.nan_to_num(b)))
+        mism = int((d > tol).sum())
+        checks.append(dict(stage="run_block", field=col, kind="numeric",
+                           n_mismatch=mism, max_abs_diff=float(d.max())))
+        return mism
+
+    if not (len(A) == len(B) == 9015):
+        fail.append(f"ROW_COUNT pathA={len(A)} pathB={len(B)}")
+    for col in ["status", "filled", "fill_bar"]:
+        if _exact(col) != 0:
+            fail.append(f"run_block_{col}_mismatch")
+    for col in ["R_lower", "R_upper", "actual_RR"]:
+        if _num(col) != 0:
+            fail.append(f"run_block_{col}_diff")
+
+    # ---- geometry parity: frozen trades vs reconstructed attempts ----
+    gcols = ["wf", "symbol", "direction", "target_price", "stop_price",
+             "entry_bar_index", "status"]
+    ga = trades[["gid", "region"] + gcols].sort_values(["gid", "region"]).reset_index(drop=True)
+    gb = (attempts_test.merge(trades[["gid", "region"]], on=["gid", "region"],
+                              validate="one_to_one")[["gid", "region"] + gcols]
+          .sort_values(["gid", "region"]).reset_index(drop=True))
+    if len(ga) != len(gb) != 9015:
+        fail.append(f"GEO_ROW_COUNT a={len(ga)} b={len(gb)}")
+    for col in gcols:
+        if col in ("target_price", "stop_price", "entry_bar_index", "direction"):
+            d = np.abs(ga[col].to_numpy(float) - gb[col].to_numpy(float))
+            mism, mad = int((d > 1e-12).sum()), float(d.max())
+            checks.append(dict(stage="geometry", field=col, kind="numeric",
+                               n_mismatch=mism, max_abs_diff=mad))
+            if mism:
+                fail.append(f"geometry_{col}_diff")
+        else:
+            a = ga[col].astype(str).to_numpy()
+            b = gb[col].astype(str).to_numpy()
+            mism = int((a != b).sum())
+            checks.append(dict(stage="geometry", field=col, kind="exact",
+                               n_mismatch=mism, max_abs_diff=np.nan))
+            if mism:
+                fail.append(f"geometry_{col}_mismatch")
+
+    chk = pd.DataFrame(checks)
+    chk.to_csv(OUT_DIR / "e2_single_primary_parity_audit.csv", index=False)
+    summary = dict(n_pathA=int(len(A)), n_pathB=int(len(B)),
+                   row_count_ok=bool(len(A) == len(B) == 9015),
+                   failures=fail, all_pass=not fail)
+    (OUT_DIR / "e2_single_primary_parity_summary.json").write_text(
+        json.dumps(summary, indent=2))
+    assert not fail, f"STOP_E2_SINGLE_PRIMARY_PARITY_FAIL: {fail}"
+    print(f"  [OK] E2 single-primary parity PASS (rows={len(A)}, checks={len(chk)})")
+    return summary
+
+
+def ambiguity_reward_bridge(df_test, single_primary_test):
+    """Verify frozen ambiguity mapping survives into reward_LIMIT_RR3, per WF."""
+    st = single_primary_test["status"].to_numpy()
+    rew = df_test["reward_LIMIT_RR3"].to_numpy(float)
+    stop_m = st == "AMBIGUOUS_FILL_STOP_ORDER"
+    tgt_m = st == "AMBIGUOUS_FILL_TARGET_ORDER"
+    assert np.all(rew[stop_m] == -1.0), "AMBIGUOUS_FILL_STOP_ORDER_REWARD_NOT_MINUS_1"
+    assert np.all(rew[tgt_m] == 0.0), "AMBIGUOUS_FILL_TARGET_ORDER_REWARD_NOT_ZERO"
+
+    rows = []
+    for wf in ["WF1", "WF2", "WF3"]:
+        m = (df_test["wf"] == wf).to_numpy()
+        s = st[m]
+        rw = rew[m]
+        raw = single_primary_test["R_lower"].to_numpy(float)[m]
+        rows.append(dict(
+            wf=wf, n_signals=int(m.sum()),
+            clean_filled_n=int(np.isin(s, ["FILLED", "FILLED_AT_OPEN"]).sum()),
+            ambiguous_fill_target_n=int((s == "AMBIGUOUS_FILL_TARGET_ORDER").sum()),
+            ambiguous_fill_stop_n=int((s == "AMBIGUOUS_FILL_STOP_ORDER").sum()),
+            censored_filled_n=int(df_test["censored_LIMIT_RR3"].to_numpy()[m].sum()),
+            raw_R_lower_sum=float(np.nansum(raw)),
+            censor_worst_R_sum=float(rw.sum()),
+            censor_worst_EV_per_signal=float(rw.mean())))
+    out = pd.DataFrame(rows)
+    out.to_csv(OUT_DIR / "e2_single_limit_ambiguity_bridge.csv", index=False)
+    print("  [OK] ambiguity reward bridge verified (stop=-1R, target=0R)")
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Stage B1: Dataset & Feature Construction (TB1 + TB2-TB4)
 # ---------------------------------------------------------------------------
 def build_multi_action_dataset(D, master_by_sym, bars_by_sym, trades: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
@@ -274,6 +420,10 @@ def build_multi_action_dataset(D, master_by_sym, bars_by_sym, trades: pd.DataFra
 
     # Validate Stage B0 on 9,015 test signals
     run_stage_b0(trades, single_primary_test, rx_test)
+
+    # MANDATORY before any ML: frozen E2 primary parity (Path A vs Path B)
+    e2_primary_parity_bridge(trades, attempts_test, single_primary_test,
+                             bars_by_sym, rr, model)
 
     # 2. Build TB1 training signals (WF0)
     contact_meta = gmap.merge(F[["symbol", "liquidity_id", "contact_number", "decision_time", "contact_bar_index", "block", "atr0"]], on=["symbol", "liquidity_id", "contact_number"], how="left")
@@ -373,14 +523,18 @@ def build_multi_action_dataset(D, master_by_sym, bars_by_sym, trades: pd.DataFra
     df_test["R_upper_MARKET"] = np.where(m_filled, m_rupp, 0.0)
     df_test["censored_MARKET"] = m_censored
 
+    # FROZEN E2 SINGLE_ATTEMPT semantics: ambiguous-stop non-fills carry -1R.
+    # conservative_reward() would wrongly zero them (filled=False, R_lower=-1).
     lim_filled = single_primary_test["status"].isin(["FILLED", "FILLED_AT_OPEN"]).to_numpy()
-    lim_censored = single_primary_test["R_lower"].isna().to_numpy() & lim_filled
-    lim_rlow = single_primary_test["R_lower"].fillna(0.0).to_numpy()
-    lim_rupp = single_primary_test["R_upper"].fillna(0.0).to_numpy()
-    df_test["reward_LIMIT_RR3"] = conservative_reward(lim_filled, lim_rlow, lim_censored)
+    lim_raw_lower = single_primary_test["R_lower"].to_numpy(np.float64)
+    lim_raw_upper = single_primary_test["R_upper"].to_numpy(np.float64)
+    lim_censored = lim_filled & np.isnan(lim_raw_lower)
+
+    df_test["reward_LIMIT_RR3"] = e2_single_limit_censor_worst(single_primary_test)
     df_test["filled_LIMIT_RR3"] = lim_filled
-    df_test["R_lower_LIMIT_RR3"] = np.where(lim_filled, lim_rlow, 0.0)
-    df_test["R_upper_LIMIT_RR3"] = np.where(lim_filled, lim_rupp, 0.0)
+    # Preserve authoritative bounds even for ambiguous non-clean-fill states.
+    df_test["R_lower_LIMIT_RR3"] = np.nan_to_num(lim_raw_lower, nan=0.0)
+    df_test["R_upper_LIMIT_RR3"] = np.nan_to_num(lim_raw_upper, nan=0.0)
     df_test["censored_LIMIT_RR3"] = lim_censored
 
     rea_filled = rx_test["filled"].to_numpy().astype(bool)
@@ -392,6 +546,9 @@ def build_multi_action_dataset(D, master_by_sym, bars_by_sym, trades: pd.DataFra
     df_test["R_lower_REASSESS_RR3"] = np.where(rea_filled, rea_rlow, 0.0)
     df_test["R_upper_REASSESS_RR3"] = np.where(rea_filled, rea_rupp, 0.0)
     df_test["censored_REASSESS_RR3"] = rea_censored
+
+    # Ambiguity reward bridge: frozen -1R / 0R mapping must survive into rewards
+    ambiguity_reward_bridge(df_test, single_primary_test)
 
     # Assemble TB1
     df_tb1 = attempts_tb1.copy().sort_values("gid").reset_index(drop=True)
@@ -420,11 +577,23 @@ def build_multi_action_dataset(D, master_by_sym, bars_by_sym, trades: pd.DataFra
     df_tb1["R_upper_MARKET"] = np.where(tb1_m_filled, tb1_m_rupp, 0.0)
     df_tb1["censored_MARKET"] = tb1_m_cens
 
-    df_tb1["reward_LIMIT_RR3"] = conservative_reward(tb1_lim_filled, tb1_lim_rlow, tb1_lim_cens)
+    # FROZEN E2 SINGLE_ATTEMPT semantics for TB1 as well.
+    # full_tb1 is in symbol-group order while df_tb1 is sorted by gid -> align by gid.
+    _tb1_idx = full_tb1.set_index("gid")
+    assert not _tb1_idx.index.duplicated().any(), "TB1_LIMIT_GID_NOT_UNIQUE"
+    tb1_aligned = _tb1_idx.loc[df_tb1["gid"].to_numpy()].reset_index()
+    _already_aligned = bool(
+        np.array_equal(tb1_aligned["gid"].to_numpy(), full_tb1["gid"].to_numpy()))
+    print(f"  [TB1-ALIGN] full_tb1 gid order already matched df_tb1: {_already_aligned}")
+    tb1_lim_filled = tb1_aligned["status"].isin(["FILLED", "FILLED_AT_OPEN"]).to_numpy()
+    tb1_lim_raw_lower = tb1_aligned["R_lower"].to_numpy(np.float64)
+    tb1_lim_raw_upper = tb1_aligned["R_upper"].to_numpy(np.float64)
+
+    df_tb1["reward_LIMIT_RR3"] = e2_single_limit_censor_worst(tb1_aligned)
     df_tb1["filled_LIMIT_RR3"] = tb1_lim_filled
-    df_tb1["R_lower_LIMIT_RR3"] = np.where(tb1_lim_filled, tb1_lim_rlow, 0.0)
-    df_tb1["R_upper_LIMIT_RR3"] = np.where(tb1_lim_filled, tb1_lim_rupp, 0.0)
-    df_tb1["censored_LIMIT_RR3"] = tb1_lim_cens
+    df_tb1["R_lower_LIMIT_RR3"] = np.nan_to_num(tb1_lim_raw_lower, nan=0.0)
+    df_tb1["R_upper_LIMIT_RR3"] = np.nan_to_num(tb1_lim_raw_upper, nan=0.0)
+    df_tb1["censored_LIMIT_RR3"] = tb1_lim_filled & np.isnan(tb1_lim_raw_lower)
 
     df_tb1["reward_REASSESS_RR3"] = conservative_reward(tb1_rea_filled, tb1_rea_rlow, tb1_rea_cens)
     df_tb1["filled_REASSESS_RR3"] = tb1_rea_filled

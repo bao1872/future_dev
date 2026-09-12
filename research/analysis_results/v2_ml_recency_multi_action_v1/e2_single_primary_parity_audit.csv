@@ -1,0 +1,14 @@
+stage,field,kind,n_mismatch,max_abs_diff
+run_block,status,exact,0,
+run_block,filled,exact,0,
+run_block,fill_bar,exact,0,
+run_block,R_lower,numeric,0,0.0
+run_block,R_upper,numeric,0,0.0
+run_block,actual_RR,numeric,0,0.0
+geometry,wf,exact,0,
+geometry,symbol,exact,0,
+geometry,direction,numeric,0,0.0
+geometry,target_price,numeric,0,0.0
+geometry,stop_price,numeric,0,0.0
+geometry,entry_bar_index,numeric,0,0.0
+geometry,status,exact,0,

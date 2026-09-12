@@ -9,58 +9,58 @@
   },
   "policy_collapse": {
     "collapsed": false,
-    "max_share_wf1": 0.31772151898734174,
-    "max_share_wf2": 0.3540569020021075,
-    "max_share_wf3": 0.2888962765957447
+    "max_share_wf1": 0.364873417721519,
+    "max_share_wf2": 0.38285914998243764,
+    "max_share_wf3": 0.3028590425531915
   },
   "performance_summary": {
     "WF1": {
-      "Q_EV_cw": -0.0253201333300598,
+      "Q_EV_cw": -0.0109350071578698,
       "Market_EV_cw": 0.0103761714151905,
       "Reassess_EV_cw": 0.034226296622653,
-      "delta_vs_Reassess": -0.0595464299527128
+      "delta_vs_Reassess": -0.0451613037805228
     },
     "WF2": {
-      "Q_EV_cw": 0.0228053967344679,
+      "Q_EV_cw": 0.0131891467225303,
       "Market_EV_cw": 0.03311778492054,
       "Reassess_EV_cw": 0.0443685310068585,
-      "delta_vs_Reassess": -0.021563134272390604
+      "delta_vs_Reassess": -0.031179384284328204
     },
     "WF3": {
-      "Q_EV_cw": 0.0973107409943073,
+      "Q_EV_cw": 0.0909026762240443,
       "Market_EV_cw": 0.0437950140835935,
       "Reassess_EV_cw": 0.1041350800345837,
-      "delta_vs_Reassess": -0.006824339040276406
+      "delta_vs_Reassess": -0.013232403810539403
     },
-    "mean_delta_vs_Reassess": -0.029311301088459935
+    "mean_delta_vs_Reassess": -0.0298576972917968
   },
   "selected_architecture": [
     {
       "model_type": "HistGBR",
-      "half_life": 120,
+      "half_life": 60,
       "feature_block": "S1",
-      "selected_score": -0.010842224900067955,
+      "selected_score": -0.018807024440677212,
       "wf": "WF1"
     },
     {
       "model_type": "HistGBR",
       "half_life": 240,
       "feature_block": "S1",
-      "selected_score": 0.020378785766614105,
+      "selected_score": 0.023181577007421073,
       "wf": "WF2"
     },
     {
       "model_type": "HistGBR",
       "half_life": 60,
       "feature_block": "S2",
-      "selected_score": 0.046642104702396846,
+      "selected_score": 0.05012688453061657,
       "wf": "WF3"
     }
   ],
   "P1_read": false,
   "P1_untouched": true,
   "hardening": {
-    "reward_end_semantics": "bar-index-purge-v1",
+    "reward_end_semantics": "bar-index-purge-v2",
     "purge_checks": 363,
     "preprocessing_scope_checks": 363,
     "prediction_reproducibility": [

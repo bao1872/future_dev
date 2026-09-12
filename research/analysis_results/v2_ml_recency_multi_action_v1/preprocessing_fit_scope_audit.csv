@@ -240,7 +240,7 @@ inner,WF2,2,4029,1740,purged_train_only
 inner,WF2,0,1129,1309,purged_train_only
 inner,WF2,1,2446,1576,purged_train_only
 inner,WF2,2,4029,1740,purged_train_only
-outer,WF2,-1,5754,2847,purged_train_only
+outer,WF2,-1,5753,2847,purged_train_only
 inner,WF3,0,1784,2290,purged_train_only
 inner,WF3,1,4062,2536,purged_train_only
 inner,WF3,2,6596,1996,purged_train_only
@@ -361,4 +361,4 @@ inner,WF3,2,6596,1996,purged_train_only
 inner,WF3,0,1784,2290,purged_train_only
 inner,WF3,1,4062,2536,purged_train_only
 inner,WF3,2,6596,1996,purged_train_only
-outer,WF3,-1,8608,3008,purged_train_only
+outer,WF3,-1,8607,3008,purged_train_only
