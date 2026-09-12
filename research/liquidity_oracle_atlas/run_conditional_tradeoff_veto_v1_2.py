@@ -845,6 +845,9 @@ def main():
                    "新 feature（FVG/OB/trend/pre-contact taxonomy）",
                    "RR filter", "target/stop 优化", "删 symbol",
                    "手续费/成本假设", "prospective OOS", "Reversal promotion"],
+        verdict_scope=("本轮结论只覆盖 CONTACT-LEVEL veto。"
+                       "signal/group-level conditional veto 在 v1.3 单独检验，"
+                       "本文件不得解释为已关闭 Tradeoff-veto 研究。"),
         risk_values=RISK_VALUES, clear_precision_values=CLEAR_PRECISION_VALUES,
         trading_metrics="NOT_APPLICABLE",
     )
@@ -904,6 +907,20 @@ def main():
                                       "T1_HGB; else NO_TRADEOFF_VETO_EDGE"),
                    detail=arch_detail,
                    TRADEOFF_VETO_GROSS_EDGE_PRESENT=VETO_EDGE),
+        verdicts_corrected_by_v13=dict(
+            CONTACT_LEVEL_TRADEOFF_VETO_EDGE=False,
+            PRECONTACT_INCREMENT_WEAK_CONTACT_LEVEL=True,
+            CONDITIONAL_SIGNAL_LEVEL_TRADEOFF_VETO="UNTESTED",
+            NO_TRADEOFF_VETO_EDGE="RETRACTED_TOO_BROAD",
+            rationale=(
+                "(1) deployment-cohort mismatch：toxicity 训练 cohort 只含 "
+                "direction-q10 candidate，不含 CLEAR85 gate，故训练分布 "
+                "(toxic base rate 0.21-0.25) 与真正的 baseline-selected deployment "
+                "分布 (0.15-0.18) 不一致；(2) decision-unit mismatch：toxic label 与 "
+                "execution 都在 signal/group 层，而 veto 作用在 contact 层。"
+                "因此本轮只证明 **contact-level** veto 无效，不足以关闭 "
+                "signal-level veto 研究。"),
+        ),
         reversal=dict(status="REVERSAL_CLEAR90_CANDIDATE frozen",
                       note="本轮不重新调、不 promote；见 v1.1 产物"),
         oos_guard=dict(max_exit_on_or_after_oos=int(
@@ -1122,6 +1139,23 @@ toxic outcome 在 **collapsed group（signal）层面**确定；contact 级 veto
 ```
 
 **`TRADEOFF_VETO_GROSS_EDGE_PRESENT = {a['final']['TRADEOFF_VETO_GROSS_EDGE_PRESENT']}`**
+
+### 8b. P0（v1.3 修正）：撤回过宽裁决
+
+```json
+{json.dumps(a['verdicts_corrected_by_v13'], indent=2, ensure_ascii=False)}
+```
+
+- 保留：`CONTACT_LEVEL_TRADEOFF_VETO_EDGE = FALSE`、
+  `PRECONTACT_INCREMENT_WEAK_CONTACT_LEVEL = TRUE`。
+- **撤回** `NO_TRADEOFF_VETO_EDGE`（下得过头）→ 替换为
+  **`CONDITIONAL_SIGNAL_LEVEL_TRADEOFF_VETO = UNTESTED`**。
+- 两处 mismatch 已记录：**deployment-cohort mismatch**（训练 cohort 缺 CLEAR85
+  gate）与 **decision-unit mismatch**（label/execution 在 group 层、veto 在
+  contact 层）。
+- 同时撤回 v1.2 §5b 中"独立于 toxicity model quality、结构上无法"的过强表述：
+  正确说法是**决策单位错位**——若模型能把某 toxic group 的**全部** selected
+  contacts 都 veto，仍可删除该 signal；实测只删掉 3/147/4 个。
 
 ---
 
