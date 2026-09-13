@@ -1,0 +1,78 @@
+{
+  "experiment": "STEP-0 local step reconfiguration audit",
+  "question": "After freezing the nearest upper/lower liquidity at decision time, how often is the current nearest pair reconfigured before the frozen pair is penetrated?",
+  "scope": {
+    "blocks": [
+      "TB1",
+      "TB2"
+    ],
+    "tb3_tb4_excluded": true,
+    "tb3_tb4_rows_present": 244628,
+    "n_excluded_non_resolved": 244848
+  },
+  "sample": {
+    "expect": {
+      "tb1_resolved": 114898,
+      "tb2_resolved": 124612
+    },
+    "got": {
+      "tb1_resolved": 114898,
+      "tb2_resolved": 124612
+    },
+    "n_states": 239510
+  },
+  "primary": {
+    "n_states": 239510,
+    "n_any_reconfig": 145012,
+    "rate_any_reconfig": 0.6054527994655755,
+    "n_any_inward_reconfig": 140177,
+    "rate_any_inward_reconfig": 0.5852657509081041,
+    "first_type_counts": {
+      "NONE": 94498,
+      "UPPER_ONLY": 37357,
+      "LOWER_ONLY": 37723,
+      "BOTH": 69932
+    },
+    "first_inward": {
+      "upper": 104556,
+      "lower": 104850,
+      "non_inward_upper": 2733,
+      "non_inward_lower": 2805
+    },
+    "bars_to_first_reconfig": {
+      "mean": 11.081227760461204,
+      "p50": 8.0,
+      "p90": 25.0,
+      "p95": 35.0,
+      "p99": 48.0
+    },
+    "episode_fraction": {
+      "mean": 0.32164306098515033,
+      "p50": 0.25,
+      "p90": 0.75
+    },
+    "pair_transitions": {
+      "mean": 5.260874284998539,
+      "p50": 2.0,
+      "p90": 12.0,
+      "n_zero": 94498,
+      "n_one": 23604,
+      "n_two": 16252,
+      "n_three_plus": 105156
+    }
+  },
+  "provenance": {
+    "first_inward_upper": 104556,
+    "first_inward_lower": 104850,
+    "provenance_failures": 502
+  },
+  "timing": {
+    "cache_load_seconds": 0.26,
+    "pair_sequence_prepare_seconds": 31.09,
+    "audit_seconds": 0.46,
+    "total_seconds": 32.03,
+    "states_per_second": 520673.9130434782,
+    "approximate_bar_comparisons": 10500108
+  },
+  "causal_note": "STEP-0 is a post-hoc structural audit. It does NOT establish predictive value and its future reconfiguration fields must not enter any current-step prediction model. It only informs how a state episode should be segmented."
+}
