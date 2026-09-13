@@ -38,6 +38,9 @@ research/exports/ob_trigger_smc_v1/
 research/exports/ob_trigger_smc_v2/
 research/exports/ob_trigger_execution_v21/
 
+# LOCAL-0 local liquidity transition: heavy per-symbol caches (regenerable)
+research/analysis_results/local_liquidity_transition_v0/cache/
+
 # G2 graph target decision: heavy full-node caches (regenerable from offline data; do not commit)
 research/analysis_results/5m_graph_target_decision_v1/cache/
 
