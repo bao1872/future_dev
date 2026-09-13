@@ -467,6 +467,9 @@ def main():
     print(pd.DataFrame(rows).to_string(index=False))
 
     # by outcome
+    frac_all = audit["episode_fraction_to_first_reconfig"].to_numpy(float)
+    btf_all = audit["bars_to_first_reconfig"].to_numpy(float)
+    btf_all = np.where(btf_all < 0, np.nan, btf_all)
     rows = []
     for code, nm in ((UP, "UP"), (DOWN, "DOWN")):
         m = (audit["frozen_outcome"].to_numpy() == code)
@@ -477,9 +480,13 @@ def main():
             if m.any() else np.nan,
             lower_inward_rate=float(audit["any_lower_inward"].to_numpy()[m].mean())
             if m.any() else np.nan,
-            mean_first_reconfig_fraction=float(np.nanmean(frac)) if m.any()
-            else np.nan))
+            mean_first_reconfig_fraction=float(np.nanmean(frac_all[m]))
+            if m.any() else np.nan,
+            median_bars_to_first_reconfig=float(np.nanmedian(btf_all[m]))
+            if m.any() else np.nan))
     pd.DataFrame(rows).to_csv(OUT / "step0_by_outcome.csv", index=False)
+    print("[BY OUTCOME]")
+    print(pd.DataFrame(rows).to_string(index=False))
 
     # by symbol
     rows = []
