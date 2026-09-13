@@ -1,0 +1,139 @@
+{
+  "audit": "G2_MISSING_DURATION_STATE_V1",
+  "baseline_commit": "32c561b72a29ace4afa61d872b0f65af0ddfefcf",
+  "purge": {
+    "n_train_signals_before_purge": 21165,
+    "n_train_signals_after_purge": 21135,
+    "n_purged_signals": 30,
+    "purge_rate": 0.001417434443656981,
+    "max_train_resolution_time": "2025-06-11 11:15:00",
+    "test_start_time": "2025-06-11 00:00:00"
+  },
+  "samples": {
+    "n_nonroot": 30991,
+    "n_primary": 22887,
+    "n_samebar": 8104,
+    "samebar_rate": 0.2614952728211416,
+    "n_root": 24954
+  },
+  "bins": [
+    "00_04",
+    "05_09",
+    "10_14",
+    "15_19",
+    "20_24",
+    "25_29",
+    "30_34"
+  ],
+  "primary_remaining_spearman": {
+    "next": {
+      "rho": 0.13997276344206167,
+      "n": 22887
+    },
+    "loss": {
+      "rho": -0.11758168800668038,
+      "n": 22887
+    },
+    "censor": {
+      "rho": -0.04279571264471134,
+      "n": 22887
+    }
+  },
+  "primary_elapsed_spearman": {
+    "next": {
+      "rho": -0.13997276344206167,
+      "n": 22887
+    },
+    "loss": {
+      "rho": 0.11758168800668038,
+      "n": 22887
+    },
+    "censor": {
+      "rho": 0.04279571264471134,
+      "n": 22887
+    }
+  },
+  "secondary_remaining_spearman": {
+    "next": {
+      "rho": 0.15942438856030752,
+      "n": 30991
+    },
+    "loss": {
+      "rho": -0.2392063594389897,
+      "n": 30991
+    },
+    "censor": {
+      "rho": 0.07185013791507218,
+      "n": 30991
+    }
+  },
+  "bootstrap_low_minus_high": {
+    "next": {
+      "observed_day_equal_mean": -0.3162797734067411,
+      "bootstrap_mean": -0.3163746426099831,
+      "ci_lo": -0.365255439297568,
+      "ci_hi": -0.2703916016602068,
+      "p_diff_gt_0": 0.0,
+      "n_days": 97
+    },
+    "loss": {
+      "observed_day_equal_mean": -0.10079015330296319,
+      "bootstrap_mean": -0.10109241106795008,
+      "ci_lo": -0.12704373370467023,
+      "ci_hi": -0.07464083722750595,
+      "p_diff_gt_0": 0.0,
+      "n_days": 97
+    },
+    "censor": {
+      "observed_day_equal_mean": 0.41706992670970433,
+      "bootstrap_mean": 0.41581277138571526,
+      "ci_lo": 0.3743456510564749,
+      "ci_hi": 0.4588234924090595,
+      "p_diff_gt_0": 1.0,
+      "n_days": 97
+    }
+  },
+  "within_edge_primary": {
+    "1": {
+      "n": 9492,
+      "rho_next": 0.05559507995081387,
+      "rho_loss": 5.4011292863978547e-05,
+      "rho_censor": 0.01202293252549474
+    },
+    "2": {
+      "n": 5091,
+      "rho_next": 0.19533530840247304,
+      "rho_loss": -0.11931535656490162,
+      "rho_censor": -0.19223346401216074
+    },
+    "3": {
+      "n": 3194,
+      "rho_next": 0.12163510792135414,
+      "rho_loss": -0.1527012524865064,
+      "rho_censor": -0.17613725425885038
+    },
+    "4": {
+      "n": 1973,
+      "rho_next": 0.20625085533527893,
+      "rho_loss": -0.17127423845494674,
+      "rho_censor": -0.27258229523704375
+    }
+  },
+  "verdict": "TIME_STATE_SUPPORTED",
+  "verdict_detail": {
+    "primary_strength": 0.13997276344206167,
+    "secondary_strength": 0.2392063594389897,
+    "ci_significant": true,
+    "strongest_outcome": "next",
+    "strongest_sign": 1,
+    "within_edge_consistent_count": 4,
+    "within_edge_consistent": true
+  },
+  "timing_seconds": {
+    "load_seconds": 2.7461773340037325,
+    "fit_predict_seconds": 1.5948504159896402,
+    "audit_seconds": 0.17786850000265986,
+    "total_seconds": 4.558327000006102
+  },
+  "interpretation_contract": "Diagnostic only. The real future arrival time state must never enter the ROOT-time G2 selector (look-ahead leakage). A positive residual means the model under-predicts that outcome; negative means over-predicts."
+}
