@@ -1,0 +1,16 @@
+{
+  "features_total_rows": 3659548,
+  "block_counts": {
+    "TB4": 1342101,
+    "TB3": 1120617,
+    "TB2": 812027,
+    "TB1": 384803
+  },
+  "tb1_signals_full": 21165,
+  "tb1_nodes_full": 384803,
+  "tb1_signals_purged": 21135,
+  "tb1_nodes_purged": 383862,
+  "tb2_signals": 24954,
+  "tb2_nodes": 812027,
+  "key_unique_signal_gid_edge": 0
+}

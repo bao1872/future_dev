@@ -1,0 +1,276 @@
+{
+  "audit": "CAL1_FULLNODE_MARGINAL_RECALIBRATION_V1",
+  "baseline_commit": "3e385b78ba3347997d3b155eba672cc42c86d93e",
+  "purge": {
+    "n_train_signals_before_purge": 21165,
+    "n_train_signals_after_purge": 21135,
+    "n_purged_signals": 30,
+    "purge_rate": 0.001417434443656981,
+    "max_train_resolution_time": "2025-06-11 11:15:00",
+    "test_start_time": "2025-06-11 00:00:00"
+  },
+  "cache_universe": {
+    "features_total_rows": 3659548,
+    "block_counts": {
+      "TB4": 1342101,
+      "TB3": 1120617,
+      "TB2": 812027,
+      "TB1": 384803
+    },
+    "tb1_signals_full": 21165,
+    "tb1_nodes_full": 384803,
+    "tb1_signals_purged": 21135,
+    "tb1_nodes_purged": 383862,
+    "tb2_signals": 24954,
+    "tb2_nodes": 812027,
+    "key_unique_signal_gid_edge": 0
+  },
+  "reproduction_c0": {
+    "t2_gain_error": 0.03788488854964011,
+    "t2_loss_error": -0.0023375445935271376,
+    "t2_ev_error": 0.04022243314316725,
+    "switched_sed": 0.1313710466504941,
+    "t2_n": 24954,
+    "same": 14778,
+    "switched": 10176
+  },
+  "probability_metrics": [
+    {
+      "model": "C0_RAW",
+      "tb2_logloss": 0.6389246547657079,
+      "tb2_brier": 0.41860225058061284,
+      "reach_ece_edges0_4": 0.0016992928837261411,
+      "loss_ece_edges0_4": 0.031100249707958508
+    },
+    {
+      "model": "C1_GLOBAL",
+      "tb2_logloss": 0.6337848136943718,
+      "tb2_brier": 0.4159311681891904,
+      "reach_ece_edges0_4": 0.0036863120637510233,
+      "loss_ece_edges0_4": 0.021746597144497556
+    },
+    {
+      "model": "C2_RR_EDGE",
+      "tb2_logloss": 0.6237844225596542,
+      "tb2_brier": 0.4089405860364377,
+      "reach_ece_edges0_4": 0.003163064985560273,
+      "loss_ece_edges0_4": 0.02413885990677461
+    }
+  ],
+  "ev_calibration": [
+    {
+      "model": "C0_RAW",
+      "ev_ece_edges0_4": 0.05341897434752013,
+      "top_decile_pred_ev": 0.047390523528782064,
+      "top_decile_actual_u": -0.11065406999766841,
+      "top_decile_gap": 0.15804459352645048
+    },
+    {
+      "model": "C1_GLOBAL",
+      "ev_ece_edges0_4": 0.04695686123450438,
+      "top_decile_pred_ev": -0.031183455163774174,
+      "top_decile_actual_u": -0.14377623503815312,
+      "top_decile_gap": 0.11259277987437893
+    },
+    {
+      "model": "C2_RR_EDGE",
+      "ev_ece_edges0_4": 0.02694806564012854,
+      "top_decile_pred_ev": -0.074736474736471,
+      "top_decile_actual_u": -0.03559229802560986,
+      "top_decile_gap": -0.03914417671086116
+    }
+  ],
+  "selector_summary": [
+    {
+      "model": "C0_RAW",
+      "n": 24954,
+      "switch_rate": 0.40779033421495553,
+      "mean_selected_edge": 0.6609761962010099,
+      "pred_reach": 0.37515381682807897,
+      "actual_reach": 0.3693596217039352,
+      "reach_error": 0.005794195124143721,
+      "gain_error": 0.03788488854964011,
+      "loss_error": -0.0023375445935271376,
+      "ev_error": 0.04022243314316725
+    },
+    {
+      "model": "C1_GLOBAL",
+      "n": 24954,
+      "switch_rate": 0.14354412118297669,
+      "mean_selected_edge": 0.23070449627314257,
+      "pred_reach": 0.4699780521404362,
+      "actual_reach": 0.4596056744409714,
+      "reach_error": 0.010372377699464851,
+      "gain_error": 0.02025853103832886,
+      "loss_error": -0.003315297481411534,
+      "ev_error": 0.02357382851974039
+    },
+    {
+      "model": "C2_RR_EDGE",
+      "n": 24954,
+      "switch_rate": 0.26244289492666506,
+      "mean_selected_edge": 0.3641500360663621,
+      "pred_reach": 0.43162781178633736,
+      "actual_reach": 0.4364831289572814,
+      "reach_error": -0.004855317170943998,
+      "gain_error": -0.011630701641769837,
+      "loss_error": 0.0077271466627724114,
+      "ev_error": -0.01935784830454225
+    }
+  ],
+  "bootstrap": [
+    {
+      "model": "C0_RAW",
+      "population": "ALL",
+      "metric": "oracle_delta",
+      "mean": -0.0184622879875681,
+      "ci_lo": -0.03689698129679758,
+      "ci_hi": 0.0009375772242846327,
+      "n_days": 120
+    },
+    {
+      "model": "C0_RAW",
+      "population": "ALL",
+      "metric": "selection_error_delta",
+      "mean": 0.05203262061944321,
+      "ci_lo": 0.03249377112239568,
+      "ci_hi": 0.07057139720432357,
+      "n_days": 120
+    },
+    {
+      "model": "C0_RAW",
+      "population": "SWITCHED",
+      "metric": "oracle_delta",
+      "mean": -0.045228325020367575,
+      "ci_lo": -0.09125064234912077,
+      "ci_hi": 0.006295499244699072,
+      "n_days": 114
+    },
+    {
+      "model": "C0_RAW",
+      "population": "SWITCHED",
+      "metric": "selection_error_delta",
+      "mean": 0.13006261131749494,
+      "ci_lo": 0.07927879578351306,
+      "ci_hi": 0.17661629560739717,
+      "n_days": 114
+    },
+    {
+      "model": "C1_GLOBAL",
+      "population": "ALL",
+      "metric": "oracle_delta",
+      "mean": -0.006192501704162234,
+      "ci_lo": -0.01531386048420372,
+      "ci_hi": 0.0025633033418091616,
+      "n_days": 120
+    },
+    {
+      "model": "C1_GLOBAL",
+      "population": "ALL",
+      "metric": "selection_error_delta",
+      "mean": 0.011433167009210236,
+      "ci_lo": 0.002678469713633549,
+      "ci_hi": 0.020476149311831907,
+      "n_days": 120
+    },
+    {
+      "model": "C1_GLOBAL",
+      "population": "SWITCHED",
+      "metric": "oracle_delta",
+      "mean": -0.03640613401055899,
+      "ci_lo": -0.09855027989382409,
+      "ci_hi": 0.025109180012279634,
+      "n_days": 111
+    },
+    {
+      "model": "C1_GLOBAL",
+      "population": "SWITCHED",
+      "metric": "selection_error_delta",
+      "mean": 0.07166952509732566,
+      "ci_lo": 0.009548523107081866,
+      "ci_hi": 0.13437177844484904,
+      "n_days": 111
+    },
+    {
+      "model": "C2_RR_EDGE",
+      "population": "ALL",
+      "metric": "oracle_delta",
+      "mean": -0.0011694482828641735,
+      "ci_lo": -0.012074855995729838,
+      "ci_hi": 0.007902228802211817,
+      "n_days": 120
+    },
+    {
+      "model": "C2_RR_EDGE",
+      "population": "ALL",
+      "metric": "selection_error_delta",
+      "mean": 0.011247484841146845,
+      "ci_lo": 0.0024058855269452986,
+      "ci_hi": 0.022370100562418865,
+      "n_days": 120
+    },
+    {
+      "model": "C2_RR_EDGE",
+      "population": "SWITCHED",
+      "metric": "oracle_delta",
+      "mean": -0.008906466986318728,
+      "ci_lo": -0.04722645189474125,
+      "ci_hi": 0.03081628514265736,
+      "n_days": 113
+    },
+    {
+      "model": "C2_RR_EDGE",
+      "population": "SWITCHED",
+      "metric": "selection_error_delta",
+      "mean": 0.04698724007341462,
+      "ci_lo": 0.007774768768560604,
+      "ci_hi": 0.08523820850354862,
+      "n_days": 113
+    }
+  ],
+  "verdicts": {
+    "C0_RAW": {
+      "oracle_delta_ci": {
+        "model": "C0_RAW",
+        "population": "ALL",
+        "metric": "oracle_delta",
+        "mean": -0.0184622879875681,
+        "ci_lo": -0.03689698129679758,
+        "ci_hi": 0.0009375772242846327,
+        "n_days": 120
+      },
+      "verdict": "PREEXECUTION_INCREMENT_AMBIGUOUS"
+    },
+    "C1_GLOBAL": {
+      "oracle_delta_ci": {
+        "model": "C1_GLOBAL",
+        "population": "ALL",
+        "metric": "oracle_delta",
+        "mean": -0.006192501704162234,
+        "ci_lo": -0.01531386048420372,
+        "ci_hi": 0.0025633033418091616,
+        "n_days": 120
+      },
+      "verdict": "PREEXECUTION_INCREMENT_AMBIGUOUS"
+    },
+    "C2_RR_EDGE": {
+      "oracle_delta_ci": {
+        "model": "C2_RR_EDGE",
+        "population": "ALL",
+        "metric": "oracle_delta",
+        "mean": -0.0011694482828641735,
+        "ci_lo": -0.012074855995729838,
+        "ci_hi": 0.007902228802211817,
+        "n_days": 120
+      },
+      "verdict": "PREEXECUTION_INCREMENT_AMBIGUOUS"
+    }
+  },
+  "selection_bias_note": "CALIBRATION_REDUCES_SELECTION_BIAS",
+  "timing_seconds": {
+    "load_seconds": 2.9480782500031637,
+    "fit_predict_seconds": 2.1234037910035113,
+    "total_seconds": 31.12983962499129
+  },
+  "interpretation_contract": "Calibration experiment only. Calibrator fit on purged TB1; TB2 evaluation only. Selector index before outcome merge. No execution."
+}
