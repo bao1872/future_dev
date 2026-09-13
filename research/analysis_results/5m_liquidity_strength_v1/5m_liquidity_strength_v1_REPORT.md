@@ -1,3 +1,20 @@
+> ## ⚠️ INVALIDATED / SUPERSEDED
+>
+> **原因**：`run_5m_liquidity_strength_v1.py`（commit `66bff6d`）的 target-first 标签实现有 **P0 级错误**。
+> 原代码为：
+> ```python
+> tfirst = in_t & ~in_s
+> ```
+> 这把「target 先到、但 34 根窗口里后来也碰过 stop」误判为 `target_first=False`。
+> 正确语义应为 frozen `first_hit_bounds()` 的严格比较 `first_target < first_stop`。
+>
+> 因此本报告中所有经济结论——**WF1 positive rate ≈ 2%、distance-only AUC=0.9436、Full 比 baseline 略差、以及 `STOP_LIQUIDITY_STRENGTH_AT_WF1`**——均**不得作为经济结论继续引用**。
+> 原数字保留不改动，仅作历史记录。
+>
+> 后继实验见 `5m_graph_probability_v1/`（5M-GPM1），标签已用 frozen `first_hit_bounds` 做独立 parity oracle 修正。
+>
+> ---
+
 # 5M-LS1 — 5m Liquidity Strength & Target Selection v1 — Final Report
 
 ## Verdict

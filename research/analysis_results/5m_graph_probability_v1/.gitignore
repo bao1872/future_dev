@@ -1,0 +1,5 @@
+# 5M-GPM1 large intermediate artifacts — do NOT commit
+*.parquet
+cache/
+transitions_*.parquet
+enrichment_*.parquet
