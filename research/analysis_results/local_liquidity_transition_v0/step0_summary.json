@@ -68,10 +68,10 @@
   },
   "timing": {
     "cache_load_seconds": 0.26,
-    "pair_sequence_prepare_seconds": 31.09,
-    "audit_seconds": 0.46,
-    "total_seconds": 32.03,
-    "states_per_second": 520673.9130434782,
+    "pair_sequence_prepare_seconds": 30.77,
+    "audit_seconds": 0.45,
+    "total_seconds": 31.72,
+    "states_per_second": 532244.4444444444,
     "approximate_bar_comparisons": 10500108
   },
   "causal_note": "STEP-0 is a post-hoc structural audit. It does NOT establish predictive value and its future reconfiguration fields must not enter any current-step prediction model. It only informs how a state episode should be segmented."
