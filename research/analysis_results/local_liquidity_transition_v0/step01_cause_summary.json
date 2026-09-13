@@ -3,24 +3,49 @@
   "base": "abe911a034fbce5d486597d267f70b0b1df2b359 (STEP-0)",
   "caveat": "All statistics are DECISION-STATE WINDOW statistics, not independent non-overlapping episodes.",
   "n_decision_states": 239510,
+  "side_event_denominator": {
+    "n_first_inward_side_events": 209406,
+    "note": "denominator is first-inward SIDE EVENTS (upper/lower), not decision states"
+  },
+  "share_of_first_inward_side_events": {
+    "NEW_ACTIVATION": 0.9976027429968578,
+    "EQUALITY_ELIGIBILITY": 0.002373379941357936,
+    "ACTIVATION_BAR_ELIGIBILITY": 2.3877061784285074e-05,
+    "ACTIVE_ELIGIBLE_ALREADY": 0.0,
+    "OTHER_INWARD": 0.0
+  },
+  "state_window_rates": {
+    "n_states_any_new_activation_inward": 139237,
+    "rate_states_any_new_activation_inward": 0.5813410713540145,
+    "n_states_any_equality_eligibility": 497,
+    "rate_states_any_equality_eligibility": 0.002075069934449501,
+    "n_states_any_activation_bar_eligibility": 5,
+    "rate_states_any_activation_bar_eligibility": 2.0875955074944677e-05,
+    "n_states_any_touch_eligibility": 5538,
+    "rate_states_any_touch_eligibility": 0.023122207841008727,
+    "note": "these ARE state-level rates; they must not be confused with side-event shares"
+  },
   "inward_causes": {
     "NEW_ACTIVATION": 208904,
     "EQUALITY_ELIGIBILITY": 497,
+    "ACTIVATION_BAR_ELIGIBILITY": 5,
     "ACTIVE_ELIGIBLE_ALREADY": 0,
-    "OTHER_INWARD": 5
+    "OTHER_INWARD": 0
   },
   "inward_causes_by_side": {
     "upper": {
       "NEW_ACTIVATION": 104303,
       "EQUALITY_ELIGIBILITY": 252,
+      "ACTIVATION_BAR_ELIGIBILITY": 1,
       "ACTIVE_ELIGIBLE_ALREADY": 0,
-      "OTHER_INWARD": 1
+      "OTHER_INWARD": 0
     },
     "lower": {
       "NEW_ACTIVATION": 104601,
       "EQUALITY_ELIGIBILITY": 245,
+      "ACTIVATION_BAR_ELIGIBILITY": 4,
       "ACTIVE_ELIGIBLE_ALREADY": 0,
-      "OTHER_INWARD": 4
+      "OTHER_INWARD": 0
     }
   },
   "non_inward_causes": {
@@ -29,11 +54,16 @@
     "EXPIRY": 0,
     "OTHER_NON_INWARD": 0
   },
-  "rates": {
-    "genuine_new_activation_inward_rate": 0.5813410713540145,
-    "equality_eligibility_inward_rate": 0.002075069934449501,
-    "touch_eligibility_rate": 0.023122207841008727,
-    "other_rate": 2.0875955074944677e-05
+  "episode_interpretation": {
+    "structural": [
+      "NEW_ACTIVATION"
+    ],
+    "non_structural_eligibility_path_events": [
+      "EQUALITY_ELIGIBILITY",
+      "ACTIVATION_BAR_ELIGIBILITY",
+      "TOUCH_ELIGIBILITY"
+    ],
+    "rule": "only NEW_ACTIVATION is a structural inward reconfiguration; EQUALITY_ELIGIBILITY / ACTIVATION_BAR_ELIGIBILITY / TOUCH_ELIGIBILITY belong to episode-internal path events and must NOT be used as episode segmentation endpoints"
   },
   "transitions": {
     "raw": {
@@ -64,6 +94,7 @@
       "n_three_plus": 97944
     }
   },
+  "transition_note": "structural = raw transitions minus exact-touch / equality-driven transitions. This is NOT a dynamic episode count.",
   "overlap": {
     "n_decision_states": 239510,
     "n_unique_frozen_triplets": 23979,
@@ -72,55 +103,70 @@
     "decision_states_per_unique_triplet_p90": 21.0,
     "decision_states_per_unique_triplet_max": 116
   },
-  "hazard": [
+  "conditional_interval_event_probability": [
     {
-      "hazard_bin": "1",
+      "bin": "1",
+      "bin_width_bars": 1,
       "at_risk": 239510,
       "events": 10481,
-      "hazard": 0.043760177028099034
+      "conditional_interval_event_probability": 0.043760177028099034
     },
     {
-      "hazard_bin": "2",
+      "bin": "2",
+      "bin_width_bars": 1,
       "at_risk": 214691,
       "events": 10023,
-      "hazard": 0.046685701776040915
+      "conditional_interval_event_probability": 0.046685701776040915
     },
     {
-      "hazard_bin": "3-5",
+      "bin": "3-5",
+      "bin_width_bars": 3,
       "at_risk": 193216,
       "events": 27098,
-      "hazard": 0.14024718449817822
+      "conditional_interval_event_probability": 0.14024718449817822
     },
     {
-      "hazard_bin": "6-10",
+      "bin": "6-10",
+      "bin_width_bars": 5,
       "at_risk": 140762,
       "events": 37201,
-      "hazard": 0.26428297409812307
+      "conditional_interval_event_probability": 0.26428297409812307
     },
     {
-      "hazard_bin": "11-20",
+      "bin": "11-20",
+      "bin_width_bars": 10,
       "at_risk": 78137,
       "events": 34739,
-      "hazard": 0.4445909108360956
+      "conditional_interval_event_probability": 0.4445909108360956
     },
     {
-      "hazard_bin": "21-40",
+      "bin": "21-40",
+      "bin_width_bars": 20,
       "at_risk": 25418,
       "events": 16185,
-      "hazard": 0.6367534817845621
+      "conditional_interval_event_probability": 0.6367534817845621
     },
     {
-      "hazard_bin": "41+",
+      "bin": "41+",
+      "bin_width_bars": -1,
       "at_risk": 4820,
       "events": 4195,
-      "hazard": 0.8703319502074689
+      "conditional_interval_event_probability": 0.8703319502074689
     }
   ],
   "timing": {
-    "cache_load_seconds": 0.24,
-    "pair_sequence_seconds": 9.87,
-    "cause_audit_seconds": 2.08,
-    "total_seconds": 13.18
+    "cache_load_seconds": 0.21,
+    "pair_sequence_seconds": 10.22,
+    "cause_audit_seconds": 1.81,
+    "total_seconds": 13.05
   },
-  "duration_caveat": "Cumulative reconfiguration probability rising with frozen duration is NOT Semi-Markov evidence: longer windows mechanically provide more exposure."
+  "duration_caveat": "Cumulative reconfiguration probability rising with frozen duration is NOT Semi-Markov evidence: longer windows mechanically provide more exposure.",
+  "hazard_note": "bins are UNEQUAL width (1, 1, 3, 5, 10, 20, 41+ bars), so these values must not be read across bins as an instantaneous hazard, and they are not Semi-Markov duration-dependence evidence.",
+  "STEP01_CLOSED": true,
+  "structural_conclusion": [
+    "genuine new inward activation is common at decision-window level",
+    "at least one genuine inward new activation occurs in 0.58134 of frozen decision-state windows",
+    "eligibility / touch artifacts are much smaller",
+    "raw frozen pair change must not itself be used directly as an episode boundary"
+  ]
 }

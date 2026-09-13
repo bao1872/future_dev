@@ -140,6 +140,37 @@ def test_7_tb3_tb4_absent():
           str(len(a)))
 
 
+def test_8_activation_bar_eligibility():
+    # upper：新 group 在 t0 已 active，但 activation_bar == t0 且位于 close 错误一侧
+    grp = mkgrp([105.0, 99.0, 95.0], [1, 1, -1], [1, 1, 1])
+    close = np.array([100.0, 100.0, 98.0, 98.0, 98.0, 98.0, 98.0, 98.0])
+    cat = m.classify_inward(grp, 1, 2, 1, 105.0, close, True)
+    check("8 upper ACTIVATION_BAR_ELIGIBILITY",
+          cat == "ACTIVATION_BAR_ELIGIBILITY", cat)
+
+    # 反例：同一位置但 activation != t0 -> 仍是 OTHER_INWARD
+    grp2 = mkgrp([105.0, 99.0, 95.0], [1, 1, -1], [0, 0, 1])
+    cat2 = m.classify_inward(grp2, 1, 2, 1, 105.0, close, True)
+    check("8b wrong-side without activation==t0 -> OTHER_INWARD",
+          cat2 == "OTHER_INWARD", cat2)
+
+    # lower 对称
+    grp3 = mkgrp([105.0, 101.0, 95.0], [1, -1, -1], [1, 1, 1])
+    close3 = np.array([100.0, 100.0, 102.0, 102.0, 102.0, 102.0, 102.0, 102.0])
+    cat3 = m.classify_inward(grp3, 1, 2, 1, 95.0, close3, False)
+    check("8c lower ACTIVATION_BAR_ELIGIBILITY",
+          cat3 == "ACTIVATION_BAR_ELIGIBILITY", cat3)
+
+
+def test_9_non_structural_events_not_structural():
+    check("9 only NEW_ACTIVATION is structural",
+          m.INWARD_CATS[0] == "NEW_ACTIVATION"
+          and set(m.NON_STRUCTURAL_PATH_EVENTS)
+          == {"EQUALITY_ELIGIBILITY", "ACTIVATION_BAR_ELIGIBILITY",
+              "TOUCH_ELIGIBILITY"},
+          str(m.NON_STRUCTURAL_PATH_EVENTS))
+
+
 def main():
     test_1_new_activation()
     test_2_equality_eligibility()
@@ -148,6 +179,8 @@ def main():
     test_5_touch_A_B_A_not_two_structural()
     test_6_resolution_bar_change_excluded()
     test_7_tb3_tb4_absent()
+    test_8_activation_bar_eligibility()
+    test_9_non_structural_events_not_structural()
     print(f"\n==== {len(FAILS)} FAIL / {len(SKIPPED)} SKIP ====")
     if FAILS:
         print("FAILED:", FAILS)

@@ -82,9 +82,16 @@ from research.liquidity_oracle_atlas.experiment_step0_step_reconfiguration_v1 im
 )
 
 INWARD_CATS = ["NEW_ACTIVATION", "EQUALITY_ELIGIBILITY",
+               "ACTIVATION_BAR_ELIGIBILITY",
                "ACTIVE_ELIGIBLE_ALREADY", "OTHER_INWARD"]
 NON_INWARD_CATS = ["TOUCH_ELIGIBILITY", "NEW_ACTIVATION_NON_INWARD",
                    "EXPIRY", "OTHER_NON_INWARD"]
+
+# 只有 NEW_ACTIVATION 属于 structural inward reconfiguration。
+# 其余（含三个 eligibility 类）全部是 episode 内部 path event。
+NON_STRUCTURAL_PATH_EVENTS = ["EQUALITY_ELIGIBILITY",
+                              "ACTIVATION_BAR_ELIGIBILITY",
+                              "TOUCH_ELIGIBILITY"]
 
 HAZ_BINS = [(1, 1), (2, 2), (3, 5), (6, 10), (11, 20), (21, 40), (41, 10 ** 9)]
 HAZ_LABELS = ["1", "2", "3-5", "6-10", "11-20", "21-40", "41+"]
@@ -175,6 +182,18 @@ def group_activation_in(grp, g: int, lo: int, hi: int) -> bool:
     return bool(((a > lo) & (a <= hi)).any())
 
 
+def group_active_with_activation_equal(grp, g: int, t: int) -> bool:
+    """是否存在一个在 t 处于 active 且 activation_bar == t 的 identity。"""
+    s = int(grp["group_starts"][g])
+    e = s + int(grp["group_lengths"][g])
+    a = grp["act"][s:e]
+    if not len(a):
+        return False
+    active = (a <= t) & (t < grp["exp"][s:e]) & (
+        (grp["pen"][s:e] < 0) | (t < grp["pen"][s:e]))
+    return bool((active & (a == t)).any())
+
+
 def classify_inward(grp, t0: int, j: int, g1: int, frozen_px: float,
                     close_arr: np.ndarray, is_upper: bool):
     px = float(grp["price"][g1])
@@ -185,6 +204,14 @@ def classify_inward(grp, t0: int, j: int, g1: int, frozen_px: float,
         return "OTHER_INWARD"
     if px == c0:
         return "EQUALITY_ELIGIBILITY"
+    wrong_side = (px < c0) if is_upper else (px > c0)
+    if wrong_side:
+        # activation bar 边界：identity 在 t0 才 activation，
+        # 此时 side-position 不变式尚未成立，level 位于 close 错误一侧，
+        # 因此严格 > / < 把它排除；后续价格移动才使其成为合法 inward 边界。
+        if group_active_with_activation_equal(grp, g1, t0):
+            return "ACTIVATION_BAR_ELIGIBILITY"
+        return "OTHER_INWARD"
     if is_upper and (px > c0) and (px < frozen_px):
         return "ACTIVE_ELIGIBLE_ALREADY"
     if (not is_upper) and (px < c0) and (px > frozen_px):
@@ -302,6 +329,7 @@ def main():
                 "lower": {k: 0 for k in INWARD_CATS}}
     nonc = {k: 0 for k in NON_INWARD_CATS}
     other_examples = []
+    abe_examples = []
 
     cause_up = np.full(len(audit), "", dtype=object)
     cause_dn = np.full(len(audit), "", dtype=object)
@@ -339,28 +367,34 @@ def main():
                 cause_up[i] = cat
                 inc[cat] += 1
                 inc_side["upper"][cat] += 1
-                if cat == "OTHER_INWARD" and len(other_examples) < 500:
-                    other_examples.append(dict(
-                        side="upper", symbol=s, decision_bar=t0,
+                if cat in ("OTHER_INWARD", "ACTIVATION_BAR_ELIGIBILITY") \
+                        and len(other_examples) + len(abe_examples) < 1000:
+                    det = dict(
+                        cause=cat, side="upper", symbol=s, decision_bar=t0,
                         reconfig_bar=j, new_group=gg,
                         new_group_price=float(grp["price"][gg]),
                         frozen_price=float(f_up[r]), close_t0=float(close[t0]),
                         close_j=float(close[j]),
-                        active_at_t0=group_active_at(grp, gg, t0)))
+                        active_at_t0=group_active_at(grp, gg, t0))
+                    (abe_examples if cat == "ACTIVATION_BAR_ELIGIBILITY"
+                     else other_examples).append(det)
             if dn_in[r]:
                 gg = int(dg[j])
                 cat = classify_inward(grp, t0, j, gg, f_dn[r], close, False)
                 cause_dn[i] = cat
                 inc[cat] += 1
                 inc_side["lower"][cat] += 1
-                if cat == "OTHER_INWARD" and len(other_examples) < 500:
-                    other_examples.append(dict(
-                        side="lower", symbol=s, decision_bar=t0,
+                if cat in ("OTHER_INWARD", "ACTIVATION_BAR_ELIGIBILITY") \
+                        and len(other_examples) + len(abe_examples) < 1000:
+                    det = dict(
+                        cause=cat, side="lower", symbol=s, decision_bar=t0,
                         reconfig_bar=j, new_group=gg,
                         new_group_price=float(grp["price"][gg]),
                         frozen_price=float(f_dn[r]), close_t0=float(close[t0]),
                         close_j=float(close[j]),
-                        active_at_t0=group_active_at(grp, gg, t0)))
+                        active_at_t0=group_active_at(grp, gg, t0))
+                    (abe_examples if cat == "ACTIVATION_BAR_ELIGIBILITY"
+                     else other_examples).append(det)
             # non-inward
             if up_non[r]:
                 cat = classify_non_inward(grp, t0, j, int(ug[j]), f_up[r],
@@ -444,21 +478,39 @@ def main():
     for (a, b), lab in zip(HAZ_BINS, HAZ_LABELS):
         at_risk = int(((dur >= a) & ((struct_k < 0) | (struct_k >= a))).sum())
         events = int(((struct_k >= a) & (struct_k <= b)).sum())
-        rows.append(dict(hazard_bin=lab, at_risk=at_risk, events=events,
-                         hazard=float(events / at_risk) if at_risk else np.nan))
+        rows.append(dict(
+            bin=lab,
+            # -1 = 开区间（最后一档）
+            bin_width_bars=(int(b - a + 1) if b < 10 ** 8 else -1),
+            at_risk=at_risk, events=events,
+            conditional_interval_event_probability=(
+                float(events / at_risk) if at_risk else np.nan)))
     pd.DataFrame(rows).to_csv(OUT / "step01_hazard.csv", index=False)
 
     # ---------------- outputs ----------------
-    inc_rows = []
-    for k in INWARD_CATS:
-        inc_rows.append(dict(cause=k, n=inc[k],
-                             rate_of_states=float(inc[k]) / max(n, 1),
-                             upper=inc_side["upper"][k],
-                             lower=inc_side["lower"][k]))
+    total_side = int(sum(inc.values()))
+    states_with = {k: int(((audit["inward_cause_upper"] == k)
+                           | (audit["inward_cause_lower"] == k)).sum())
+                   for k in INWARD_CATS}
+    inc_rows = [dict(
+        cause=k,
+        n_first_inward_side_events=inc[k],
+        share_of_first_inward_side_events=float(inc[k]) / max(total_side, 1),
+        n_upper=inc_side["upper"][k],
+        n_lower=inc_side["lower"][k],
+        n_states_with_this_cause=states_with[k],
+        rate_states_with_this_cause=float(states_with[k]) / max(n, 1))
+        for k in INWARD_CATS]
     pd.DataFrame(inc_rows).to_csv(OUT / "step01_inward_causes.csv", index=False)
 
-    non_rows = [dict(cause=k, n=nonc[k],
-                     rate_of_states=float(nonc[k]) / max(n, 1))
+    non_states_with = {
+        k: int(((audit["non_inward_cause_upper"] == k)
+                | (audit["non_inward_cause_lower"] == k)).sum())
+        for k in NON_INWARD_CATS}
+    non_rows = [dict(cause=k, n_side_events=nonc[k],
+                     n_states_with_this_cause=non_states_with[k],
+                     rate_states_with_this_cause=float(non_states_with[k])
+                     / max(n, 1))
                 for k in NON_INWARD_CATS]
     pd.DataFrame(non_rows).to_csv(OUT / "step01_non_inward_causes.csv",
                                   index=False)
@@ -473,20 +525,24 @@ def main():
     pd.DataFrame(tr_rows).to_csv(OUT / "step01_transition_decomposition.csv",
                                  index=False)
 
-    if other_examples:
-        pd.DataFrame(other_examples).to_csv(OUT / "step01_other_examples.csv",
-                                            index=False)
+    PD_COLS = ["cause", "side", "symbol", "decision_bar", "reconfig_bar",
+               "new_group", "new_group_price", "frozen_price", "close_t0",
+               "close_j", "active_at_t0"]
+    pd.DataFrame(other_examples, columns=PD_COLS).to_csv(
+        OUT / "step01_other_examples.csv", index=False)
+    pd.DataFrame(abe_examples, columns=PD_COLS).to_csv(
+        OUT / "step01_activation_bar_eligibility_examples.csv", index=False)
 
     timing["total_seconds"] = round(time.perf_counter() - t_total, 2)
 
     n_new = inc["NEW_ACTIVATION"]
     n_eq = inc["EQUALITY_ELIGIBILITY"]
+    n_abe = inc["ACTIVATION_BAR_ELIGIBILITY"]
     n_inv = inc["ACTIVE_ELIGIBLE_ALREADY"]
     n_oth = inc["OTHER_INWARD"]
-    states_new = int(((audit["inward_cause_upper"] == "NEW_ACTIVATION")
-                      | (audit["inward_cause_lower"] == "NEW_ACTIVATION")).sum())
-    states_eq = int(((audit["inward_cause_upper"] == "EQUALITY_ELIGIBILITY")
-                     | (audit["inward_cause_lower"] == "EQUALITY_ELIGIBILITY")).sum())
+    states_new = states_with["NEW_ACTIVATION"]
+    states_eq = states_with["EQUALITY_ELIGIBILITY"]
+    states_abe = states_with["ACTIVATION_BAR_ELIGIBILITY"]
     states_touch = int(((audit["non_inward_cause_upper"] == "TOUCH_ELIGIBILITY")
                         | (audit["non_inward_cause_lower"] == "TOUCH_ELIGIBILITY")).sum())
 
@@ -496,26 +552,72 @@ def main():
         caveat=("All statistics are DECISION-STATE WINDOW statistics, not "
                 "independent non-overlapping episodes."),
         n_decision_states=n,
+
+        # ---- 口径 A: first-inward SIDE-EVENT cause share ----
+        # 注意：一个 BOTH state 会同时贡献 upper 与 lower 两条 side-event，
+        # 因此分母是 side-events，不是 states。
+        side_event_denominator=dict(
+            n_first_inward_side_events=total_side,
+            note=("denominator is first-inward SIDE EVENTS (upper/lower), "
+                  "not decision states"),
+        ),
+        share_of_first_inward_side_events={
+            k: float(inc[k]) / max(total_side, 1) for k in INWARD_CATS},
+
+        # ---- 口径 B: decision-state window rate（state-level，唯一合法的
+        #              "rate of states"） ----
+        state_window_rates=dict(
+            n_states_any_new_activation_inward=states_new,
+            rate_states_any_new_activation_inward=float(states_new) / max(n, 1),
+            n_states_any_equality_eligibility=states_eq,
+            rate_states_any_equality_eligibility=float(states_eq) / max(n, 1),
+            n_states_any_activation_bar_eligibility=states_abe,
+            rate_states_any_activation_bar_eligibility=float(states_abe) / max(n, 1),
+            n_states_any_touch_eligibility=states_touch,
+            rate_states_any_touch_eligibility=float(states_touch) / max(n, 1),
+            note=("these ARE state-level rates; they must not be confused "
+                  "with side-event shares"),
+        ),
         inward_causes=inc,
         inward_causes_by_side=inc_side,
         non_inward_causes=nonc,
-        rates=dict(
-            genuine_new_activation_inward_rate=float(states_new) / max(n, 1),
-            equality_eligibility_inward_rate=float(states_eq) / max(n, 1),
-            touch_eligibility_rate=float(states_touch) / max(n, 1),
-            other_rate=float(n_oth) / max(n, 1),
+
+        episode_interpretation=dict(
+            structural=["NEW_ACTIVATION"],
+            non_structural_eligibility_path_events=NON_STRUCTURAL_PATH_EVENTS,
+            rule=("only NEW_ACTIVATION is a structural inward "
+                  "reconfiguration; EQUALITY_ELIGIBILITY / "
+                  "ACTIVATION_BAR_ELIGIBILITY / TOUCH_ELIGIBILITY belong to "
+                  "episode-internal path events and must NOT be used as "
+                  "episode segmentation endpoints"),
         ),
         transitions={r["metric"]: {k: r[k] for k in
                                    ("mean", "p50", "p90", "n_zero", "n_one",
                                     "n_two", "n_three_plus")}
                      for r in tr_rows},
+        transition_note=("structural = raw transitions minus exact-touch / "
+                         "equality-driven transitions. This is NOT a dynamic "
+                         "episode count."),
         overlap=overlap,
-        hazard=rows,
+        conditional_interval_event_probability=rows,
         timing=timing,
         duration_caveat=("Cumulative reconfiguration probability rising with "
                          "frozen duration is NOT Semi-Markov evidence: longer "
                          "windows mechanically provide more exposure."),
+        hazard_note=("bins are UNEQUAL width (1, 1, 3, 5, 10, 20, 41+ bars), "
+                     "so these values must not be read across bins as an "
+                     "instantaneous hazard, and they are not Semi-Markov "
+                     "duration-dependence evidence."),
     )
+    summary["STEP01_CLOSED"] = bool(n_oth == 0 and n_inv == 0)
+    summary["structural_conclusion"] = [
+        "genuine new inward activation is common at decision-window level",
+        (f"at least one genuine inward new activation occurs in "
+         f"{float(states_new) / max(n, 1):.5f} of frozen decision-state windows"),
+        "eligibility / touch artifacts are much smaller",
+        ("raw frozen pair change must not itself be used directly as an "
+         "episode boundary"),
+    ]
     (OUT / "step01_cause_summary.json").write_text(
         json.dumps(summary, indent=2, default=str))
 
@@ -526,20 +628,21 @@ def main():
     print("[TRANSITIONS]")
     print(pd.DataFrame(tr_rows).to_string(index=False))
     print(f"[OVERLAP] {overlap}")
-    print("[HAZARD]")
+    print("[CONDITIONAL INTERVAL EVENT PROBABILITY]")
     print(pd.DataFrame(rows).to_string(index=False))
+    print(f"[STEP01_CLOSED] {summary['STEP01_CLOSED']}")
     print(f"[TIMING] {timing}")
 
-    if n_inv > 0:
-        raise SystemExit(
-            "STOP_STEP01_NEAREST_PAIR_INVARIANT_FAIL: "
-            f"{n_inv} inward changes where the new group was already active, "
-            "on the correct side and inward at the decision bar.")
     if n_oth > 0:
         raise SystemExit(
             "STOP_STEP01_OTHER_INWARD: "
             f"{n_oth} unexplained inward changes; examples -> "
             f"{OUT / 'step01_other_examples.csv'}")
+    if n_inv > 0:
+        raise SystemExit(
+            "STOP_STEP01_NEAREST_PAIR_INVARIANT_FAIL: "
+            f"{n_inv} inward changes where the new group was already active, "
+            "on the correct side and inward at the decision bar.")
 
     print(f"[DONE] {timing['total_seconds']}s -> {OUT}")
 

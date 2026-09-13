@@ -1,6 +1,1 @@
-side,symbol,decision_bar,reconfig_bar,new_group,new_group_price,frozen_price,close_t0,close_j,active_at_t0
-upper,AL,3420,3421,400,20675.0,20715.0,20680.0,20670.0,True
-lower,RB,3471,3472,393,3154.0,3152.0,3153.0,3155.0,True
-lower,RB,5999,6000,201,3058.0,3044.0,3057.0,3059.0,True
-lower,SN,11339,11340,683,264350.0,260540.0,264320.0,264850.0,True
-lower,SN,16482,16483,1228,273430.03125,272500.0,273420.0,273620.0,True
+cause,side,symbol,decision_bar,reconfig_bar,new_group,new_group_price,frozen_price,close_t0,close_j,active_at_t0
