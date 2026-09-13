@@ -1,0 +1,3 @@
+symbol,expiry_bar,n_decision_rows_with_pair_expiring_here,n_resolved_up_before_expiry,n_resolved_down_before_expiry,n_ambiguous_before_expiry,n_roll_right_censor,n_end_of_data_right_censor
+SC,30496,28997,14318,14679,0,0,0
+TOTAL,-1,28997,14318,14679,0,0,0

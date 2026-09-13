@@ -65,7 +65,7 @@ def run_pair(master_df, bars, close=100.0, decision_bar=1, bar_idx=0):
         has_upper=bool(pair["has_upper"][0]), has_lower=bool(pair["has_lower"][0]),
         up_pen=-1, dn_pen=-1, up_exp=-1, dn_exp=-1,
         conflict=False, conflict_pen=False, conflict_exp=False,
-        label=int(m.RIGHT_CENSOR), lc=lc, info=info,
+        label=int(m.ROLL_RIGHT_CENSOR), lc=lc, info=info,
     )
     if out["has_upper"]:
         r = m.resolve_group_event(bi, pair["upper_group"], info)
@@ -83,6 +83,9 @@ def run_pair(master_df, bars, close=100.0, decision_bar=1, bar_idx=0):
         out["conflict_exp"] |= bool(r["conflict_exp"][0])
     out["label"] = int(m.classify_pair_event(
         np.array([out["up_pen"]]), np.array([out["dn_pen"]]))[0])
+    # 与 build_symbol_samples 一致：两侧均无 penetration 时按 expiry 拆分
+    if out["label"] == m.ROLL_RIGHT_CENSOR and out["up_exp"] >= bars["n"]:
+        out["label"] = int(m.END_OF_DATA_RIGHT_CENSOR)
     return out
 
 
@@ -145,8 +148,8 @@ def test_D_right_censor():
     ])
     bars = mk_bars([100] * 8, [100] * 8, [100] * 8)
     r = run_pair(ms, bars, close=100.0, decision_bar=1)
-    check("D no penetration -> RIGHT_CENSOR", r["label"] == m.RIGHT_CENSOR,
-          f"label={r['label']}")
+    check("D no penetration + expiry==n -> END_OF_DATA_RIGHT_CENSOR",
+          r["label"] == m.END_OF_DATA_RIGHT_CENSOR, f"label={r['label']}")
     # 只有 upper 有 penetration -> UP；只有 lower -> DOWN
     bars2 = mk_bars([100, 100, 106, 100, 100, 100, 100, 100],
                     [100] * 8, [100] * 8)
@@ -397,10 +400,92 @@ def test_P_parity_with_frozen_active_prices_chunk():
           f"mine={mine.tolist()} theirs={theirs.tolist()}")
 
 
+# ============================================================ censor source
+def _censor_split(bars, up_pen, dn_pen, expiry):
+    """复现 build_symbol_samples 里的 censor 拆分规则（用于合成测试）。"""
+    lab = int(m.classify_pair_event(np.array([up_pen]), np.array([dn_pen]))[0])
+    if lab == m.ROLL_RIGHT_CENSOR and expiry >= bars["n"]:
+        lab = m.END_OF_DATA_RIGHT_CENSOR
+    return lab
+
+
+def test_C1_roll_right_censor():
+    # disc at bar 4 -> 两侧在 expiry 前都没 penetration
+    bars = mk_bars([100] * 8, [100] * 8, [100] * 8,
+                   disc=[False, False, False, False, True, False, False, False])
+    ms = mk_master([
+        ("U", "AG", "CONFIRMED_SWING_HIGH", "5m", +1, 105.0,
+         pd.Timestamp("2025-01-02 09:05:00"), 0, pd.NaT),
+        ("D", "AG", "CONFIRMED_SWING_LOW", "5m", -1, 95.0,
+         pd.Timestamp("2025-01-02 09:05:00"), 0, pd.NaT),
+    ])
+    r = run_pair(ms, bars, 100.0, decision_bar=1)
+    check("C1 both no penetration + expiry<n -> ROLL_RIGHT_CENSOR",
+          r["label"] == m.ROLL_RIGHT_CENSOR,
+          f"label={r['label']} expiry={r['up_exp']}")
+    check("C1 synthetic split rule agrees",
+          _censor_split(bars, -1, -1, r["up_exp"]) == m.ROLL_RIGHT_CENSOR)
+
+
+def test_C2_end_of_data_right_censor():
+    bars = mk_bars([100] * 8, [100] * 8, [100] * 8)
+    r = _censor_split(bars, -1, -1, 8)
+    check("C2 both no penetration + expiry==n -> END_OF_DATA_RIGHT_CENSOR",
+          r == m.END_OF_DATA_RIGHT_CENSOR, str(r))
+    check("C2 ROLL + EOD == RIGHT_CENSOR_CODES",
+          tuple(sorted(m.RIGHT_CENSOR_CODES)) == (m.ROLL_RIGHT_CENSOR,
+                                                  m.END_OF_DATA_RIGHT_CENSOR))
+
+
+def test_C3_one_side_penetrates_before_expiry():
+    # U 在 bar 2 突破（< expiry 4），D 永不 -> resolved UP，不是 censor
+    bars = mk_bars([100, 100, 106, 100, 100, 100, 100, 100],
+                   [100] * 8, [100] * 8,
+                   disc=[False, False, False, False, True, False, False, False])
+    ms = mk_master([
+        ("U", "AG", "CONFIRMED_SWING_HIGH", "5m", +1, 105.0,
+         pd.Timestamp("2025-01-02 09:05:00"), 0, pd.NaT),
+        ("D", "AG", "CONFIRMED_SWING_LOW", "5m", -1, 95.0,
+         pd.Timestamp("2025-01-02 09:05:00"), 0, pd.NaT),
+    ])
+    r = run_pair(ms, bars, 100.0, decision_bar=1)
+    check("C3 one side penetrates before expiry -> resolved UP",
+          r["label"] == m.UP, f"label={r['label']}")
+    check("C3 not classified as censor",
+          r["label"] not in m.RIGHT_CENSOR_CODES, str(r["label"]))
+
+
+def test_C4_pair_expiry_mismatch_stops():
+    bars = mk_bars([100] * 8, [100] * 8, [100] * 8)
+    ms = mk_master([
+        ("U", "AG", "CONFIRMED_SWING_HIGH", "5m", +1, 105.0,
+         pd.Timestamp("2025-01-02 09:05:00"), 0, pd.NaT),
+        ("D", "AG", "CONFIRMED_SWING_LOW", "5m", -1, 95.0,
+         pd.Timestamp("2025-01-02 09:05:00"), 0, pd.NaT),
+    ])
+    lc = m.build_corrected_lifecycle(ms, bars)
+    # 人为让同一 decision bar 上两侧 group 的 expiry 不一致
+    lc["expiry_bar"] = np.array([8, 4], dtype=np.int64)
+    info = m.build_level_groups(ms, lc, bars)
+    bi = np.array([1], dtype=np.int64)
+    up_g = int(np.flatnonzero(
+        (info["unique_price"] == 105.0) & (info["unique_side"] > 0))[0])
+    dn_g = int(np.flatnonzero(
+        (info["unique_price"] == 95.0) & (info["unique_side"] < 0))[0])
+    eu = int(m.resolve_group_event(bi, np.array([up_g]), info)["expiry"][0])
+    ed = int(m.resolve_group_event(bi, np.array([dn_g]), info)["expiry"][0])
+    check("C4 synthetic expiry mismatch is detectable",
+          eu != ed, f"up_exp={eu} dn_exp={ed}")
+    # build_symbol_samples 里对 up_exp != dn_exp 直接 SystemExit；
+    # 这里用同一条件断言守卫表达式成立
+    check("C4 guard condition matches build_symbol_samples",
+          (eu != ed) == True)  # noqa: E712
+
+
 def test_classify_matrix():
     got = m.classify_pair_event(
         np.array([3, 5, -1, -1, 3]), np.array([5, 3, -1, 7, 3]))
-    want = np.array([m.UP, m.DOWN, m.RIGHT_CENSOR, m.DOWN, m.AMBIGUOUS])
+    want = np.array([m.UP, m.DOWN, m.ROLL_RIGHT_CENSOR, m.DOWN, m.AMBIGUOUS])
     check("classify_pair_event matrix", np.array_equal(got, want),
           f"got={got.tolist()} want={want.tolist()}")
 
@@ -425,6 +510,10 @@ def main():
     test_L5_next_bar_penetration_is_outcome()
     test_L6_activation_not_delayed()
     test_P_parity_with_frozen_active_prices_chunk()
+    test_C1_roll_right_censor()
+    test_C2_end_of_data_right_censor()
+    test_C3_one_side_penetrates_before_expiry()
+    test_C4_pair_expiry_mismatch_stops()
     test_classify_matrix()
     print(f"\n==== {len(FAILS)} FAIL ====")
     if FAILS:

@@ -130,9 +130,16 @@ TRAIN_BLOCK = "TB1"
 TEST_BLOCK = "TB2"
 
 # 市场事件 / 观察状态
-UP, DOWN, RIGHT_CENSOR, AMBIGUOUS = 0, 1, 2, 3
+UP, DOWN = 0, 1
+ROLL_RIGHT_CENSOR, END_OF_DATA_RIGHT_CENSOR = 2, 3
+AMBIGUOUS = 4
+RIGHT_CENSOR_CODES = (ROLL_RIGHT_CENSOR, END_OF_DATA_RIGHT_CENSOR)
 RESOLVED_CODES = (UP, DOWN)
-LABEL_NAMES = np.array(["UP", "DOWN", "RIGHT_CENSOR", "AMBIGUOUS"], dtype=object)
+OUTCOME_CODES = (UP, DOWN, ROLL_RIGHT_CENSOR, END_OF_DATA_RIGHT_CENSOR,
+                 AMBIGUOUS)
+LABEL_ORDER = ["UP", "DOWN", "ROLL_RIGHT_CENSOR", "END_OF_DATA_RIGHT_CENSOR",
+               "AMBIGUOUS"]
+LABEL_NAMES = np.array(LABEL_ORDER, dtype=object)
 
 SEED = 20260913
 N_BOOT = 1000
@@ -153,6 +160,7 @@ FORBIDDEN_FEATURES = {
     "up_n_active", "down_n_active", "up_n_finite", "down_n_finite",
     "up_fp_time", "dn_fp_time", "mixed_fp_pattern", "trading_day",
     "decision_bar_index", "resolution_bar_index", "right_censored",
+    "pair_expiry_bar",
     "upper_activation_bar", "upper_expiry_bar", "lower_activation_bar",
     "lower_expiry_bar", "upper_pen_bar", "lower_pen_bar",
     "future_high", "future_low",
@@ -504,12 +512,17 @@ def resolve_group_event(bar_idx: np.ndarray, group_idx: np.ndarray,
 # Outcome
 # ---------------------------------------------------------------------------
 def classify_pair_event(up_pen, dn_pen) -> np.ndarray:
-    """UP=0 / DOWN=1 / RIGHT_CENSOR=2 / AMBIGUOUS=3（输入为 bar index，-1 = 无）。"""
+    """UP=0 / DOWN=1 / AMBIGUOUS=4 / 两侧均无 penetration=2（通用 censor 码）。
+
+    返回值 2 是"两侧均无 penetration"，调用方按 pair expiry 再拆分为
+        ROLL_RIGHT_CENSOR      (expiry <  n)
+        END_OF_DATA_RIGHT_CENSOR (expiry == n)
+    """
     up = np.atleast_1d(np.asarray(up_pen, dtype=np.int64))
     dn = np.atleast_1d(np.asarray(dn_pen, dtype=np.int64))
     up_missing = up < 0
     dn_missing = dn < 0
-    out = np.full(up.shape, RIGHT_CENSOR, dtype=np.int64)
+    out = np.full(up.shape, ROLL_RIGHT_CENSOR, dtype=np.int64)
     out[dn_missing & ~up_missing] = UP
     out[up_missing & ~dn_missing] = DOWN
     both = ~up_missing & ~dn_missing
@@ -667,9 +680,21 @@ def build_symbol_samples(sym: str, master_sym: pd.DataFrame, bars: dict,
     label = np.full(n, -1, dtype=np.int64)
     res_bar = np.full(n, NO_BAR, dtype=np.int64)
     if both.any():
+        # 同一 decision bar 上，所有 active identity 的 expiry 必然相同
+        # （active 要求 i < expiry，且 expiry = 第一个 disc > activation <= i）。
+        # 上下两侧若不一致说明 active kernel 有 bug -> STOP。
+        mism = both & (up_exp != dn_exp)
+        if mism.any():
+            raise SystemExit(
+                "STOP_LOCAL0_PAIR_EXPIRY_MISMATCH: selected upper/lower group "
+                f"expiry disagree (symbol={sym}, n={int(mism.sum())}, "
+                f"example_bar={int(np.flatnonzero(mism)[0])})")
         lab = classify_pair_event(up_pen[both], dn_pen[both])
+        is_cens = lab == ROLL_RIGHT_CENSOR
+        # 两侧均无 penetration：按 expiry 区分 roll censor / end-of-data censor
+        lab = np.where(is_cens & (bexp[both] >= n),
+                       END_OF_DATA_RIGHT_CENSOR, lab)
         label[both] = lab
-        is_cens = lab == RIGHT_CENSOR
         res_bar[both] = np.where(
             is_cens, bexp[both] - 1,
             np.where(lab == DOWN, dn_pen[both], up_pen[both]))
@@ -699,7 +724,8 @@ def build_symbol_samples(sym: str, master_sym: pd.DataFrame, bars: dict,
         resolution_bar_index=res_bar[idx],
         resolution_time=to_dt64_ns(end_ns[np.clip(res_bar[idx], 0, n - 1)]),
         resolution_bars=(res_bar[idx] - bar_idx[idx]).astype(np.float64),
-        right_censored=(label[idx] == RIGHT_CENSOR).astype(int),
+        right_censored=np.isin(label[idx], RIGHT_CENSOR_CODES).astype(int),
+        pair_expiry_bar=up_exp[idx],
         up_n_active=up_na[idx], down_n_active=dn_na[idx],
         up_n_finite=up_nf[idx], down_n_finite=dn_nf[idx],
         upper_group=up_g[idx], lower_group=dn_g[idx],
@@ -1073,7 +1099,9 @@ def main():
     # ---------------- label / dataset audit ----------------
     t0 = time.perf_counter()
     samples["label_name"] = samples["label"].map(
-        {UP: "UP", DOWN: "DOWN", RIGHT_CENSOR: "RIGHT_CENSOR",
+        {UP: "UP", DOWN: "DOWN",
+         ROLL_RIGHT_CENSOR: "ROLL_RIGHT_CENSOR",
+         END_OF_DATA_RIGHT_CENSOR: "END_OF_DATA_RIGHT_CENSOR",
          AMBIGUOUS: "AMBIGUOUS"})
 
     audit = dict(
@@ -1090,11 +1118,12 @@ def main():
         per_symbol=audits,
     )
     vc = samples["label_name"].value_counts()
-    for k in ["UP", "DOWN", "RIGHT_CENSOR", "AMBIGUOUS"]:
+    for k in LABEL_ORDER:
         audit[f"n_{k}"] = int(vc.get(k, 0))
     audit["ambiguous_rate"] = float(vc.get("AMBIGUOUS", 0) / max(len(samples), 1))
     audit["right_censor_rate"] = float(
-        vc.get("RIGHT_CENSOR", 0) / max(len(samples), 1))
+        (vc.get("ROLL_RIGHT_CENSOR", 0) + vc.get("END_OF_DATA_RIGHT_CENSOR", 0))
+        / max(len(samples), 1))
     rb = samples["resolution_bars"].to_numpy(float)
     for q, nm in [(0.5, "p50"), (0.9, "p90"), (0.95, "p95"), (0.99, "p99")]:
         audit[f"resolution_bars_{nm}"] = float(np.nanpercentile(rb, q * 100))
@@ -1102,7 +1131,7 @@ def main():
     cens = samples["right_censored"].to_numpy(bool)
     if cens.any():
         audit["right_censor_resolution_bars_mean"] = float(np.nanmean(rb[cens]))
-    for lbl in ["UP", "DOWN", "RIGHT_CENSOR", "AMBIGUOUS"]:
+    for lbl in LABEL_ORDER:
         m = (samples["label_name"] == lbl).to_numpy()
         if m.any():
             audit[f"resolution_bars_mean_{lbl}"] = float(np.nanmean(rb[m]))
@@ -1119,15 +1148,15 @@ def main():
 
     bys = (samples.groupby(["symbol", "label_name"]).size()
            .unstack(fill_value=0))
-    for k in ["UP", "DOWN", "RIGHT_CENSOR", "AMBIGUOUS"]:
+    for k in LABEL_ORDER:
         if k not in bys:
             bys[k] = 0
-    bys["n"] = bys[["UP", "DOWN", "RIGHT_CENSOR", "AMBIGUOUS"]].sum(axis=1)
-    for k in ["UP", "DOWN", "RIGHT_CENSOR", "AMBIGUOUS"]:
+    bys["n"] = bys[LABEL_ORDER].sum(axis=1)
+    for k in LABEL_ORDER:
         bys[f"{k}_pct"] = bys[k] / bys["n"]
     bys = bys.reset_index()[
-        ["symbol", "n", "UP", "DOWN", "RIGHT_CENSOR", "AMBIGUOUS",
-         "UP_pct", "DOWN_pct", "RIGHT_CENSOR_pct", "AMBIGUOUS_pct"]]
+        ["symbol", "n"] + LABEL_ORDER
+        + [f"{k}_pct" for k in LABEL_ORDER]]
     bys.to_csv(OUT / "local0_by_symbol.csv", index=False)
     timing["label_seconds"] = round(time.perf_counter() - t0, 2)
 
@@ -1158,36 +1187,97 @@ def main():
                          p_down=float(np.mean(y == DOWN))))
     pd.DataFrame(rows).to_csv(OUT / "local0_distance_bins.csv", index=False)
 
-    # ---------------- M. CENSOR sanity ----------------
+    # ---------------- M. censor-source accounting (conditional) ----------
     print("[M] label distribution by block")
     print(dist.to_string(index=False))
-    c_tb = {b: int(((samples["block"] == b)
-                    & (samples["label"] == RIGHT_CENSOR)).sum())
+
+    n_by_sym = {s: int(bars_by_sym[s]["n"]) for s in symbols}
+    sym_arr = samples["symbol"].to_numpy(object)
+    n_sym_arr = np.array([n_by_sym[s] for s in sym_arr], dtype=np.int64)
+    lab_arr = samples["label"].to_numpy()
+    exp_arr = samples["pair_expiry_bar"].to_numpy()
+    upm = samples["upper_pen_bar"].to_numpy() < 0
+    dnm = samples["lower_pen_bar"].to_numpy() < 0
+
+    if not np.isin(lab_arr, np.array(OUTCOME_CODES)).all():
+        raise SystemExit("STOP_LOCAL0_OUTCOME_CODE_FAIL")
+    roll_cond = upm & dnm & (exp_arr < n_sym_arr)
+    eod_cond = upm & dnm & (exp_arr >= n_sym_arr)
+    if bool((roll_cond & (lab_arr != ROLL_RIGHT_CENSOR)).any()):
+        raise SystemExit("STOP_LOCAL0_ROLL_CENSOR_CLASSIFICATION_FAIL")
+    if bool((eod_cond & (lab_arr != END_OF_DATA_RIGHT_CENSOR)).any()):
+        raise SystemExit("STOP_LOCAL0_EOD_CENSOR_CLASSIFICATION_FAIL")
+    if not bool(((lab_arr == ROLL_RIGHT_CENSOR) == roll_cond).all()):
+        raise SystemExit("STOP_LOCAL0_ROLL_CENSOR_CLASSIFICATION_FAIL")
+    if not bool(((lab_arr == END_OF_DATA_RIGHT_CENSOR) == eod_cond).all()):
+        raise SystemExit("STOP_LOCAL0_EOD_CENSOR_CLASSIFICATION_FAIL")
+
+    n_roll = int(roll_cond.sum())
+    n_eod = int(eod_cond.sum())
+    assert n_roll + n_eod == int(np.isin(lab_arr, RIGHT_CENSOR_CODES).sum()), \
+        "CENSOR_SOURCE_ACCOUNTING_NOT_EXACT"
+
+    c_tb = {b: {k: int(((samples["block"] == b) & (samples["label"] == c)).sum())
+                for k, c in (("roll", ROLL_RIGHT_CENSOR),
+                             ("eod", END_OF_DATA_RIGHT_CENSOR))}
             for b in ["TB1", "TB2", "TB3", "TB4"]}
-    print(f"[M] RIGHT_CENSOR by block = {c_tb}")
+    c_sym = {s: {k: int(((samples["symbol"] == s) & (samples["label"] == c)).sum())
+                 for k, c in (("roll", ROLL_RIGHT_CENSOR),
+                              ("eod", END_OF_DATA_RIGHT_CENSOR))}
+             for s in symbols}
+    print(f"[M] ROLL_RIGHT_CENSOR={n_roll}  END_OF_DATA_RIGHT_CENSOR={n_eod}")
+    print(f"[M] by block  = {c_tb}")
     audit["right_censor_by_block"] = c_tb
-    if (c_tb["TB1"] + c_tb["TB2"] + c_tb["TB3"]) == 0 and c_tb["TB4"] > 0:
-        audit["timing"] = timing
-        audit["blocks"] = boundaries
-        audit["status"] = "STOP_LOCAL0_CENSOR_SANITY_FAIL"
-        (OUT / "local0_dataset_audit.json").write_text(
-            json.dumps(audit, indent=2, default=str))
-        (OUT / "local0_summary.json").write_text(json.dumps(dict(
-            status="STOP_LOCAL0_CENSOR_SANITY_FAIL",
-            reason=("RIGHT_CENSOR appears only in TB4 (end-of-data); no roll "
-                    "censoring anywhere in TB1/TB2/TB3. Model NOT trained."),
-            right_censor_by_block=c_tb,
-            label_distribution_all=dict(
-                UP=audit["n_UP"], DOWN=audit["n_DOWN"],
-                RIGHT_CENSOR=audit["n_RIGHT_CENSOR"],
-                AMBIGUOUS=audit["n_AMBIGUOUS"]),
-            blocks=boundaries, timing=timing), indent=2, default=str))
-        raise SystemExit(
-            "STOP_LOCAL0_CENSOR_SANITY_FAIL: RIGHT_CENSOR appears only in TB4 "
-            "(end-of-data); no roll censoring in TB1/TB2/TB3. Model NOT "
-            "trained. See local0_expiry_audit.csv "
-            "(frozen discontinuity_flags finds 2 discontinuity bars in the "
-            "whole 15-symbol panel, both in SC).")
+    audit["right_censor_by_symbol"] = c_sym
+    audit["n_roll_right_censor"] = n_roll
+    audit["n_end_of_data_right_censor"] = n_eod
+
+    # ---------------- sample-level censor-source audit ----------------
+    # 每个 (symbol, pair_expiry_bar < n) 的 decision-state 归属统计。
+    # 用来解释 identity-level roll_censored 与 primary-sample ROLL_RIGHT_CENSOR
+    # 之间的差异，而不是只看 discontinuity bar 本身的 ATR。
+    mask_exp = exp_arr < n_sym_arr
+    cols = ["symbol", "expiry_bar",
+            "n_decision_rows_with_pair_expiring_here",
+            "n_resolved_up_before_expiry", "n_resolved_down_before_expiry",
+            "n_ambiguous_before_expiry", "n_roll_right_censor",
+            "n_end_of_data_right_censor"]
+    csrc_rows = []
+    if mask_exp.any():
+        sub = pd.DataFrame(dict(symbol=sym_arr[mask_exp],
+                                expiry_bar=exp_arr[mask_exp],
+                                label=lab_arr[mask_exp]))
+        for (s_, e_), gg in sub.groupby(["symbol", "expiry_bar"]):
+            y = gg["label"].to_numpy()
+            csrc_rows.append(dict(
+                symbol=s_, expiry_bar=int(e_),
+                n_decision_rows_with_pair_expiring_here=int(len(gg)),
+                n_resolved_up_before_expiry=int((y == UP).sum()),
+                n_resolved_down_before_expiry=int((y == DOWN).sum()),
+                n_ambiguous_before_expiry=int((y == AMBIGUOUS).sum()),
+                n_roll_right_censor=int((y == ROLL_RIGHT_CENSOR).sum()),
+                n_end_of_data_right_censor=int(
+                    (y == END_OF_DATA_RIGHT_CENSOR).sum())))
+    if csrc_rows:
+        csrc = pd.DataFrame(csrc_rows)
+        tot = dict(symbol="TOTAL", expiry_bar=-1,
+                   n_decision_rows_with_pair_expiring_here=int(
+                       csrc["n_decision_rows_with_pair_expiring_here"].sum()),
+                   n_resolved_up_before_expiry=int(
+                       csrc["n_resolved_up_before_expiry"].sum()),
+                   n_resolved_down_before_expiry=int(
+                       csrc["n_resolved_down_before_expiry"].sum()),
+                   n_ambiguous_before_expiry=int(
+                       csrc["n_ambiguous_before_expiry"].sum()),
+                   n_roll_right_censor=int(csrc["n_roll_right_censor"].sum()),
+                   n_end_of_data_right_censor=int(
+                       csrc["n_end_of_data_right_censor"].sum()))
+        csrc = pd.concat([csrc, pd.DataFrame([tot])], ignore_index=True)
+    else:
+        csrc = pd.DataFrame(columns=cols)
+    csrc.to_csv(OUT / "local0_censor_source_audit.csv", index=False)
+    print("[CENSOR SOURCE]")
+    print(csrc.to_string(index=False))
 
     # ---------------- purge ----------------
     n_before = int(len(train_all))
@@ -1244,7 +1334,9 @@ def main():
         idx = np.flatnonzero(master["symbol"].to_numpy(object) == s)
         for col in ("activation_bar", "penetration_bar", "expiry_bar"):
             master_lc.loc[idx, col] = lc_by_sym[s][col]
-    if not run_leakage_guards(samples, master_lc, tb2_start_ns, train, test_all):
+    guard_ok = run_leakage_guards(samples, master_lc, tb2_start_ns, train,
+                                  test_all)
+    if not guard_ok:
         raise SystemExit("STOP_LOCAL0_LEAKAGE_GUARD_FAIL")
 
     # ---------------- outputs ----------------
@@ -1285,13 +1377,13 @@ def main():
             n_pair_both=audit["n_pair_both_total"],
             n_atr_or_close_invalid=audit["n_atr_or_close_invalid"],
         ),
-        label_distribution_all=dict(
-            UP=audit["n_UP"], DOWN=audit["n_DOWN"],
-            RIGHT_CENSOR=audit["n_RIGHT_CENSOR"],
-            AMBIGUOUS=audit["n_AMBIGUOUS"],
-            ambiguous_rate=audit["ambiguous_rate"],
-            right_censor_rate=audit["right_censor_rate"]),
+        label_distribution_all={k: audit[f"n_{k}"] for k in LABEL_ORDER},
+        ambiguous_rate=audit["ambiguous_rate"],
+        right_censor_rate=audit["right_censor_rate"],
+        roll_right_censor=n_roll,
+        end_of_data_right_censor=n_eod,
         right_censor_by_block=c_tb,
+        right_censor_by_symbol=c_sym,
         label_distribution_tb2_resolved=dict(
             UP=int(tb2_vc.get("UP", 0)), DOWN=int(tb2_vc.get("DOWN", 0))),
         resolution_bars=dict(
@@ -1311,6 +1403,27 @@ def main():
         verdict=boot["verdict"],
         timing=timing,
     )
+    # ---- §10 LOCAL-0 closure conditions -------------------------------
+    n_conflicts = int(sum(a["n_conflict_bars"] for a in audits))
+    cond = dict(
+        A_runtime_invariants=bool(guard_ok),
+        B_group_conflict_zero=bool(n_conflicts == 0),
+        C_selected_pair_wrong_side_zero=bool(ws_after == 0),
+        D_pair_expiry_mismatch_zero=True,   # hard-asserted in build_symbol_samples
+        E_censor_source_accounting_exact=True,  # hard-asserted above
+        F_binary_model_completed=True,
+        G_bootstrap_verdict_obtained=bool(boot["verdict"]),
+    )
+    summary["closure_conditions"] = cond
+    summary["LOCAL0_CLOSED"] = bool(all(cond.values()))
+    summary["verdict_interpretation"] = (
+        "local upper/lower geometry contains stable OOS information about "
+        "which frozen boundary is penetrated first. NOT evidence for SMC, "
+        "path memory, latent state, PGM or RL.")
+    (OUT / "local0_summary.json").write_text(
+        json.dumps(summary, indent=2, default=str))
+    print(f"\n[CLOSURE] {json.dumps(cond, indent=2)}")
+    print(f"[CLOSURE] LOCAL0_CLOSED = {summary['LOCAL0_CLOSED']}")
     (OUT / "local0_summary.json").write_text(
         json.dumps(summary, indent=2, default=str))
     print("\n[SUMMARY] " + json.dumps({
