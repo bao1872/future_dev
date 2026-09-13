@@ -113,6 +113,23 @@ FULL_UNIV = ["AG", "AL", "AU", "CF", "CU", "I", "M", "MA", "NI", "P",
              "RB", "RU", "SC", "SN", "TA"]
 G0_HARDENED_BASELINE = dict(before=21165, after=21135, purged=30)
 
+# G1b-core: PURE formation type (Swing vs EQH/EQL). Deliberately EXCLUDES
+# has_prev_session/day/week — those re-encode timeframe/scope and would
+# re-introduce the already-failed G1a question. Same 4-gate as G1a.
+G1B_CORE_NUM = G0_NUM + ["has_swing", "has_eq"]
+G1B_CORE_CAT = G0_CAT
+
+# G1c0: structure-size increment, TYPE-CONTROLLED.
+#  C0 = G0 + type flags + the two missing flags (nuisance controls)
+#  C1 = C0 + actual structure magnitudes (structure_size_R, period_range_R)
+# The missing flags are identical in C0 and C1, so C1's increment can ONLY come
+# from magnitude, never from presence (which would otherwise leak formation type).
+COMMON_MISSING_FLAGS = ["structure_size_missing", "period_range_missing"]
+G1C0_BASE_NUM = (G0_NUM + ["has_swing", "has_eq", "has_prev_session",
+                           "has_prev_day", "has_prev_week"]
+                 + list(COMMON_MISSING_FLAGS))
+G1C0_FULL_NUM = G1C0_BASE_NUM + ["structure_size_R", "period_range_R"]
+
 # ---------------------------------------------------------------------------
 # Data loading (reuse frozen contracts)
 # ---------------------------------------------------------------------------
@@ -944,6 +961,167 @@ def run_g1a(symbols, max_signals, scope_tag):
 
 
 # ---------------------------------------------------------------------------
+# G1b-core (pure formation type) + G1c0 (type-controlled structure size)
+# ---------------------------------------------------------------------------
+
+def _quintile_audit(tr_purged, te, value_col, label, present_col=None):
+    """Descriptive only (NOT a gate): cut `value_col` (where present) into 5 by
+    TB1-train quantiles, then report TB2 hit-rates per quintile."""
+    if present_col is None:
+        tr_mask = tr_purged[value_col].notna()
+        te_mask = te[value_col].notna()
+    else:
+        tr_mask = tr_purged[present_col] == 1
+        te_mask = te[present_col] == 1
+    trp = tr_purged[tr_mask][value_col].dropna()
+    tep = te[te_mask][value_col].dropna()
+    if len(trp) < 20 or len(tep) < 20:
+        return []
+    cuts = trp.quantile([0.2, 0.4, 0.6, 0.8]).tolist()
+    tep = tep.to_frame(value_col)
+    tep["q"] = pd.cut(tep[value_col], bins=[-np.inf] + cuts + [np.inf],
+                      labels=[1, 2, 3, 4, 5])
+    out = []
+    src = te[te_mask]
+    for q in [1, 2, 3, 4, 5]:
+        g = src[tep["q"] == q]
+        if len(g) == 0:
+            continue
+        n = len(g)
+        vc = g["state_code"].map({NEXT: "NEXT", LOSS: "LOSS",
+                                  CENSOR: "CENSOR"}).value_counts()
+        out.append(dict(audit=label, quintile=int(q), n_edges=n,
+                        n_signals=int(g["signal_id"].nunique()),
+                        NEXT_pct=float(vc.get("NEXT", 0) / n),
+                        LOSS_pct=float(vc.get("LOSS", 0) / n),
+                        CENSOR_pct=float(vc.get("CENSOR", 0) / n),
+                        avg_delta_R=float(g["delta_R"].mean())))
+    return out
+
+
+def _g1bc_compare(tr_purged, te, purg, num_base, cat_base, num_aug, cat_aug,
+                  block, pass_v, fail_v, out_prefix):
+    """Fit baseline vs augmented on IDENTICAL rows; paired bootstrap; strict 4-gate.
+    Returns (row_dict, paired_loss_df_with_block)."""
+    base = fit_multinomial(tr_purged, num_base, cat_base)
+    aug = fit_multinomial(tr_purged, num_aug, cat_aug)
+    # same-sample contract: feature sets exactly as declared
+    assert list(base.feature_names_in_) == num_base + cat_base
+    assert list(aug.feature_names_in_) == num_aug + cat_aug
+    mb = signal_metrics(base, te)
+    ma = signal_metrics(aug, te)
+    bs = paired_bootstrap(mb["per_sig"], ma["per_sig"])
+    d_nll = mb["joint_nll_per_signal"] - ma["joint_nll_per_signal"]    # base - aug > 0 => aug better
+    d_brier = mb["brier_signal_equal"] - ma["brier_signal_equal"]
+    ga, gb = d_nll > 0, d_brier > 0
+    gc, gd = bs["dnll_ci_lo"] > 0, bs["dbrier_ci_lo"] > 0
+    verdict = pass_v if (ga and gb and gc and gd) else fail_v
+    pl = mb["per_sig"].rename(columns={"joint_nll_signal": f"{out_prefix}_base_nll",
+                                       "brier_signal_equal": f"{out_prefix}_base_brier"})
+    pl1 = ma["per_sig"].rename(columns={"joint_nll_signal": f"{out_prefix}_aug_nll",
+                                        "brier_signal_equal": f"{out_prefix}_aug_brier"})
+    pl = pl.merge(pl1[["signal_id", f"{out_prefix}_aug_nll", f"{out_prefix}_aug_brier"]],
+                  on="signal_id", how="outer")
+    pl["block"] = block
+    row = dict(block=block,
+               n_test_edges=int(len(te)), n_test_signals=int(te["signal_id"].nunique()),
+               n_train_after_purge=int(purg["n_train_signals_after_purge"]),
+               base_joint_nll=mb["joint_nll_per_signal"], aug_joint_nll=ma["joint_nll_per_signal"],
+               base_joint_nll_edge=mb["joint_nll_per_edge"], aug_joint_nll_edge=ma["joint_nll_per_edge"],
+               base_brier_eqsig=mb["brier_signal_equal"], aug_brier_eqsig=ma["brier_signal_equal"],
+               base_brier_pathsum=mb["brier_path_sum"], aug_brier_pathsum=ma["brier_path_sum"],
+               base_edge_logloss=float(edge_logloss(base, te)),
+               aug_edge_logloss=float(edge_logloss(aug, te)),
+               d_joint_nll=d_nll, d_brier=d_brier,
+               bootstrap_dnll_mean=bs["dnll_mean"], bootstrap_dnll_ci_lo=bs["dnll_ci_lo"],
+               bootstrap_dnll_ci_hi=bs["dnll_ci_hi"], bootstrap_dnll_p=bs["dnll_p"],
+               bootstrap_dbrier_mean=bs["dbrier_mean"], bootstrap_dbrier_ci_lo=bs["dbrier_ci_lo"],
+               bootstrap_dbrier_ci_hi=bs["dbrier_ci_hi"], bootstrap_dbrier_p=bs["dbrier_p"],
+               gate_A=bool(ga), gate_B=bool(gb), gate_C=bool(gc), gate_D=bool(gd),
+               verdict=verdict)
+    print(f"  {block}: d_jointNLL={d_nll:+.5f} d_brier={d_brier:+.5f} "
+          f"boot_dnll_CI=[{bs['dnll_ci_lo']:+.4f},{bs['dnll_ci_hi']:+.4f}] "
+          f"boot_dbrier_CI=[{bs['dbrier_ci_lo']:+.4f},{bs['dbrier_ci_hi']:+.4f}] "
+          f"-> {verdict}")
+    return row, pl
+
+
+def run_g1bc(symbols, max_signals, scope_tag):
+    """G1b-core (pure formation type) + G1c0 (type-controlled structure size).
+    WF1 only, reusing TB12_HARDENED cache (NO rebuild). Same strict 4-gate.
+    G1b-core is NOT a gate for G1c0. Sample-drift guard on full run.
+    """
+    res = []
+    quints = []
+    pl_parts = []
+    for wf, trb, teb in [("WF1", ["TB1"], "TB2")]:
+        tr = load_transitions(symbols, trb, None, scope_tag)
+        te = load_transitions(symbols, [teb], None, scope_tag)
+        if max_signals:
+            tr = _cap_signals(tr, max_signals)
+            te = _cap_signals(te, max_signals)
+        if len(te) == 0:
+            continue
+        req = ["has_swing", "has_eq", "has_prev_session", "has_prev_day",
+               "has_prev_week", "structure_size_R", "period_range_R"]
+        missing = [c for c in req if c not in tr.columns]
+        assert not missing, f"G1BC_COLS_MISSING {missing}"
+        # missing flags computed from cache; identical in train & test
+        for c, flag in [("structure_size_R", "structure_size_missing"),
+                        ("period_range_R", "period_range_missing")]:
+            tr[flag] = tr[c].isna().astype(int)
+            te[flag] = te[c].isna().astype(int)
+        for c in ["has_swing", "has_eq", "has_prev_session", "has_prev_day",
+                  "has_prev_week", "structure_size_R", "period_range_R"]:
+            assert tr[c].nunique() > 1, f"G1BC_CONSTANT {c}"
+
+        test_start_time = pd.Timestamp(te["signal_trading_day"].min())
+        tr_purged, purg = purge_train(tr, test_start_time)
+        print("  [PURGE] " + ", ".join(f"{k}={v}" for k, v in purg.items()))
+        if (max_signals is None) and (set(symbols) == set(FULL_UNIV)):
+            if (purg["n_train_signals_before_purge"] != G0_HARDENED_BASELINE["before"]
+                    or purg["n_train_signals_after_purge"] != G0_HARDENED_BASELINE["after"]
+                    or purg["n_purged_signals"] != G0_HARDENED_BASELINE["purged"]):
+                raise SystemExit(
+                    "STOP_SAMPLE_DRIFT: purge counts differ from hardened G0 "
+                    f"baseline {G0_HARDENED_BASELINE} vs {purg}")
+
+        # ---- G1b-core: G0 vs (G0 + has_swing + has_eq) ----
+        row_b, pl_b = _g1bc_compare(
+            tr_purged, te, purg, G0_NUM, G0_CAT, G1B_CORE_NUM, G1B_CORE_CAT,
+            "G1b-core", "FORMATION_TYPE_INCREMENT_WF1_PASS",
+            "NO_FORMATION_TYPE_INCREMENT_WF1", "g1bcore")
+        res.append(row_b)
+        pl_parts.append(pl_b)
+
+        # ---- G1c0: C0 (type+missing controlled) vs C1 (+structure magnitudes) ----
+        row_c, pl_c = _g1bc_compare(
+            tr_purged, te, purg, G1C0_BASE_NUM, G0_CAT, G1C0_FULL_NUM, G0_CAT,
+            "G1c0", "STRUCTURE_SIZE_INCREMENT_WF1_PASS",
+            "NO_STRUCTURE_SIZE_INCREMENT_WF1", "g1c0")
+        res.append(row_c)
+        pl_parts.append(pl_c)
+
+        # descriptive structure-size quintile audit (train cutpoints, TB2 report)
+        quints += _quintile_audit(tr_purged, te, "structure_size_R",
+                                 "swing_structure_size_R", present_col="has_swing")
+        quints += _quintile_audit(tr_purged, te, "period_range_R",
+                                 "period_range_R", present_col=None)
+
+    summ = pd.DataFrame(res)
+    summ.to_csv(OUT / "g1bc_summary.csv", index=False)
+    if quints:
+        pd.DataFrame(quints).to_csv(OUT / "g1bc_structure_quintile.csv", index=False)
+    if pl_parts:
+        pd.concat(pl_parts, ignore_index=True).to_parquet(
+            OUT / "g1bc_signal_losses_wf1.parquet", index=False)
+    print("  [QUINT] " + "; ".join(
+        f"{q['audit']} Q{q['quintile']}(n={q['n_edges']},NEXT={q['NEXT_pct']:.2f})"
+        for q in quints))
+    return summ
+
+
+# ---------------------------------------------------------------------------
 # P0 label parity vs frozen first_hit_bounds
 # ---------------------------------------------------------------------------
 
@@ -1165,7 +1343,7 @@ def run_tests(trans, contacts, master):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--mode", required=True,
-                    choices=["parity", "smoke", "pilot", "wf1", "g1a"])
+                    choices=["parity", "smoke", "pilot", "wf1", "g1a", "g1bc"])
     ap.add_argument("--symbols", nargs="*", default=None)
     ap.add_argument("--max-signals", type=int, default=None)
     ap.add_argument("--workers", type=int, default=1)
@@ -1211,6 +1389,16 @@ def main():
         contacts_build = contacts[contacts["block"].isin(["TB1", "TB2"])].copy()
         scope_tag = "TB12_HARDENED"
         print(f"[G1a] {univ} TB1->TB2 (timeframe identity increment over G0; "
+              f"cap={cap}; reuse {scope_tag} cache)")
+    elif args.mode == "g1bc":
+        # reuse FULL TB12_HARDENED cache (no rebuild); cap applied inside run_g1bc.
+        # G1b-core (pure type) + G1c0 (type-controlled structure size).
+        univ = args.symbols or list(FULL_UNIV)
+        cap = args.max_signals  # None=full 15-sym; 100=smoke-val; 500=pilot-val
+        ms = None
+        contacts_build = contacts[contacts["block"].isin(["TB1", "TB2"])].copy()
+        scope_tag = "TB12_HARDENED"
+        print(f"[G1bc] {univ} TB1->TB2 (formation type + type-controlled structure size; "
               f"cap={cap}; reuse {scope_tag} cache)")
     else:  # wf1 — ONLY TB1+TB2 (hardening round; no TB3/TB4, no WF2/WF3, no G1)
         ms = None
@@ -1263,6 +1451,28 @@ def main():
                 print("[G1a] NO_TIMEFRAME_IDENTITY_INCREMENT_WF1: under stricter gate G1a "
                       "does not beat G0. Report to user; do NOT auto-start G1b.")
         print(f"[DONE] g1a ({time.perf_counter()-t_total:.1f}s)")
+        return
+
+    # g1bc: G1b-core (pure formation type) + G1c0 (type-controlled structure size),
+    # strict purge, A/B/C/D gate for each block. G1b-core is NOT a gate for G1c0.
+    if args.mode == "g1bc":
+        res = run_g1bc(univ, cap, scope_tag)
+        print(res.to_string(index=False))
+        for _, r in res.iterrows():
+            if r["verdict"] == "FORMATION_TYPE_INCREMENT_WF1_PASS":
+                print(f"[G1b-core] PASS: formation type (Swing/EQ) adds stable OOS "
+                      f"increment over G0. Report to user.")
+            elif r["verdict"] == "NO_FORMATION_TYPE_INCREMENT_WF1":
+                print(f"[G1b-core] NO_FORMATION_TYPE_INCREMENT_WF1: pure type adds no "
+                      f"stable increment; do NOT stop the graph-model research.")
+            elif r["verdict"] == "STRUCTURE_SIZE_INCREMENT_WF1_PASS":
+                print(f"[G1c0] PASS: structure magnitude adds increment AFTER controlling "
+                      f"type. Next round may authorize G1c1 (within-timeframe structure size).")
+            else:
+                print(f"[G1c0] NO_STRUCTURE_SIZE_INCREMENT_WF1: current structure-size "
+                      f"definition shows no isolated increment; consider G1d next, not a "
+                      f"costly per-timeframe rebuild.")
+        print(f"[DONE] g1bc ({time.perf_counter()-t_total:.1f}s)")
         return
 
     # wf1: hardened Graph Necessity Gate (M0 vs G0), strict outer-WF purge

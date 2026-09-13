@@ -119,10 +119,27 @@ WF2/WF3, no selector. G1 remains PAUSED (pending explicit user authorization).
   sample confirmed (purge 21165→21135/30 matches G0; G0 NLL 1.680916 identical).
   Detailed in `5m_graph_probability_v1_G1A_REPORT.md`. G1a FAIL ≠ whole liquidity
   identity hypothesis fails; it only rules out this featureization.
-- **G1b — liquidity type** (Swing, EQH/EQL, Session/Day/Week H/L): NOT started,
-  pending user authorization. Tested independently from G0 (not chained on G1a).
-- **G1c — structure size** (structure_size_R, period_range_R, confluence): deferred.
-- **G1d — freshness / prior-touch / multi-TF confluence**: deferred.
+- **G1b-core — pure formation type (has_swing, has_eq; NO has_prev_*):
+  TESTED 2026-09-13 → `NO_FORMATION_TYPE_INCREMENT_WF1`.** Bare Swing-vs-EQ type
+  adds no stable OOS increment over G0 (ΔNLL=−0.00011, ΔBrier=+0.00002; bootstrap
+  ΔNLL CI straddles 0; gate A/C fail). Same frozen sample confirmed. Detailed in
+  `5m_graph_probability_v1_G1BC_REPORT.md`.
+- **G1c0 — type-controlled structure size (C0=C0 type+missing flags; C1=C0+magnitude):
+  TESTED 2026-09-13 → `NO_STRUCTURE_SIZE_INCREMENT_WF1`.** After controlling
+  formation type + presence, structure magnitude (structure_size_R, period_range_R)
+  adds no isolated OOS increment (ΔNLL=+0.00041, ΔBrier=−0.00011; both bootstrap CIs
+  straddle 0; gates B/C/D fail). **Descriptive quintile audit shows a real gradient
+  for swing structures: NEXT% falls Q1→Q5 (0.61→0.45) as structure grows — bigger
+  swing structures look MORE exhausted, contradicting "bigger=stronger level".**
+  Per governance: G1c0 FAIL ⇒ **skip the expensive G1c1 per-timeframe rebuild**.
+- **G1d — freshness / prior-touch / multi-TF confluence** (age, prior_touch count,
+  multi-TF aligned count): NOT started, pending user authorization. This is now the
+  next candidate after G1a/G1b-core/G1c0 all failed the strict gate.
+- Each G1 block compared independently (G1b-core G0−G1b-core; G1c0 C1−C0); only
+  blocks with isolated increment enter a future `G1-FINAL`.
+- Only if a G1 block passes: WF1/WF2/WF3 full, then T0 Nearest / T1 Indep-EV /
+  T2 Graph-EV selector with equity curves + bootstrap (no SKIP first round).
+- Then (if static Graph EV increment holds): Dynamic Graph Reassess vs old RR3.
 - Each G1 block compared G1x − G0 independently; only blocks with isolated increment
   enter a future `G1-FINAL`.
 - Only if a G1 block passes: WF1/WF2/WF3 full, then T0 Nearest / T1 Indep-EV /
