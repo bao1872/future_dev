@@ -1,0 +1,174 @@
+{
+  "closure": "CLOSURE_FAIL",
+  "verdict": "CLOSURE_FAIL",
+  "g0_probability_structure": "GRAPH_STRUCTURE_NECESSITY_WF1_HARDENED_PASS",
+  "economic_decision": "STATIC_GRAPH_TARGET_DECISION_FAIL",
+  "guards": {
+    "A_purge_baseline": {
+      "pass_": true,
+      "n_train_signals_before_purge": 21165,
+      "n_train_signals_after_purge": 21135,
+      "n_purged_signals": 30,
+      "purge_rate": 0.001417434443656981,
+      "max_train_resolution_time": "2025-06-11 11:15:00",
+      "test_start_time": "2025-06-11 00:00:00",
+      "baseline": {
+        "before": 21165,
+        "after": 21135,
+        "purged": 30
+      }
+    },
+    "B_test_universe": {
+      "pass_": true,
+      "n_test_signals": 24954,
+      "hardened_n_test_signals": 24954,
+      "n_test_edges": 55945,
+      "hardened_n_test_edges": 55945
+    },
+    "C_g0_reproduction": {
+      "pass_": true,
+      "g0_joint_nll": 1.6809162943727887,
+      "hardened_g0_joint_nll": 1.6809162943727889,
+      "g0_brier_eqsig": 0.22865629046744193,
+      "hardened_g0_brier_eqsig": 0.2286562904674419,
+      "abs_d_nll": 2.220446049250313e-16,
+      "abs_d_brier": 2.7755575615628914e-17
+    },
+    "D_model_contract": {
+      "pass_": true,
+      "g0_train_signal_hash": "5b9ea7f6a318107a",
+      "g0_train_edge_hash": "a0d213f2d22e08d5",
+      "g0_feature_spec_hash": "65fe979e1d480798",
+      "g0_model_contract_match": true,
+      "t2_features": [
+        "delta_R",
+        "cum_distance_R",
+        "risk_R",
+        "edge_index",
+        "direction",
+        "symbol",
+        "contact_type"
+      ],
+      "g0_features": [
+        "delta_R",
+        "cum_distance_R",
+        "risk_R",
+        "edge_index",
+        "direction",
+        "symbol",
+        "contact_type"
+      ],
+      "t2_classes": [
+        0,
+        1,
+        2
+      ]
+    },
+    "E_attribution": {
+      "pass_": true,
+      "g0_joint_nll": 1.6809162943727887,
+      "g0_brier": 0.22865629046744193,
+      "reported": [
+        {
+          "model": "F0",
+          "n_train_edges": 42771,
+          "n_test_edges": 55945,
+          "joint_nll_per_signal": 2.0223032527819726,
+          "joint_nll_per_edge": 0.9020387053341915,
+          "brier_signal_equal": 0.28043503221477567,
+          "brier_path_sum": 0.7821255120866555
+        },
+        {
+          "model": "F1",
+          "n_train_edges": 42771,
+          "n_test_edges": 55945,
+          "joint_nll_per_signal": 1.7096245103181464,
+          "joint_nll_per_edge": 0.7625698459286625,
+          "brier_signal_equal": 0.22182064316107272,
+          "brier_path_sum": 0.6812313742836219
+        },
+        {
+          "model": "F2",
+          "n_train_edges": 42771,
+          "n_test_edges": 55945,
+          "joint_nll_per_signal": 1.8205321132667236,
+          "joint_nll_per_edge": 0.812039652416799,
+          "brier_signal_equal": 0.24070614934223575,
+          "brier_path_sum": 0.7285055961825304
+        },
+        {
+          "model": "G0",
+          "n_train_edges": 42771,
+          "n_test_edges": 55945,
+          "joint_nll_per_signal": 1.6809162943727887,
+          "joint_nll_per_edge": 0.7497646833457604,
+          "brier_signal_equal": 0.22865629046744193,
+          "brier_path_sum": 0.683453783666779
+        }
+      ]
+    },
+    "F_zero_node_universe": {
+      "pass_": true,
+      "n_hardened_test_signals": 24954,
+      "n_g2_candidate_signals": 24954,
+      "n_zero_node_signals": 0,
+      "expected_diff": 0,
+      "by_symbol": {
+        "AG": 0,
+        "AL": 0,
+        "AU": 0,
+        "CF": 0,
+        "CU": 0,
+        "I": 0,
+        "M": 0,
+        "MA": 0,
+        "NI": 0,
+        "P": 0,
+        "RB": 0,
+        "RU": 0,
+        "SC": 0,
+        "SN": 0,
+        "TA": 0
+      }
+    },
+    "G_economic_replay": {
+      "pass_": false,
+      "replay_ev": {
+        "t0": 0.007971291410363488,
+        "t1": -0.37295452909848686,
+        "t2": -0.058259027151357334
+      },
+      "prev_ev": {
+        "T0_Nearest": 0.0079712914103634,
+        "T1_IndependentEV": -0.1054002247566118,
+        "T2_GraphEV": -0.0582590271513573
+      },
+      "replay_T2T0_ci": [
+        -0.09647541306779524,
+        -0.03822963150317182
+      ],
+      "prev_T2T0_ci": [
+        -0.0964754130677952,
+        -0.0382296315031718
+      ],
+      "ev_match": false,
+      "bs_match": true
+    },
+    "H_samebar": {
+      "pass_": true,
+      "n_test_signals": 5747,
+      "n_test_nodes": 7721737,
+      "n_reached_nodes": 415589,
+      "rate_max_batch_ge_2": 0.976857490864799,
+      "rate_max_batch_ge_3": 0.9431007482164607,
+      "rate_max_batch_ge_4": 0.8995997911954063,
+      "batch_size_1": 4855,
+      "batch_size_2": 5598,
+      "batch_size_3": 3534,
+      "batch_size_ge4": 30692,
+      "fraction_reached_nodes_in_multinode_batch": 0.9883177851194329,
+      "ambiguous_with_stop_node_rate": 0.0010280070403848253
+    }
+  },
+  "seconds": 151.64509241600172
+}
