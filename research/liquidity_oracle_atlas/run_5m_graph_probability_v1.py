@@ -101,6 +101,18 @@ M0_CAT = ["direction", "symbol", "contact_type"]
 G0_NUM = ["delta_R", "cum_distance_R", "risk_R"]
 G0_CAT = ["edge_index", "direction", "symbol", "contact_type"]
 
+# G1a: timeframe identity increment — ONLY the 6 scope flags added as raw numeric
+# (0/1) features on top of frozen G0. No other feature added (G1b/G1c/G1d deferred).
+SCOPE_COLS = ["has_5m", "has_15m", "has_1h", "has_session", "has_day", "has_week"]
+G1A_NUM = G0_NUM + list(SCOPE_COLS)
+G1A_CAT = G0_CAT
+
+# hardened G0 WF1 purge baseline (full 15-symbol run) — G1a must reproduce it
+# (whole-path outer-WF purge; same TB1/TB2 split), else STOP_G1A_SAMPLE_DRIFT.
+FULL_UNIV = ["AG", "AL", "AU", "CF", "CU", "I", "M", "MA", "NI", "P",
+             "RB", "RU", "SC", "SN", "TA"]
+G0_HARDENED_BASELINE = dict(before=21165, after=21135, purged=30)
+
 # ---------------------------------------------------------------------------
 # Data loading (reuse frozen contracts)
 # ---------------------------------------------------------------------------
@@ -782,6 +794,156 @@ def run_wf1(symbols, max_signals, scope_tag):
 
 
 # ---------------------------------------------------------------------------
+# G1a — Liquidity Timeframe Identity Increment (over frozen G0)
+# ---------------------------------------------------------------------------
+
+def _cap_signals(df: pd.DataFrame, max_signals: int):
+    """Keep first `max_signals` signals per symbol (deterministic order)."""
+    if not max_signals:
+        return df
+    parts = []
+    for _, g in df.groupby("symbol"):
+        sigs = g["signal_id"].unique()[:max_signals]
+        parts.append(g[g["signal_id"].isin(sigs)])
+    return pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
+
+
+def edge_logloss(pipe, test: pd.DataFrame) -> float:
+    P = pipe.predict_proba(test[pipe.feature_names_in_])
+    y = test["state_code"].to_numpy()
+    return float(-np.mean(np.log(np.maximum(P[np.arange(len(test)), y], 1e-12))))
+
+
+def run_g1a(symbols, max_signals, scope_tag):
+    """G1a: does timeframe identity (5m/15m/1h/Session/Day/Week) add OOS probability
+    value over frozen G0, after geometry/order/distance are already controlled?
+
+    Reuses hardened TB12_HARDENED transitions (NO rebuild). Strict whole-path purge.
+    Gate A/B/C/D (both NLL and Brier, both bootstrap CIs > 0) -> PASS, else NO.
+    """
+    res = []
+    for wf, trb, teb in [("WF1", ["TB1"], "TB2")]:
+        tr = load_transitions(symbols, trb, None, scope_tag)
+        te = load_transitions(symbols, [teb], None, scope_tag)
+        if max_signals:
+            tr = _cap_signals(tr, max_signals)
+            te = _cap_signals(te, max_signals)
+        if len(te) == 0:
+            continue
+        # verify scope flag columns exist and are non-constant in train
+        missing = [c for c in SCOPE_COLS if c not in tr.columns]
+        assert not missing, f"G1A_SCOPE_COLS_MISSING {missing}"
+        for c in SCOPE_COLS:
+            assert tr[c].nunique() > 1, f"G1A_SCOPE_CONSTANT {c}"
+
+        test_start_time = pd.Timestamp(te["signal_trading_day"].min())
+        tr_purged, purg = purge_train(tr, test_start_time)
+        print("  [PURGE] " + ", ".join(f"{k}={v}" for k, v in purg.items()))
+        # sample-drift guard: full run must reproduce hardened G0 purge baseline
+        if (max_signals is None) and (set(symbols) == set(FULL_UNIV)):
+            if (purg["n_train_signals_before_purge"] != G0_HARDENED_BASELINE["before"]
+                    or purg["n_train_signals_after_purge"] != G0_HARDENED_BASELINE["after"]
+                    or purg["n_purged_signals"] != G0_HARDENED_BASELINE["purged"]):
+                raise SystemExit(
+                    "STOP_G1A_SAMPLE_DRIFT: purge counts differ from hardened G0 "
+                    f"baseline {G0_HARDENED_BASELINE} vs {purg}")
+
+        g0 = fit_multinomial(tr_purged, G0_NUM, G0_CAT)
+        g1a = fit_multinomial(tr_purged, G1A_NUM, G1A_CAT)
+
+        # same-sample contract: G0 and G1a are fit on the SAME tr_purged and
+        # evaluated on the SAME te (no per-model sample drift). The only difference
+        # is the feature set; assert the ordering is exactly G0 (+ 6 scope flags).
+        assert len(tr_purged) > 0 and len(te) > 0
+        assert list(g0.feature_names_in_) == G0_NUM + G0_CAT
+        assert list(g1a.feature_names_in_) == G1A_NUM + G1A_CAT
+
+        mm0 = signal_metrics(g0, te)
+        mm1 = signal_metrics(g1a, te)
+        bs = paired_bootstrap(mm0["per_sig"], mm1["per_sig"])
+        m0_ll = edge_logloss(g0, te)
+        m1_ll = edge_logloss(g1a, te)
+        d_nll = mm0["joint_nll_per_signal"] - mm1["joint_nll_per_signal"]    # G0 - G1a > 0 => G1a better
+        d_brier = mm0["brier_signal_equal"] - mm1["brier_signal_equal"]
+
+        # descriptive per-scope audit on TB2 test (NOT a gate; guard vs misread)
+        desc = []
+        for c in SCOPE_COLS:
+            sub = te[te[c] == 1]
+            n_e = len(sub)
+            if n_e:
+                vc = sub["state_code"].map(
+                    {NEXT: "NEXT", LOSS: "LOSS", CENSOR: "CENSOR"}).value_counts()
+                desc.append(dict(scope=c, n_edges=n_e, n_signals=int(sub["signal_id"].nunique()),
+                                NEXT_pct=float(vc.get("NEXT", 0) / n_e),
+                                LOSS_pct=float(vc.get("LOSS", 0) / n_e),
+                                CENSOR_pct=float(vc.get("CENSOR", 0) / n_e),
+                                avg_delta_R=float(sub["delta_R"].mean()),
+                                avg_cum_distance_R=float(sub["cum_distance_R"].mean())))
+        # multinomial coefficients per scope (descriptive; raw 0/1 scale, NUM unscaled)
+        feats = list(g1a.feature_names_in_)
+        coef = g1a.named_steps["clf"].coef_   # (3, n_feat)
+        coef_rows = []
+        for c in SCOPE_COLS:
+            if c in feats:
+                idx = feats.index(c)
+                coef_rows.append(dict(scope=c,
+                                     NEXT_coef=float(coef[0, idx]),
+                                     LOSS_coef=float(coef[1, idx]),
+                                     CENSOR_coef=float(coef[2, idx])))
+
+        # ---- G1a Gate (stricter: requires BOTH NLL and Brier CIs > 0) ----
+        gate_A = d_nll > 0
+        gate_B = d_brier > 0
+        gate_C = bs["dnll_ci_lo"] > 0
+        gate_D = bs["dbrier_ci_lo"] > 0
+        verdict = ("TIMEFRAME_IDENTITY_INCREMENT_WF1_PASS"
+                   if (gate_A and gate_B and gate_C and gate_D)
+                   else "NO_TIMEFRAME_IDENTITY_INCREMENT_WF1")
+
+        # save paired per-signal losses (large parquet; gitignored)
+        pl = mm0["per_sig"].rename(
+            columns={"joint_nll_signal": "g0_joint_nll",
+                     "brier_signal_equal": "g0_equal_brier"})
+        pl1 = mm1["per_sig"].rename(
+            columns={"joint_nll_signal": "g1a_joint_nll",
+                     "brier_signal_equal": "g1a_equal_brier"})
+        pl = pl.merge(pl1[["signal_id", "g1a_joint_nll", "g1a_equal_brier"]],
+                      on="signal_id", how="outer")
+        pl.to_parquet(OUT / "g1a_signal_losses_wf1.parquet", index=False)
+
+        row = dict(
+            wf=wf, n_test_edges=int(len(te)), n_test_signals=int(te["signal_id"].nunique()),
+            n_train_after_purge=int(purg["n_train_signals_after_purge"]),
+            g0_joint_nll=mm0["joint_nll_per_signal"], g1a_joint_nll=mm1["joint_nll_per_signal"],
+            g0_joint_nll_edge=mm0["joint_nll_per_edge"], g1a_joint_nll_edge=mm1["joint_nll_per_edge"],
+            g0_brier_eqsig=mm0["brier_signal_equal"], g1a_brier_eqsig=mm1["brier_signal_equal"],
+            g0_brier_pathsum=mm0["brier_path_sum"], g1a_brier_pathsum=mm1["brier_path_sum"],
+            g0_edge_logloss=float(m0_ll), g1a_edge_logloss=float(m1_ll),
+            d_joint_nll=d_nll, d_brier=d_brier,
+            bootstrap_dnll_mean=bs["dnll_mean"], bootstrap_dnll_ci_lo=bs["dnll_ci_lo"],
+            bootstrap_dnll_ci_hi=bs["dnll_ci_hi"], bootstrap_dnll_p=bs["dnll_p"],
+            bootstrap_dbrier_mean=bs["dbrier_mean"], bootstrap_dbrier_ci_lo=bs["dbrier_ci_lo"],
+            bootstrap_dbrier_ci_hi=bs["dbrier_ci_hi"], bootstrap_dbrier_p=bs["dbrier_p"],
+            gate_A=bool(gate_A), gate_B=bool(gate_B), gate_C=bool(gate_C), gate_D=bool(gate_D),
+            verdict=verdict)
+        res.append(row)
+        pd.DataFrame([row]).to_csv(OUT / "g1a_wf1_summary.csv", index=False)
+        pd.DataFrame(desc).to_csv(OUT / "g1a_scope_descriptive.csv", index=False)
+        pd.DataFrame(coef_rows).to_csv(OUT / "g1a_scope_coefficients.csv", index=False)
+        print(f"  {wf}: d_jointNLL={d_nll:+.5f} d_brier={d_brier:+.5f} "
+              f"boot_dnll_CI=[{bs['dnll_ci_lo']:+.4f},{bs['dnll_ci_hi']:+.4f}] "
+              f"boot_dbrier_CI=[{bs['dbrier_ci_lo']:+.4f},{bs['dbrier_ci_hi']:+.4f}] "
+              f"-> {verdict}")
+        print("  [DESC] " + "; ".join(
+            f"{d['scope']}(n={d['n_edges']},NEXT={d['NEXT_pct']:.2f})" for d in desc))
+        print("  [COEF] " + "; ".join(
+            f"{r['scope']}(N={r['NEXT_coef']:+.3f},L={r['LOSS_coef']:+.3f},C={r['CENSOR_coef']:+.3f})"
+            for r in coef_rows))
+    return pd.DataFrame(res)
+
+
+# ---------------------------------------------------------------------------
 # P0 label parity vs frozen first_hit_bounds
 # ---------------------------------------------------------------------------
 
@@ -1003,7 +1165,7 @@ def run_tests(trans, contacts, master):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--mode", required=True,
-                    choices=["parity", "smoke", "pilot", "wf1"])
+                    choices=["parity", "smoke", "pilot", "wf1", "g1a"])
     ap.add_argument("--symbols", nargs="*", default=None)
     ap.add_argument("--max-signals", type=int, default=None)
     ap.add_argument("--workers", type=int, default=1)
@@ -1041,6 +1203,15 @@ def main():
         scope_tag = "parity"
         contacts_build = contacts
         print(f"[PARITY] {univ} max_signals={ms} (label+resolution parity vs frozen oracle)")
+    elif args.mode == "g1a":
+        # reuse FULL TB12_HARDENED cache (no rebuild); cap applied inside run_g1a
+        univ = args.symbols or list(FULL_UNIV)
+        cap = args.max_signals  # None=full 15-sym; 100=smoke-val; 500=pilot-val
+        ms = None
+        contacts_build = contacts[contacts["block"].isin(["TB1", "TB2"])].copy()
+        scope_tag = "TB12_HARDENED"
+        print(f"[G1a] {univ} TB1->TB2 (timeframe identity increment over G0; "
+              f"cap={cap}; reuse {scope_tag} cache)")
     else:  # wf1 — ONLY TB1+TB2 (hardening round; no TB3/TB4, no WF2/WF3, no G1)
         ms = None
         contacts_build = contacts[contacts["block"].isin(["TB1", "TB2"])].copy()
@@ -1077,6 +1248,21 @@ def main():
             print("STOP_AT_SMOKE: contract test failed")
             return
         print(f"[DONE] {args.mode} OK ({time.perf_counter()-t_total:.1f}s)")
+        return
+
+    # g1a: timeframe identity increment (G0 vs G1a), strict purge, A/B/C/D gate
+    if args.mode == "g1a":
+        res = run_g1a(univ, cap, scope_tag)
+        print(res.to_string(index=False))
+        if len(res):
+            r = res.iloc[0]
+            if r["verdict"] == "TIMEFRAME_IDENTITY_INCREMENT_WF1_PASS":
+                print("[G1a] PASS: timeframe identity adds stable OOS increment over G0 "
+                      "(both NLL & Brier, both bootstrap CIs>0). Do NOT auto-start G1b/WF2/WF3.")
+            else:
+                print("[G1a] NO_TIMEFRAME_IDENTITY_INCREMENT_WF1: under stricter gate G1a "
+                      "does not beat G0. Report to user; do NOT auto-start G1b.")
+        print(f"[DONE] g1a ({time.perf_counter()-t_total:.1f}s)")
         return
 
     # wf1: hardened Graph Necessity Gate (M0 vs G0), strict outer-WF purge

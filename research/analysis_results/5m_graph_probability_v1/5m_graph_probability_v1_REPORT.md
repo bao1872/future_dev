@@ -110,15 +110,23 @@ WF2/WF3, no selector. G1 remains PAUSED (pending explicit user authorization).
 - 5m freeze / E1.1 freeze / pre-P1 manifest: unchanged.
 - Old `66bff6d` (LS1) report marked INVALIDATED; committed history preserved.
 
-## Next (requires user authorization — NOT started)
+## Next (requires user authorization)
 
-- **G1 (identity increment), split into 3 blocks** (do not pile at once):
-  1. period identity (5m/15m/1h/session/day/week scope flags)
-  2. structure size (structure_size_R, period_range_R, confluence)
-  3. freshness / prior-touch / multi-TF aligned count
-  Compare G1 − G0 per block to localize which layer adds value.
-- Only if G1 passes: WF1/WF2/WF3 full, then T0 Nearest / T1 Indep-EV / T2 Graph-EV
-  selector with equity curves + bootstrap (no SKIP first round).
+- **G1a — period/timeframe identity (5m/15m/1h/session/day/week flags on top of G0):
+  TESTED 2026-09-13 → `NO_TIMEFRAME_IDENTITY_INCREMENT_WF1`.** Adding the 6 raw
+  multi-hot scope flags does NOT give stable OOS increment over G0 (ΔNLL=−0.00106,
+  ΔBrier=+0.00020; both bootstrap CIs straddle 0; gates C/D fail). Same frozen
+  sample confirmed (purge 21165→21135/30 matches G0; G0 NLL 1.680916 identical).
+  Detailed in `5m_graph_probability_v1_G1A_REPORT.md`. G1a FAIL ≠ whole liquidity
+  identity hypothesis fails; it only rules out this featureization.
+- **G1b — liquidity type** (Swing, EQH/EQL, Session/Day/Week H/L): NOT started,
+  pending user authorization. Tested independently from G0 (not chained on G1a).
+- **G1c — structure size** (structure_size_R, period_range_R, confluence): deferred.
+- **G1d — freshness / prior-touch / multi-TF confluence**: deferred.
+- Each G1 block compared G1x − G0 independently; only blocks with isolated increment
+  enter a future `G1-FINAL`.
+- Only if a G1 block passes: WF1/WF2/WF3 full, then T0 Nearest / T1 Indep-EV /
+  T2 Graph-EV selector with equity curves + bootstrap (no SKIP first round).
 - Then (if static Graph EV increment holds): Dynamic Graph Reassess vs old RR3.
 
 ## Commit / governance
