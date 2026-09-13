@@ -1,0 +1,93 @@
+{
+  "audit": "G2_RISKSET_TO_FULLGRAPH_TOPOLOGY_SUPPORT_V1",
+  "baseline_commit": "09905ed60e96fa473068824d0a9643127bab8fb2",
+  "purge": {
+    "n_train_signals_before_purge": 21165,
+    "n_train_signals_after_purge": 21135,
+    "n_purged_signals": 30,
+    "purge_rate": 0.001417434443656981,
+    "max_train_resolution_time": "2025-06-11 11:15:00",
+    "test_start_time": "2025-06-11 00:00:00"
+  },
+  "ohe_semantics": {
+    "known_encode_ok": true,
+    "unknown_all_zero_ok": true,
+    "transform_known_1": [
+      [
+        0.0,
+        1.0,
+        0.0
+      ]
+    ],
+    "transform_unknown_9": [
+      [
+        0.0,
+        0.0,
+        0.0
+      ]
+    ]
+  },
+  "train_support": {
+    "edge_p95": 5,
+    "edge_p99": 9,
+    "edge_max": 26,
+    "encoder_edge_categories": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23,
+      24,
+      25,
+      26
+    ]
+  },
+  "signal_support": {
+    "n_fullnode_signals": 24954,
+    "n_transition_test_signals": 24954,
+    "n_zero_node_signals_vs_transition": 0,
+    "candidate_nodes_mean": 32.54095535785846,
+    "candidate_nodes_p50": 29,
+    "candidate_nodes_p95": 68,
+    "candidate_nodes_p99": 104,
+    "candidate_nodes_max": 139,
+    "share_signals_graph_extends_gt_train_p95": 0.9436964013785365,
+    "share_signals_graph_extends_gt_train_p99": 0.8817023322914163,
+    "share_signals_graph_extends_gt_train_max": 0.530896850204376
+  },
+  "t2_selected": {
+    "n": 24954,
+    "edge_mean": 0.6609761962010099,
+    "edge_p50": 0,
+    "edge_p95": 3,
+    "edge_p99": 4,
+    "edge_max": 32,
+    "share_unseen_exact_category": 4.0073735673639494e-05,
+    "share_gt_train_p95": 0.00048088482808367395,
+    "share_gt_train_p99": 0.0003606636210627555,
+    "share_gt_train_max": 4.0073735673639494e-05,
+    "share_train_count_le_20": 4.0073735673639494e-05,
+    "share_train_count_le_100": 0.0003606636210627555
+  },
+  "verdict": "STRICT_EDGE_CATEGORY_OOD_PRESENT",
+  "interpretation_contract": "STRICT_EDGE_CATEGORY_OOD_PRESENT only shows that T2 uses nodes outside the G0 edge_index categorical training support. It does NOT by itself prove this is the sole cause of the G2 economic failure."
+}
