@@ -1,0 +1,5 @@
+# 5M-LS1 large intermediate artifacts — do NOT commit
+*.parquet
+cache/
+enrichment_*.parquet
+candidate_rows_*.parquet
