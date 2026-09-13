@@ -1,0 +1,126 @@
+{
+  "experiment": "STEP-0.1 local step reconfiguration cause decomposition",
+  "base": "abe911a034fbce5d486597d267f70b0b1df2b359 (STEP-0)",
+  "caveat": "All statistics are DECISION-STATE WINDOW statistics, not independent non-overlapping episodes.",
+  "n_decision_states": 239510,
+  "inward_causes": {
+    "NEW_ACTIVATION": 208904,
+    "EQUALITY_ELIGIBILITY": 497,
+    "ACTIVE_ELIGIBLE_ALREADY": 0,
+    "OTHER_INWARD": 5
+  },
+  "inward_causes_by_side": {
+    "upper": {
+      "NEW_ACTIVATION": 104303,
+      "EQUALITY_ELIGIBILITY": 252,
+      "ACTIVE_ELIGIBLE_ALREADY": 0,
+      "OTHER_INWARD": 1
+    },
+    "lower": {
+      "NEW_ACTIVATION": 104601,
+      "EQUALITY_ELIGIBILITY": 245,
+      "ACTIVE_ELIGIBLE_ALREADY": 0,
+      "OTHER_INWARD": 4
+    }
+  },
+  "non_inward_causes": {
+    "TOUCH_ELIGIBILITY": 5538,
+    "NEW_ACTIVATION_NON_INWARD": 0,
+    "EXPIRY": 0,
+    "OTHER_NON_INWARD": 0
+  },
+  "rates": {
+    "genuine_new_activation_inward_rate": 0.5813410713540145,
+    "equality_eligibility_inward_rate": 0.002075069934449501,
+    "touch_eligibility_rate": 0.023122207841008727,
+    "other_rate": 2.0875955074944677e-05
+  },
+  "transitions": {
+    "raw": {
+      "mean": 5.260874284998539,
+      "p50": 2.0,
+      "p90": 12.0,
+      "n_zero": 94498,
+      "n_one": 23604,
+      "n_two": 16252,
+      "n_three_plus": 105156
+    },
+    "touch_eligibility": {
+      "mean": 0.502642895912488,
+      "p50": 0.0,
+      "p90": 1.0,
+      "n_zero": 186811,
+      "n_one": 30865,
+      "n_two": 10449,
+      "n_three_plus": 11385
+    },
+    "structural": {
+      "mean": 4.758231389086051,
+      "p50": 1.0,
+      "p90": 11.0,
+      "n_zero": 99588,
+      "n_one": 23471,
+      "n_two": 18507,
+      "n_three_plus": 97944
+    }
+  },
+  "overlap": {
+    "n_decision_states": 239510,
+    "n_unique_frozen_triplets": 23979,
+    "decision_states_per_unique_triplet_mean": 9.988323116059886,
+    "decision_states_per_unique_triplet_p50": 8.0,
+    "decision_states_per_unique_triplet_p90": 21.0,
+    "decision_states_per_unique_triplet_max": 116
+  },
+  "hazard": [
+    {
+      "hazard_bin": "1",
+      "at_risk": 239510,
+      "events": 10481,
+      "hazard": 0.043760177028099034
+    },
+    {
+      "hazard_bin": "2",
+      "at_risk": 214691,
+      "events": 10023,
+      "hazard": 0.046685701776040915
+    },
+    {
+      "hazard_bin": "3-5",
+      "at_risk": 193216,
+      "events": 27098,
+      "hazard": 0.14024718449817822
+    },
+    {
+      "hazard_bin": "6-10",
+      "at_risk": 140762,
+      "events": 37201,
+      "hazard": 0.26428297409812307
+    },
+    {
+      "hazard_bin": "11-20",
+      "at_risk": 78137,
+      "events": 34739,
+      "hazard": 0.4445909108360956
+    },
+    {
+      "hazard_bin": "21-40",
+      "at_risk": 25418,
+      "events": 16185,
+      "hazard": 0.6367534817845621
+    },
+    {
+      "hazard_bin": "41+",
+      "at_risk": 4820,
+      "events": 4195,
+      "hazard": 0.8703319502074689
+    }
+  ],
+  "timing": {
+    "cache_load_seconds": 0.24,
+    "pair_sequence_seconds": 9.87,
+    "cause_audit_seconds": 2.08,
+    "total_seconds": 13.18
+  },
+  "duration_caveat": "Cumulative reconfiguration probability rising with frozen duration is NOT Semi-Markov evidence: longer windows mechanically provide more exposure."
+}

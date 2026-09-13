@@ -1,0 +1,2 @@
+n_decision_states,n_unique_frozen_triplets,decision_states_per_unique_triplet_mean,decision_states_per_unique_triplet_p50,decision_states_per_unique_triplet_p90,decision_states_per_unique_triplet_max
+239510,23979,9.988323116059886,8.0,21.0,116
