@@ -1,4 +1,4 @@
-"""LOCAL-0 — Local Liquidity Transition Baseline v0
+"""LOCAL-0 (+ LOCAL-0 FIX) — Local Liquidity Transition Baseline v0
 
 ===========================================================================
 研究问题（本轮唯一问题）
@@ -9,59 +9,70 @@ active lower liquidity D，问：
     U 与 D 谁先被 penetration？
 
 本轮**不是** SMC 增量实验。禁止加入 BOS / CHoCH / Sweep / OB / FVG /
-event sequence / HMM / HSMM / PGM / RL / target selection / execution / PnL。
-只建立局部环境 + 最简单 geometry baseline。
+event sequence / path / HMM / HSMM / PGM / RL / target selection /
+execution / PnL。只建立局部环境 + 最简单 geometry baseline。
 
 ===========================================================================
-因果合同（继承 frozen lifecycle v1.1，不修改）
+上一轮（f2bb046）的 STOP 与两个 P0
+===========================================================================
+P0-1  frozen master 的 `first_penetration_time` 是 **side-relative**：
+        side=+1 (resistance) -> 价格向上突破该 level 的时间
+        side=-1 (support)    -> 价格向下跌破该 level 的时间
+      把不同 side 的 identity 合并成同一个 price-cell outcome 是无定义的。
+      （全样本 6,587 / 22,489 个 price cell = 29.3% 同时含两侧）
+
+P0-2  更严重：frozen `build_liquidity_lifecycle_v1_1.find_contacts` 在
+      TOUCH_ONLY 之后要求价格先"离开 level"才重新 arm，于是
+          touch (high == level) -> 下一根 strict break
+      这种普通行情会被漏记，导致 `first_penetration_time` 系统性滞后，
+      进而污染 **active set**（价格已经在某个 side=+1 level 上方，
+      该 level 仍被当作 active）。
+
+===========================================================================
+LOCAL-0 FIX 的做法：不修改 frozen，另建 LOCAL_LIFECYCLE_V2
+===========================================================================
+不修改 `build_liquidity_lifecycle_v1_1.py` / `liquidity_master_v1_1.parquet`。
+只为 LOCAL 研究线重建 penetration 语义：
+
+    从 causal available 之后第一根可观察新 bar `a` 开始
+        side=+1 : 第一个 j >= a 使 high[j] >  level
+        side=-1 : 第一个 j >= a 使 low[j]  <  level
+    精确相等（high == level / low == level）**只是 touch，不消费**，
+    但 touch 之后下一根 strict break 必须被正常识别（不使用旧 re-arm）。
+    搜索在 discontinuity 处截断。
+    corrected_first_penetration_time = 首次 strict penetration bar 的 END time。
+
+LOCAL-0 后续所有 active / outcome **只使用 corrected fp**，
+禁止再使用旧 master `first_penetration_time`。
+
+local pair 的 side 语义（不是事后过滤器，是 identity 自身的方向语义）：
+
+    U_t = 最近的 active **side=+1** 且 price > close
+    D_t = 最近的 active **side=-1** 且 price < close
+
+===========================================================================
+因果合同
 ===========================================================================
     decision_time           = bar_end = bar_start + 5min
     available_time          = 因果可得时间
-    first_penetration_time  = penetration bar 的 END time
+    corrected fp time       = penetration bar 的 END time
     active at t             = available_time <= t
-                              AND (first_penetration_time is NaT
-                                   OR first_penetration_time > t)
+                              AND (new_fp is NaT OR new_fp > t)
 
 ===========================================================================
 复用（只读，不修改任何 frozen 旧实验代码）
 ===========================================================================
-    load_raw_bars                  <- run_5m_graph_probability_v1
-    load_master / active_mask_at   <- run_5m_graph_probability_v1
-    prepare_master_price_groups    <- run_5m_graph_target_decision_v1
-    active_prices_chunk            <- run_5m_graph_target_decision_v1
-
-===========================================================================
-状态：STOPPED at §7 — STOP_LOCAL0_SAME_PRICE_FP_CONFLICT
-===========================================================================
-按 §4 字面定义（按 price 分组，不考虑 master 的 `side`）构建 local pair 时，
-§7 same-price identity contract 在全 15 品种上失败：
-
-    7,181 / 485,379 primary bars (1.48%) 的 selected price group 内，
-    同时存在 >=2 个 active identity 且给出 **不同** 的 finite
-    first_penetration_time。
-
-根因（已核实，见 local0_same_price_conflict.csv）：
-    master 的 `first_penetration_time` 是 **side-relative** 的：
-        side=+1 (HIGH / resistance) -> 价格**向上**突破该 level 的时间
-        side=-1 (LOW  / support)    -> 价格**向下**跌破该 level 的时间
-    同一个 price 上可以同时存在 side=+1 与 side=-1 的 identity
-    （全样本 6,587 / 22,489 个 price cell = 29.3% 同时含两侧）,
-    两者的 fp 指向**方向相反的两个不同物理事件**，因此
-    “price p 的下一次穿透时间”在不固定 side 时 **无定义**。
-
-    AG 实例（decision_time=2025-03-22T02:25, price=8143, close=8207,
-    selected as LOWER）：
-        CONFIRMED_SWING_LOW        side=-1  fp=2025-04-07T09:05  (跌破 8143)
-        PREV_CONTIG_SESSION_HIGH   side=+1  fp=2025-04-11T23:05  (上破 8143)
-    两者在 decision_time 都是 active，finite fp 不一致 -> 冲突。
-
-按 §7 规定：不自行选 min/max 掩盖，不重新解释定义，STOP 并上报。
+    load_raw_bars / load_master / active_mask_at  <- run_5m_graph_probability_v1
+    prepare_master_price_groups / active_prices_chunk
+                                                  <- run_5m_graph_target_decision_v1
+    （price-only 的两个函数仍保留，用于 A–G 合成测试与历史 STOP 复现）
 
 ===========================================================================
 输出（只提交小型结果；大型 parquet/cache 不入库）
 ===========================================================================
-    local0_same_price_conflict.csv          <- STOP artifact（冲突细节）
-    local0_same_price_conflict_census.csv   <- 全 15 品种冲突规模普查
+    local0_lifecycle_correction_audit.csv
+    local0_lifecycle_correction_examples.csv
+    local0_side_position_audit.csv
     local0_dataset_audit.json
     local0_label_distribution.csv
     local0_by_symbol.csv
@@ -117,6 +128,7 @@ FULL_UNIV = ["AG", "AL", "AU", "CF", "CU", "I", "M", "MA", "NI", "P",
 BAR_MINUTES = 5
 BAR_NS = np.int64(BAR_MINUTES * 60 * 1_000_000_000)
 CHUNK_BARS = 256          # memory-safe fixed chunk; NOT tuned by results
+IDENTITY_CHUNK = 256      # corrected-lifecycle build chunk
 N_BLOCKS = 4
 TRAIN_BLOCK = "TB1"
 TEST_BLOCK = "TB2"
@@ -143,6 +155,7 @@ FORBIDDEN_FEATURES = {
     "resolution_bars", "label", "label_name", "upper_group", "lower_group",
     "up_n_active", "down_n_active", "up_n_finite", "down_n_finite",
     "up_fp_time", "dn_fp_time", "mixed_fp_pattern", "trading_day",
+    "decision_bar_index", "resolution_bar_index",
     "future_high", "future_low",
 }
 
@@ -167,57 +180,250 @@ def to_dt64_ns(x: np.ndarray) -> np.ndarray:
     return np.asarray(x, dtype=np.int64).view("datetime64[ns]")
 
 
-# ---------------------------------------------------------------------------
-# Master price-group prep (wraps the frozen helper; unit-normalized to ns)
-# ---------------------------------------------------------------------------
-def build_price_group_info(master_sym: pd.DataFrame) -> dict:
-    base = prepare_master_price_groups(master_sym)
-    order = base["identity_order"]
+# ===========================================================================
+# LOCAL_LIFECYCLE_V2 — corrected causal penetration (does NOT touch frozen)
+# ===========================================================================
+def build_corrected_lifecycle(master_sym: pd.DataFrame, bars: dict,
+                              chunk: int = IDENTITY_CHUNK) -> dict:
+    """重建每个 liquidity identity 的 **strict** first penetration。
+
+    side=+1 : 第一个 j >= a 使 high[j] >  level
+    side=-1 : 第一个 j >= a 使 low[j]  <  level
+    精确相等只是 touch，不消费；touch 后下一根 strict break 正常识别。
+    搜索在 discontinuity 处截断（limit = 第一个 disc index >= a，否则 n）。
+
+    chunked NumPy（identity x bar），无 identity x future-bar Python 双循环。
+    """
+    n = int(bars["n"])
+    h = np.asarray(bars["h"], dtype=np.float64)
+    low = np.asarray(bars["l"], dtype=np.float64)
+    t_ns = to_ns_int(bars["t"])
+    disc_idx = np.flatnonzero(np.asarray(bars["disc"], dtype=bool))
+    cols = np.arange(n, dtype=np.int64)
+
+    price = master_sym["price"].to_numpy(np.float64)
+    side = master_sym["side"].to_numpy(np.int64)
+    avb = master_sym["available_bar_index"].to_numpy(np.float64)
+
+    # 第一根可观察的新 bar（沿用 frozen lifecycle 的 a = available_bar_index + 1）
+    start = np.where(np.isfinite(avb), avb + 1.0, np.nan)
+    m_total = len(price)
+    new_fp_bar = np.full(m_total, -1, dtype=np.int64)
+    start_i = np.where(np.isfinite(start), start, n).astype(np.int64)
+
+    # discontinuity 截断上界（searchsorted：第一个 disc index >= start）
+    k0 = np.searchsorted(disc_idx, start_i, side="left")
+    limit = np.full(m_total, n, dtype=np.int64)
+    has_disc = k0 < len(disc_idx)
+    if len(disc_idx):
+        limit[has_disc] = disc_idx[np.minimum(k0[has_disc], len(disc_idx) - 1)]
+
+    for s_val in (1, -1):
+        idx = np.flatnonzero(side == s_val)
+        for lo in range(0, len(idx), chunk):
+            sel = idx[lo:lo + chunk]
+            lv = price[sel][:, None]
+            a_i = start_i[sel][:, None]
+            if s_val == 1:
+                cross = h[None, :] > lv
+            else:
+                cross = low[None, :] < lv
+            hit = cross & (cols[None, :] >= a_i)
+            any_hit = hit.any(axis=1)
+            first = np.argmax(hit, axis=1).astype(np.int64)
+            ok = any_hit & (first < limit[sel]) & (start_i[sel] < n)
+            new_fp_bar[sel] = np.where(ok, first, -1)
+
+    valid = new_fp_bar >= 0
+    new_fp_ns = np.full(m_total, INAT, dtype=np.int64)
+    new_fp_ns[valid] = t_ns[np.clip(new_fp_bar[valid], 0, n - 1)] + BAR_NS
+
+    # 可观察性时间：identity 的**第一根可观察 bar** 的 END time。
+    # 在此之前（decision bar < a）该 identity 一根 bar 都没被观察到，
+    # "尚未被穿透" 只是空命题，不能算作 verified active。
+    # active 要求 decision_time >= av_obs  <=>  decision_bar_index >= a。
+    av_ns = to_ns_int(master_sym["available_time"])
+    end_ns = t_ns + BAR_NS
+    av_obs = np.full(m_total, I64MAX, dtype=np.int64)
+    has_a = np.isfinite(start) & (start_i < n)
+    av_obs[has_a] = np.maximum(av_ns[has_a],
+                               end_ns[start_i[has_a]])
+    return dict(new_fp_bar=new_fp_bar, new_fp_ns=new_fp_ns,
+                search_start=start, limit_index=limit, av_obs_ns=av_obs)
+
+
+def lifecycle_correction_audit(sym: str, master_sym: pd.DataFrame,
+                               new_fp_ns: np.ndarray) -> dict:
+    """旧 frozen fp vs corrected fp 的 parity audit（按 symbol 一行）。"""
+    old = to_ns_int(master_sym["first_penetration_time"])
+    new = np.asarray(new_fp_ns, dtype=np.int64)
+    old_nat = old == INAT
+    new_nat = new == INAT
+    both_fin = (~old_nat) & (~new_nat)
+    return dict(
+        symbol=sym,
+        n_identities=int(len(old)),
+        both_nat=int((old_nat & new_nat).sum()),
+        old_eq_new=int((both_fin & (old == new)).sum()),
+        old_later_than_new=int((both_fin & (old > new)).sum()),
+        old_earlier_than_new=int((both_fin & (old < new)).sum()),
+        old_nat_new_finite=int((old_nat & (~new_nat)).sum()),
+        old_finite_new_nat=int(((~old_nat) & new_nat).sum()),
+    )
+
+
+def side_position_audit(sym: str, master_sym: pd.DataFrame, bars: dict,
+                        lc: dict, cap_examples: int = 100,
+                        av_ns_override: np.ndarray = None):
+    """强 audit：active identity 是否出现在 close 的"错误一侧"。
+
+    corrected lifecycle 后，对**已有至少一根可观察 bar** 的 decision bar：
+        active side=+1  =>  level >= close   （否则价格已在它上方却被当作未穿透）
+        active side=-1  =>  level <= close
+    这个不变式应 **精确成立**（证明：active 意味着 [a, i] 内无 strict crossing，
+    故 high[i] <= level，而 close[i] <= high[i]）。
+
+    唯一可能例外的 decision bar 是 i == a-1（availability bar，
+    此时 identity 已 active 但一根 bar 都还没观察到），单独统计并举例。
+
+    Returns (total_violations, violations_after_first_observed_bar, examples)
+    """
+    n = int(bars["n"])
+    close = np.asarray(bars["c"], dtype=np.float64)
+    dt_ns = to_ns_int(bars["t"]) + BAR_NS
+    av_ns = (to_ns_int(master_sym["available_time"])
+             if av_ns_override is None else np.asarray(av_ns_override, np.int64))
+
+    price = master_sym["price"].to_numpy(np.float64)
+    side = master_sym["side"].to_numpy(np.int64)
+    lid = master_sym["liquidity_id"].to_numpy(object)
+    new_fp_bar = lc["new_fp_bar"]
+    start = lc["search_start"]
+    limit = lc["limit_index"]
+
+    total = 0
+    after = 0
+    examples = []
+    for i in range(len(price)):
+        if not np.isfinite(start[i]):
+            continue
+        a = int(start[i])
+        i0 = int(np.searchsorted(dt_ns, av_ns[i], side="left"))
+        if i0 >= n:
+            continue
+        j = int(new_fp_bar[i])
+        end = (j - 1) if j >= 0 else (int(limit[i]) - 1)
+        if end < i0:
+            continue
+        seg = close[i0:end + 1]
+        bad = seg > price[i] if side[i] > 0 else seg < price[i]
+        cnt = int(bad.sum())
+        if cnt == 0:
+            continue
+        total += cnt
+        lo2 = max(i0, a)
+        if end >= lo2:
+            seg2 = close[lo2:end + 1]
+            bad2 = seg2 > price[i] if side[i] > 0 else seg2 < price[i]
+            after += int(bad2.sum())
+        if len(examples) < cap_examples:
+            k = int(np.flatnonzero(bad)[0])
+            examples.append(dict(
+                symbol=sym, liquidity_id=str(lid[i]), side=int(side[i]),
+                price=float(price[i]),
+                available_time=str(to_dt64_ns(np.int64(av_ns[i]))),
+                decision_bar_index=int(i0 + k),
+                first_observed_bar_index=a,
+                close=float(seg[k]),
+            ))
+    return total, after, examples
+
+
+# ===========================================================================
+# Master grouping
+# ===========================================================================
+def _group_info_common(master_sym: pd.DataFrame, order: np.ndarray,
+                       starts: np.ndarray, fp_ns: np.ndarray,
+                       av_obs_ns: np.ndarray = None) -> dict:
     n_id = len(order)
-    starts = base["group_starts"]
+    price_s = master_sym["price"].to_numpy(np.float64)[order]
+    side_s = master_sym["side"].to_numpy(np.int64)[order]
+    av = (to_ns_int(master_sym["available_time"])[order]
+          if av_obs_ns is None else np.asarray(av_obs_ns, np.int64)[order])
     lengths = np.diff(np.r_[starts, n_id]).astype(np.int64)
+    uniq_price = price_s[starts]
+    uniq_side = side_s[starts]
+    isnat = fp_ns == INAT
+    return dict(
+        unique_price=uniq_price,
+        unique_side=uniq_side,
+        group_starts=starts,
+        group_lengths=lengths,
+        id_group=np.repeat(np.arange(len(starts), dtype=np.int64), lengths),
+        available_time=av.view("datetime64[ns]"),
+        first_penetration_time=fp_ns.view("datetime64[ns]"),
+        identity_order=np.asarray(order, dtype=np.int64),
+        av_ns=av,
+        fp_ns=fp_ns,
+        fp_isnat=isnat,
+        liquidity_id_sorted=master_sym["liquidity_id"].to_numpy(object)[order],
+        identity_price=price_s,
+        identity_side=side_s,
+        identity_ltype=master_sym["liquidity_type"].to_numpy(object)[order],
+    )
 
-    av = base["available_time"].astype("datetime64[ns]")
-    fp = base["first_penetration_time"].astype("datetime64[ns]")
 
+def build_price_group_info(master_sym: pd.DataFrame) -> dict:
+    """PRICE-ONLY 分组（上一轮 f2bb046 的定义，保留用于 A–G 合成测试）。
+
+    使用旧 master 的 side-relative `first_penetration_time`。
+    LOCAL-0 FIX 的实际建模路径 **不使用** 本函数。
+    """
+    base = prepare_master_price_groups(master_sym)
+    fp_ns = to_ns_int(master_sym["first_penetration_time"])[base["identity_order"]]
     info = dict(base)
-    info["available_time"] = av
-    info["first_penetration_time"] = fp
-    info["group_lengths"] = lengths
-    info["id_group"] = np.repeat(np.arange(len(starts), dtype=np.int64), lengths)
-    info["av_ns"] = av.view("int64")
-    info["fp_ns"] = fp.view("int64")
-    info["fp_isnat"] = np.isnat(fp)
-    info["master_index"] = np.asarray(order, dtype=np.int64)
-    info["liquidity_id_sorted"] = master_sym["liquidity_id"].to_numpy(object)[order]
-    info["identity_price"] = master_sym["price"].to_numpy(np.float64)[order]
-    info["identity_side"] = master_sym["side"].to_numpy(np.int64)[order]
-    info["identity_ltype"] = master_sym["liquidity_type"].to_numpy(object)[order]
+    info.update(_group_info_common(master_sym, base["identity_order"],
+                                   base["group_starts"], fp_ns))
+    info["available_time"] = base["available_time"].astype("datetime64[ns]")
     return info
 
 
+def build_level_groups(master_sym: pd.DataFrame, new_fp_ns: np.ndarray,
+                       av_obs_ns: np.ndarray = None) -> dict:
+    """(price, side) 分组 + corrected fp。LOCAL-0 FIX 的建模路径使用本函数。
+
+    返回的 key 与 frozen `active_prices_chunk` 期望的完全一致
+    （unique_price / group_starts / available_time / first_penetration_time），
+    因此可以直接复用 frozen 的 chunked active-mask 实现。
+    """
+    price = master_sym["price"].to_numpy(np.float64)
+    side = master_sym["side"].to_numpy(np.int64)
+    order = np.lexsort((side, price))
+    price_s = price[order]
+    side_s = side[order]
+    new_grp = np.r_[True,
+                    (price_s[1:] != price_s[:-1]) | (side_s[1:] != side_s[:-1])]
+    starts = np.flatnonzero(new_grp)
+    fp_ns = np.asarray(new_fp_ns, dtype=np.int64)[order]
+    return _group_info_common(master_sym, order, starts, fp_ns,
+                              av_obs_ns=av_obs_ns)
+
+
 # ---------------------------------------------------------------------------
-# Core: nearest active upper / lower (chunked, vectorized)
+# Nearest active pair
 # ---------------------------------------------------------------------------
 def nearest_active_pair_chunk(decision_time: np.ndarray, close: np.ndarray,
                               master_info: dict) -> dict:
-    """对一个 chunk 的 5m bar close，找 decision_time 当时最近 active upper/lower。
-
-    所有信息必须 decision-time causal。返回 group index（unique_price 的下标）。
-    """
+    """PRICE-ONLY（上一轮定义，A–G 测试使用）。不考虑 identity 的 side。"""
     price = master_info["unique_price"]
-
     active = active_prices_chunk(decision_time, master_info)
-
     delta = price[None, :] - close[:, None]
 
-    # nearest upper (strictly above close)
     work = np.where(active & (delta > 0.0), delta, np.inf)
     up_idx = np.argmin(work, axis=1)
     up_dist = work[np.arange(len(close)), up_idx]
     has_up = np.isfinite(up_dist)
 
-    # nearest lower (strictly below close)
     work = np.where(active & (delta < 0.0), -delta, np.inf)
     down_idx = np.argmin(work, axis=1)
     down_dist = work[np.arange(len(close)), down_idx]
@@ -225,17 +431,54 @@ def nearest_active_pair_chunk(decision_time: np.ndarray, close: np.ndarray,
 
     upper = np.full(len(close), np.nan, dtype=np.float64)
     lower = np.full(len(close), np.nan, dtype=np.float64)
-
     upper[has_up] = price[up_idx[has_up]]
     lower[has_down] = price[down_idx[has_down]]
-    up_idx = np.where(has_up, up_idx, -1).astype(np.int64)
-    down_idx = np.where(has_down, down_idx, -1).astype(np.int64)
 
     return {
         "upper_price": upper,
         "lower_price": lower,
-        "upper_group": up_idx,
-        "lower_group": down_idx,
+        "upper_group": np.where(has_up, up_idx, -1).astype(np.int64),
+        "lower_group": np.where(has_down, down_idx, -1).astype(np.int64),
+        "has_upper": has_up,
+        "has_lower": has_down,
+    }
+
+
+def nearest_active_pair_chunk_v2(decision_time: np.ndarray, close: np.ndarray,
+                                 master_info: dict) -> dict:
+    """LOCAL-0 FIX：upper 只取 side=+1，lower 只取 side=-1。
+
+    这不是"为消除 conflict 而加的事后过滤器"，而是 liquidity identity
+    自身的方向语义：side=+1 的 identity 被"穿透"= 价格向上穿过它。
+    """
+    price = master_info["unique_price"]
+    gside = master_info["unique_side"]
+    active = active_prices_chunk(decision_time, master_info)
+    delta = price[None, :] - close[:, None]
+
+    is_up = (gside[None, :] > 0)
+    is_dn = (gside[None, :] < 0)
+
+    work = np.where(active & is_up & (delta > 0.0), delta, np.inf)
+    up_idx = np.argmin(work, axis=1)
+    up_dist = work[np.arange(len(close)), up_idx]
+    has_up = np.isfinite(up_dist)
+
+    work = np.where(active & is_dn & (delta < 0.0), -delta, np.inf)
+    down_idx = np.argmin(work, axis=1)
+    down_dist = work[np.arange(len(close)), down_idx]
+    has_down = np.isfinite(down_dist)
+
+    upper = np.full(len(close), np.nan, dtype=np.float64)
+    lower = np.full(len(close), np.nan, dtype=np.float64)
+    upper[has_up] = price[up_idx[has_up]]
+    lower[has_down] = price[down_idx[has_down]]
+
+    return {
+        "upper_price": upper,
+        "lower_price": lower,
+        "upper_group": np.where(has_up, up_idx, -1).astype(np.int64),
+        "lower_group": np.where(has_down, down_idx, -1).astype(np.int64),
         "has_upper": has_up,
         "has_lower": has_down,
     }
@@ -243,21 +486,11 @@ def nearest_active_pair_chunk(decision_time: np.ndarray, close: np.ndarray,
 
 def resolve_group_fp(dt_ns: np.ndarray, group_idx: np.ndarray,
                      master_info: dict) -> dict:
-    """给定 (decision_time, selected price group)，返回该 group 的 next penetration。
+    """给定 (decision_time, selected level group)，返回该 group 的 next penetration。
 
     只看当时 **active** 的 identity：
         active = available_time <= dt AND (fp is NaT OR fp > dt)
-
-    若 group 内 active 且 finite 的 fp 出现两个不同值 -> conflict=True
-    （禁止自行选 min/max 掩盖）。
-
-    Returns dict with:
-        fp          int64 ns 的 next penetration（无 finite -> INAT）
-        n_active    group 内 active identity 数
-        n_finite    group 内 active 且 fp finite 的 identity 数
-        has_finite
-        mixed       active 中同时存在 NaT 与 finite（允许，但需计数）
-        conflict    同一 price 的 active identity 给出不一致 finite fp
+    若 group 内 active 且 finite 的 fp 出现两个不同值 -> conflict=True。
     """
     gid = master_info["id_group"]
     av = master_info["av_ns"]
@@ -285,7 +518,7 @@ def resolve_group_fp(dt_ns: np.ndarray, group_idx: np.ndarray,
 
 
 # ---------------------------------------------------------------------------
-# Outcome classification (no future scan; uses frozen first_penetration_time)
+# Outcome classification (no future scan; uses corrected first_penetration)
 # ---------------------------------------------------------------------------
 def classify_pair_time(t_up, t_down) -> np.ndarray:
     """UP=0 / DOWN=1 / CENSOR=2 / AMBIGUOUS=3。"""
@@ -310,7 +543,6 @@ def classify_pair_time(t_up, t_down) -> np.ndarray:
 # Time blocks (global, over FULL_UNIV trading days)
 # ---------------------------------------------------------------------------
 def build_blocks(bars_by_symbol: dict):
-    """全部品种 raw 5m 的 global unique trading_day 排序后四等分。"""
     day_arrays = [
         np.asarray(b["td"]).astype("datetime64[D]") for b in bars_by_symbol.values()
     ]
@@ -337,19 +569,22 @@ def block_codes_for(bars: dict, all_days: np.ndarray,
 
 
 # ---------------------------------------------------------------------------
-# Contiguous-segment end time (discontinuity / end-of-data)
+# Contiguous-segment helpers (discontinuity / end-of-data)
 # ---------------------------------------------------------------------------
-def segment_end_ns(bars: dict) -> np.ndarray:
-    """每根 bar 所属连续段的最后一根 bar 的 END time（int64 ns）。"""
+def segment_last_index(bars: dict) -> np.ndarray:
+    """每根 bar 所属连续段的最后一根 bar 的 index。"""
     n = int(bars["n"])
-    t_ns = to_ns_int(bars["t"])
     disc = np.asarray(bars["disc"], dtype=bool)
     seg_id = np.cumsum(disc.astype(np.int64))
     _, first_idx = np.unique(seg_id, return_index=True)
     last_idx = np.r_[first_idx[1:], n] - 1
     lengths = np.diff(np.r_[first_idx, n])
-    per_bar_last = np.repeat(last_idx, lengths)
-    return t_ns[per_bar_last] + BAR_NS
+    return np.repeat(last_idx, lengths)
+
+
+def segment_end_ns(bars: dict) -> np.ndarray:
+    t_ns = to_ns_int(bars["t"])
+    return t_ns[segment_last_index(bars)] + BAR_NS
 
 
 # ---------------------------------------------------------------------------
@@ -390,19 +625,23 @@ def collect_conflict_rows(sym, master_info: dict, dt_ns: np.ndarray,
 
 
 # ---------------------------------------------------------------------------
-# Per-symbol sample builder
+# Per-symbol sample builder (LOCAL-0 FIX)
 # ---------------------------------------------------------------------------
 def build_symbol_samples(sym: str, master_sym: pd.DataFrame, bars: dict,
                          all_days: np.ndarray, day_block_code: np.ndarray,
+                         new_fp_ns: np.ndarray, new_fp_bar: np.ndarray,
+                         av_obs_ns: np.ndarray = None,
                          conflict_cap: int = 500,
                          stop_on_conflict: bool = True):
-    info = build_price_group_info(master_sym)
+    info = build_level_groups(master_sym, new_fp_ns, av_obs_ns=av_obs_ns)
     n = int(bars["n"])
     t_ns = to_ns_int(bars["t"])
-    dt_ns = t_ns + BAR_NS
+    end_ns = t_ns + BAR_NS
+    dt_ns = end_ns
     close = np.asarray(bars["c"], dtype=np.float64)
     atr = np.asarray(bars["atr"], dtype=np.float64)
     seg_end = segment_end_ns(bars)
+    seg_last = segment_last_index(bars)
     codes = block_codes_for(bars, all_days, day_block_code)
 
     up_px = np.full(n, np.nan, dtype=np.float64)
@@ -421,13 +660,12 @@ def build_symbol_samples(sym: str, master_sym: pd.DataFrame, bars: dict,
         hi = min(lo + CHUNK_BARS, n)
         sl = slice(lo, hi)
         dtc = to_dt64_ns(dt_ns[sl])
-        pair = nearest_active_pair_chunk(dtc, close[sl], info)
+        pair = nearest_active_pair_chunk_v2(dtc, close[sl], info)
         up_px[sl] = pair["upper_price"]
         dn_px[sl] = pair["lower_price"]
         up_g[sl] = pair["upper_group"]
         dn_g[sl] = pair["lower_group"]
 
-        # ---- resolve next penetration time for the selected groups ----
         iu = np.flatnonzero(pair["has_upper"])
         if len(iu):
             res = resolve_group_fp(dt_ns[sl][iu], pair["upper_group"][iu], info)
@@ -444,13 +682,11 @@ def build_symbol_samples(sym: str, master_sym: pd.DataFrame, bars: dict,
             conflict_mask[lo + idn[res["conflict"]]] = True
 
         if conflict_mask[sl].any():
-            n_bad = int(conflict_mask[sl].sum())
             if not stop_on_conflict:
                 continue
             bad = np.flatnonzero(conflict_mask[sl])
             rows = []
             for b in bad:
-                # report BOTH selected sides: the conflict may sit on either one
                 for side_name, gsel in (("upper", up_g[lo + b]),
                                         ("lower", dn_g[lo + b])):
                     if gsel < 0:
@@ -464,13 +700,13 @@ def build_symbol_samples(sym: str, master_sym: pd.DataFrame, bars: dict,
                     rows += extra
                 if len(rows) >= conflict_cap:
                     break
-            pd.DataFrame(rows).to_csv(OUT / "local0_same_price_conflict.csv",
+            pd.DataFrame(rows).to_csv(OUT / "local0_same_side_conflict.csv",
                                       index=False)
             raise SystemExit(
-                "STOP_LOCAL0_SAME_PRICE_FP_CONFLICT: same-price active "
-                f"identities disagree on next first_penetration_time "
+                "STOP_LOCAL0_SAME_SIDE_FP_CONFLICT: same (price, side) active "
+                "identities disagree on next corrected penetration time "
                 f"(symbol={sym}, n_conflict_bars={int(conflict_mask.sum())}); "
-                f"details -> {OUT / 'local0_same_price_conflict.csv'}"
+                f"details -> {OUT / 'local0_same_side_conflict.csv'}"
             )
 
     has_up = up_g >= 0
@@ -492,6 +728,7 @@ def build_symbol_samples(sym: str, master_sym: pd.DataFrame, bars: dict,
 
     label = np.full(n, -1, dtype=np.int64)
     res_ns = np.full(n, INAT, dtype=np.int64)
+    res_bar = np.full(n, -1, dtype=np.int64)
     if both.any():
         lab = classify_pair_time(to_dt64_ns(up_fp[both]), to_dt64_ns(dn_fp[both]))
         label[both] = lab
@@ -500,6 +737,11 @@ def build_symbol_samples(sym: str, master_sym: pd.DataFrame, bars: dict,
         res_ns[both] = np.where(
             is_censor, seg_end[both], np.where(is_down, dn_fp[both], up_fp[both])
         )
+        fin = res_ns[both] != INAT
+        tmp = np.full(int(both.sum()), -1, dtype=np.int64)
+        tmp[fin] = np.searchsorted(end_ns, res_ns[both][fin], side="left")
+        tmp[~fin] = seg_last[both][~fin]
+        res_bar[both] = tmp
 
     idx = np.flatnonzero(primary)
     up_dist = np.full(n, np.nan, dtype=np.float64)
@@ -507,8 +749,10 @@ def build_symbol_samples(sym: str, master_sym: pd.DataFrame, bars: dict,
     up_dist[idx] = (up_px[idx] - close[idx]) / atr[idx]
     dn_dist[idx] = (close[idx] - dn_px[idx]) / atr[idx]
 
+    bar_idx = np.arange(n, dtype=np.int64)
     df = pd.DataFrame(dict(
         symbol=sym,
+        decision_bar_index=bar_idx[idx],
         decision_time=to_dt64_ns(dt_ns[idx]),
         trading_day=np.asarray(bars["td"]).astype("datetime64[D]")[idx],
         block=np.array([f"TB{c + 1}" for c in codes[idx]], dtype=object),
@@ -523,6 +767,7 @@ def build_symbol_samples(sym: str, master_sym: pd.DataFrame, bars: dict,
             (up_dist[idx] + 1e-8) / (dn_dist[idx] + 1e-8)
         ),
         label=label[idx],
+        resolution_bar_index=res_bar[idx],
         resolution_time=to_dt64_ns(res_ns[idx]),
         resolution_bars=(res_ns[idx] - dt_ns[idx]).astype(np.float64)
         / float(BAR_NS),
@@ -530,7 +775,7 @@ def build_symbol_samples(sym: str, master_sym: pd.DataFrame, bars: dict,
         down_n_active=dn_na[idx],
         up_n_finite=up_nf[idx],
         down_n_finite=dn_nf[idx],
-        # OUTCOME-only audit fields. NEVER model features (see FORBIDDEN_FEATURES).
+        # OUTCOME-only audit fields. NEVER model features (FORBIDDEN_FEATURES).
         up_fp_time=to_dt64_ns(up_fp[idx]),
         dn_fp_time=to_dt64_ns(dn_fp[idx]),
     ))
@@ -540,6 +785,7 @@ def build_symbol_samples(sym: str, master_sym: pd.DataFrame, bars: dict,
     ).astype(int)
 
     audit = dict(
+        symbol=sym,
         n_bars=int(n),
         n_conflict_bars=int(conflict_mask.sum()),
         n_atr_or_close_invalid=int((~atr_ok).sum()),
@@ -605,8 +851,7 @@ def proba_matrix(pipe, df: pd.DataFrame) -> np.ndarray:
     """Return a FULL 3-column matrix in fixed [UP, DOWN, CENSOR] order.
 
     If a class is absent from the training sample (e.g. CENSOR after the
-    mandated whole-outcome purge), its column stays exactly 0.0 — the model
-    simply has no mass on it. Nothing is imputed or re-weighted.
+    mandated whole-outcome purge), its column stays exactly 0.0.
     """
     P = pipe.predict_proba(df[pipe.feature_names_in_])
     classes = np.asarray(pipe.named_steps["clf"].classes_, dtype=int)
@@ -634,7 +879,6 @@ def day_paired_bootstrap(test: pd.DataFrame, ll_b0: np.ndarray,
                          ll_b1: np.ndarray, seed: int = SEED,
                          n_boot: int = N_BOOT) -> dict:
     d = test["trading_day"].to_numpy()
-    days = np.unique(d)
     g0 = pd.Series(ll_b0).groupby(d).mean()
     g1 = pd.Series(ll_b1).groupby(d).mean()
     delta_day = (g1 - g0).to_numpy()
@@ -664,15 +908,15 @@ def day_paired_bootstrap(test: pd.DataFrame, ll_b0: np.ndarray,
 
 
 # ---------------------------------------------------------------------------
-# Hard leakage guards (independent code path where possible)
+# Hard leakage guards
 # ---------------------------------------------------------------------------
-def run_leakage_guards(samples: pd.DataFrame, master: pd.DataFrame,
+def run_leakage_guards(samples: pd.DataFrame, master_lc: pd.DataFrame,
                        tb2_start_ns: int, train: pd.DataFrame,
                        test: pd.DataFrame, n_guard_rows: int = 3000):
     """17 条 hard leakage guard 的可执行部分。
 
     1/2/3/4 通过 **独立代码路径** 复核：直接用 frozen `active_mask_at` +
-    pandas 原始 master 表重算 active 集合，而不是复用 builder 的中间数组。
+    pandas 原始表重算 active 集合（表里的 fp 已替换为 corrected fp）。
     """
     msgs = []
     ok = True
@@ -683,7 +927,6 @@ def run_leakage_guards(samples: pd.DataFrame, master: pd.DataFrame,
         msgs.append(f"[{'PASS' if cond else 'FAIL'}] {name}"
                     + (f" :: {detail}" if detail else ""))
 
-    # ---- G8: TB3/TB4 never enter fit / metric / bootstrap ----
     check("G8a train block is TB1 only", set(train["block"].unique()) <= {TRAIN_BLOCK},
           str(sorted(train["block"].unique())))
     check("G8b test block is TB2 only", set(test["block"].unique()) <= {TEST_BLOCK},
@@ -692,14 +935,12 @@ def run_leakage_guards(samples: pd.DataFrame, master: pd.DataFrame,
     check("G8c TB3/TB4 rows exist in table but unused", tb34 >= 0,
           f"n_tb34_in_table={tb34}")
 
-    # ---- G7: purge ----
     tr_res = to_ns_int(train["resolution_time"])
     check("G7 kept-train resolution_time < TB2 start",
           bool((tr_res < tb2_start_ns).all()),
           f"max_train_res={pd.Timestamp(max(tr_res) if len(tr_res) else 0, unit='ns')} "
           f"tb2_start={pd.Timestamp(tb2_start_ns, unit='ns')}")
 
-    # ---- G6: no future fields in model features ----
     used = set(NUM_FEATURES) | set(CAT_FEATURES)
     check("G6 no forbidden feature", not (used & FORBIDDEN_FEATURES),
           str(sorted(used & FORBIDDEN_FEATURES)))
@@ -707,7 +948,6 @@ def run_leakage_guards(samples: pd.DataFrame, master: pd.DataFrame,
           used == {"up_distance_R", "down_distance_R", "width_R",
                    "log_distance_ratio", "symbol"}, str(sorted(used)))
 
-    # ---- G1..G4: independent recompute on a deterministic subsample ----
     s = samples.reset_index(drop=True)
     if len(s) > n_guard_rows:
         pick = np.linspace(0, len(s) - 1, n_guard_rows).astype(int)
@@ -716,24 +956,24 @@ def run_leakage_guards(samples: pd.DataFrame, master: pd.DataFrame,
         sub = s
 
     g1 = g2 = g3 = g4 = True
-    g_fp = g_conflict = True
+    g_fp = g_conflict = g_side = True
     bad_detail = ""
     for sym, g in sub.groupby("symbol"):
-        ms = master[master["symbol"] == sym]
+        ms = master_lc[master_lc["symbol"] == sym]
         av = pd.to_datetime(ms["available_time"]).to_numpy()
         fp = pd.to_datetime(ms["first_penetration_time"]).to_numpy()
         px = ms["price"].to_numpy(np.float64)
+        sd = ms["side"].to_numpy(np.int64)
         for _, r in g.iterrows():
-            dt = np.datetime64(pd.Timestamp(r["decision_time"]).to_pydatetime(),
-                               "ns")
+            dt = np.datetime64(pd.Timestamp(r["decision_time"]).to_pydatetime(), "ns")
             close = float(r["close"])
             am = active_mask_at(av, fp, dt)
             act_px = px[am]
-            up_c = act_px[act_px > close]
-            dn_c = act_px[act_px < close]
+            up_c = act_px[(act_px > close) & (sd[am] > 0)]
+            dn_c = act_px[(act_px < close) & (sd[am] < 0)]
             if len(up_c) == 0 or len(dn_c) == 0:
                 g3 = False
-                bad_detail = f"{sym} no active pair at {dt}"
+                bad_detail = f"{sym} no active side-consistent pair at {dt}"
                 break
             if not np.isclose(float(up_c.min()), float(r["upper_price"])):
                 g3 = False
@@ -743,9 +983,10 @@ def run_leakage_guards(samples: pd.DataFrame, master: pd.DataFrame,
                 g4 = False
                 bad_detail = f"{sym} {dt} lower {dn_c.max()} != {r['lower_price']}"
                 break
-            for side_price, is_up in ((float(r["upper_price"]), True),
-                                      (float(r["lower_price"]), False)):
-                m = am & (px == side_price)
+            for side_price, want_side, is_up in (
+                    (float(r["upper_price"]), 1, True),
+                    (float(r["lower_price"]), -1, False)):
+                m = am & (px == side_price) & (sd == want_side)
                 if not m.any():
                     g1 = False
                     bad_detail = f"{sym} {dt} no active identity at {side_price}"
@@ -762,7 +1003,7 @@ def run_leakage_guards(samples: pd.DataFrame, master: pd.DataFrame,
                 fps = fps[~np.isnat(fps)]
                 if len(fps) > 1 and len(np.unique(fps)) > 1:
                     g_conflict = False
-                    bad_detail = f"{sym} {dt} same-price fp conflict at {side_price}"
+                    bad_detail = f"{sym} {dt} same-side fp conflict at {side_price}"
                     break
                 if len(fps) == 1:
                     expect = (r["up_fp_time"] if is_up else r["dn_fp_time"])
@@ -771,17 +1012,18 @@ def run_leakage_guards(samples: pd.DataFrame, master: pd.DataFrame,
                         g_fp = False
                         bad_detail = (f"{sym} {dt} fp mismatch {fps[0]} vs {expect}")
                         break
-            if not (g1 and g2 and g3 and g4 and g_fp and g_conflict):
+            if not (g1 and g2 and g3 and g4 and g_fp and g_conflict and g_side):
                 break
-        if not (g1 and g2 and g3 and g4 and g_fp and g_conflict):
+        if not (g1 and g2 and g3 and g4 and g_fp and g_conflict and g_side):
             break
 
     check("G1 available_time <= decision_time (independent recompute)", g1, bad_detail)
-    check("G2 fp NaT or > decision_time (independent recompute)", g2, bad_detail)
-    check("G3 upper is nearest active price > close", g3, bad_detail)
-    check("G4 lower is nearest active price < close", g4, bad_detail)
+    check("G2 corrected fp NaT or > decision_time (independent recompute)", g2,
+          bad_detail)
+    check("G3 upper = nearest active side=+1 above close", g3, bad_detail)
+    check("G4 lower = nearest active side=-1 below close", g4, bad_detail)
     check("G1b resolved fp equals active identity fp", g_fp, bad_detail)
-    check("G7b same-price active fp consistent", g_conflict, bad_detail)
+    check("G7b same-(price,side) active fp consistent", g_conflict, bad_detail)
 
     for m in msgs:
         print("  " + m)
@@ -794,7 +1036,7 @@ def run_leakage_guards(samples: pd.DataFrame, master: pd.DataFrame,
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--symbols", nargs="*", default=None)
-    ap.add_argument("--mode", default="run", choices=["run", "census"])
+    ap.add_argument("--mode", default="run", choices=["run", "census", "bench"])
     ap.add_argument("--reuse-cache", action="store_true")
     ap.add_argument("--force-rebuild", action="store_true")
     args = ap.parse_args()
@@ -806,7 +1048,7 @@ def main():
     timing = {}
 
     symbols = args.symbols or list(FULL_UNIV)
-    print(f"[LOCAL-0] symbols={symbols}")
+    print(f"[LOCAL-0 FIX] symbols={symbols} mode={args.mode}")
 
     # ---------------- load ----------------
     t0 = time.perf_counter()
@@ -822,11 +1064,100 @@ def main():
         f"{b['block']}=[{b['first_day']}..{b['last_day']}]({b['n_days']}d)"
         for b in boundaries))
 
-    # ---------------- pair build + label ----------------
+    # ---------------- corrected lifecycle ----------------
+    t0 = time.perf_counter()
+    lc_by_sym = {}
+    n_identities_total = 0
+    for s in symbols:
+        lc_by_sym[s] = build_corrected_lifecycle(ms_by_sym[s], bars_by_sym[s])
+        n_identities_total += int(len(ms_by_sym[s]))
+    timing["lifecycle_build_seconds"] = round(time.perf_counter() - t0, 2)
+    timing["identities_per_second"] = float(
+        n_identities_total / max(timing["lifecycle_build_seconds"], 1e-9))
+    print(f"[LIFECYCLE] identities={n_identities_total} "
+          f"seconds={timing['lifecycle_build_seconds']} "
+          f"ids/sec={timing['identities_per_second']:.0f}")
+
+    if args.mode == "bench":
+        print(json.dumps(timing, indent=2))
+        return
+
+    # ---------------- lifecycle correction audit ----------------
+    aud_rows = []
+    ex_rows = []
+    for s in symbols:
+        aud_rows.append(lifecycle_correction_audit(
+            s, ms_by_sym[s], lc_by_sym[s]["new_fp_ns"]))
+        old = to_ns_int(ms_by_sym[s]["first_penetration_time"])
+        new = lc_by_sym[s]["new_fp_ns"]
+        late = (old != INAT) & (new != INAT) & (old > new)
+        if late.any() and len(ex_rows) < 100:
+            sub = ms_by_sym[s][late].iloc[:100 - len(ex_rows)]
+            for _, r in sub.iterrows():
+                j = int(lc_by_sym[s]["new_fp_bar"][r.name])
+                ex_rows.append(dict(
+                    symbol=s,
+                    liquidity_id=str(r["liquidity_id"]),
+                    side=int(r["side"]),
+                    price=float(r["price"]),
+                    available_time=str(pd.Timestamp(r["available_time"])),
+                    old_fp=str(pd.Timestamp(r["first_penetration_time"])),
+                    new_fp=str(pd.Timestamp(int(new[r.name]), unit="ns")),
+                    new_fp_bar_index=j,
+                    lag_bars=int(r["first_penetration_bar_index"] - j)
+                    if pd.notna(r["first_penetration_bar_index"]) else -1,
+                ))
+    aud = pd.DataFrame(aud_rows)
+    tot = {k: (int(aud[k].sum()) if k != "symbol" else "TOTAL")
+           for k in aud.columns}
+    aud = pd.concat([aud, pd.DataFrame([tot])], ignore_index=True)
+    aud.to_csv(OUT / "local0_lifecycle_correction_audit.csv", index=False)
+    pd.DataFrame(ex_rows).to_csv(
+        OUT / "local0_lifecycle_correction_examples.csv", index=False)
+    print("[LIFECYCLE AUDIT]")
+    print(aud.to_string(index=False))
+
+    # ---------------- side-position invariant audit ----------------
+    t0 = time.perf_counter()
+    sp_rows = []
+    sp_examples = []
+    vio_total = vio_after = 0
+    vio_timeonly = 0
+    for s in symbols:
+        # A) 只用 available_time <= t 的（时间-only）active 定义 —— 对照口径
+        tt0, _, _ = side_position_audit(s, ms_by_sym[s], bars_by_sym[s],
+                                        lc_by_sym[s], cap_examples=0)
+        # B) 采用可观察性条件后的正式 active 定义 —— 必须为 0
+        tt, aa, ex = side_position_audit(s, ms_by_sym[s], bars_by_sym[s],
+                                         lc_by_sym[s],
+                                         av_ns_override=lc_by_sym[s]["av_obs_ns"])
+        vio_timeonly += tt0
+        vio_total += tt
+        vio_after += aa
+        sp_rows.append(dict(
+            symbol=s,
+            violations_timeonly_active=tt0,
+            side_position_violations_total=tt,
+            side_position_violations_after_first_observed_bar=aa))
+        sp_examples += ex
+    sp = pd.DataFrame(sp_rows)
+    sp.to_csv(OUT / "local0_side_position_audit.csv", index=False)
+    print(f"[SIDE-POSITION] total={vio_total} "
+          f"after_first_observed_bar={vio_after} "
+          f"({time.perf_counter()-t0:.1f}s)")
+    if vio_after > 0:
+        pd.DataFrame(sp_examples).to_csv(
+            OUT / "local0_side_position_violations.csv", index=False)
+        raise SystemExit(
+            "STOP_LOCAL0_SIDE_POSITION_INVARIANT_FAIL: "
+            f"{vio_after} (bar, identity) pairs where an active identity sits on "
+            "the wrong side of close AFTER at least one observed bar; "
+            f"examples -> {OUT / 'local0_side_position_violations.csv'}")
+
+    # ---------------- local pair + label ----------------
     t0 = time.perf_counter()
     frames = []
     audits = []
-    info_by_sym = {}
     for s in symbols:
         cp = CACHE / f"local0_samples_{s}.parquet"
         if args.reuse_cache and cp.exists() and not args.force_rebuild:
@@ -834,12 +1165,11 @@ def main():
             print(f"[CACHE] reuse {cp.name} rows={len(df)}")
         else:
             t1 = time.perf_counter()
-            info = build_price_group_info(ms_by_sym[s])
-            info_by_sym[s] = info
             df, au = build_symbol_samples(
                 s, ms_by_sym[s], bars_by_sym[s], all_days, day_block_code,
+                lc_by_sym[s]["new_fp_ns"], lc_by_sym[s]["new_fp_bar"],
+                av_obs_ns=lc_by_sym[s]["av_obs_ns"],
                 stop_on_conflict=(args.mode == "run"))
-            au["symbol"] = s
             audits.append(au)
             df.to_parquet(cp, index=False)
             print(f"[BUILD] {s} bars={au['n_bars']} primary={au['n_primary']} "
@@ -849,29 +1179,12 @@ def main():
     samples = pd.concat(frames, ignore_index=True)
     timing["pair_build_seconds"] = round(time.perf_counter() - t0, 2)
 
-    # ---------------- conflict census (diagnostic; does NOT stop) ----------
     if args.mode == "census":
-        rows = []
-        for a in audits:
-            m = ms_by_sym[a["symbol"]]
-            cell = m.groupby("price")["side"].nunique()
-            rows.append(dict(
-                symbol=a["symbol"],
-                n_identities=int(len(m)),
-                n_price_cells=int(len(cell)),
-                n_price_cells_both_sides=int((cell > 1).sum()),
-                n_bars=a["n_bars"],
-                n_primary=a["n_primary"],
-                n_conflict_bars=a["n_conflict_bars"],
-                conflict_rate=float(a["n_conflict_bars"]) / max(a["n_primary"], 1),
-            ))
-        cen = pd.DataFrame(rows)
-        cen.to_csv(OUT / "local0_same_price_conflict_census.csv", index=False)
+        cen = pd.DataFrame(audits)
+        cen.to_csv(OUT / "local0_same_side_conflict_census.csv", index=False)
         print(cen.to_string(index=False))
-        print(f"[CENSUS] total_conflict_bars={int(cen['n_conflict_bars'].sum())} "
-              f"of primary={int(cen['n_primary'].sum())}")
-        print("STOP LOCAL0_SAME_PRICE_FP_CONFLICT (see "
-              "local0_same_price_conflict_census.csv)")
+        print(f"[CENSUS] total_same_side_conflict_bars="
+              f"{int(cen['n_conflict_bars'].sum())}")
         return
 
     # ---------------- label / audit ----------------
@@ -880,24 +1193,18 @@ def main():
         {UP: "UP", DOWN: "DOWN", CENSOR: "CENSOR", AMBIGUOUS: "AMBIGUOUS"})
 
     audit = {}
-    if audits:
-        audit["per_symbol_raw"] = audits
-    audit["n_bars_total"] = int(
-        sum(int(bars_by_sym[s]["n"]) for s in symbols))
+    audit["n_bars_total"] = int(sum(int(bars_by_sym[s]["n"]) for s in symbols))
     audit["n_primary_total"] = int(len(samples))
-    audit["n_pair_both_total"] = int(
-        sum(a["n_pair_both"] for a in audits)) if audits else None
-    audit["n_missing_upper"] = int(
-        sum(a["n_missing_upper"] for a in audits)) if audits else None
-    audit["n_missing_lower"] = int(
-        sum(a["n_missing_lower"] for a in audits)) if audits else None
-    audit["n_missing_both"] = int(
-        sum(a["n_missing_both"] for a in audits)) if audits else None
+    audit["n_pair_both_total"] = int(sum(a["n_pair_both"] for a in audits))
+    audit["n_missing_upper"] = int(sum(a["n_missing_upper"] for a in audits))
+    audit["n_missing_lower"] = int(sum(a["n_missing_lower"] for a in audits))
+    audit["n_missing_both"] = int(sum(a["n_missing_both"] for a in audits))
     audit["n_atr_or_close_invalid"] = int(
-        sum(a["n_atr_or_close_invalid"] for a in audits)) if audits else None
+        sum(a["n_atr_or_close_invalid"] for a in audits))
     audit["n_mixed_fp_pattern"] = int(samples["mixed_fp_pattern"].sum())
     audit["n_multi_identity_selected"] = int(
         ((samples["up_n_active"] > 1) | (samples["down_n_active"] > 1)).sum())
+    audit["per_symbol"] = audits
 
     vc = samples["label_name"].value_counts()
     for k in ["UP", "DOWN", "CENSOR", "AMBIGUOUS"]:
@@ -918,13 +1225,11 @@ def main():
         for q, name in [(0.5, "p50"), (0.9, "p90"), (0.99, "p99")]:
             audit[f"{col}_{name}"] = float(np.nanpercentile(v, q * 100))
 
-    # ---- label distribution csv ----
     dist = (samples.groupby(["block", "label_name"]).size()
             .unstack(fill_value=0).reset_index())
     dist["total"] = dist.drop(columns=["block"]).sum(axis=1)
     dist.to_csv(OUT / "local0_label_distribution.csv", index=False)
 
-    # ---- by symbol ----
     bys = (samples.groupby(["symbol", "label_name"]).size()
            .unstack(fill_value=0))
     for k in ["UP", "DOWN", "CENSOR", "AMBIGUOUS"]:
@@ -945,7 +1250,6 @@ def main():
 
     train_all = samples[samples["block"] == TRAIN_BLOCK].copy()
     test_all = samples[samples["block"] == TEST_BLOCK].copy()
-
     train_all = train_all[train_all["label"].isin(PRIMARY_CODES)]
     test_all = test_all[test_all["label"].isin(PRIMARY_CODES)]
 
@@ -1027,7 +1331,17 @@ def main():
 
     # ---------------- leakage guards ----------------
     print("[GUARDS]")
-    guard_ok = run_leakage_guards(samples, master, tb2_start_ns, train, test_all)
+    master_lc = master.copy()
+    fp_all = np.full(len(master), INAT, dtype=np.int64)
+    av_all = np.full(len(master), I64MAX, dtype=np.int64)
+    for s in symbols:
+        idx = np.flatnonzero(master["symbol"].to_numpy(object) == s)
+        fp_all[idx] = lc_by_sym[s]["new_fp_ns"]
+        av_all[idx] = lc_by_sym[s]["av_obs_ns"]
+    master_lc["first_penetration_time"] = to_dt64_ns(fp_all)
+    master_lc["available_time"] = to_dt64_ns(av_all)
+    guard_ok = run_leakage_guards(samples, master_lc, tb2_start_ns, train,
+                                  test_all)
     if not guard_ok:
         raise SystemExit("STOP_LOCAL0_LEAKAGE_GUARD_FAIL")
 
@@ -1043,6 +1357,11 @@ def main():
         zip(["UP", "DOWN", "CENSOR"], [float(x) for x in prior]))
     audit["train_label_counts_after_purge"] = train_label_counts
     audit["train_class_absent_after_purge"] = train_class_absent
+    audit["side_position"] = dict(
+        violations_timeonly_active=int(vio_timeonly),
+        violations_total=int(vio_total),
+        violations_after_first_observed_bar=int(vio_after),
+    )
     audit["tb3_tb4_rows_in_table"] = int(
         samples["block"].isin(["TB3", "TB4"]).sum())
     (OUT / "local0_dataset_audit.json").write_text(
@@ -1050,9 +1369,10 @@ def main():
 
     tb2_vc = test_all["label_name"].value_counts()
     summary = dict(
-        experiment="LOCAL-0 local liquidity transition baseline",
+        experiment="LOCAL-0 (+LOCAL-0 FIX) local liquidity transition baseline",
         question=("At each 5m bar close, which of the nearest active upper / "
                   "lower liquidity is penetrated first?"),
+        lifecycle="LOCAL_LIFECYCLE_V2 (independent corrected strict crossing)",
         blocks=boundaries,
         train_block=TRAIN_BLOCK,
         test_block=TEST_BLOCK,
@@ -1089,21 +1409,22 @@ def main():
         purge=purge,
         train_label_counts_after_purge=train_label_counts,
         train_class_absent_after_purge=train_class_absent,
+        side_position_invariant=dict(
+            violations_timeonly_active=int(vio_timeonly),
+            violations_total=int(vio_total),
+            violations_after_first_observed_bar=int(vio_after),
+        ),
+        same_side_conflict="NONE",
         metrics=dict(B0_PRIOR=m0, B1_LOCAL_GEOMETRY=m1),
         bootstrap=boot,
         verdict=boot["verdict"],
-        same_price=dict(
-            n_multi_identity_selected=audit["n_multi_identity_selected"],
-            n_mixed_fp_pattern=audit["n_mixed_fp_pattern"],
-            conflict="NONE",
-        ),
         timing=timing,
     )
     (OUT / "local0_summary.json").write_text(
         json.dumps(summary, indent=2, default=str))
 
     print("\n[SUMMARY] " + json.dumps({
-        "blocks": [b["block"] for b in boundaries],
+        "blocks": boundaries,
         "n_primary": summary["primary_sample"]["n_total"],
         "label": summary["label_distribution_all"],
         "purge": purge,

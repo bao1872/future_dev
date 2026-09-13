@@ -1,0 +1,136 @@
+{
+  "experiment": "LOCAL-0 (+LOCAL-0 FIX) local liquidity transition baseline",
+  "question": "At each 5m bar close, which of the nearest active upper / lower liquidity is penetrated first?",
+  "lifecycle": "LOCAL_LIFECYCLE_V2 (independent corrected strict crossing)",
+  "blocks": [
+    {
+      "block": "TB1",
+      "first_day": "2025-01-02",
+      "last_day": "2025-06-09",
+      "n_days": 102
+    },
+    {
+      "block": "TB2",
+      "first_day": "2025-06-10",
+      "last_day": "2025-11-06",
+      "n_days": 102
+    },
+    {
+      "block": "TB3",
+      "first_day": "2025-11-07",
+      "last_day": "2026-04-10",
+      "n_days": 102
+    },
+    {
+      "block": "TB4",
+      "first_day": "2026-04-13",
+      "last_day": "2026-09-04",
+      "n_days": 101
+    }
+  ],
+  "train_block": "TB1",
+  "test_block": "TB2",
+  "tb2_start_time": "2025-06-09 21:05:00",
+  "primary_sample": {
+    "n_total": 483829,
+    "n_tb1_primary": 114568,
+    "n_tb2_primary": 124590,
+    "n_tb3_primary": 119857,
+    "n_tb4_primary": 124814
+  },
+  "missing_pair": {
+    "missing_upper": 16984,
+    "missing_lower": 4274,
+    "missing_both": 241,
+    "n_pair_both": 484178,
+    "n_atr_or_close_invalid": 739
+  },
+  "label_distribution_all": {
+    "UP": 251593,
+    "DOWN": 231091,
+    "CENSOR": 737,
+    "AMBIGUOUS": 408,
+    "ambiguous_rate": 0.0008432731398903331
+  },
+  "label_distribution_tb2": {
+    "UP": 64674,
+    "DOWN": 59827,
+    "CENSOR": 0,
+    "AMBIGUOUS": 0
+  },
+  "resolution_bars": {
+    "mean": 247.0523883438157,
+    "p50": 95.0,
+    "p90": 705.0,
+    "p95": 995.0,
+    "p99": 2276.0
+  },
+  "purge": {
+    "train_before": 114440,
+    "train_after": 113600,
+    "purged": 840,
+    "purge_rate": 0.007340090877315624,
+    "tb2_start_time": "2025-06-09 21:05:00",
+    "max_kept_train_resolution_time": "2025-06-09 15:00:00"
+  },
+  "train_label_counts_after_purge": {
+    "UP": 56972,
+    "DOWN": 56628,
+    "CENSOR": 0
+  },
+  "train_class_absent_after_purge": [
+    "CENSOR"
+  ],
+  "side_position_invariant": {
+    "violations_timeonly_active": 8755,
+    "violations_total": 0,
+    "violations_after_first_observed_bar": 0
+  },
+  "same_side_conflict": "NONE",
+  "metrics": {
+    "B0_PRIOR": {
+      "model": "B0_PRIOR",
+      "n": 124501,
+      "logloss": 0.6930338742222363,
+      "brier": 0.49988669400161717,
+      "ece_up": 0.017951622595711814,
+      "ece_down": 0.017951622595711758,
+      "ece_censor": 0.0,
+      "up_pct": 0.5194657071027542,
+      "down_pct": 0.4805342928972458,
+      "censor_pct": 0.0
+    },
+    "B1_LOCAL_GEOMETRY": {
+      "model": "B1_LOCAL_GEOMETRY",
+      "n": 124501,
+      "logloss": 0.5954651092131652,
+      "brier": 0.40945249095055714,
+      "ece_up": 0.018296888942716995,
+      "ece_down": 0.01829688894271702,
+      "ece_censor": 0.0,
+      "up_pct": 0.5194657071027542,
+      "down_pct": 0.4805342928972458,
+      "censor_pct": 0.0
+    }
+  },
+  "bootstrap": {
+    "n_days": 102,
+    "n_boot": 1000,
+    "seed": 20260913,
+    "mean_delta_logloss": -0.09771214610072405,
+    "ci_lo": -0.10932830202265434,
+    "ci_hi": -0.08748616029216434,
+    "verdict": "LOCAL_GEOMETRY_INCREMENT_SUPPORTED"
+  },
+  "verdict": "LOCAL_GEOMETRY_INCREMENT_SUPPORTED",
+  "timing": {
+    "load_seconds": 8.86,
+    "lifecycle_build_seconds": 1.42,
+    "identities_per_second": 56541.549295774654,
+    "pair_build_seconds": 25.21,
+    "label_seconds": 0.1,
+    "fit_seconds": 0.23,
+    "total_seconds": 37.04,
+    "bars_per_sec": 20039.468464894882
+  }
+}
