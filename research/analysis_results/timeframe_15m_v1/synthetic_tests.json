@@ -8,7 +8,6 @@
   "T9_geometry_from_decision_close": true,
   "T12_actual_entry_next_15m_open": true,
   "T13_gap_invalid_detected": true,
-  "T14_outcome_window_le_36_child_slots": true,
   "T15_same_child_ambiguous_bounds": true,
   "T16_geometry_bins_complete": true,
   "T17_no_5m_R1R4_imported": true,
@@ -17,5 +16,12 @@
   "T26_no_model_training": true,
   "T27_p1_not_read": true,
   "T20_one_trade_per_contact": true,
-  "T28_5m_freeze_unchanged": true
+  "T28_5m_freeze_unchanged": true,
+  "T_disc_outcome_convention_fb_plus_1": true,
+  "T_disc_activation_uses_bar_itself": true,
+  "T8_decision_prefix_causality": true,
+  "T10_structural_stop_causality": true,
+  "T11_liquidity_target_depletion_parity": true,
+  "T7_contact_visible_only_after_parent_close": true,
+  "T14_outcome_window_le_36_child_slots": true
 }

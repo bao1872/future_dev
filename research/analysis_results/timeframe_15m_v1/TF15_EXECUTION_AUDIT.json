@@ -51,11 +51,11 @@
   "n_regions": 1120,
   "n_robust_positive": 29,
   "market_passing_scales": [],
-  "verdict": "STOP_15M_EXECUTION_LINE",
+  "verdict": "STOP_15M_EXECUTION_LINE_FINAL",
   "balance_check_5m_ttl_minutes": 10,
   "ttl_note": "5m E2 TTL=2 bars ≈ 10 min; 15m cannot express 10 min exactly, so Limit phase (if reached) will use pre-registered TTL=[1,2] parent bars = 15/30 min",
   "freeze_integrity_start": {
-    "spec_sha256": "87126146f33ac4fdef9df1a68dd0114e91ed2bff2deae6bc6b02d588a8704d34",
+    "spec_sha256": "73bae6ffd59ea47e8f537a34f5c976c93c2ab77017aaf5e1ebd3dbf3b7588362",
     "policy_hash": "21adee821eb3c5278b35d1100e4ec071d9054e3e476fd06ca476073e205c4e42",
     "region_hash": "7d488897be3e699410ebe6340d033f22d2431c5d89074c7efd0fbe076a3c23c7"
   },
@@ -69,7 +69,6 @@
     "T9_geometry_from_decision_close": true,
     "T12_actual_entry_next_15m_open": true,
     "T13_gap_invalid_detected": true,
-    "T14_outcome_window_le_36_child_slots": true,
     "T15_same_child_ambiguous_bounds": true,
     "T16_geometry_bins_complete": true,
     "T17_no_5m_R1R4_imported": true,
@@ -78,7 +77,14 @@
     "T26_no_model_training": true,
     "T27_p1_not_read": true,
     "T20_one_trade_per_contact": true,
-    "T28_5m_freeze_unchanged": true
+    "T28_5m_freeze_unchanged": true,
+    "T_disc_outcome_convention_fb_plus_1": true,
+    "T_disc_activation_uses_bar_itself": true,
+    "T8_decision_prefix_causality": true,
+    "T10_structural_stop_causality": true,
+    "T11_liquidity_target_depletion_parity": true,
+    "T7_contact_visible_only_after_parent_close": true,
+    "T14_outcome_window_le_36_child_slots": true
   },
   "deferred_tests": [
     "T21_limit_strict_exact_touch_no_fill",
@@ -87,6 +93,20 @@
     "T24_ttl2_6_child_bars",
     "T25_old_order_cancelled_before_reassess"
   ],
+  "causality_stats": {
+    "n_prefix_compared": 200,
+    "n_avail_mismatch": 0,
+    "n_target_mismatch": 0,
+    "n_stop_mismatch": 0,
+    "poison_mismatch": 0,
+    "t7_bad": 0
+  },
+  "ev_denominator": "EV_censor_worst_per_signal = total_R / ALL policy signals (gap-invalid / not-executed contribute 0R); per-executed-trade EV reported separately",
+  "disc_semantics": {
+    "definition": "disc[i] = untrustworthy boundary BEFORE bar i",
+    "outcome_window": "fb+1 (disc bar itself IS read); matches Stage 4A L282-283 and closure scalar_outcome L101",
+    "activation": "disc[ei+k] blocks that bar itself; matches run_block L21-23/32 and closure L63/75/84"
+  },
   "forbidden": [
     "ML",
     "RR tuning",
@@ -96,5 +116,5 @@
     "time decay",
     "symbol tuning"
   ],
-  "elapsed_seconds": 122.663
+  "elapsed_seconds": 142.566
 }

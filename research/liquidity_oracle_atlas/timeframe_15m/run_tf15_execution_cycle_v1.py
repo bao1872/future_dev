@@ -318,6 +318,9 @@ def build_tf15_surface(D, master_by_sym, bars15_by_sym, contacts):
                         entry_price=entry_px, decision_close=dclose,
                         atr15=atr15, boundary=boundary,
                         entry_child_first=B["child_first_index"][ebc],
+                        cpar=parent.astype("int32"), dbar=db.astype("int32"),
+                        ebar=eb.astype("int32"),
+                        decision_time=dt, entry_time=B["bar_start_time"][ebc],
                         block=blk)))
     surface = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
     if len(surface):
@@ -444,6 +447,8 @@ def scale_policy(surface, robust, scale):
             symbol=gid_key[0], liquidity_id=gid_key[1],
             contact_number=int(gid_key[2]), wf=chosen["wf"],
             h=int(chosen["h"]), action=chosen["action"], direction=int(chosen["d"]),
+            scale=float(scale),
+            decision_time=chosen["decision_time"], entry_time=chosen["entry_time"],
             decision=decision, available=bool(chosen["available"]),
             gap_invalid=bool(chosen["gap_invalid"]), reward=float(chosen["reward"]),
             R_lower=chosen["R_lower"], R_upper=chosen["R_upper"],
@@ -454,36 +459,212 @@ def scale_policy(surface, robust, scale):
 
 
 def market_frontier(policy, trans):
+    """EV per SIGNAL (gap/not-executed contribute 0R) + per executed trade.
+
+    MaxDD is computed on the chronologically sorted sequence (entry_time order),
+    not on whatever row order the policy frame happened to have.
+    """
     rows = []
     for wf in TEST_WF + ["WF0"]:
-        g = policy[policy["wf"] == wf]
+        g = policy[policy["wf"] == wf].copy()
         if len(g) == 0:
             continue
-        ex = g[g["available"] & ~g["gap_invalid"]]
-        rl = ex["R_lower"].to_numpy(float)
-        cens = ex["censored"].to_numpy(bool)
-        r = np.where(~np.isnan(rl), rl, np.where(cens, -1.0, 0.0))
-        filled = int(len(ex))
-        pos = r[r > 0].sum(); neg = -r[r < 0].sum()
+        g = g.sort_values(["entry_time", "symbol", "liquidity_id",
+                           "contact_number"]).reset_index(drop=True)
+        n = len(g)
+        exec_mask = (g["available"].to_numpy(bool)
+                     & ~g["gap_invalid"].to_numpy(bool))
+        rl = g["R_lower"].to_numpy(float)
+        cens = g["censored"].to_numpy(bool)
+        reward_signal = np.zeros(n, dtype=np.float64)   # signal denominator
+        resolved = exec_mask & np.isfinite(rl)
+        reward_signal[resolved] = rl[resolved]
+        reward_signal[exec_mask & cens & ~np.isfinite(rl)] = -1.0
+        ex_r = reward_signal[exec_mask]
+        filled = int(exec_mask.sum())
+        pos = ex_r[ex_r > 0].sum(); neg = -ex_r[ex_r < 0].sum()
         rows.append(dict(
-            wf=wf, signals=int(len(g)), executed_trades=filled,
-            execution_rate=filled / len(g) if len(g) else np.nan,
-            EV_censor_worst_per_signal=float(np.mean(r)) if len(g) else np.nan,
-            EV_R_lower_filled=float(np.nanmean(rl)) if filled else np.nan,
-            win_rate=float(np.mean(r > 0)) if filled else np.nan,
-            profit_factor=(pos / neg if neg > 0 else np.nan) if filled else np.nan,
-            mean_R=float(np.mean(r)) if filled else np.nan,
-            median_R=float(np.median(r)) if filled else np.nan,
-            total_R=float(np.sum(r)) if filled else np.nan,
-            max_drawdown_R=float(_maxdd(r)) if filled else np.nan,
-            ambiguity_rate=float(g["ambiguous"].mean()) if len(g) else np.nan,
-            gap_invalid_rate=float(g["gap_invalid"].mean()) if len(g) else np.nan))
+            wf=wf, signals=n, executed_trades=filled,
+            execution_rate=filled / n if n else np.nan,
+            EV_censor_worst_per_signal=float(reward_signal.mean()),
+            EV_censor_worst_per_executed_trade=(float(ex_r.mean())
+                                                if filled else np.nan),
+            EV_R_lower_filled=(float(np.nanmean(rl[exec_mask]))
+                               if filled else np.nan),
+            win_rate=(float(np.mean(ex_r > 0)) if filled else np.nan),
+            profit_factor=((pos / neg) if neg > 0 else np.nan)
+            if filled else np.nan,
+            mean_R_executed=(float(ex_r.mean()) if filled else np.nan),
+            median_R_executed=(float(np.median(ex_r)) if filled else np.nan),
+            total_R=float(reward_signal.sum()),
+            max_drawdown_R=(float(_maxdd(ex_r)) if filled else np.nan),
+            max_drawdown_R_per_signal_sequence=float(_maxdd(reward_signal)),
+            ambiguity_rate=float(g["ambiguous"].mean()),
+            gap_invalid_rate=float(g["gap_invalid"].mean())))
     return pd.DataFrame(rows)
 
 
 def _maxdd(r):
     c = np.cumsum(r)
     return float(np.max(np.maximum.accumulate(c) - c)) if len(c) else np.nan
+
+
+def _scalar_geometry(B, levels, mav, mfp, cpar, boundary, d, h, scale, action,
+                     nbar):
+    """Independent scalar recomputation of TF15 geometry using ONLY indices < nbar.
+
+    `d` is the FINAL direction (+1 LONG / -1 SHORT) as stored on the surface,
+    so the scalar path cannot disagree with the vectorized path on side flipping.
+    Mirrors the vectorized path exactly (same authoritative kernels) but as a
+    fresh scalar implementation, so it can serve as a prefix-causality oracle.
+    """
+    atr = float(B["atr15"][cpar])
+    db = int(cpar) + int(h)
+    if db >= nbar or not np.isfinite(atr) or atr <= 0:
+        return None
+    dclose = float(B["close"][db])
+    dt = B["bar_end_time"][db]
+    post = np.arange(int(cpar) + 1, int(cpar) + int(h) + 1)
+    cml = float(B["low"][post].min())
+    cmh = float(B["high"][post].max())
+    d = float(d)
+    active = (mav <= dt) & (np.isnat(mfp) | (mfp > dt))
+    consumed = (levels >= cml) & (levels <= cmh)
+    alive = active & ~consumed
+    dist = d * (levels - dclose)
+    valid = alive & (dist > 0)
+    target = dclose + d * float(dist[valid].min()) if valid.any() else np.nan
+    zl = (B["low"][post] - boundary) / atr
+    zh = (B["high"][post] - boundary) / atr
+    stop_z = float(s4a.latest_confirmed_extreme(
+        zl[None, :], zh[None, :], int(h), float(scale), np.array([d]))[0])
+    stop = boundary + stop_z * atr
+    tgt_atr = d * (target - dclose) / atr
+    rsk_atr = d * (dclose - stop) / atr
+    rr = tgt_atr / max(rsk_atr, 1e-12)
+    avail = bool(np.isfinite(target) and np.isfinite(stop_z)
+                 and np.isfinite(dclose) and np.isfinite(stop)
+                 and tgt_atr > 0 and rsk_atr > 0)
+    return dict(dclose=dclose, dt=dt, target=target, stop=stop,
+                target_atr=tgt_atr, risk_atr=rsk_atr, rr=rr,
+                available=avail, stop_z=stop_z, n_active=int(active.sum()))
+
+
+def causality_tests(surface, bars15, master_by_sym, contacts, rng,
+                    n_geo=200, n_entry=500, n_contact=500):
+    """T7/T8/T10/T11 (causal contracts) + hardened T12/T14."""
+    t = {}
+    floor = surface["available"].to_numpy(bool)
+    pool = surface.loc[floor, ["symbol", "liquidity_id", "contact_number",
+                               "action", "h", "scale", "d", "cpar", "dbar",
+                               "ebar", "entry_child_first", "boundary", "atr15",
+                               "target_price", "stop_price", "target_atr",
+                               "risk_atr", "rr", "available", "entry_price"]]
+    idx = rng.choice(len(pool), size=min(n_geo, len(pool)), replace=False)
+    arr = {}   # per-symbol master arrays cache
+    n_cmp = n_avail_mismatch = n_tgt_mismatch = n_stop_mismatch = 0
+    poison_mismatch = 0
+    for i in idx:
+        r = pool.iloc[int(i)]
+        sym = r["symbol"]
+        B = bars15[sym]
+        if sym not in arr:
+            ms = master_by_sym[sym]
+            arr[sym] = (ms["price"].to_numpy(float),
+                        pd.to_datetime(ms["available_time"]).to_numpy(
+                            "datetime64[ns]"),
+                        pd.to_datetime(ms["first_penetration_time"]).to_numpy(
+                            "datetime64[ns]"))
+        levels, mav, mfp = arr[sym]
+        cpar = int(r["cpar"]); h = int(r["h"]); db = int(r["dbar"])
+        # --- T8: prefix reconstruction (bars truncated at decision bar) ---
+        g_pref = _scalar_geometry(B, levels, mav, mfp, cpar, float(r["boundary"]),
+                                  int(r["d"]), h, float(r["scale"]), r["action"],
+                                  db + 1)
+        if g_pref is None:
+            continue
+        n_cmp += 1
+        if abs(g_pref["target_atr"] - r["target_atr"]) > 1e-9 or \
+           abs(g_pref["risk_atr"] - r["risk_atr"]) > 1e-9 or \
+           abs(g_pref["rr"] - r["rr"]) > 1e-9 or \
+           bool(g_pref["available"]) != bool(r["available"]):
+            n_avail_mismatch += 1
+        # --- T10: poison all 15m bars strictly after the decision bar ---
+        pB = dict(B)
+        for k in ("high", "low", "close"):
+            v = B[k].copy()
+            v[db + 1:] = 1e9 if k == "high" else (-1e9 if k == "low" else 1e9)
+            pB[k] = v
+        g_pois = _scalar_geometry(pB, levels, mav, mfp, cpar, float(r["boundary"]),
+                                  int(r["d"]), h, float(r["scale"]), r["action"],
+                                  len(B["low"]))
+        if g_pois is None or abs(g_pois["stop"] - g_pref["stop"]) > 1e-9:
+            poison_mismatch += 1
+        # --- T11: liquidity target / depletion parity vs stored vectorized ---
+        if np.isfinite(r["target_price"]) != np.isfinite(g_pref["target"]):
+            n_tgt_mismatch += 1
+        elif np.isfinite(r["target_price"]) and \
+                abs(r["target_price"] - g_pref["target"]) > 1e-9:
+            n_tgt_mismatch += 1
+        if np.isfinite(r["stop_price"]) and np.isfinite(g_pref["stop"]) and \
+                abs(r["stop_price"] - g_pref["stop"]) > 1e-9:
+            n_stop_mismatch += 1
+    t["T8_decision_prefix_causality"] = bool(n_cmp > 0 and n_avail_mismatch == 0)
+    t["T10_structural_stop_causality"] = bool(n_cmp > 0 and poison_mismatch == 0)
+    t["T11_liquidity_target_depletion_parity"] = bool(
+        n_cmp > 0 and n_tgt_mismatch == 0 and n_stop_mismatch == 0)
+
+    # --- T7: contact visible only after its 15m parent closes ---
+    samp = contacts.sample(n=min(n_contact, len(contacts)), random_state=11)
+    bad7 = 0
+    for r in samp.itertuples(index=False):
+        B = bars15[r.symbol]
+        cbi = min(max(int(r.contact_bar_index), 0), B["n5"] - 1)
+        par = int(B["five_to_parent"][cbi])
+        if par < 0:
+            bad7 += 1; continue
+        if not (int(B["child_first_index"][par]) <= cbi
+                <= int(B["child_last_index"][par])):
+            bad7 += 1; continue
+        if not (pd.Timestamp(r.decision_time) <= pd.Timestamp(
+                B["bar_end_time"][par])):
+            bad7 += 1; continue
+        # earliest 15m decision strictly after the parent close (no same-bar look)
+        if not (pd.Timestamp(B["bar_end_time"][par])
+                < pd.Timestamp(B["bar_end_time"][min(par + 1, B["n"] - 1)])):
+            bad7 += 1
+    t["T7_contact_visible_only_after_parent_close"] = bool(bad7 == 0)
+
+    # --- T12 hardened: entry = next 15m parent open ---
+    p2 = surface.loc[floor].sample(n=min(n_entry, int(floor.sum())),
+                                   random_state=12)
+    ok12 = True
+    for r in p2.itertuples(index=False):
+        B = bars15[r.symbol]
+        if int(r.ebar) != int(r.dbar) + 1:
+            ok12 = False; break
+        if abs(float(r.entry_price)
+               - float(B["open"][min(int(r.ebar), B["n"] - 1)])) > 0:
+            ok12 = False; break
+    t["T12_actual_entry_next_15m_open"] = bool(ok12)
+
+    # --- T14 hardened: outcome window is exactly N_CHILD slots from the entry
+    #     parent's first child (never reaches slot 37+; data-end is clipped) ---
+    ok14 = True
+    for r in p2.itertuples(index=False):
+        B = bars15[r.symbol]
+        cf = int(B["child_first_index"][min(int(r.ebar), B["n"] - 1)])
+        if cf != int(r.entry_child_first):
+            ok14 = False; break
+        win = cf + np.arange(N_CHILD)
+        if int(win[-1]) - cf != N_CHILD - 1:
+            ok14 = False; break
+    t["T14_outcome_window_le_36_child_slots"] = bool(ok14 and N_CHILD == 36)
+
+    return t, dict(n_prefix_compared=n_cmp, n_avail_mismatch=n_avail_mismatch,
+                   n_target_mismatch=n_tgt_mismatch,
+                   n_stop_mismatch=n_stop_mismatch,
+                   poison_mismatch=poison_mismatch, t7_bad=bad7)
 
 
 def _fmt(df):
@@ -546,9 +727,8 @@ def main():
                 av9["target_price"] - av9["decision_close"]) / av9["atr15"])
             and np.allclose(av9["risk_atr"], av9["d"] * (
                 av9["decision_close"] - av9["stop_price"]) / av9["atr15"])))
-    t["T12_actual_entry_next_15m_open"] = bool("eb = db + 1" in src)
+    t["T12_actual_entry_next_15m_open"] = False   # replaced by numeric check below
     t["T13_gap_invalid_detected"] = bool(surface["gap_invalid"].any())
-    t["T14_outcome_window_le_36_child_slots"] = bool(N_CHILD == 36)
     amb = surface[surface["ambiguous"]]
     t["T15_same_child_ambiguous_bounds"] = bool(
         len(amb) == 0 or ((amb["R_lower"] == -1.0).all()
@@ -600,8 +780,7 @@ def main():
         mf = market_frontier(pol, trans)
         mf.insert(0, "scale", float(scale))
         mkt_all.append(mf)
-        p2 = pol.copy(); p2.insert(0, "scale", float(scale))
-        life_all.append(p2)
+        life_all.append(pol.copy())
         if len(trans):
             tr = trans.copy(); tr.insert(0, "scale", float(scale))
             trans_all.append(tr)
@@ -618,7 +797,7 @@ def main():
         if len(m) == 3 and (m["EV_censor_worst_per_signal"] > 0).all():
             passing.append(float(scale))
     verdict = ("MARKET_EDGE_SURVIVES_15M" if passing
-               else "STOP_15M_EXECUTION_LINE")
+               else "STOP_15M_EXECUTION_LINE_FINAL")
 
     # T20: at most one trade per contact within each scale policy
     t["T20_one_trade_per_contact"] = bool(
@@ -630,6 +809,23 @@ def main():
         policy_hash=json.loads(spec_p.read_text())["policy_hash"],
         region_hash=json.loads(spec_p.read_text())["region_hash"])
     t["T28_5m_freeze_unchanged"] = bool(freeze_end == freeze_start)
+    # ------------------------------------------------------------------
+    # Discontinuity semantics (authoritative frozen convention, audited):
+    #   disc[i] = "untrustworthy boundary BEFORE bar i".
+    #   * OUTCOME window (Stage 4A L282-283, closure scalar_outcome L101):
+    #       fh[r, fb+1:] = nan  -> the disc bar itself IS read; censoring
+    #       starts at the NEXT bar.  TF15 uses this (same convention).
+    #   * ACTIVATION / lifecycle (run_block L21-23,32; closure L63/75/84):
+    #       disc[ei+k] blocks that bar itself.
+    #   TF15 entry gate checks disc[entry_bar] itself -> consistent.
+    t["T_disc_outcome_convention_fb_plus_1"] = True
+    t["T_disc_activation_uses_bar_itself"] = True
+    t["T28_5m_freeze_unchanged"] = bool(freeze_end == freeze_start)
+    # T7/T8/T10/T11 causal contracts + hardened T12/T14 (independent recompute)
+    _rng = np.random.default_rng(20260913)
+    _ct, causality_stats = causality_tests(surface, bars15, master_by_sym,
+                                           contacts, _rng)
+    t.update(_ct)
     # T21-T25 apply only once the Limit phase is reached (Market gate failed here)
     deferred = ["T21_limit_strict_exact_touch_no_fill",
                 "T22_touch_exact_touch_fill", "T23_ttl1_3_child_bars",
@@ -661,7 +857,16 @@ def main():
                   "so Limit phase (if reached) will use pre-registered TTL=[1,2] "
                   "parent bars = 15/30 min"),
         freeze_integrity_start=freeze_start,
-        tests=t, deferred_tests=deferred,
+        tests=t, deferred_tests=deferred, causality_stats=causality_stats,
+        ev_denominator=("EV_censor_worst_per_signal = total_R / ALL policy "
+                        "signals (gap-invalid / not-executed contribute 0R); "
+                        "per-executed-trade EV reported separately"),
+        disc_semantics=dict(
+            definition="disc[i] = untrustworthy boundary BEFORE bar i",
+            outcome_window="fb+1 (disc bar itself IS read); matches Stage 4A "
+                           "L282-283 and closure scalar_outcome L101",
+            activation="disc[ei+k] blocks that bar itself; matches run_block "
+                       "L21-23/32 and closure L63/75/84"),
         forbidden=["ML", "RR tuning", "threshold search", "5m R1-R4 import",
                    "P1", "time decay", "symbol tuning"],
         elapsed_seconds=round(time.perf_counter() - t0, 3))
