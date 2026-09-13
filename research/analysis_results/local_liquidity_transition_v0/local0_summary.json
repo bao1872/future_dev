@@ -220,5 +220,17 @@
     "G_bootstrap_verdict_obtained": true
   },
   "LOCAL0_CLOSED": true,
-  "verdict_interpretation": "local upper/lower geometry contains stable OOS information about which frozen boundary is penetrated first. NOT evidence for SMC, path memory, latent state, PGM or RL."
+  "verdict_interpretation": "local upper/lower geometry contains stable OOS information about which frozen boundary is penetrated first. NOT evidence for SMC, path memory, latent state, PGM or RL.",
+  "attribution_closure": {
+    "local01_summary": "local01_summary.json",
+    "primary": {
+      "delta": "M3_GEOMETRY_SYMBOL - M1_SYMBOL_ONLY",
+      "mean_delta_logloss": -0.09910791895301072,
+      "ci_lo": -0.11041016013281382,
+      "ci_hi": -0.0887998239162068,
+      "verdict": "LOCAL_GEOMETRY_CONDITIONAL_INCREMENT_SUPPORTED"
+    },
+    "local0_closed": true,
+    "verdict": "LOCAL_GEOMETRY_CONDITIONAL_INCREMENT_SUPPORTED"
+  }
 }

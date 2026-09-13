@@ -1,0 +1,187 @@
+{
+  "experiment": "LOCAL-0.1 local geometry attribution closure",
+  "base_commit": "534de62e0182bf6da9410d6cee2375b4393d57b2",
+  "question": "Does the frozen B1-B0 improvement come from geometry, or from symbol base-rate differences?",
+  "data": {
+    "source": "gitignored LOCAL-0 sample cache (no rebuild)",
+    "sample_counts": {
+      "tb1_resolved_before_purge": 114898,
+      "tb1_resolved_after_purge": 114095,
+      "tb2_resolved": 124612
+    },
+    "expected": {
+      "tb1_resolved_before_purge": 114898,
+      "tb1_resolved_after_purge": 114095,
+      "tb2_resolved": 124612
+    },
+    "tb2_start_time": "2025-06-09 21:05:00",
+    "train_row_key_sha256": "6e251a56b5f55e636cec19f9d323a35a888f184f96e7fc6f43af8c44b8a3c3b2",
+    "test_row_key_sha256": "b911116e35ae0313ba5734178307e791b249ea0c8a398f9f7952989738db3e1f"
+  },
+  "model_specs": {
+    "M0_GLOBAL_PRIOR": {
+      "num": [],
+      "cat": []
+    },
+    "M1_SYMBOL_ONLY": {
+      "num": [],
+      "cat": [
+        "symbol"
+      ]
+    },
+    "M2_GEOMETRY_ONLY": {
+      "num": [
+        "up_distance_R",
+        "down_distance_R",
+        "width_R",
+        "log_distance_ratio"
+      ],
+      "cat": []
+    },
+    "M3_GEOMETRY_SYMBOL": {
+      "num": [
+        "up_distance_R",
+        "down_distance_R",
+        "width_R",
+        "log_distance_ratio"
+      ],
+      "cat": [
+        "symbol"
+      ]
+    }
+  },
+  "metrics": {
+    "M0_GLOBAL_PRIOR": {
+      "model": "M0_GLOBAL_PRIOR",
+      "n": 124612,
+      "logloss": 0.6930189280542756,
+      "brier": 0.24993587399737824,
+      "ece_up": 0.017657167284562236,
+      "ece_down": 0.017657167284562236,
+      "up_pct": 0.5193881809135557,
+      "down_pct": 0.48061181908644435
+    },
+    "M1_SYMBOL_ONLY": {
+      "model": "M1_SYMBOL_ONLY",
+      "n": 124612,
+      "logloss": 0.6928665361439083,
+      "brier": 0.24985396404246818,
+      "ece_up": 0.017657693585724128,
+      "ece_down": 0.017657693585724204,
+      "up_pct": 0.5193881809135557,
+      "down_pct": 0.48061181908644435
+    },
+    "M2_GEOMETRY_ONLY": {
+      "model": "M2_GEOMETRY_ONLY",
+      "n": 124612,
+      "logloss": 0.5925973546603013,
+      "brier": 0.20348207294001752,
+      "ece_up": 0.016568770039005542,
+      "ece_down": 0.01656877003900554,
+      "up_pct": 0.5193881809135557,
+      "down_pct": 0.48061181908644435
+    },
+    "M3_GEOMETRY_SYMBOL": {
+      "model": "M3_GEOMETRY_SYMBOL",
+      "n": 124612,
+      "logloss": 0.5938093809219754,
+      "brier": 0.2039953173098139,
+      "ece_up": 0.0180042115133877,
+      "ece_down": 0.01800421151338768,
+      "up_pct": 0.5193881809135557,
+      "down_pct": 0.48061181908644435
+    }
+  },
+  "bootstrap": {
+    "M3_GEOMETRY_SYMBOL - M1_SYMBOL_ONLY": {
+      "n_days": 102,
+      "n_boot": 1000,
+      "seed": 20260913,
+      "mean_delta_logloss": -0.09910791895301072,
+      "ci_lo": -0.11041016013281382,
+      "ci_hi": -0.0887998239162068,
+      "verdict": "LOCAL_GEOMETRY_INCREMENT_SUPPORTED",
+      "role": "PRIMARY",
+      "model_a": "M1_SYMBOL_ONLY",
+      "model_b": "M3_GEOMETRY_SYMBOL",
+      "delta": "M3_GEOMETRY_SYMBOL - M1_SYMBOL_ONLY"
+    },
+    "M2_GEOMETRY_ONLY - M0_GLOBAL_PRIOR": {
+      "n_days": 102,
+      "n_boot": 1000,
+      "seed": 20260913,
+      "mean_delta_logloss": -0.10050475476831704,
+      "ci_lo": -0.11211016370606723,
+      "ci_hi": -0.09044034801906711,
+      "verdict": "LOCAL_GEOMETRY_INCREMENT_SUPPORTED",
+      "role": "SECONDARY",
+      "model_a": "M0_GLOBAL_PRIOR",
+      "model_b": "M2_GEOMETRY_ONLY",
+      "delta": "M2_GEOMETRY_ONLY - M0_GLOBAL_PRIOR"
+    },
+    "M1_SYMBOL_ONLY - M0_GLOBAL_PRIOR": {
+      "n_days": 102,
+      "n_boot": 1000,
+      "seed": 20260913,
+      "mean_delta_logloss": -0.00022597469552270612,
+      "ci_lo": -0.003187131575203497,
+      "ci_hi": 0.002795764590767524,
+      "verdict": "LOCAL_GEOMETRY_INCREMENT_AMBIGUOUS",
+      "role": "DIAGNOSTIC",
+      "model_a": "M0_GLOBAL_PRIOR",
+      "model_b": "M1_SYMBOL_ONLY",
+      "delta": "M1_SYMBOL_ONLY - M0_GLOBAL_PRIOR"
+    },
+    "M3_GEOMETRY_SYMBOL - M2_GEOMETRY_ONLY": {
+      "n_days": 102,
+      "n_boot": 1000,
+      "seed": 20260913,
+      "mean_delta_logloss": 0.0011708611197835733,
+      "ci_lo": -0.0008097844118953924,
+      "ci_hi": 0.0030941331865348516,
+      "verdict": "LOCAL_GEOMETRY_INCREMENT_AMBIGUOUS",
+      "role": "DIAGNOSTIC",
+      "model_a": "M2_GEOMETRY_ONLY",
+      "model_b": "M3_GEOMETRY_SYMBOL",
+      "delta": "M3_GEOMETRY_SYMBOL - M2_GEOMETRY_ONLY"
+    }
+  },
+  "primary": {
+    "delta": "M3_GEOMETRY_SYMBOL - M1_SYMBOL_ONLY",
+    "mean_delta_logloss": -0.09910791895301072,
+    "ci_lo": -0.11041016013281382,
+    "ci_hi": -0.0887998239162068,
+    "verdict": "LOCAL_GEOMETRY_CONDITIONAL_INCREMENT_SUPPORTED"
+  },
+  "secondary": {
+    "delta": "M2_GEOMETRY_ONLY - M0_GLOBAL_PRIOR",
+    "mean_delta_logloss": -0.10050475476831704,
+    "ci_lo": -0.11211016370606723,
+    "ci_hi": -0.09044034801906711
+  },
+  "by_symbol": {
+    "n_symbols": 15,
+    "n_delta_negative": 15,
+    "n_delta_positive": 0,
+    "min": -0.14312310403640216,
+    "max": -0.06972798691254423
+  },
+  "calibration_note": "geometry improves proper scoring rules (logloss/Brier) but has NOT been shown to improve calibration: on TB2 resolved, ECE_UP M0=0.017657, M3=0.018004. These probabilities must not be called a calibrated belief state.",
+  "interpretation": "Conditional on symbol-specific base-rate information, local geometry of the nearest frozen upper/lower liquidity boundary carries stable TB1->TB2 OOS probability information about which frozen boundary is penetrated first.",
+  "forbidden_claims": [
+    "stable across all regimes",
+    "long-term stable",
+    "SMC works",
+    "path memory proven",
+    "belief calibrated",
+    "PGM/RL validated"
+  ],
+  "local0_closed": true,
+  "verdict": "LOCAL_GEOMETRY_CONDITIONAL_INCREMENT_SUPPORTED",
+  "timing": {
+    "cache_load_seconds": 0.29,
+    "fit_seconds": 0.39,
+    "bootstrap_seconds": 0.03,
+    "total_seconds": 0.81
+  }
+}
