@@ -564,14 +564,25 @@ def sequential_curve(features: pd.DataFrame, sel: dict, bars_by_sym: dict, which
 # ---------------------------------------------------------------------------
 # Metrics
 # ---------------------------------------------------------------------------
-def compute_metrics(rr, decision_day=None, label="signals"):
+def compute_metrics(rr, decision_day=None, decision_time=None, label="signals",
+                    ev_label="EV_per_signal"):
     """label: 'signals' for paired counterfactual (no one-position filter),
-    'trades' for sequential (one position per symbol). P1-3."""
+    'trades' for sequential (one position per symbol). P1-3.
+    ev_label: column name for per-unit EV ('EV_per_signal' paired,
+    'EV_per_executed_trade' sequential).
+
+    decision_time: if provided, PATH-DEPENDENT metrics (cumulative R, max_DD_R,
+    normalized 0.5%-risk drawdown, max_DD_pct_0p5risk, longest drawdown) are computed
+    on the CHRONOLOGICAL ordering of (decision_time, rr). This matters for paired
+    metrics, whose rows arrive in symbol-major concat order, not market-chronological
+    order. EV / win_rate / avg win-loss / PF / total_R are order-independent -> raw rr."""
     rr = np.asarray(rr, dtype=float)
-    rr = rr[np.isfinite(rr)]
+    finite = np.isfinite(rr)
+    rr = rr[finite]
     n = len(rr)
     if n == 0:
         return dict(n=0)
+    # ---- order-independent metrics (raw rr) ----
     wins = rr[rr > 0]
     losses = rr[rr < 0]
     mw = float(wins.mean()) if len(wins) else np.nan
@@ -582,23 +593,30 @@ def compute_metrics(rr, decision_day=None, label="signals"):
     pf = (sw / sl) if sl > 0 else np.nan
     ev = float(rr.mean())
     total_R = float(rr.sum())
-    # P1-1: primary drawdown in R units (cumulative sum of per-signal R).
-    cum_R = np.r_[0.0, np.cumsum(rr)]
+    # ---- path-dependent metrics: sort to true chronological order ----
+    if decision_time is not None:
+        dt = np.asarray(pd.to_datetime(np.asarray(decision_time)))[finite]
+        rr_path = rr[np.argsort(dt, kind="stable")]
+    else:
+        rr_path = rr
+    # P1-1: primary drawdown in R units (cumulative sum of chronological per-signal R).
+    cum_R = np.r_[0.0, np.cumsum(rr_path)]
     peak_R = np.maximum.accumulate(cum_R)
     dd_R = cum_R - peak_R
     max_DD_R = float(-dd_R.min())
     # P1-2: 0.5%-risk normalized account drawdown — SEPARATE metric, NOT a real margin
     # backtest. Kept only for descriptive comparison.
-    equity = np.cumprod(1.0 + 0.005 * rr)
+    equity = np.cumprod(1.0 + 0.005 * rr_path)
     peak = np.maximum.accumulate(equity)
     dd = equity / peak - 1.0
     max_DD_pct_0p5risk = float(dd.min() * 100)  # NOT_REAL_MARGIN_BACKTEST
     m = dict(n=int(n), win_rate=float((rr > 0).mean()),
              avg_win_R=mw, avg_loss_R=ml, payoff_ratio=payoff,
-             profit_factor=pf, EV_per_signal=ev, total_R=total_R,
+             profit_factor=pf, total_R=total_R,
              max_DD_R=max_DD_R,
              max_DD_pct_0p5risk=max_DD_pct_0p5risk,  # NOT_REAL_MARGIN_BACKTEST
              totalR_over_maxDD=(total_R / max_DD_R if max_DD_R > 0 else np.nan))
+    m[ev_label] = ev
     if decision_day is not None:
         days = pd.to_datetime(np.asarray(decision_day)).values
         if len(days):
@@ -1323,14 +1341,31 @@ def run_g2_closure_audit():
     guards["K_execution_parity"] = dict(pass_=bool(k_ok))
 
     # ---- Guard L: WF1 sequential TB2-only (P0-4) ----
-    seq_executed = 0
+    executed_by_selector = {}
     for name in ("t0", "t1", "t2"):
         sc = sequential_curve(test_feats, sel_test, bars_cache, which=name)
-        seq_executed += int(sc["executed"].sum())
+        executed_by_selector[name] = int(sc["executed"].sum())
     l_ok = (int(test_feats["signal_gid"].nunique()) == HARDENED_N_TEST_SIGNALS)
     guards["L_sequential_tb2_only"] = dict(pass_=bool(l_ok),
         n_input_signals=int(test_feats["signal_gid"].nunique()),
-        expected_n_test_signals=HARDENED_N_TEST_SIGNALS, n_sequential_executed=seq_executed)
+        expected_n_test_signals=HARDENED_N_TEST_SIGNALS,
+        executed_by_selector=executed_by_selector)
+
+    # ---- Guard M: metric chronology (P1 paired drawdown) ----
+    dt_paired = pd.to_datetime(rewards_test["decision_time"]).to_numpy()
+    order_m = np.argsort(dt_paired, kind="stable")
+    rr_t2_path = r_t2[order_m]
+    cum_m = np.r_[0.0, np.cumsum(rr_t2_path)]
+    peak_m = np.maximum.accumulate(cum_m)
+    mdd_chrono = float(-(cum_m - peak_m).min())
+    sorted_ts = dt_paired[order_m].astype("datetime64[ns]")
+    ts_monotonic = bool(np.all(np.diff(sorted_ts) >= np.timedelta64(0, "ns")))
+    prev_t2 = prev[prev["selector"] == "T2_GraphEV"]
+    prev_t2_mdd = float(prev_t2["max_DD_R"].iloc[0]) if len(prev_t2) else np.nan
+    m_ok = ts_monotonic and abs(mdd_chrono - prev_t2_mdd) < 1e-9
+    guards["M_metric_chronology"] = dict(pass_=bool(m_ok),
+        t2_max_DD_R_chronological=mdd_chrono, g2_summary_t2_max_DD_R=prev_t2_mdd,
+        sorted_timestamps_monotonic=ts_monotonic)
 
     # ---- final closure judgement ----
     all_pass = all(g.get("pass_", False) for g in guards.values())
@@ -1450,6 +1485,40 @@ def run_execution_parity(n_random=600, seed=1):
     return True
 
 
+def run_metric_chronology_test():
+    """P1: path-dependent metrics MUST be computed on chronological order.
+    Hand-check R=[+2,-1,-1] with shuffled timestamps, then 100 random permutations
+    of the same (timestamp, R) pairs must leave max_DD_R invariant."""
+    # hand check: chronological order (Jan1,-1),(Jan2,-1),(Jan3,+2) -> maxDD = 2.0
+    rr = np.array([2.0, -1.0, -1.0])
+    ts = pd.to_datetime(["2025-01-03", "2025-01-01", "2025-01-02"])
+    m = compute_metrics(rr, decision_time=ts)
+    if abs(m["max_DD_R"] - 2.0) > 1e-9:
+        print("STOP_METRIC_CHRONOLOGY_FAIL hand-check max_DD_R=", m["max_DD_R"])
+        return False
+    # order-independent metrics must be identical with/without decision_time
+    m_raw = compute_metrics(rr)
+    if abs(m["total_R"] - m_raw["total_R"]) > 1e-12 or \
+       abs(m["EV_per_signal"] - m_raw["EV_per_signal"]) > 1e-12:
+        print("STOP_METRIC_CHRONOLOGY_FAIL order-independent drift")
+        return False
+    # shuffle-invariance: same (timestamp, R) pairs, permuted together -> sorted order
+    # recovers the same chronology, so max_DD_R must not change.
+    rng = np.random.default_rng(7)
+    base_ts = pd.date_range("2025-01-01", periods=20, freq="D")
+    base_rr = rng.normal(0, 1, size=20)
+    ref = compute_metrics(base_rr, decision_time=base_ts)["max_DD_R"]
+    ts_arr = np.asarray(base_ts)
+    for _ in range(100):
+        perm = rng.permutation(20)
+        mp = compute_metrics(base_rr[perm], decision_time=ts_arr[perm])["max_DD_R"]
+        if abs(mp - ref) > 1e-12:
+            print("STOP_METRIC_CHRONOLOGY_FAIL shuffle max_DD_R=", mp, "ref=", ref)
+            return False
+    print("METRIC CHRONOLOGY OK (hand-check + 100 shuffle permutations invariant)")
+    return True
+
+
 def run_component_tests():
     """Lightweight correctness harness (no economics). Returns True if all pass."""
     rng = np.random.default_rng(0)
@@ -1504,6 +1573,9 @@ def run_component_tests():
     # 4) execution parity vs scalar oracle (P0-2)
     if not run_execution_parity(n_random=600, seed=1):
         fails.append("execution parity FAIL")
+    # 5) metric chronology invariance (P1)
+    if not run_metric_chronology_test():
+        fails.append("metric chronology FAIL")
     if fails:
         print("STOP_COMPONENT_TEST_FAIL")
         for f in fails[:10]:
@@ -1664,11 +1736,13 @@ def run_g2(symbols, max_signals, force_rebuild, cache_nodes):
     sel_test = select_targets(test_feats, ev_g_test, ev_i_test)
     rewards_test = compute_rewards(test_feats, sel_test, bars_cache)
 
-    # ---- paired metrics ----
+    # ---- paired metrics (path metrics chronological by decision_time) ----
     paired = {}
     for name in ("t0", "t1", "t2"):
         paired[name] = compute_metrics(rewards_test[f"reward_{name}"].to_numpy(),
-                                       rewards_test["trading_day"].to_numpy())
+                                       rewards_test["trading_day"].to_numpy(),
+                                       decision_time=rewards_test["decision_time"].to_numpy(),
+                                       label="signals")
 
     # ---- primary gate (paired counterfactual) ----
     r_t0 = rewards_test["reward_t0"].to_numpy()
@@ -1697,7 +1771,8 @@ def run_g2(symbols, max_signals, force_rebuild, cache_nodes):
         sc = sequential_curve(test_feats, sel_test, bars_cache, which=name)
         ex = sc[sc["executed"]]
         seq[name] = compute_metrics(ex["realized_R"].to_numpy(), ex["trading_day"].to_numpy(),
-                                     label="trades")
+                                     decision_time=ex["entry_time"].to_numpy(),
+                                     label="trades", ev_label="EV_per_executed_trade")
 
     # ---- G0 Feature Attribution (fixed nested models; EXACT hardened transition
     #      risk-set; NLL/Brier only; NOT in economic PASS/FAIL) ----

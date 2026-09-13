@@ -10,4 +10,5 @@ H_t1_replay,True,"{'replay_t1': -0.05754341052260602, 'g2_summary_t1': -0.057543
 I_t0_t2_replay,True,"{'replay_t0': -0.0175271771225042, 'g2_summary_t0': -0.0175271771225042, 'replay_t2': -0.04114699307259559, 'g2_summary_t2': -0.0411469930725955, 'replay_T2T0_ci': [-0.04885486829054667, -0.000727351750919875], 'g2_summary_T2T0_ci': [-0.0488548682905466, -0.0007273517509198], 'ev_match': True, 'bs_match': True}"
 J_samebar_signal_universe,True,"{'n_test_signals': 24954, 'n_test_nodes': 812027, 'n_reached_nodes': 31153, 'rate_max_batch_ge_2': 0.17488178247976277, 'rate_max_batch_ge_3': 0.06011060351045924, 'rate_max_batch_ge_4': 0.020477678929229783, 'batch_size_1': 17865, 'batch_size_2': 3710, 'batch_size_3': 1100, 'batch_size_ge4': 518, 'fraction_reached_nodes_in_multinode_batch': 0.4265399800982249, 'ambiguous_with_stop_node_rate': 0.0008177068003896422, 'expected_n_test_signals': 24954}"
 K_execution_parity,True,{}
-L_sequential_tb2_only,True,"{'n_input_signals': 24954, 'expected_n_test_signals': 24954, 'n_sequential_executed': 25679}"
+L_sequential_tb2_only,True,"{'n_input_signals': 24954, 'expected_n_test_signals': 24954, 'executed_by_selector': {'t0': 10137, 't1': 7239, 't2': 8303}}"
+M_metric_chronology,True,"{'t2_max_DD_R_chronological': 1335.0946626955215, 'g2_summary_t2_max_DD_R': 1335.0946626955215, 'sorted_timestamps_monotonic': True}"
