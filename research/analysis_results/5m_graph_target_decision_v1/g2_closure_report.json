@@ -1,8 +1,8 @@
 {
-  "closure": "CLOSURE_FAIL",
-  "verdict": "CLOSURE_FAIL",
+  "closure": "CLOSED",
+  "verdict": "NO_GRAPH_TARGET_ECONOMIC_INCREMENT_WF1",
   "g0_probability_structure": "GRAPH_STRUCTURE_NECESSITY_WF1_HARDENED_PASS",
-  "economic_decision": "STATIC_GRAPH_TARGET_DECISION_FAIL",
+  "economic_decision": "NO_GRAPH_TARGET_ECONOMIC_INCREMENT_WF1",
   "guards": {
     "A_purge_baseline": {
       "pass_": true,
@@ -107,68 +107,169 @@
         }
       ]
     },
-    "F_zero_node_universe": {
+    "F_cache_provenance": {
       "pass_": true,
-      "n_hardened_test_signals": 24954,
-      "n_g2_candidate_signals": 24954,
-      "n_zero_node_signals": 0,
-      "expected_diff": 0,
-      "by_symbol": {
-        "AG": 0,
-        "AL": 0,
-        "AU": 0,
-        "CF": 0,
-        "CU": 0,
-        "I": 0,
-        "M": 0,
-        "MA": 0,
-        "NI": 0,
-        "P": 0,
-        "RB": 0,
-        "RU": 0,
-        "SC": 0,
-        "SN": 0,
-        "TA": 0
+      "n_symbols": 15,
+      "provenance": {
+        "AG": {
+          "builder_version": "G2-VEC-1",
+          "master_hash": "9a48cc35987b",
+          "contacts_hash": "e172c39dccb8",
+          "sig_hash": "9691c2816f36",
+          "n_signals": 5599
+        },
+        "AL": {
+          "builder_version": "G2-VEC-1",
+          "master_hash": "9a48cc35987b",
+          "contacts_hash": "e172c39dccb8",
+          "sig_hash": "b56bdefc95d3",
+          "n_signals": 6990
+        },
+        "AU": {
+          "builder_version": "G2-VEC-1",
+          "master_hash": "9a48cc35987b",
+          "contacts_hash": "e172c39dccb8",
+          "sig_hash": "2c010ca67da0",
+          "n_signals": 5575
+        },
+        "CF": {
+          "builder_version": "G2-VEC-1",
+          "master_hash": "9a48cc35987b",
+          "contacts_hash": "e172c39dccb8",
+          "sig_hash": "ab4c8ff7af85",
+          "n_signals": 7826
+        },
+        "CU": {
+          "builder_version": "G2-VEC-1",
+          "master_hash": "9a48cc35987b",
+          "contacts_hash": "e172c39dccb8",
+          "sig_hash": "3240f26d3391",
+          "n_signals": 5764
+        },
+        "I": {
+          "builder_version": "G2-VEC-1",
+          "master_hash": "9a48cc35987b",
+          "contacts_hash": "e172c39dccb8",
+          "sig_hash": "4b5314fed3fc",
+          "n_signals": 8732
+        },
+        "M": {
+          "builder_version": "G2-VEC-1",
+          "master_hash": "9a48cc35987b",
+          "contacts_hash": "e172c39dccb8",
+          "sig_hash": "45fd33de65ba",
+          "n_signals": 6916
+        },
+        "MA": {
+          "builder_version": "G2-VEC-1",
+          "master_hash": "9a48cc35987b",
+          "contacts_hash": "e172c39dccb8",
+          "sig_hash": "103e294af400",
+          "n_signals": 6427
+        },
+        "NI": {
+          "builder_version": "G2-VEC-1",
+          "master_hash": "9a48cc35987b",
+          "contacts_hash": "e172c39dccb8",
+          "sig_hash": "0bdde20ea502",
+          "n_signals": 5773
+        },
+        "P": {
+          "builder_version": "G2-VEC-1",
+          "master_hash": "9a48cc35987b",
+          "contacts_hash": "e172c39dccb8",
+          "sig_hash": "b95d2a615f8d",
+          "n_signals": 5523
+        },
+        "RB": {
+          "builder_version": "G2-VEC-1",
+          "master_hash": "9a48cc35987b",
+          "contacts_hash": "e172c39dccb8",
+          "sig_hash": "081af1fbbe28",
+          "n_signals": 7945
+        },
+        "RU": {
+          "builder_version": "G2-VEC-1",
+          "master_hash": "9a48cc35987b",
+          "contacts_hash": "e172c39dccb8",
+          "sig_hash": "9f60ec93a735",
+          "n_signals": 5967
+        },
+        "SC": {
+          "builder_version": "G2-VEC-1",
+          "master_hash": "9a48cc35987b",
+          "contacts_hash": "e172c39dccb8",
+          "sig_hash": "11e51743a699",
+          "n_signals": 6064
+        },
+        "SN": {
+          "builder_version": "G2-VEC-1",
+          "master_hash": "9a48cc35987b",
+          "contacts_hash": "e172c39dccb8",
+          "sig_hash": "6337ef2db8cd",
+          "n_signals": 5413
+        },
+        "TA": {
+          "builder_version": "G2-VEC-1",
+          "master_hash": "9a48cc35987b",
+          "contacts_hash": "e172c39dccb8",
+          "sig_hash": "691f14561f61",
+          "n_signals": 6386
+        }
       }
     },
-    "G_economic_replay": {
-      "pass_": false,
-      "replay_ev": {
-        "t0": 0.007971291410363488,
-        "t1": -0.37295452909848686,
-        "t2": -0.058259027151357334
-      },
-      "prev_ev": {
-        "T0_Nearest": 0.0079712914103634,
-        "T1_IndependentEV": -0.1054002247566118,
-        "T2_GraphEV": -0.0582590271513573
-      },
+    "G_key_uniqueness": {
+      "pass_": true,
+      "n_nodes": 3659548,
+      "n_outcomes": 3659548
+    },
+    "H_t1_replay": {
+      "pass_": true,
+      "replay_t1": -0.05754341052260602,
+      "g2_summary_t1": -0.057543410522606
+    },
+    "I_t0_t2_replay": {
+      "pass_": true,
+      "replay_t0": -0.0175271771225042,
+      "g2_summary_t0": -0.0175271771225042,
+      "replay_t2": -0.04114699307259559,
+      "g2_summary_t2": -0.0411469930725955,
       "replay_T2T0_ci": [
-        -0.09647541306779524,
-        -0.03822963150317182
+        -0.04885486829054667,
+        -0.000727351750919875
       ],
-      "prev_T2T0_ci": [
-        -0.0964754130677952,
-        -0.0382296315031718
+      "g2_summary_T2T0_ci": [
+        -0.0488548682905466,
+        -0.0007273517509198
       ],
-      "ev_match": false,
+      "ev_match": true,
       "bs_match": true
     },
-    "H_samebar": {
+    "J_samebar_signal_universe": {
       "pass_": true,
-      "n_test_signals": 5747,
-      "n_test_nodes": 7721737,
-      "n_reached_nodes": 415589,
-      "rate_max_batch_ge_2": 0.976857490864799,
-      "rate_max_batch_ge_3": 0.9431007482164607,
-      "rate_max_batch_ge_4": 0.8995997911954063,
-      "batch_size_1": 4855,
-      "batch_size_2": 5598,
-      "batch_size_3": 3534,
-      "batch_size_ge4": 30692,
-      "fraction_reached_nodes_in_multinode_batch": 0.9883177851194329,
-      "ambiguous_with_stop_node_rate": 0.0010280070403848253
+      "n_test_signals": 24954,
+      "n_test_nodes": 812027,
+      "n_reached_nodes": 31153,
+      "rate_max_batch_ge_2": 0.17488178247976277,
+      "rate_max_batch_ge_3": 0.06011060351045924,
+      "rate_max_batch_ge_4": 0.020477678929229783,
+      "batch_size_1": 17865,
+      "batch_size_2": 3710,
+      "batch_size_3": 1100,
+      "batch_size_ge4": 518,
+      "fraction_reached_nodes_in_multinode_batch": 0.4265399800982249,
+      "ambiguous_with_stop_node_rate": 0.0008177068003896422,
+      "expected_n_test_signals": 24954
+    },
+    "K_execution_parity": {
+      "pass_": true
+    },
+    "L_sequential_tb2_only": {
+      "pass_": true,
+      "n_input_signals": 24954,
+      "expected_n_test_signals": 24954,
+      "n_sequential_executed": 25679
     }
   },
-  "seconds": 151.64509241600172
+  "seconds": 70.66370054200524
 }

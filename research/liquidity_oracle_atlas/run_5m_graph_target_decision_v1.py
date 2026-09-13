@@ -348,7 +348,10 @@ def compute_graph_ev(p_next, p_loss, p_censor, signal_gid, rr_ref):
     p_censor_before = segmented_cumsum(censor_mass_edge, starts, lengths)
     mass = p_reach + p_loss_before + p_censor_before
     assert np.allclose(mass, 1.0, atol=1e-6), "GRAPH_MASS_SUM_NOT_1"
-    assert np.all(np.diff(p_reach[is_start]) <= 1e-9) or True
+    # P1-5: within a signal segment, p_reach is non-increasing across edge_index (later
+    # nodes are reached at most as often). Vectorized real check, not a no-op.
+    same_segment = signal_gid[1:] == signal_gid[:-1]
+    assert np.all(np.diff(p_reach)[same_segment] <= 1e-9), "STOP_GRAPH_REACH_NONMONOTONIC"
     graph_ev = p_reach * rr_ref - p_loss_before
     return graph_ev, p_reach, p_loss_before, p_censor_before
 
@@ -376,16 +379,26 @@ def select_targets(features: pd.DataFrame, graph_ev: np.ndarray, indep_ev: np.nd
 # ---------------------------------------------------------------------------
 # Vectorized reward (frozen execution contract)
 # ---------------------------------------------------------------------------
-def reward_for_signal(direction, entry_open, stop_px, target_px, Hp, Lp):
-    """Return (realized_R, outcome_str). CENSOR/gap = 0R. Frozen exit semantics."""
+def reward_for_signal(direction, entry_open, stop_px, target_px, Op, Hp, Lp):
+    """Frozen execution contract (matches run_fixed_execution_baseline_v1.execute_path).
+
+    Returns (realized_R, outcome_str, exit_bar_index, exit_px).
+      exit_bar_index: index within the future path (0 == entry bar); -1 if no exit.
+      exit_px:        realized fill price.
+
+    P0-1: on the bar where target/stop is first hit, the fill uses that bar's OPEN, NOT its
+    High/Low. A gap through the level is filled at the open (the executable price given the
+    position opens at entry_open and the next bar gaps). Same-bar target&stop hit resolves
+    STOP_FIRST (frozen default).
+    """
     d = int(direction)
-    if not (entry_open is not None and np.isfinite(entry_open)):
-        return 0.0, "GAP_INVALID"
-    if not (d * (entry_open - stop_px) > 0):
-        return 0.0, "ENTRY_BEYOND_STOP"
-    if not (d * (target_px - entry_open) > 0):
-        return 0.0, "TARGET_PASSED_BEFORE_ENTRY"
     W = len(Hp)
+    if not (entry_open is not None and np.isfinite(entry_open)):
+        return 0.0, "GAP_INVALID", -1, np.nan
+    if not (d * (entry_open - stop_px) > 0):
+        return 0.0, "ENTRY_BEYOND_STOP", -1, np.nan
+    if not (d * (target_px - entry_open) > 0):
+        return 0.0, "TARGET_PASSED_BEFORE_ENTRY", -1, np.nan
     if d > 0:
         sm = Lp <= stop_px
         tm = Hp >= target_px
@@ -395,23 +408,23 @@ def reward_for_signal(direction, entry_open, stop_px, target_px, Hp, Lp):
     si = int(np.argmax(sm)) if sm.any() else W
     ti = int(np.argmax(tm)) if tm.any() else W
     if si >= W and ti >= W:
-        return 0.0, "CENSOR"
+        return 0.0, "CENSOR", -1, np.nan
     if si < W and ti < W and si == ti:
-        # same-bar ambiguous -> STOP_FIRST (conservative)
+        # same-bar ambiguous -> STOP_FIRST (conservative, frozen default)
         k = si
-        ex = min(stop_px, Hp[k]) if d > 0 else max(stop_px, Hp[k])
+        ex = min(stop_px, Op[k]) if d > 0 else max(stop_px, Op[k])
         risk_px = float(d * (entry_open - stop_px))
-        return float(d * (ex - entry_open) / risk_px), "STOP"
+        return float(d * (ex - entry_open) / risk_px), "STOP", k, float(ex)
     if ti < si:
         k = ti
-        ex = max(target_px, Hp[k]) if d > 0 else min(target_px, Hp[k])
+        ex = max(target_px, Op[k]) if d > 0 else min(target_px, Op[k])
         risk_px = float(d * (entry_open - stop_px))
-        return float(d * (ex - entry_open) / risk_px), "TARGET"
+        return float(d * (ex - entry_open) / risk_px), "TARGET", k, float(ex)
     else:
         k = si
-        ex = min(stop_px, Hp[k]) if d > 0 else max(stop_px, Hp[k])
+        ex = min(stop_px, Op[k]) if d > 0 else max(stop_px, Op[k])
         risk_px = float(d * (entry_open - stop_px))
-        return float(d * (ex - entry_open) / risk_px), "STOP"
+        return float(d * (ex - entry_open) / risk_px), "STOP", k, float(ex)
 
 
 def compute_rewards(features: pd.DataFrame, sel: dict, bars_by_sym: dict):
@@ -453,11 +466,13 @@ def compute_rewards(features: pd.DataFrame, sel: dict, bars_by_sym: dict):
         w = int(W[k])
         Hp = b["h"][eb:eb + w] if w > 0 else np.array([])
         Lp = b["l"][eb:eb + w] if w > 0 else np.array([])
+        Op = b["o"][eb:eb + w] if w > 0 else np.array([])
         entry_open = float(b["o"][eb])
         row["entry_open"] = entry_open
         for s in ("t0", "t1", "t2"):
             tp = float(target_price[idx[s][ui]])
-            r, o = reward_for_signal(int(direction[k]), entry_open, float(stop[k]), tp, Hp, Lp)
+            r, o, _k, _ex = reward_for_signal(int(direction[k]), entry_open,
+                                             float(stop[k]), tp, Op, Hp, Lp)
             row[f"target_price_{s}"] = tp
             row[f"reward_{s}"] = r
             row[f"outcome_{s}"] = o
@@ -469,6 +484,8 @@ def compute_rewards(features: pd.DataFrame, sel: dict, bars_by_sym: dict):
 # Sequential (one position per symbol) state machine — only allowed python loop
 # ---------------------------------------------------------------------------
 def sequential_curve(features: pd.DataFrame, sel: dict, bars_by_sym: dict, which="t2"):
+    # P0-4: sequential WF1 curve MUST run on TB2-only test signals.
+    assert (features["block"] == "TB2").all(), "STOP_SEQUENTIAL_NON_TB2_INPUT"
     sig = features["signal_gid"].to_numpy()
     is_start, starts, lengths, _ = segment_meta(sig)
     usig, inv = np.unique(sig, return_inverse=True)
@@ -478,14 +495,12 @@ def sequential_curve(features: pd.DataFrame, sel: dict, bars_by_sym: dict, which
     entry_bar = features["entry_bar"].to_numpy(np.int64)
     target_price = features["target_price"].to_numpy(np.float64)
     W = features["W"].to_numpy(np.int64)
-    dec_time = features["decision_time"].to_numpy()
     tday = features["trading_day"].to_numpy(object)
     idx = sel[which]
 
     # sort signals chronologically by entry_bar ascending per symbol
     rows = []
     open_until = {}
-    # precompute per-signal entry_time + path end
     meta = {}
     for ui in range(len(usig)):
         k = int(starts[ui])  # row index of this signal's first node
@@ -529,17 +544,16 @@ def sequential_curve(features: pd.DataFrame, sel: dict, bars_by_sym: dict, which
         w = int(W[k])
         Hp = b["h"][eb:eb + w] if w > 0 else np.array([])
         Lp = b["l"][eb:eb + w] if w > 0 else np.array([])
-        r, o = reward_for_signal(int(direction[k]), entry_open, float(stop[k]), tp, Hp, Lp)
-        # exit_time
+        Op = b["o"][eb:eb + w] if w > 0 else np.array([])
+        # P0-3: SAME execution kernel as paired; exit_bar_index drives exit_time (no 2nd argmax).
+        r, o, exit_idx, _ex = reward_for_signal(int(direction[k]), entry_open,
+                                               float(stop[k]), tp, Op, Hp, Lp)
         if o == "CENSOR":
             last = min(eb + w - 1, b["n"] - 1) if w > 0 else eb
             exit_time = pd.Timestamp(b["t"][last]) if 0 <= last < b["n"] else entry_time
-        elif o == "TARGET":
-            ti = int(np.argmax(Lp <= tp if int(direction[k]) < 0 else Hp >= tp))
-            exit_time = pd.Timestamp(b["t"][eb + ti])
-        else:  # STOP
-            si = int(np.argmax(Hp >= stop[k] if int(direction[k]) > 0 else Lp <= stop[k]))
-            exit_time = pd.Timestamp(b["t"][eb + si])
+        else:
+            ei = int(eb + exit_idx) if (exit_idx >= 0 and 0 <= eb + exit_idx < b["n"]) else eb
+            exit_time = pd.Timestamp(b["t"][ei])
         open_until[sym[k]] = exit_time
         rows.append(dict(signal_gid=k, executed=True, skip_reason="", realized_R=float(r),
                          outcome=o, entry_time=entry_time, exit_time=exit_time,
@@ -550,7 +564,9 @@ def sequential_curve(features: pd.DataFrame, sel: dict, bars_by_sym: dict, which
 # ---------------------------------------------------------------------------
 # Metrics
 # ---------------------------------------------------------------------------
-def compute_metrics(rr, decision_day=None):
+def compute_metrics(rr, decision_day=None, label="signals"):
+    """label: 'signals' for paired counterfactual (no one-position filter),
+    'trades' for sequential (one position per symbol). P1-3."""
     rr = np.asarray(rr, dtype=float)
     rr = rr[np.isfinite(rr)]
     n = len(rr)
@@ -566,21 +582,31 @@ def compute_metrics(rr, decision_day=None):
     pf = (sw / sl) if sl > 0 else np.nan
     ev = float(rr.mean())
     total_R = float(rr.sum())
+    # P1-1: primary drawdown in R units (cumulative sum of per-signal R).
+    cum_R = np.r_[0.0, np.cumsum(rr)]
+    peak_R = np.maximum.accumulate(cum_R)
+    dd_R = cum_R - peak_R
+    max_DD_R = float(-dd_R.min())
+    # P1-2: 0.5%-risk normalized account drawdown — SEPARATE metric, NOT a real margin
+    # backtest. Kept only for descriptive comparison.
     equity = np.cumprod(1.0 + 0.005 * rr)
     peak = np.maximum.accumulate(equity)
     dd = equity / peak - 1.0
-    max_dd_R = float(dd.min() * 100)
+    max_DD_pct_0p5risk = float(dd.min() * 100)  # NOT_REAL_MARGIN_BACKTEST
     m = dict(n=int(n), win_rate=float((rr > 0).mean()),
              avg_win_R=mw, avg_loss_R=ml, payoff_ratio=payoff,
              profit_factor=pf, EV_per_signal=ev, total_R=total_R,
-             max_DD_R=max_dd_R,
-             totalR_over_maxDD=(total_R / abs(max_dd_R) if max_dd_R != 0 else np.nan))
+             max_DD_R=max_DD_R,
+             max_DD_pct_0p5risk=max_DD_pct_0p5risk,  # NOT_REAL_MARGIN_BACKTEST
+             totalR_over_maxDD=(total_R / max_DD_R if max_DD_R > 0 else np.nan))
     if decision_day is not None:
         days = pd.to_datetime(np.asarray(decision_day)).values
         if len(days):
             t0 = pd.Timestamp(days.min()); t1 = pd.Timestamp(days.max())
             span = max((t1 - t0).days, 1)
-            m["trades_per_100_days"] = round(n / span * 100, 3)
+            # P1-3: paired counterfactual has no one-position execution filter -> "signals";
+            # sequential (one position per symbol) -> "trades".
+            m[f"{label}_per_100_days"] = round(n / span * 100, 3)
             m["R_per_100_days"] = round(total_R / span * 100, 3)
             months = pd.to_datetime(days).values.astype("datetime64[M]")
             by_m = {}
@@ -1027,59 +1053,62 @@ def _segmented_argmax_scalar(value, starts, lengths):
 # Reuses TB12_HARDENED transition cache + G2 full-node feature cache.
 # Does NOT rebuild master field / full nodes / scan liquidity / future paths.
 # ---------------------------------------------------------------------------
-def load_full_node_tb2(force_rebuild=False):
-    """Reuse G2 full-node caches (NO rebuild) for the full 15-symbol universe.
+def _sig_hash_for_symbol(contacts_sym):
+    sids = (contacts_sym["liquidity_id"].astype(str) + "|"
+            + contacts_sym["contact_number"].astype(str))
+    return hashlib.sha256(str(tuple(sorted(sids.tolist()))).encode()).hexdigest()[:12]
 
-    Selects, per symbol, the cached parquet whose meta `n_signals` equals the full
-    contact count for that symbol — i.e. the WF1 full-universe cache, regardless of
-    the cache-key naming. Returns concatenated (features, outcomes) with `block`
-    column intact. `bars` are NOT loaded here (closure builds its own bars_cache).
-    """
+
+def load_full_node_tb2(force_rebuild=False):
+    """P0-8: load the EXACT WF1 full-universe full-node caches by signal-set hash.
+    NO 'pick largest cache' heuristic, NO rebuild. If the exact cache for any symbol is
+    missing, or its builder_version/master_hash/contacts_hash/sig_hash do not match the
+    current data, STOP_CLOSURE_CACHE_MISSING (reviewer must rebuild explicitly).
+    Returns (features, outcomes, provenance). signal_gid is globalized via the SAME
+    helper run_g2 uses (P0-6)."""
     master = load_master()
     contacts = load_contacts()
     contacts["block"] = assign_blocks(contacts)
     feats_all, outs_all = [], []
+    offset = 0
+    provenance = {}
     for sym in FULL_UNIV:
         cs = contacts[contacts["symbol"] == sym]
-        full_n = len(cs)
-        chosen = None
-        cands = []
-        for cp in sorted(CACHE.glob(f"g2_full_nodes_features_{sym}_TB12*.parquet")):
-            # skip the pre-fix plain cache (no sig_hash) — it is STALE and NOT the WF1
-            # full-universe cache. Only the hashed caches written by the fixed builder
-            # are valid; pilot/smoke hashed caches are excluded by the n_signals match.
-            if cp.name == f"g2_full_nodes_features_{sym}_TB12.parquet":
-                continue
-            mp = CACHE / (cp.name.replace("features_", "meta_").replace(".parquet", ".json"))
-            if not mp.exists():
-                continue
-            try:
-                m = json.loads(mp.read_text())
-            except Exception:
-                continue
-            if int(m.get("n_signals", -1)) != full_n:
-                continue
-            cands.append(cp)
-        if cands:
-            # Among full-universe (n_signals==full_n) hashed caches, the WF1 full build is
-            # the MOST COMPLETE (largest node/edge count). Pick it by max row count so we
-            # reproduce the committed g2_summary.csv (n=24954, T1=-0.10540), not a partial
-            # earlier build.
-            chosen = max(cands, key=lambda cp: len(pd.read_parquet(cp, columns=["signal_gid"])))
-        if chosen is None:
-            # fall back to build_or_load_nodes (may rebuild only if cache truly missing)
-            ms = master[master["symbol"] == sym]
-            bars = load_raw_bars(sym)
-            feats, outs = build_or_load_nodes(sym, cs, ms, bars,
-                                              force=force_rebuild, cache=True)
-        else:
-            feats = pd.read_parquet(chosen)
-            outs = pd.read_parquet(CACHE / (chosen.name.replace("features", "outcomes")))
+        expected_hash = _sig_hash_for_symbol(cs)
+        fpath = CACHE / f"g2_full_nodes_features_{sym}_TB12_{expected_hash}.parquet"
+        opath = CACHE / f"g2_full_nodes_outcomes_{sym}_TB12_{expected_hash}.parquet"
+        meta = CACHE / f"g2_nodes_meta_{sym}_TB12_{expected_hash}.json"
+        if not (fpath.exists() and opath.exists() and meta.exists()):
+            print("STOP_CLOSURE_CACHE_MISSING", sym, expected_hash)
+            return None, None, None
+        m = json.loads(meta.read_text())
+        if not (m.get("builder_version") == BUILDER_VERSION
+                and m.get("master_hash") == _hash_file(MASTER_PATH)
+                and m.get("contacts_hash") == _hash_file(CONTACTS_PATH)
+                and m.get("sig_hash") == expected_hash):
+            print("STOP_CLOSURE_CACHE_HASH_MISMATCH", sym, expected_hash, m)
+            return None, None, None
+        feats = pd.read_parquet(fpath)
+        outs = pd.read_parquet(opath)
+        # P0-6: same globalize helper as run_g2.
+        feats, outs, offset = globalize_node_ids(feats, outs, offset)
         feats_all.append(feats)
         outs_all.append(outs)
+        provenance[sym] = dict(expected_hash=expected_hash,
+                               builder_version=m.get("builder_version"),
+                               master_hash=m.get("master_hash"),
+                               contacts_hash=m.get("contacts_hash"),
+                               sig_hash=m.get("sig_hash"),
+                               n_signals=int(m.get("n_signals", -1)))
     features = pd.concat(feats_all, ignore_index=True)
     outcomes = pd.concat(outs_all, ignore_index=True)
-    return features, outcomes
+    # P0-7: node-key uniqueness guards (one-to-one, no cross-symbol collision).
+    feat_key = ["signal_gid", "edge_index"]
+    assert not features.duplicated(feat_key).any(), "STOP_G2_NODE_KEY_COLLISION"
+    assert not outcomes.duplicated(feat_key).any(), "STOP_G2_NODE_KEY_COLLISION"
+    assert len(features) == len(outcomes), "STOP_G2_NODE_KEY_COLLISION"
+    features.merge(outcomes, on=feat_key, validate="one_to_one")
+    return features, outcomes, provenance
 
 
 def run_g2_closure_audit():
@@ -1216,30 +1245,33 @@ def run_g2_closure_audit():
         g0_brier=float(metrics["G0"]["brier_signal_equal"]),
         reported=attr_rows)
 
-    # ---- Guard F: 24954 (hardened TB2) vs 24700 (G2 candidate universe) ----
-    te_by_sym = {s: set(g["signal_id"].unique()) for s, g in te_all.groupby("symbol")}
-    features, outcomes = load_full_node_tb2()
-    fn = features[features["block"] == "TB2"].copy()
-    fn_by_sym = {s: set(g["signal_id"].unique()) for s, g in fn.groupby("symbol")}
-    zero_by_sym = {}
-    for sym in FULL_UNIV:
-        hs = te_by_sym.get(sym, set())
-        gs = fn_by_sym.get(sym, set())
-        zero_by_sym[sym] = int(len(hs - gs))
-    n_zero = int(sum(zero_by_sym.values()))
-    n_hard = int(te_all["signal_id"].nunique())
-    n_g2 = int(fn["signal_id"].nunique())
-    gF = (n_hard - n_g2 == n_zero) and (n_hard == HARDENED_N_TEST_SIGNALS) and (n_zero >= 0)
-    guards["F_zero_node_universe"] = dict(pass_=bool(gF),
-        n_hardened_test_signals=n_hard, n_g2_candidate_signals=n_g2,
-        n_zero_node_signals=n_zero, expected_diff=int(n_hard - n_g2),
-        by_symbol=zero_by_sym)
-    if not gF:
-        print("STOP_G2_ZERO_NODE_UNIVERSE_MISMATCH")
-        print(json.dumps(guards["F_zero_node_universe"], indent=2, default=str))
-        return dict(verdict="STOP_G2_ZERO_NODE_UNIVERSE_MISMATCH", guards=guards)
+    # ---- Guard F: exact full-node cache provenance (P0-8) ----
+    # load_full_node_tb2 STOP_CLOSURE_CACHE_MISSING if any symbol's exact cache is
+    # missing or builder_version/master_hash/contacts_hash/sig_hash mismatch.
+    features, outcomes, provenance = load_full_node_tb2()
+    if provenance is None:
+        return dict(verdict="STOP_CLOSURE_CACHE_MISSING", guards=guards)
+    cache_ok = bool(provenance) and all(
+        p["builder_version"] == BUILDER_VERSION for p in provenance.values())
+    guards["F_cache_provenance"] = dict(pass_=bool(cache_ok), n_symbols=len(provenance),
+        provenance={s: {k: p[k] for k in ("builder_version", "master_hash",
+                  "contacts_hash", "sig_hash", "n_signals")} for s, p in provenance.items()})
+    if not cache_ok:
+        print("STOP_CLOSURE_CACHE_PROVENANCE_FAIL")
+        print(json.dumps(guards["F_cache_provenance"], indent=2, default=str))
+        return dict(verdict="STOP_CLOSURE_CACHE_PROVENANCE_FAIL", guards=guards)
 
-    # ---- Guard G: deterministic economic replay (reuse full-node caches) ----
+    # ---- Guard G: global node-key uniqueness (P0-7) ----
+    # Enforced by assertions inside load_full_node_tb2 (raises STOP_G2_NODE_KEY_COLLISION
+    # if violated). Reaching here means the one-to-one merge succeeded.
+    feat_key = ["signal_gid", "edge_index"]
+    g_ok = (not features.duplicated(feat_key).any()
+            and not outcomes.duplicated(feat_key).any()
+            and len(features) == len(outcomes))
+    guards["G_key_uniqueness"] = dict(pass_=bool(g_ok), n_nodes=int(len(features)),
+                                      n_outcomes=int(len(outcomes)))
+
+    # ---- Guards H/I: deterministic economic replay vs freshly written g2_summary ----
     bars_cache = {sym: load_raw_bars(sym) for sym in FULL_UNIV}
     i0_pipe = train_i0(features, outcomes)
     ev_g, _, _, _ = score_g0_nodes(t2_pipe, features)
@@ -1249,6 +1281,7 @@ def run_g2_closure_audit():
     features["indep_ev"] = ev_i
     test_mask = features["block"].to_numpy() == "TB2"
     test_feats = features[test_mask].reset_index(drop=True)
+    assert (test_feats["block"] == "TB2").all(), "STOP_SEQUENTIAL_NON_TB2_INPUT"
     sel_test = select_targets(test_feats, test_feats["graph_ev"].to_numpy(),
                               test_feats["indep_ev"].to_numpy())
     rewards_test = compute_rewards(test_feats, sel_test, bars_cache)
@@ -1258,36 +1291,62 @@ def run_g2_closure_audit():
     dd = rewards_test["trading_day"].to_numpy()
     ev_replay = dict(t0=float(r_t0.mean()), t1=float(r_t1.mean()), t2=float(r_t2.mean()))
     bs_replay = paired_bootstrap_by_day(r_t2 - r_t0, dd)
+    # compare to g2_summary.csv that run_g2 just regenerated in THIS session
     prev = pd.read_csv(OUT / "g2_summary.csv")
     prev_ev = dict(zip(prev["selector"], prev["EV_per_signal"]))
-    ev_match = (abs(ev_replay["t0"] - prev_ev["T0_Nearest"]) < 1e-9
-                and abs(ev_replay["t1"] - prev_ev["T1_IndependentEV"]) < 1e-9
-                and abs(ev_replay["t2"] - prev_ev["T2_GraphEV"]) < 1e-9)
+    h_match = abs(ev_replay["t1"] - prev_ev["T1_IndependentEV"]) < 1e-9
+    i_match = (abs(ev_replay["t0"] - prev_ev["T0_Nearest"]) < 1e-9
+               and abs(ev_replay["t2"] - prev_ev["T2_GraphEV"]) < 1e-9)
     prev_bs = pd.read_csv(OUT / "g2_bootstrap.csv")
     prev_bs_t20 = prev_bs[prev_bs["compare"] == "T2-T0"].iloc[0]
     bs_match = (abs(bs_replay["ci_lo"] - float(prev_bs_t20["ci_lo"])) < 1e-6
                and abs(bs_replay["ci_hi"] - float(prev_bs_t20["ci_hi"])) < 1e-6)
-    guards["G_economic_replay"] = dict(pass_=bool(ev_match and bs_match),
-        replay_ev=ev_replay, prev_ev=prev_ev,
+    guards["H_t1_replay"] = dict(pass_=bool(h_match), replay_t1=ev_replay["t1"],
+                                 g2_summary_t1=prev_ev["T1_IndependentEV"])
+    guards["I_t0_t2_replay"] = dict(pass_=bool(i_match and bs_match),
+        replay_t0=ev_replay["t0"], g2_summary_t0=prev_ev["T0_Nearest"],
+        replay_t2=ev_replay["t2"], g2_summary_t2=prev_ev["T2_GraphEV"],
         replay_T2T0_ci=[bs_replay["ci_lo"], bs_replay["ci_hi"]],
-        prev_T2T0_ci=[float(prev_bs_t20["ci_lo"]), float(prev_bs_t20["ci_hi"])],
-        ev_match=bool(ev_match), bs_match=bool(bs_match))
-    # save replay reward artifact (per-signal) for future diff
+        g2_summary_T2T0_ci=[float(prev_bs_t20["ci_lo"]), float(prev_bs_t20["ci_hi"])],
+        ev_match=bool(i_match), bs_match=bool(bs_match))
     rewards_test.to_csv(OUT / "g2_closure_replay_rewards.csv", index=False)
 
-    # ---- Guard H: same-bar diagnostic deterministic reconfirm ----
+    # ---- Guard J: same-bar diagnostic signal universe (P0-10) ----
     sb = samebar_multinode_diagnostic(test_feats, outcomes)
-    prev_sb = pd.read_csv(OUT / "g2_samebar_multinode_diagnostic.csv").iloc[0]
-    sb_match = (abs(sb["rate_max_batch_ge_2"] - float(prev_sb["rate_max_batch_ge_2"])) < 1e-9
-                and abs(sb["fraction_reached_nodes_in_multinode_batch"]
-                        - float(prev_sb["fraction_reached_nodes_in_multinode_batch"])) < 1e-9)
-    guards["H_samebar"] = dict(pass_=bool(sb_match), **sb)
+    j_ok = (int(sb["n_test_signals"]) == HARDENED_N_TEST_SIGNALS
+            and int(sb["n_test_signals"]) == int(test_feats["signal_gid"].nunique()))
+    guards["J_samebar_signal_universe"] = dict(pass_=bool(j_ok), **sb,
+        expected_n_test_signals=HARDENED_N_TEST_SIGNALS)
 
-    # ---- final closure judgement (Section 13) ----
+    # ---- Guard K: execution oracle parity (P0-2) ----
+    k_ok = run_execution_parity(n_random=600, seed=1)
+    guards["K_execution_parity"] = dict(pass_=bool(k_ok))
+
+    # ---- Guard L: WF1 sequential TB2-only (P0-4) ----
+    seq_executed = 0
+    for name in ("t0", "t1", "t2"):
+        sc = sequential_curve(test_feats, sel_test, bars_cache, which=name)
+        seq_executed += int(sc["executed"].sum())
+    l_ok = (int(test_feats["signal_gid"].nunique()) == HARDENED_N_TEST_SIGNALS)
+    guards["L_sequential_tb2_only"] = dict(pass_=bool(l_ok),
+        n_input_signals=int(test_feats["signal_gid"].nunique()),
+        expected_n_test_signals=HARDENED_N_TEST_SIGNALS, n_sequential_executed=seq_executed)
+
+    # ---- final closure judgement ----
     all_pass = all(g.get("pass_", False) for g in guards.values())
     if all_pass:
-        verdict = "NO_GRAPH_TARGET_ECONOMIC_INCREMENT_WF1"
-        closure = "CLOSED_ACCEPTED"
+        # economic verdict from FRESHLY computed T0/T1/T2 (no presupposition of old result)
+        A = ev_replay["t2"] > ev_replay["t0"]
+        B = ev_replay["t2"] > ev_replay["t1"]
+        C = bs_replay["ci_lo"] > 0
+        D = (paired_bootstrap_by_day(r_t2 - r_t1, dd)["ci_lo"] > 0)
+        if A and B and C and D:
+            verdict = "GRAPH_TARGET_SELECTION_WF1_PASS"
+        elif (A and B) and not (C and D):
+            verdict = "GRAPH_TARGET_SELECTION_WF1_WEAK"
+        else:
+            verdict = "NO_GRAPH_TARGET_ECONOMIC_INCREMENT_WF1"
+        closure = "CLOSED"
     else:
         verdict = "CLOSURE_FAIL"
         closure = "CLOSURE_FAIL"
@@ -1295,7 +1354,7 @@ def run_g2_closure_audit():
         closure=closure,
         verdict=verdict,
         g0_probability_structure="GRAPH_STRUCTURE_NECESSITY_WF1_HARDENED_PASS",
-        economic_decision="STATIC_GRAPH_TARGET_DECISION_FAIL",
+        economic_decision=verdict,
         guards=guards,
         seconds=time.perf_counter() - t0,
     )
@@ -1313,9 +1372,82 @@ def run_g2_closure_audit():
     print(f"  economic replay EV/sig: T0={ev_replay['t0']:+.5f} "
           f"T1={ev_replay['t1']:+.5f} T2={ev_replay['t2']:+.5f}")
     print(f"  T2-T0 bootstrap CI=[{bs_replay['ci_lo']:+.4f},{bs_replay['ci_hi']:+.4f}]")
-    print(f"  zero-node signals: {n_zero} (hardened {n_hard} - candidate {n_g2})")
     print(f"  [{time.perf_counter() - t0:.1f}s]")
     return report
+
+
+def run_execution_parity(n_random=600, seed=1):
+    """P0-2: scalar-oracle execution parity vs frozen run_fixed_execution_baseline_v1.execute_path.
+    Returns True iff ZERO mismatches across random + synthetic cases."""
+    from research.liquidity_oracle_atlas.run_fixed_execution_baseline_v1 import execute_path
+    rng = np.random.default_rng(seed)
+    fails = []
+
+    def check(direction, entry_open, stop_px, target_px, O, H, L, tag):
+        W = len(O)
+        bars = dict(o=O, h=H, l=L, c=np.empty(W), n=W,
+                    t=np.arange(W), disc=np.zeros(W, dtype=bool))
+        ref = execute_path(bars, 0, W, direction, stop_px, target_px, stop_first=True)
+        R, out, k, ex = reward_for_signal(direction, entry_open, stop_px, target_px, O, H, L)
+        if ref is None:
+            if out != "CENSOR":
+                fails.append(f"{tag}: oracle None but out={out}")
+            return
+        if out != ref["outcome"]:
+            fails.append(f"{tag}: outcome {out} != {ref['outcome']}")
+            return
+        if k != ref["exit_bar"]:
+            fails.append(f"{tag}: exit_bar {k} != {ref['exit_bar']}")
+        if abs(ex - ref["exit_px"]) > 1e-9:
+            fails.append(f"{tag}: exit_px {ex} != {ref['exit_px']}")
+        risk_px = direction * (entry_open - stop_px)
+        if abs(risk_px) > 0:
+            Rref = direction * (ref["exit_px"] - entry_open) / risk_px
+            if abs(R - Rref) > 1e-9:
+                fails.append(f"{tag}: R {R} != {Rref}")
+        if ref["same_bar_ambiguous"] and out != "STOP":
+            fails.append(f"{tag}: ambiguous but outcome {out}")
+
+    # 500+ random cases
+    for _ in range(n_random):
+        direction = 1 if rng.random() < 0.5 else -1
+        entry_open = rng.uniform(100, 200)
+        atr = rng.uniform(0.5, 5)
+        stop_px = entry_open - direction * atr
+        tgt_dist = rng.uniform(atr * 1.1, atr * 5)
+        target_px = entry_open + direction * tgt_dist
+        W = int(rng.integers(2, 40))
+        base = rng.uniform(90, 210, size=W)
+        o = rng.uniform(95, 205, size=W)
+        h = np.maximum(o, base) + rng.uniform(0, 3, size=W)
+        l = np.minimum(o, base) - rng.uniform(0, 3, size=W)
+        check(direction, entry_open, stop_px, target_px, o, h, l, "rand")
+
+    # synthetic hand-built cases (P0-2 explicit list)
+    cases = [
+        (1, 100.0, 99.0, 101.0, [100,100,100], [100,101.5,100], [100,99,100], "L_target_normal"),
+        (1, 100.0, 99.0, 101.0, [100,102,100], [100,102,100], [100,101,100], "L_target_gap"),
+        (1, 100.0, 99.0, 101.0, [100,100,100], [100,100,100], [100,98,100], "L_stop_normal"),
+        (1, 100.0, 99.0, 101.0, [100,97,100], [100,97,100], [100,97,100], "L_stop_gap"),
+        (-1, 100.0, 101.0, 99.0, [100,100,100], [100,100,100], [100,98,100], "S_target_normal"),
+        (-1, 100.0, 101.0, 99.0, [100,98,100], [100,98,100], [100,98,100], "S_target_gap"),
+        (-1, 100.0, 101.0, 99.0, [100,100,100], [100,102,100], [100,100,100], "S_stop_normal"),
+        (-1, 100.0, 101.0, 99.0, [100,103,100], [100,103,100], [100,103,100], "S_stop_gap"),
+        (1, 100.0, 99.0, 101.0, [100,100,100], [100,101.5,100], [100,98,100], "samebar_stop_first"),
+        (1, 100.0, 99.0, 101.0, [100,100,100], [100,100,100], [100,100,100], "censor"),
+    ]
+    for direction, eo, sp, tp, o, h, l, tag in cases:
+        check(direction, eo, sp, tp, np.array(o, dtype=float), np.array(h, dtype=float),
+              np.array(l, dtype=float), tag)
+
+    if fails:
+        print("STOP_G2_EXECUTION_PARITY_FAIL")
+        for f in fails[:30]:
+            print("  " + f)
+        return False
+    print(f"EXECUTION PARITY OK: reward_for_signal matches frozen execute_path "
+          f"({n_random} random + {len(cases)} synthetic cases, 0 mismatch)")
+    return True
 
 
 def run_component_tests():
@@ -1369,6 +1501,9 @@ def run_component_tests():
     # 3) node-builder parity vs scalar oracle (P0)
     if not run_p0_parity(symbols=("AG",), first_n=100):
         fails.append("P0 node-builder parity FAIL")
+    # 4) execution parity vs scalar oracle (P0-2)
+    if not run_execution_parity(n_random=600, seed=1):
+        fails.append("execution parity FAIL")
     if fails:
         print("STOP_COMPONENT_TEST_FAIL")
         for f in fails[:10]:
@@ -1449,6 +1584,21 @@ def run_p0_parity(symbols=("AG",), first_n=100):
 
 
 # ---------------------------------------------------------------------------
+# Global signal key (P0-5/P0-6): ONE shared helper for main run and closure
+# ---------------------------------------------------------------------------
+def globalize_node_ids(feats, outs, offset):
+    """Make signal_gid globally unique across symbols. offset advances by
+    (max local gid + 1), NOT nunique, so zero-node / gap gids stay unique.
+    Returns (feats, outs, new_offset)."""
+    feats = feats.copy()
+    outs = outs.copy()
+    local_max = int(feats["signal_gid"].max())
+    feats["signal_gid"] = feats["signal_gid"].astype(np.int64) + offset
+    outs["signal_gid"] = outs["signal_gid"].astype(np.int64) + offset
+    return feats, outs, offset + local_max + 1
+
+
+# ---------------------------------------------------------------------------
 # Core run
 # ---------------------------------------------------------------------------
 def run_g2(symbols, max_signals, force_rebuild, cache_nodes):
@@ -1477,18 +1627,18 @@ def run_g2(symbols, max_signals, force_rebuild, cache_nodes):
         bars_cache[sym] = bars
         feats, outs = build_or_load_nodes(sym, cs, ms, bars, force=force_rebuild,
                                           cache=cache_nodes)
-        # make signal_gid globally unique across symbols (avoid id collision) and
-        # keep contiguity within each symbol's node block.
-        n_sig = int(feats["signal_gid"].nunique())
-        feats = feats.copy()
-        outs = outs.copy()
-        feats["signal_gid"] = feats["signal_gid"] + offset
-        outs["signal_gid"] = outs["signal_gid"] + offset
-        offset += n_sig
+        # P0-5/P0-6: one shared helper to globalize signal_gid across symbols.
+        feats, outs, offset = globalize_node_ids(feats, outs, offset)
         feats_all.append(feats)
         outs_all.append(outs)
     features = pd.concat(feats_all, ignore_index=True)
     outcomes = pd.concat(outs_all, ignore_index=True)
+    # P0-7: node-key uniqueness guards (one-to-one, no cross-symbol collision).
+    feat_key = ["signal_gid", "edge_index"]
+    assert not features.duplicated(feat_key).any(), "STOP_G2_NODE_KEY_COLLISION"
+    assert not outcomes.duplicated(feat_key).any(), "STOP_G2_NODE_KEY_COLLISION"
+    assert len(features) == len(outcomes), "STOP_G2_NODE_KEY_COLLISION"
+    features.merge(outcomes, on=feat_key, validate="one_to_one")
 
     # G0 (frozen) + I0 (full nodes)
     g0_pipe, _ = train_g0()
@@ -1539,12 +1689,15 @@ def run_g2(symbols, max_signals, force_rebuild, cache_nodes):
     else:
         verdict = "NO_GRAPH_TARGET_ECONOMIC_INCREMENT_WF1"
 
-    # ---- sequential (one position per symbol) ----
+    # ---- sequential (one position per symbol) — P0-4: TB2-only ----
+    assert (test_feats["block"] == "TB2").all(), "STOP_SEQUENTIAL_NON_TB2_INPUT"
+    print(f"[SEQ] n_input_signals(TB2)={int(test_feats['signal_gid'].nunique())}")
     seq = {}
     for name in ("t0", "t1", "t2"):
-        sc = sequential_curve(features, sel, bars_cache, which=name)
+        sc = sequential_curve(test_feats, sel_test, bars_cache, which=name)
         ex = sc[sc["executed"]]
-        seq[name] = compute_metrics(ex["realized_R"].to_numpy(), ex["trading_day"].to_numpy())
+        seq[name] = compute_metrics(ex["realized_R"].to_numpy(), ex["trading_day"].to_numpy(),
+                                     label="trades")
 
     # ---- G0 Feature Attribution (fixed nested models; EXACT hardened transition
     #      risk-set; NLL/Brier only; NOT in economic PASS/FAIL) ----
