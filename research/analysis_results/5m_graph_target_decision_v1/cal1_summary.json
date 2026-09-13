@@ -23,7 +23,18 @@
     "tb1_nodes_purged": 383862,
     "tb2_signals": 24954,
     "tb2_nodes": 812027,
-    "key_unique_signal_gid_edge": 0
+    "key_unique_signal_gid_edge": 0,
+    "purge_key_missing": 0,
+    "purge_key_extra": 0,
+    "purge_removed_keys": 30,
+    "tb2_edge_node_counts": {
+      "0": 24954,
+      "1": 24748,
+      "2": 24477,
+      "3": 24311,
+      "4": 24104
+    },
+    "tb2_edge_node_sum_0_4": 122594
   },
   "reproduction_c0": {
     "t2_gain_error": 0.03788488854964011,
@@ -39,45 +50,45 @@
       "model": "C0_RAW",
       "tb2_logloss": 0.6389246547657079,
       "tb2_brier": 0.41860225058061284,
-      "reach_ece_edges0_4": 0.0016992928837261411,
-      "loss_ece_edges0_4": 0.031100249707958508
+      "reach_ece_edges0_4": 0.011624216058834565,
+      "loss_ece_edges0_4": 0.02295174588456253
     },
     {
       "model": "C1_GLOBAL",
       "tb2_logloss": 0.6337848136943718,
       "tb2_brier": 0.4159311681891904,
-      "reach_ece_edges0_4": 0.0036863120637510233,
-      "loss_ece_edges0_4": 0.021746597144497556
+      "reach_ece_edges0_4": 0.01775978477487295,
+      "loss_ece_edges0_4": 0.017634101640682173
     },
     {
       "model": "C2_RR_EDGE",
       "tb2_logloss": 0.6237844225596542,
       "tb2_brier": 0.4089405860364377,
-      "reach_ece_edges0_4": 0.003163064985560273,
-      "loss_ece_edges0_4": 0.02413885990677461
+      "reach_ece_edges0_4": 0.010308956781257282,
+      "loss_ece_edges0_4": 0.019095511819776013
     }
   ],
   "ev_calibration": [
     {
       "model": "C0_RAW",
-      "ev_ece_edges0_4": 0.05341897434752013,
-      "top_decile_pred_ev": 0.047390523528782064,
-      "top_decile_actual_u": -0.11065406999766841,
-      "top_decile_gap": 0.15804459352645048
+      "ev_ece_edges0_4": 0.14538349231023845,
+      "top_decile_pred_ev": 0.28090571010919424,
+      "top_decile_actual_u": -0.02434044074892056,
+      "top_decile_gap": 0.3052461508581148
     },
     {
       "model": "C1_GLOBAL",
-      "ev_ece_edges0_4": 0.04695686123450438,
-      "top_decile_pred_ev": -0.031183455163774174,
-      "top_decile_actual_u": -0.14377623503815312,
-      "top_decile_gap": 0.11259277987437893
+      "ev_ece_edges0_4": 0.11503894031957473,
+      "top_decile_pred_ev": 0.2021349417255226,
+      "top_decile_actual_u": -0.008975390171311895,
+      "top_decile_gap": 0.21111033189683454
     },
     {
       "model": "C2_RR_EDGE",
-      "ev_ece_edges0_4": 0.02694806564012854,
-      "top_decile_pred_ev": -0.074736474736471,
-      "top_decile_actual_u": -0.03559229802560986,
-      "top_decile_gap": -0.03914417671086116
+      "ev_ece_edges0_4": 0.05181516449572859,
+      "top_decile_pred_ev": 0.08418288026034972,
+      "top_decile_actual_u": 0.018754865144223913,
+      "top_decile_gap": 0.06542801511612582
     }
   ],
   "selector_summary": [
@@ -267,10 +278,12 @@
     }
   },
   "selection_bias_note": "CALIBRATION_REDUCES_SELECTION_BIAS",
+  "cv_scope": "CALIBRATOR_ONLY_EXPANDING_CV_ON_FROZEN_G0",
+  "cv_scope_note": "Calibrator fit is chronological expanding, BUT the base G0 probabilities come from a G0 fit on ALL purged TB1 at once. Therefore this is NOT an end-to-end causal CV; it is reporting-only and is not used to tune/select C1/C2.",
   "timing_seconds": {
-    "load_seconds": 2.9480782500031637,
-    "fit_predict_seconds": 2.1234037910035113,
-    "total_seconds": 31.12983962499129
+    "load_seconds": 2.7653090829990106,
+    "fit_predict_seconds": 2.0336050000041723,
+    "total_seconds": 29.383740416989895
   },
   "interpretation_contract": "Calibration experiment only. Calibrator fit on purged TB1; TB2 evaluation only. Selector index before outcome merge. No execution."
 }

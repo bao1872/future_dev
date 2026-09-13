@@ -48,6 +48,7 @@ EPS = 1e-8
 CAL_EDGES = (0, 1, 2, 3, 4)
 RR_BINS = [0, 1.5, 2.0, 3.0, 4.0, 6.0, np.inf]
 RR_LABELS = ["0_1p5", "1p5_2", "2_3", "3_4", "4_6", "6p"]
+CV_SCOPE = "CALIBRATOR_ONLY_EXPANDING_CV_ON_FROZEN_G0"
 
 # AUDIT-D C0 reproduction targets
 RC = dict(t2_gain_error=0.03788488854977161, t2_loss_error=-0.0023375445935045133,
@@ -137,6 +138,23 @@ def main():
     tb1_mask = (blk == "TB1") & in_purged
     tb2_mask = (blk == "TB2")
 
+    # P1: purge key EQUALITY (not just cardinality)
+    def _keys(df):
+        return set(map(tuple, df[["symbol", "signal_id"]].drop_duplicates().to_numpy()))
+
+    full_tb1_trans_keys = _keys(tr)
+    purged_trans_keys = _keys(tr_p)
+    fullnode_tb1_keys = _keys(feat12.loc[blk == "TB1"])
+    kept_keys = _keys(feat12.loc[tb1_mask])
+    n_key_missing = len(purged_trans_keys - kept_keys)
+    n_key_extra = len(kept_keys - purged_trans_keys)
+    assert purged_trans_keys == kept_keys, "STOP_CAL1_TRAIN_UNIVERSE_MAPPING_FAIL"
+    assert n_key_missing == 0 and n_key_extra == 0, "STOP_CAL1_TRAIN_UNIVERSE_MAPPING_FAIL"
+    removed_keys = fullnode_tb1_keys - kept_keys
+    assert removed_keys == (full_tb1_trans_keys - purged_trans_keys), \
+        "STOP_CAL1_PURGED_KEY_MISMATCH"
+    assert len(removed_keys) == 30, "STOP_CAL1_PURGED_KEY_COUNT"
+
     cache_universe = dict(
         features_total_rows=int(len(features)),
         block_counts={k: int(v) for k, v in features["block"].value_counts().items()},
@@ -147,6 +165,9 @@ def main():
         tb2_signals=int(feat12.loc[tb2_mask, "signal_gid"].nunique()),
         tb2_nodes=int(tb2_mask.sum()),
         key_unique_signal_gid_edge=int(feat12.duplicated(["signal_gid", "edge_index"]).sum()),
+        purge_key_missing=n_key_missing,
+        purge_key_extra=n_key_extra,
+        purge_removed_keys=len(removed_keys),
     )
     if cache_universe["tb1_signals_purged"] != 21135:
         raise SystemExit(f"STOP_CAL1_TRAIN_UNIVERSE_MAPPING_FAIL {cache_universe}")
@@ -228,7 +249,14 @@ def main():
 
     # ---- TB2 evaluation ----
     tb2_idx = np.where(tb2_mask)[0]
-    e0_4 = np.isin(edge[edge], CAL_EDGES)  # node-level edges 0-4 mask over all nodes
+    e0_4 = np.isin(edge, CAL_EDGES)  # P0 FIX: node-level edges 0-4 mask over all nodes
+    # explicit reference counts straight from the dataframe (do NOT self-prove with e0_4)
+    tb2_edge_counts = {int(e): int(((blk == "TB2") & (edge == e)).sum()) for e in CAL_EDGES}
+    tb2_edge_sum_0_4 = int(sum(tb2_edge_counts.values()))
+    ref_e04 = feat12.loc[(feat12["block"] == "TB2") & feat12["edge_index"].isin(CAL_EDGES)]
+    assert len(ref_e04) == tb2_edge_sum_0_4
+    cache_universe["tb2_edge_node_counts"] = tb2_edge_counts
+    cache_universe["tb2_edge_node_sum_0_4"] = tb2_edge_sum_0_4
     prob_rows, ev_rows, sel_rows, boot_rows, rr_rows, edge_rows = [], [], [], [], [], []
 
     for name, M in models.items():
@@ -241,6 +269,7 @@ def main():
         br = float(np.mean(((Pn - Y) ** 2).sum(1)[tb2_mask]))
         # reach/loss ECE edges0-4 (TB2)
         m04 = tb2_mask & e0_4
+        assert int(m04.sum()) == tb2_edge_sum_0_4, "CAL1_EDGE_MASK_MISMATCH"
         _, ece_reach = reliability(pT[m04], y_reach[m04])
         _, ece_loss = reliability(pL[m04], y_loss[m04])
         # EV calibration edges0-4 (TB2)
@@ -304,6 +333,26 @@ def main():
     ev_df.to_csv(OUT / "cal1_tb2_ev_calibration.csv", index=False)
     sel_df.to_csv(OUT / "cal1_selector_summary.csv", index=False)
     boot_df.to_csv(OUT / "cal1_selector_bootstrap.csv", index=False)
+
+    # P0 guard: selector / bootstrap must be UNCHANGED by the diagnostic fix
+    EXP_SWITCH = {"C0_RAW": 0.40779033421495553, "C1_GLOBAL": 0.14354412118297669,
+                  "C2_RR_EDGE": 0.26244289492666506}
+    EXP_OD = {"C0_RAW": -0.0184622879875681, "C1_GLOBAL": -0.006192501704162234,
+              "C2_RR_EDGE": -0.0011694482828641735}
+    EXP_SED = {"C0_RAW": 0.05203262061944321, "C1_GLOBAL": 0.011433167009210236,
+               "C2_RR_EDGE": 0.011247484841146845}
+    sw_by_model = dict(zip(sel_df["model"], sel_df["switch_rate"]))
+    for nm in models:
+        assert abs(float(sw_by_model[nm]) - EXP_SWITCH[nm]) < 1e-12, \
+            "STOP_CAL1_SELECTOR_CHANGED_AFTER_DIAGNOSTIC_FIX"
+        r_od = boot_df[(boot_df.model == nm) & (boot_df.metric == "oracle_delta")
+                       & (boot_df.population == "ALL")].iloc[0]
+        r_sd = boot_df[(boot_df.model == nm) & (boot_df.metric == "selection_error_delta")
+                       & (boot_df.population == "ALL")].iloc[0]
+        assert abs(float(r_od["mean"]) - EXP_OD[nm]) < 1e-12, \
+            "STOP_CAL1_SELECTOR_CHANGED_AFTER_DIAGNOSTIC_FIX"
+        assert abs(float(r_sd["mean"]) - EXP_SED[nm]) < 1e-12, \
+            "STOP_CAL1_SELECTOR_CHANGED_AFTER_DIAGNOSTIC_FIX"
     pd.DataFrame(rr_rows).to_csv(OUT / "cal1_rr_bins.csv", index=False)
     pd.DataFrame(edge_rows).to_csv(OUT / "cal1_edge_bins.csv", index=False)
 
@@ -342,7 +391,7 @@ def main():
             evx = pT * rr[te_i] - pL
             _, ece_ev = reliability(evx, u_label[te_i])
             _, ece_reach = reliability(pT, y_reach[te_i])
-            cv_rows.append(dict(model=nm, fold=f, logloss=ll, brier=brr,
+            cv_rows.append(dict(model=nm, fold=f, cv_scope=CV_SCOPE, logloss=ll, brier=brr,
                                 reach_ece=ece_reach, ev_ece=ece_ev))
     pd.DataFrame(cv_rows).to_csv(OUT / "cal1_cv_metrics.csv", index=False)
 
@@ -386,6 +435,11 @@ def main():
         bootstrap=boot_df.to_dict("records"),
         verdicts=verdicts,
         selection_bias_note=cal_note,
+        cv_scope=CV_SCOPE,
+        cv_scope_note=("Calibrator fit is chronological expanding, BUT the base G0 probabilities "
+                       "come from a G0 fit on ALL purged TB1 at once. Therefore this is NOT an "
+                       "end-to-end causal CV; it is reporting-only and is not used to tune/select "
+                       "C1/C2."),
         timing_seconds=dict(load_seconds=load_seconds, fit_predict_seconds=fit_predict_seconds,
                             total_seconds=time.perf_counter() - t_all),
         interpretation_contract=("Calibration experiment only. Calibrator fit on purged TB1; TB2 "

@@ -12,5 +12,16 @@
   "tb1_nodes_purged": 383862,
   "tb2_signals": 24954,
   "tb2_nodes": 812027,
-  "key_unique_signal_gid_edge": 0
+  "key_unique_signal_gid_edge": 0,
+  "purge_key_missing": 0,
+  "purge_key_extra": 0,
+  "purge_removed_keys": 30,
+  "tb2_edge_node_counts": {
+    "0": 24954,
+    "1": 24748,
+    "2": 24477,
+    "3": 24311,
+    "4": 24104
+  },
+  "tb2_edge_node_sum_0_4": 122594
 }
