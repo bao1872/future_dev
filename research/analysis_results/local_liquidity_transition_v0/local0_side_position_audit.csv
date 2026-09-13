@@ -1,4 +1,4 @@
-symbol,violations_timeonly_active,side_position_violations_total,side_position_violations_after_first_observed_bar
+symbol,wrong_side_all_active,wrong_side_after_activation_bar,selected_pair_wrong_side
 AG,753,0,0
 AL,576,0,0
 AU,806,0,0

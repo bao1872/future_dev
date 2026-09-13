@@ -3,7 +3,11 @@
 运行：
   .venv/bin/python research/liquidity_oracle_atlas/test_local_liquidity_transition_v0.py
 
-覆盖用户 §21 要求的 A–G，外加严格不等号与因果可用性两个结构性用例。
+覆盖：
+  * A–G   方向 outcome / consumed / not-yet-activated / 同组冲突（bar-index 版）
+  * F1–F6 corrected strict-crossing lifecycle
+  * L1–L6 activation / expiry / discontinuity 守卫
+  * P    与 frozen active_prices_chunk 的 parity（无 discontinuity 时）
 """
 from __future__ import annotations
 
@@ -27,194 +31,7 @@ def check(name, cond, detail=""):
         FAILS.append(name)
 
 
-T0 = pd.Timestamp("2025-01-02 09:05:00")     # decision_time (bar END)
-
-
-def mk_master(rows) -> pd.DataFrame:
-    return pd.DataFrame(
-        rows,
-        columns=["liquidity_id", "symbol", "liquidity_type", "liquidity_scope",
-                 "side", "price", "available_time", "first_penetration_time"],
-    )
-
-
-def pair_and_label(master_df, close=100.0, decision_time=T0):
-    """返回 (upper_price, lower_price, has_upper, has_lower, up_fp, dn_fp,
-    up_conflict, dn_conflict)。"""
-    info = m.build_price_group_info(master_df)
-    dt = m.to_ns_int(np.array([decision_time]))
-    pair = m.nearest_active_pair_chunk(m.to_dt64_ns(dt),
-                                       np.array([close], dtype=float), info)
-    out = dict(
-        upper_price=float(pair["upper_price"][0]),
-        lower_price=float(pair["lower_price"][0]),
-        has_upper=bool(pair["has_upper"][0]),
-        has_lower=bool(pair["has_lower"][0]),
-        up_fp=m.INAT, dn_fp=m.INAT, up_conflict=False, dn_conflict=False,
-    )
-    if out["has_upper"]:
-        r = m.resolve_group_fp(dt, pair["upper_group"], info)
-        out["up_fp"] = int(r["fp"][0])
-        out["up_conflict"] = bool(r["conflict"][0])
-    if out["has_lower"]:
-        r = m.resolve_group_fp(dt, pair["lower_group"], info)
-        out["dn_fp"] = int(r["fp"][0])
-        out["dn_conflict"] = bool(r["conflict"][0])
-    out["label"] = int(m.classify_pair_time(
-        m.to_dt64_ns(np.array([out["up_fp"]])),
-        m.to_dt64_ns(np.array([out["dn_fp"]])),
-    )[0])
-    return out
-
-
-# --------------------------------------------------------------- A
-def test_A_upper_first():
-    ms = mk_master([
-        ("U1", "AG", "CONFIRMED_SWING_HIGH", "5m", +1, 101.0,
-         pd.Timestamp("2025-01-02 09:00:00"), pd.Timestamp("2025-01-02 10:05:00")),
-        ("D1", "AG", "CONFIRMED_SWING_LOW", "5m", -1, 99.0,
-         pd.Timestamp("2025-01-02 09:00:00"), pd.Timestamp("2025-01-02 11:05:00")),
-    ])
-    r = pair_and_label(ms)
-    check("A upper_first -> UP", r["label"] == m.UP,
-          f"label={r['label']} up={r['upper_price']} dn={r['lower_price']}")
-    check("A upper price selected", r["upper_price"] == 101.0, str(r["upper_price"]))
-    check("A lower price selected", r["lower_price"] == 99.0, str(r["lower_price"]))
-
-
-# --------------------------------------------------------------- B
-def test_B_lower_first():
-    ms = mk_master([
-        ("U1", "AG", "CONFIRMED_SWING_HIGH", "5m", +1, 101.0,
-         pd.Timestamp("2025-01-02 09:00:00"), pd.Timestamp("2025-01-02 11:05:00")),
-        ("D1", "AG", "CONFIRMED_SWING_LOW", "5m", -1, 99.0,
-         pd.Timestamp("2025-01-02 09:00:00"), pd.Timestamp("2025-01-02 10:05:00")),
-    ])
-    r = pair_and_label(ms)
-    check("B lower_first -> DOWN", r["label"] == m.DOWN, f"label={r['label']}")
-
-
-# --------------------------------------------------------------- C
-def test_C_same_bar_penetration():
-    ms = mk_master([
-        ("U1", "AG", "CONFIRMED_SWING_HIGH", "5m", +1, 101.0,
-         pd.Timestamp("2025-01-02 09:00:00"), pd.Timestamp("2025-01-02 10:05:00")),
-        ("D1", "AG", "CONFIRMED_SWING_LOW", "5m", -1, 99.0,
-         pd.Timestamp("2025-01-02 09:00:00"), pd.Timestamp("2025-01-02 10:05:00")),
-    ])
-    r = pair_and_label(ms)
-    check("C same_bar -> AMBIGUOUS", r["label"] == m.AMBIGUOUS, f"label={r['label']}")
-
-
-# --------------------------------------------------------------- D
-def test_D_no_penetration():
-    ms = mk_master([
-        ("U1", "AG", "CONFIRMED_SWING_HIGH", "5m", +1, 101.0,
-         pd.Timestamp("2025-01-02 09:00:00"), pd.NaT),
-        ("D1", "AG", "CONFIRMED_SWING_LOW", "5m", -1, 99.0,
-         pd.Timestamp("2025-01-02 09:00:00"), pd.NaT),
-    ])
-    r = pair_and_label(ms)
-    check("D both_NaT -> CENSOR", r["label"] == m.CENSOR, f"label={r['label']}")
-    # 只有 upper 有 finite fp -> UP；只有 lower 有 -> DOWN
-    ms2 = ms.copy()
-    ms2.loc[0, "first_penetration_time"] = pd.Timestamp("2025-01-02 10:05:00")
-    check("D upper_only_finite -> UP", pair_and_label(ms2)["label"] == m.UP)
-    ms3 = ms.copy()
-    ms3.loc[1, "first_penetration_time"] = pd.Timestamp("2025-01-02 10:05:00")
-    check("D lower_only_finite -> DOWN", pair_and_label(ms3)["label"] == m.DOWN)
-
-
-# --------------------------------------------------------------- E
-def test_E_consumed_not_active():
-    # fp == decision_time -> consumed (active requires fp > decision_time)
-    ms = mk_master([
-        ("U1", "AG", "CONFIRMED_SWING_HIGH", "5m", +1, 101.0,
-         pd.Timestamp("2025-01-02 09:00:00"), pd.Timestamp("2025-01-02 09:05:00")),
-        ("U2", "AG", "CONFIRMED_SWING_HIGH", "5m", +1, 105.0,
-         pd.Timestamp("2025-01-02 09:00:00"), pd.NaT),
-        ("D1", "AG", "CONFIRMED_SWING_LOW", "5m", -1, 99.0,
-         pd.Timestamp("2025-01-02 09:00:00"), pd.NaT),
-    ])
-    r = pair_and_label(ms)
-    check("E consumed_upper_skipped", r["upper_price"] == 105.0,
-          f"upper={r['upper_price']}")
-    # fp < decision_time 也算 consumed
-    ms.loc[0, "first_penetration_time"] = pd.Timestamp("2025-01-02 08:00:00")
-    check("E earlier_fp_also_consumed", pair_and_label(ms)["upper_price"] == 105.0)
-
-
-# --------------------------------------------------------------- F
-def test_F_future_availability_not_active():
-    ms = mk_master([
-        ("U1", "AG", "CONFIRMED_SWING_HIGH", "5m", +1, 101.0,
-         pd.Timestamp("2025-01-02 09:10:00"), pd.NaT),   # > decision_time
-        ("U2", "AG", "CONFIRMED_SWING_HIGH", "5m", +1, 105.0,
-         pd.Timestamp("2025-01-02 09:00:00"), pd.NaT),
-        ("D1", "AG", "CONFIRMED_SWING_LOW", "5m", -1, 99.0,
-         pd.Timestamp("2025-01-02 09:00:00"), pd.NaT),
-    ])
-    r = pair_and_label(ms)
-    check("F future_available_skipped", r["upper_price"] == 105.0,
-          f"upper={r['upper_price']}")
-
-
-# --------------------------------------------------------------- G
-def test_G_same_price_fp_conflict():
-    ms = mk_master([
-        ("UA", "AG", "PREV_CONTIG_SESSION_HIGH", "CONTIG_SESSION", +1, 101.0,
-         pd.Timestamp("2025-01-02 09:00:00"), pd.Timestamp("2025-01-02 10:05:00")),
-        ("UB", "AG", "PREV_CONTIG_SESSION_LOW", "CONTIG_SESSION", -1, 101.0,
-         pd.Timestamp("2025-01-02 09:00:00"), pd.Timestamp("2025-01-02 11:05:00")),
-        ("D1", "AG", "CONFIRMED_SWING_LOW", "5m", -1, 99.0,
-         pd.Timestamp("2025-01-02 09:00:00"), pd.NaT),
-    ])
-    r = pair_and_label(ms)
-    check("G same_price_conflict_detected", r["up_conflict"] is True,
-          f"conflict={r['up_conflict']}")
-    # 一致时不应报冲突：两个 identity 完全同 fp
-    ms2 = ms.copy()
-    ms2.loc[1, "first_penetration_time"] = pd.Timestamp("2025-01-02 10:05:00")
-    r2 = pair_and_label(ms2)
-    check("G identical_fp_no_conflict", r2["up_conflict"] is False)
-    # 一个 NaT 一个 finite：允许，使用 finite，不报冲突
-    ms3 = ms.copy()
-    ms3.loc[1, "first_penetration_time"] = pd.NaT
-    r3 = pair_and_label(ms3)
-    check("G nat_plus_finite_no_conflict", r3["up_conflict"] is False)
-    check("G nat_plus_finite_uses_finite",
-          m.to_dt64_ns(np.array([r3["up_fp"]]))[0]
-          == np.datetime64("2025-01-02T10:05:00"), str(r3["up_fp"]))
-
-
-# --------------------------------------------------------------- 额外结构用例
-def test_strict_inequality():
-    ms = mk_master([
-        ("EQ", "AG", "CONFIRMED_SWING_HIGH", "5m", +1, 100.0,
-         pd.Timestamp("2025-01-02 09:00:00"), pd.NaT),   # == close
-        ("U1", "AG", "CONFIRMED_SWING_HIGH", "5m", +1, 101.0,
-         pd.Timestamp("2025-01-02 09:00:00"), pd.NaT),
-        ("D1", "AG", "CONFIRMED_SWING_LOW", "5m", -1, 99.0,
-         pd.Timestamp("2025-01-02 09:00:00"), pd.NaT),
-    ])
-    r = pair_and_label(ms, close=100.0)
-    check("level_equal_close_is_neither_side",
-          r["upper_price"] == 101.0 and r["lower_price"] == 99.0,
-          f"up={r['upper_price']} dn={r['lower_price']}")
-
-
-def test_missing_side_flagged():
-    ms = mk_master([
-        ("U1", "AG", "CONFIRMED_SWING_HIGH", "5m", +1, 101.0,
-         pd.Timestamp("2025-01-02 09:00:00"), pd.NaT),
-    ])
-    r = pair_and_label(ms, close=100.0)
-    check("no_lower_pair_flagged", r["has_lower"] is False and r["has_upper"])
-
-
-# ===========================================================================
-# LOCAL-0 FIX — corrected lifecycle tests
-# ===========================================================================
+# ---------------------------------------------------------------- helpers
 def mk_bars(h, l, c, disc=None, start="2025-01-02 09:00"):
     n = len(h)
     t = pd.date_range(start, periods=n, freq="5min")
@@ -229,7 +46,7 @@ def mk_bars(h, l, c, disc=None, start="2025-01-02 09:00"):
     )
 
 
-def mk_master_fix(rows) -> pd.DataFrame:
+def mk_master(rows) -> pd.DataFrame:
     return pd.DataFrame(
         rows,
         columns=["liquidity_id", "symbol", "liquidity_type", "liquidity_scope",
@@ -238,196 +55,377 @@ def mk_master_fix(rows) -> pd.DataFrame:
     )
 
 
-T_BASE = pd.Timestamp("2025-01-02 09:00:00")
-
-
-def fp_bar_of(master_df, bars, i=0):
+def run_pair(master_df, bars, close=100.0, decision_bar=1, bar_idx=0):
     lc = m.build_corrected_lifecycle(master_df, bars)
-    return int(lc["new_fp_bar"][i]), lc
+    info = m.build_level_groups(master_df, lc, bars)
+    bi = np.array([decision_bar], dtype=np.int64)
+    pair = m.nearest_active_pair_chunk_v2(bi, np.array([close], dtype=float), info)
+    out = dict(
+        upper=float(pair["upper_price"][0]), lower=float(pair["lower_price"][0]),
+        has_upper=bool(pair["has_upper"][0]), has_lower=bool(pair["has_lower"][0]),
+        up_pen=-1, dn_pen=-1, up_exp=-1, dn_exp=-1,
+        conflict=False, conflict_pen=False, conflict_exp=False,
+        label=int(m.RIGHT_CENSOR), lc=lc, info=info,
+    )
+    if out["has_upper"]:
+        r = m.resolve_group_event(bi, pair["upper_group"], info)
+        out["up_pen"] = int(r["pen"][0])
+        out["up_exp"] = int(r["expiry"][0])
+        out["conflict"] |= bool(r["conflict"][0])
+        out["conflict_pen"] |= bool(r["conflict_pen"][0])
+        out["conflict_exp"] |= bool(r["conflict_exp"][0])
+    if out["has_lower"]:
+        r = m.resolve_group_event(bi, pair["lower_group"], info)
+        out["dn_pen"] = int(r["pen"][0])
+        out["dn_exp"] = int(r["expiry"][0])
+        out["conflict"] |= bool(r["conflict"][0])
+        out["conflict_pen"] |= bool(r["conflict_pen"][0])
+        out["conflict_exp"] |= bool(r["conflict_exp"][0])
+    out["label"] = int(m.classify_pair_event(
+        np.array([out["up_pen"]]), np.array([out["dn_pen"]]))[0])
+    return out
 
 
-# --- 1 -------------------------------------------------------------------
+# bars: 8 bars, high/low 在指定 bar 突破 105 / 跌破 95
+BARS_UP_AT_2 = mk_bars([99, 99, 106, 99, 99, 99, 99, 99],
+                       [98] * 8, [99] * 8)
+BARS_DN_AT_2 = mk_bars([101] * 8, [100, 100, 94, 100, 100, 100, 100, 100],
+                       [100] * 8)
+
+
+# ============================================================ A–G
+def test_A_upper_first():
+    ms = mk_master([
+        ("U", "AG", "CONFIRMED_SWING_HIGH", "5m", +1, 105.0,
+         pd.Timestamp("2025-01-02 09:05:00"), 0, pd.NaT),
+        ("D", "AG", "CONFIRMED_SWING_LOW", "5m", -1, 95.0,
+         pd.Timestamp("2025-01-02 09:05:00"), 0, pd.NaT),
+    ])
+    bars = mk_bars([99, 99, 106, 99, 99, 99, 99, 99],
+                   [100, 100, 100, 100, 100, 94, 100, 100], [99] * 8)
+    r = run_pair(ms, bars, close=100.0, decision_bar=1)
+    check("A upper_first -> UP", r["label"] == m.UP, f"label={r['label']}")
+    check("A upper selected", r["upper"] == 105.0, str(r["upper"]))
+    check("A lower selected", r["lower"] == 95.0, str(r["lower"]))
+
+
+def test_B_lower_first():
+    ms = mk_master([
+        ("U", "AG", "CONFIRMED_SWING_HIGH", "5m", +1, 105.0,
+         pd.Timestamp("2025-01-02 09:05:00"), 0, pd.NaT),
+        ("D", "AG", "CONFIRMED_SWING_LOW", "5m", -1, 95.0,
+         pd.Timestamp("2025-01-02 09:05:00"), 0, pd.NaT),
+    ])
+    bars = mk_bars([100, 100, 100, 100, 106, 100, 100, 100],
+                   [100, 100, 94, 100, 100, 100, 100, 100], [100] * 8)
+    r = run_pair(ms, bars, close=100.0, decision_bar=1)
+    check("B lower_first -> DOWN", r["label"] == m.DOWN, f"label={r['label']}")
+
+
+def test_C_same_bar():
+    ms = mk_master([
+        ("U", "AG", "CONFIRMED_SWING_HIGH", "5m", +1, 105.0,
+         pd.Timestamp("2025-01-02 09:05:00"), 0, pd.NaT),
+        ("D", "AG", "CONFIRMED_SWING_LOW", "5m", -1, 95.0,
+         pd.Timestamp("2025-01-02 09:05:00"), 0, pd.NaT),
+    ])
+    bars = mk_bars([100, 100, 106, 100, 100, 100, 100, 100],
+                   [100, 100, 94, 100, 100, 100, 100, 100], [100] * 8)
+    r = run_pair(ms, bars, close=100.0, decision_bar=1)
+    check("C same_bar -> AMBIGUOUS", r["label"] == m.AMBIGUOUS,
+          f"label={r['label']} up_pen={r['up_pen']} dn_pen={r['dn_pen']}")
+
+
+def test_D_right_censor():
+    ms = mk_master([
+        ("U", "AG", "CONFIRMED_SWING_HIGH", "5m", +1, 105.0,
+         pd.Timestamp("2025-01-02 09:05:00"), 0, pd.NaT),
+        ("D", "AG", "CONFIRMED_SWING_LOW", "5m", -1, 95.0,
+         pd.Timestamp("2025-01-02 09:05:00"), 0, pd.NaT),
+    ])
+    bars = mk_bars([100] * 8, [100] * 8, [100] * 8)
+    r = run_pair(ms, bars, close=100.0, decision_bar=1)
+    check("D no penetration -> RIGHT_CENSOR", r["label"] == m.RIGHT_CENSOR,
+          f"label={r['label']}")
+    # 只有 upper 有 penetration -> UP；只有 lower -> DOWN
+    bars2 = mk_bars([100, 100, 106, 100, 100, 100, 100, 100],
+                    [100] * 8, [100] * 8)
+    check("D upper_only -> UP",
+          run_pair(ms, bars2, 100.0, 1)["label"] == m.UP)
+    bars3 = mk_bars([100] * 8, [100, 100, 94, 100, 100, 100, 100, 100],
+                    [100] * 8)
+    check("D lower_only -> DOWN",
+          run_pair(ms, bars3, 100.0, 1)["label"] == m.DOWN)
+
+
+def test_E_consumed_not_active():
+    # 已 penetration 的 level：penetration_bar <= decision_bar -> 不 active
+    bars = mk_bars([100, 106, 100, 100, 100, 100, 100, 100],
+                   [100, 100, 100, 100, 100, 94, 100, 100], [100] * 8)
+    ms = mk_master([
+        ("U", "AG", "CONFIRMED_SWING_HIGH", "5m", +1, 105.0,
+         pd.Timestamp("2025-01-02 09:05:00"), 0, pd.NaT),
+        ("U2", "AG", "PREV_TRADING_WEEK_HIGH", "TRADING_WEEK", +1, 120.0,
+         pd.Timestamp("2025-01-02 09:05:00"), 0, pd.NaT),
+        ("D", "AG", "CONFIRMED_SWING_LOW", "5m", -1, 95.0,
+         pd.Timestamp("2025-01-02 09:05:00"), 0, pd.NaT),
+    ])
+    # decision_bar=2: U 已在 bar1 被突破（pen=1 <= 2） -> 不得 active
+    r = run_pair(ms, bars, close=100.0, decision_bar=2)
+    check("E consumed_upper_skipped", r["upper"] == 120.0, str(r["upper"]))
+
+
+def test_F_not_yet_activated():
+    bars = mk_bars([100] * 8, [100] * 8, [100] * 8)
+    ms = mk_master([
+        ("U", "AG", "CONFIRMED_SWING_HIGH", "5m", +1, 105.0,
+         pd.Timestamp("2025-01-02 09:05:00"), 0, pd.NaT),
+        ("U2", "AG", "PREV_TRADING_WEEK_HIGH", "TRADING_WEEK", +1, 102.0,
+         pd.Timestamp("2025-01-02 09:30:00"), 5, pd.NaT),
+        ("D", "AG", "CONFIRMED_SWING_LOW", "5m", -1, 95.0,
+         pd.Timestamp("2025-01-02 09:05:00"), 0, pd.NaT),
+    ])
+    # decision_bar=1: U2 的 activation_bar=5 > 1 -> 不得 active
+    r = run_pair(ms, bars, close=100.0, decision_bar=1)
+    check("F future_activation_skipped", r["upper"] == 105.0, str(r["upper"]))
+    # decision_bar=5: U2 已 activation -> 它是更近的 upper
+    r5 = run_pair(ms, bars, close=100.0, decision_bar=5)
+    check("F become_active_at_activation_bar", r5["upper"] == 102.0,
+          str(r5["upper"]))
+
+
+def test_G_same_group_conflict():
+    # 同一 (price, side) 两个 identity 给出不同 finite penetration -> conflict
+    bars = mk_bars([99] * 8, [98] * 8, [99] * 8)
+    ms = mk_master([
+        ("UA", "AG", "CONFIRMED_SWING_HIGH", "5m", +1, 105.0,
+         pd.Timestamp("2025-01-02 09:05:00"), 0, pd.NaT),
+        ("UB", "AG", "PREV_CONTIG_SESSION_HIGH", "CONTIG_SESSION", +1, 105.0,
+         pd.Timestamp("2025-01-02 09:05:00"), 0, pd.NaT),
+    ])
+    # 手工构造不一致：直接改 penetration_bar
+    lc = m.build_corrected_lifecycle(ms, bars)
+    lc["penetration_bar"] = np.array([3, 5], dtype=np.int64)
+    info = m.build_level_groups(ms, lc, bars)
+    g = np.array([int(np.flatnonzero(info["unique_price"] == 105.0)[0])])
+    r = m.resolve_group_event(np.array([1], dtype=np.int64), g, info)
+    check("G same_group_penetration_conflict", bool(r["conflict"][0]) is True)
+    # 一致 -> 无冲突
+    lc2 = m.build_corrected_lifecycle(ms, bars)
+    lc2["penetration_bar"] = np.array([3, 3], dtype=np.int64)
+    info2 = m.build_level_groups(ms, lc2, bars)
+    r2 = m.resolve_group_event(np.array([1], dtype=np.int64), g, info2)
+    check("G consistent_penetration_no_conflict",
+          bool(r2["conflict"][0]) is False)
+
+
+# ============================================================ F1–F6
 def test_F1_touch_then_strict_break():
     bars = mk_bars([99, 100, 101, 100], [98, 98, 98, 98], [99, 100, 101, 100])
-    ms = mk_master_fix([("U", "AG", "CONFIRMED_SWING_HIGH", "5m", +1, 100.0,
-                         T_BASE + pd.Timedelta(minutes=5), 0, pd.NaT)])
-    fp, _ = fp_bar_of(ms, bars)
-    # 旧 re-arm 逻辑会在 bar1 touch 后等待离开 level，从而漏掉 bar2 的突破
-    check("F1 touch==level then strict break -> fp=2", fp == 2, f"fp={fp}")
+    ms = mk_master([("U", "AG", "CONFIRMED_SWING_HIGH", "5m", +1, 100.0,
+                     pd.Timestamp("2025-01-02 09:05:00"), 0, pd.NaT)])
+    lc = m.build_corrected_lifecycle(ms, bars)
+    check("F1 touch==level then strict break -> bar2",
+          int(lc["penetration_bar"][0]) == 2, str(lc["penetration_bar"].tolist()))
 
 
-# --- 2 -------------------------------------------------------------------
 def test_F2_multiple_touch_then_strict_break():
-    bars = mk_bars([99, 100, 100, 100, 101],
-                   [98, 98, 98, 98, 98],
-                   [99, 100, 100, 100, 101])
-    ms = mk_master_fix([("U", "AG", "CONFIRMED_SWING_HIGH", "5m", +1, 100.0,
-                         T_BASE + pd.Timedelta(minutes=5), 0, pd.NaT)])
-    fp, _ = fp_bar_of(ms, bars)
-    check("F2 several touch==level then strict break -> fp=4", fp == 4, f"fp={fp}")
+    bars = mk_bars([99, 100, 100, 100, 101], [98] * 5, [99, 100, 100, 100, 101])
+    ms = mk_master([("U", "AG", "CONFIRMED_SWING_HIGH", "5m", +1, 100.0,
+                     pd.Timestamp("2025-01-02 09:05:00"), 0, pd.NaT)])
+    lc = m.build_corrected_lifecycle(ms, bars)
+    check("F2 several touch then strict break -> bar4",
+          int(lc["penetration_bar"][0]) == 4, str(lc["penetration_bar"].tolist()))
 
 
-# --- 3 -------------------------------------------------------------------
-def test_F3_side_plus_strict_high_gt_level():
-    bars = mk_bars([99, 101, 100], [98, 98, 98], [99, 101, 100])
-    ms = mk_master_fix([("U", "AG", "CONFIRMED_SWING_HIGH", "5m", +1, 100.0,
-                         T_BASE + pd.Timedelta(minutes=5), 0, pd.NaT)])
-    fp, _ = fp_bar_of(ms, bars)
-    check("F3 side=+1 high>level consumed at first bar", fp == 1, f"fp={fp}")
-    # 精确相等不消费
-    bars2 = mk_bars([99, 100, 100], [98, 98, 98], [99, 100, 100])
-    fp2, _ = fp_bar_of(ms, bars2)
-    check("F3 exact high==level is NOT consumed", fp2 == -1, f"fp={fp2}")
+def test_F3_F4_strict_sides():
+    bars_up = mk_bars([99, 101, 100], [98, 98, 98], [99, 101, 100])
+    ms_up = mk_master([("U", "AG", "CONFIRMED_SWING_HIGH", "5m", +1, 100.0,
+                        pd.Timestamp("2025-01-02 09:05:00"), 0, pd.NaT)])
+    check("F3 side=+1 high>level consumed",
+          int(m.build_corrected_lifecycle(ms_up, bars_up)["penetration_bar"][0]) == 1)
+    bars_t = mk_bars([99, 100, 100], [98, 98, 98], [99, 100, 100])
+    check("F3 exact high==level NOT consumed",
+          int(m.build_corrected_lifecycle(ms_up, bars_t)["penetration_bar"][0]) == -1)
+
+    bars_dn = mk_bars([101, 99, 100], [101, 99, 100], [101, 99, 100])
+    ms_dn = mk_master([("D", "AG", "CONFIRMED_SWING_LOW", "5m", -1, 100.0,
+                        pd.Timestamp("2025-01-02 09:05:00"), 0, pd.NaT)])
+    check("F4 side=-1 low<level consumed",
+          int(m.build_corrected_lifecycle(ms_dn, bars_dn)["penetration_bar"][0]) == 1)
+    bars_dt = mk_bars([101, 100, 100], [101, 100, 100], [101, 100, 100])
+    check("F4 exact low==level NOT consumed",
+          int(m.build_corrected_lifecycle(ms_dn, bars_dt)["penetration_bar"][0]) == -1)
 
 
-# --- 4 -------------------------------------------------------------------
-def test_F4_side_minus_strict_low_lt_level():
-    bars = mk_bars([101, 99, 100], [101, 99, 100], [101, 99, 100])
-    ms = mk_master_fix([("D", "AG", "CONFIRMED_SWING_LOW", "5m", -1, 100.0,
-                         T_BASE + pd.Timedelta(minutes=5), 0, pd.NaT)])
-    fp, _ = fp_bar_of(ms, bars)
-    check("F4 side=-1 low<level consumed at first bar", fp == 1, f"fp={fp}")
-    bars2 = mk_bars([101, 100, 100], [101, 100, 100], [101, 100, 100])
-    fp2, _ = fp_bar_of(ms, bars2)
-    check("F4 exact low==level is NOT consumed", fp2 == -1, f"fp={fp2}")
-
-
-# --- 5 -------------------------------------------------------------------
-def test_F5_gap_cross_identified():
-    # open 直接跳到 level 之上（gap），high > level 必须被识别
+def test_F5_gap_cross():
     bars = mk_bars([99, 103], [98, 102], [99, 103])
-    ms = mk_master_fix([("U", "AG", "CONFIRMED_SWING_HIGH", "5m", +1, 100.0,
-                         T_BASE + pd.Timedelta(minutes=5), 0, pd.NaT)])
-    fp, _ = fp_bar_of(ms, bars)
-    check("F5 gap_cross identified", fp == 1, f"fp={fp}")
+    ms = mk_master([("U", "AG", "CONFIRMED_SWING_HIGH", "5m", +1, 100.0,
+                     pd.Timestamp("2025-01-02 09:05:00"), 0, pd.NaT)])
+    check("F5 gap_cross identified",
+          int(m.build_corrected_lifecycle(ms, bars)["penetration_bar"][0]) == 1)
 
 
-# --- 6 -------------------------------------------------------------------
 def test_F6_discontinuity_truncation():
-    bars = mk_bars([99, 101, 101, 101], [98, 98, 98, 98],
-                   [99, 101, 101, 101], disc=[False, True, False, False])
-    ms = mk_master_fix([("U", "AG", "CONFIRMED_SWING_HIGH", "5m", +1, 100.0,
-                         T_BASE, -1 + 0, pd.NaT)])
-    ms["available_bar_index"] = [0.0]
-    ms["available_time"] = [T_BASE + pd.Timedelta(minutes=5)]
-    fp, _ = fp_bar_of(ms, bars)
-    check("F6 search truncated at discontinuity -> no fp", fp == -1, f"fp={fp}")
-
-
-# --- 7 -------------------------------------------------------------------
-def test_F7_side_position_invariant():
-    # level=105 side=+1，available_bar_index=0 -> 首根可观察 bar=1
-    # bar0 的 close 已经在 105 之上（旧 time-only active 会把它算作 active）
-    bars = mk_bars([106] * 4, [104] * 4, [106] * 4)
-    ms = mk_master_fix([("U", "AG", "CONFIRMED_SWING_HIGH", "5m", +1, 105.0,
-                         T_BASE + pd.Timedelta(minutes=5), 0, pd.NaT)])
+    bars = mk_bars([99, 101, 101, 101], [98] * 4, [99, 101, 101, 101],
+                   disc=[False, True, False, False])
+    ms = mk_master([("U", "AG", "CONFIRMED_SWING_HIGH", "5m", +1, 100.0,
+                     pd.Timestamp("2025-01-02 09:00:00"), 0, pd.NaT)])
     lc = m.build_corrected_lifecycle(ms, bars)
-    v_timeonly, _, _ = m.side_position_audit("AG", ms, bars, lc, cap_examples=0)
-    v_obs, v_after, _ = m.side_position_audit(
-        "AG", ms, bars, lc, av_ns_override=lc["av_obs_ns"])
-    check("F7 time-only active shows the stale-level violation",
-          v_timeonly >= 1, f"v_timeonly={v_timeonly}")
-    check("F7 observable-active removes it (total=0)", v_obs == 0, f"v_obs={v_obs}")
-    check("F7 observable-active after-first-observed-bar=0", v_after == 0,
-          f"v_after={v_after}")
+    check("F6 search truncated at discontinuity -> no penetration",
+          int(lc["penetration_bar"][0]) == -1, str(lc["penetration_bar"].tolist()))
+    check("F6 expiry_bar == first discontinuity bar",
+          int(lc["expiry_bar"][0]) == 1, str(lc["expiry_bar"].tolist()))
 
 
-# --- 8 -------------------------------------------------------------------
-def test_F8_same_price_same_side_fp_consistent():
-    # price=101 side=+1 两个 identity，首次突破都在 bar4
-    bars = mk_bars([99, 99, 99, 99, 105, 99], [98] * 6, [99] * 6)
-    ms = mk_master_fix([
-        ("UA", "AG", "CONFIRMED_SWING_HIGH", "5m", +1, 101.0,
-         T_BASE + pd.Timedelta(minutes=5), 0, pd.NaT),
-        ("UB", "AG", "PREV_CONTIG_SESSION_HIGH", "CONTIG_SESSION", +1, 101.0,
-         T_BASE + pd.Timedelta(minutes=15), 2, pd.NaT),
+# ============================================================ L1–L6
+def test_L1_selected_identity_not_expired():
+    bars = mk_bars([100] * 8, [100] * 8, [100] * 8)
+    ms = mk_master([
+        ("U", "AG", "CONFIRMED_SWING_HIGH", "5m", +1, 105.0,
+         pd.Timestamp("2025-01-02 09:05:00"), 0, pd.NaT),
+        ("D", "AG", "CONFIRMED_SWING_LOW", "5m", -1, 95.0,
+         pd.Timestamp("2025-01-02 09:05:00"), 0, pd.NaT),
+    ])
+    r = run_pair(ms, bars, 100.0, 1)
+    check("L1 selected upper decision_bar < expiry_bar",
+          r["up_exp"] > 1 and r["dn_exp"] > 1,
+          f"up_exp={r['up_exp']} dn_exp={r['dn_exp']}")
+
+
+def test_L2_expiry_kills_level():
+    # disc at bar 3；level 在 [1,3) 未被突破 -> expiry=3
+    bars = mk_bars([99] * 8, [98] * 8, [99] * 8,
+                   disc=[False, False, False, True, False, False, False, False])
+    ms = mk_master([("U", "AG", "CONFIRMED_SWING_HIGH", "5m", +1, 105.0,
+                     pd.Timestamp("2025-01-02 09:05:00"), 0, pd.NaT)])
+    lc = m.build_corrected_lifecycle(ms, bars)
+    info = m.build_level_groups(ms, lc, bars)
+    check("L2 expiry_bar == discontinuity bar",
+          int(lc["expiry_bar"][0]) == 3, str(lc["expiry_bar"].tolist()))
+    a = m.active_level_groups_chunk(np.array([2], dtype=np.int64), info)
+    b = m.active_level_groups_chunk(np.array([3], dtype=np.int64), info)
+    check("L2 active before expiry", bool(a.any()))
+    check("L2 NOT active at expiry bar", not bool(b.any()))
+    c = m.active_level_groups_chunk(np.array([5], dtype=np.int64), info)
+    check("L2 NOT active in later segment", not bool(c.any()))
+
+
+def test_L3_old_level_never_reappears():
+    bars = mk_bars([99] * 8, [98] * 8, [99] * 8,
+                   disc=[False, False, True, False, False, False, False, False])
+    ms = mk_master([("U", "AG", "CONFIRMED_SWING_HIGH", "5m", +1, 105.0,
+                     pd.Timestamp("2025-01-02 09:05:00"), 0, pd.NaT)])
+    lc = m.build_corrected_lifecycle(ms, bars)
+    info = m.build_level_groups(ms, lc, bars)
+    act = m.active_level_groups_chunk(np.arange(8, dtype=np.int64), info)
+    check("L3 active only in [activation, expiry)",
+          act.flatten().tolist() == [True, True, False, False, False, False,
+                                     False, False],
+          str(act.flatten().tolist()))
+
+
+def test_L4_activation_bar_is_immediate_boundary():
+    bars = mk_bars([100] * 8, [100] * 8, [100] * 8)
+    ms = mk_master([
+        ("U", "AG", "CONFIRMED_SWING_HIGH", "5m", +1, 105.0,
+         pd.Timestamp("2025-01-02 09:15:00"), 2, pd.NaT),
+        ("D", "AG", "CONFIRMED_SWING_LOW", "5m", -1, 95.0,
+         pd.Timestamp("2025-01-02 09:05:00"), 0, pd.NaT),
     ])
     lc = m.build_corrected_lifecycle(ms, bars)
-    check("F8 both identities see the same strict crossing",
-          int(lc["new_fp_bar"][0]) == 4 and int(lc["new_fp_bar"][1]) == 4,
-          f"{lc['new_fp_bar'].tolist()}")
-    info = m.build_level_groups(ms, lc["new_fp_ns"],
-                                av_obs_ns=lc["av_obs_ns"])
-    check("F8 same (price,side) collapsed into ONE group",
-          int((info["unique_price"] == 101.0).sum()) == 1,
-          str(info["unique_price"].tolist()))
-    # decision at bar3 -> 两个 identity 都已 observable 且都未穿透
-    dt = m.to_ns_int(bars["t"][3:4]) + m.BAR_NS
-    g = np.array([int(np.flatnonzero(info["unique_price"] == 101.0)[0])])
-    r = m.resolve_group_fp(dt, g, info)
-    check("F8 no conflict for same-(price,side)", bool(r["conflict"][0]) is False)
-    check("F8 two active identities", int(r["n_active"][0]) == 2,
-          str(r["n_active"].tolist()))
+    check("L4 activation_bar == available_bar_index (not +1)",
+          int(lc["activation_bar"][0]) == 2, str(lc["activation_bar"].tolist()))
+    r = run_pair(ms, bars, 100.0, decision_bar=2)
+    check("L4 level usable at its activation bar", r["upper"] == 105.0,
+          str(r["upper"]))
+    r1 = run_pair(ms, bars, 100.0, decision_bar=1)
+    check("L4 not usable one bar before activation", r1["upper"] != 105.0,
+          str(r1["upper"]))
 
 
-# --- 9 -------------------------------------------------------------------
-def test_F9_same_price_opposite_side_not_merged():
-    # price=101 同时有 side=+1 (上破 bar4) 与 side=-1 (下破 bar2)
-    # bar1 是双侧精确 touch（h==101 且 l==101），两侧都不消费
-    bars = mk_bars([99, 101, 99, 99, 105, 99],
-                   [98, 101, 97, 98, 98, 98],
-                   [99, 101, 97, 99, 105, 99])
-    ms = mk_master_fix([
-        ("UA", "AG", "CONFIRMED_SWING_HIGH", "5m", +1, 101.0,
-         T_BASE + pd.Timedelta(minutes=5), 0, pd.NaT),
-        ("DB", "AG", "PREV_CONTIG_SESSION_LOW", "CONTIG_SESSION", -1, 101.0,
-         T_BASE + pd.Timedelta(minutes=5), 0, pd.NaT),
+def test_L5_next_bar_penetration_is_outcome():
+    bars = mk_bars([100, 106, 100, 100, 100, 100, 100, 100],
+                   [100, 100, 100, 100, 100, 94, 100, 100], [100] * 8)
+    ms = mk_master([
+        ("U", "AG", "CONFIRMED_SWING_HIGH", "5m", +1, 105.0,
+         pd.Timestamp("2025-01-02 09:05:00"), 0, pd.NaT),
+        ("D", "AG", "CONFIRMED_SWING_LOW", "5m", -1, 95.0,
+         pd.Timestamp("2025-01-02 09:05:00"), 0, pd.NaT),
+    ])
+    # decision at activation bar 0；penetration 在下一根 bar 1
+    r = run_pair(ms, bars, 100.0, decision_bar=0)
+    check("L5 next-bar strict penetration -> UP", r["label"] == m.UP,
+          f"label={r['label']} up_pen={r['up_pen']}")
+    check("L5 penetration bar == decision_bar + 1", r["up_pen"] == 1,
+          str(r["up_pen"]))
+
+
+def test_L6_activation_not_delayed():
+    bars = mk_bars([100] * 8, [100] * 8, [100] * 8)
+    ms = mk_master([("U", "AG", "CONFIRMED_SWING_HIGH", "5m", +1, 105.0,
+                     pd.Timestamp("2025-01-02 09:05:00"), 3, pd.NaT)])
+    lc = m.build_corrected_lifecycle(ms, bars)
+    check("L6 activation_bar == 3", int(lc["activation_bar"][0]) == 3)
+    check("L6 search starts at activation+1",
+          int(lc["search_start"][0]) == 4, str(lc["search_start"].tolist()))
+
+
+# ============================================================ parity
+def test_P_parity_with_frozen_active_prices_chunk():
+    """无 discontinuity 时，bar-index kernel 必须与 frozen datetime kernel 一致。"""
+    bars = mk_bars([100] * 8, [100] * 8, [100] * 8)
+    ms = mk_master([
+        ("U", "AG", "CONFIRMED_SWING_HIGH", "5m", +1, 105.0,
+         pd.Timestamp("2025-01-02 09:05:00"), 0, pd.NaT),
+        ("D", "AG", "CONFIRMED_SWING_LOW", "5m", -1, 95.0,
+         pd.Timestamp("2025-01-02 09:05:00"), 0, pd.NaT),
+        ("U2", "AG", "PREV_TRADING_WEEK_HIGH", "TRADING_WEEK", +1, 110.0,
+         pd.Timestamp("2025-01-02 09:05:00"), 0, pd.NaT),
     ])
     lc = m.build_corrected_lifecycle(ms, bars)
-    check("F9 opposite sides get different fp (allowed)",
-          int(lc["new_fp_bar"][0]) == 4 and int(lc["new_fp_bar"][1]) == 2,
-          f"{lc['new_fp_bar'].tolist()}")
-    info = m.build_level_groups(ms, lc["new_fp_ns"],
-                                av_obs_ns=lc["av_obs_ns"])
-    sel = info["unique_price"] == 101.0
-    check("F9 two distinct (price,side) groups at same price",
-          int(sel.sum()) == 2 and sorted(info["unique_side"][sel].tolist()) == [-1, 1],
-          str(info["unique_side"][sel].tolist()))
-    # decision bar2, close=97 -> upper 必须只取 side=+1 的那个 group
-    dt = m.to_dt64_ns(m.to_ns_int(bars["t"][2:3]) + m.BAR_NS)
-    pair = m.nearest_active_pair_chunk_v2(dt, np.array([97.0]), info)
-    up_g = int(pair["upper_group"][0])
-    check("F9 upper selects the side=+1 group only",
-          up_g >= 0 and int(info["unique_side"][up_g]) == 1,
-          f"up_g={up_g} side={info['unique_side'][up_g] if up_g >= 0 else None}")
-    check("F9 lower not present (no active side=-1 below close)",
-          bool(pair["has_lower"][0]) is False)
+    # 让 U 在 bar 4 被突破
+    bars["h"] = np.array([100, 100, 100, 100, 106, 100, 100, 100], float)
+    lc = m.build_corrected_lifecycle(ms, bars)
+    info = m.build_level_groups(ms, lc, bars)
+    bi = np.arange(8, dtype=np.int64)
+    mine = m.active_level_groups_chunk(bi, info)
+    dt = m.to_dt64_ns(m.to_ns_int(bars["t"]) + m.BAR_NS)
+    theirs = m.active_prices_chunk(dt[bi], info)
+    check("P bar-index kernel == frozen active_prices_chunk (no discontinuity)",
+          np.array_equal(mine, theirs),
+          f"mine={mine.tolist()} theirs={theirs.tolist()}")
 
 
 def test_classify_matrix():
-    t1 = np.datetime64("2025-01-02T10:00:00")
-    t2 = np.datetime64("2025-01-02T11:00:00")
-    na = np.datetime64("NaT")
-    got = m.classify_pair_time(
-        np.array([t1, t2, na, na, t1]),
-        np.array([t2, t1, na, t1, t1]),
-    )
-    want = np.array([m.UP, m.DOWN, m.CENSOR, m.DOWN, m.AMBIGUOUS])
-    check("classify_pair_time matrix", np.array_equal(got, want),
+    got = m.classify_pair_event(
+        np.array([3, 5, -1, -1, 3]), np.array([5, 3, -1, 7, 3]))
+    want = np.array([m.UP, m.DOWN, m.RIGHT_CENSOR, m.DOWN, m.AMBIGUOUS])
+    check("classify_pair_event matrix", np.array_equal(got, want),
           f"got={got.tolist()} want={want.tolist()}")
 
 
 def main():
     test_A_upper_first()
     test_B_lower_first()
-    test_C_same_bar_penetration()
-    test_D_no_penetration()
+    test_C_same_bar()
+    test_D_right_censor()
     test_E_consumed_not_active()
-    test_F_future_availability_not_active()
-    test_G_same_price_fp_conflict()
-    test_strict_inequality()
-    test_missing_side_flagged()
-    test_classify_matrix()
-    # LOCAL-0 FIX — corrected lifecycle
+    test_F_not_yet_activated()
+    test_G_same_group_conflict()
     test_F1_touch_then_strict_break()
     test_F2_multiple_touch_then_strict_break()
-    test_F3_side_plus_strict_high_gt_level()
-    test_F4_side_minus_strict_low_lt_level()
-    test_F5_gap_cross_identified()
+    test_F3_F4_strict_sides()
+    test_F5_gap_cross()
     test_F6_discontinuity_truncation()
-    test_F7_side_position_invariant()
-    test_F8_same_price_same_side_fp_consistent()
-    test_F9_same_price_opposite_side_not_merged()
+    test_L1_selected_identity_not_expired()
+    test_L2_expiry_kills_level()
+    test_L3_old_level_never_reappears()
+    test_L4_activation_bar_is_immediate_boundary()
+    test_L5_next_bar_penetration_is_outcome()
+    test_L6_activation_not_delayed()
+    test_P_parity_with_frozen_active_prices_chunk()
+    test_classify_matrix()
     print(f"\n==== {len(FAILS)} FAIL ====")
     if FAILS:
         print("FAILED:", FAILS)
