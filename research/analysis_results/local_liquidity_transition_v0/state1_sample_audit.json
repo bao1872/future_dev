@@ -1,0 +1,45 @@
+{
+  "sample_parity": {
+    "n_samples": 37224,
+    "sample_key_sha256": "ddf034ed30a90597aa86dbad71d6397b1934d532afb348b8a93b406984787c12",
+    "matches_repl0": true,
+    "n_dev": 24705,
+    "n_repl": 12519
+  },
+  "provenance": {
+    "n_samples": 37224,
+    "n_provenance_ok": 37224,
+    "n_provenance_missing": 0,
+    "upper_oldest_age_bars": {
+      "mean": 200.75338491295938,
+      "p50": 7.0,
+      "p90": 234.0,
+      "max": 29288
+    },
+    "upper_newest_age_bars": {
+      "mean": 173.4728132387707,
+      "p50": 3.0,
+      "min": 0
+    },
+    "upper_n_active_identities": {
+      "mean": 1.4466204599183323,
+      "p50": 1.0,
+      "max": 11
+    },
+    "lower_oldest_age_bars": {
+      "mean": 143.51987964753923,
+      "p50": 7.0,
+      "p90": 206.0,
+      "max": 16805
+    },
+    "frac_upper_newest_age_zero": 0.4117773479475607,
+    "frac_lower_newest_age_zero": 0.41553836234687297
+  },
+  "prev_event_to_provenance_coupling": {
+    "frac_upper_age0_given_prev_NEW_UPPER": 0.9989015012815818,
+    "frac_upper_age0_given_prev_no_NEW_UPPER": 0.07161950019092876,
+    "frac_lower_age0_given_prev_NEW_LOWER": 0.9986326016552717,
+    "frac_lower_age0_given_prev_no_NEW_LOWER": 0.0682412448026062
+  },
+  "tb4_analytically_used": false
+}

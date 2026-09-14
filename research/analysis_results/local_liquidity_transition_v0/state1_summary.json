@@ -1,0 +1,393 @@
+{
+  "experiment": "STATE-1 current-boundary provenance vs event memory",
+  "base": "4fa151ae6409a6af5d5b0ad13b31cc37d3c061ab",
+  "question": "is the stable prev_event_mask increment genuine cross-episode event memory, or does it merely encode the activation provenance/age of the current boundary at target start?",
+  "models": {
+    "S0_GEOMETRY": {
+      "numeric": [
+        "cur_up_distance_R",
+        "cur_down_distance_R",
+        "cur_width_R",
+        "cur_log_distance_ratio"
+      ],
+      "categorical": []
+    },
+    "S1_GEOMETRY_PROVENANCE": {
+      "numeric": [
+        "cur_up_distance_R",
+        "cur_down_distance_R",
+        "cur_width_R",
+        "cur_log_distance_ratio",
+        "upper_oldest_age_bars",
+        "upper_newest_age_bars",
+        "upper_n_active_identities",
+        "lower_oldest_age_bars",
+        "lower_newest_age_bars",
+        "lower_n_active_identities"
+      ],
+      "categorical": []
+    },
+    "S2_GEOMETRY_PREV_EVENT": {
+      "numeric": [
+        "cur_up_distance_R",
+        "cur_down_distance_R",
+        "cur_width_R",
+        "cur_log_distance_ratio"
+      ],
+      "categorical": [
+        "prev_event_mask"
+      ]
+    },
+    "S3_GEOMETRY_PROVENANCE_PREV_EVENT": {
+      "numeric": [
+        "cur_up_distance_R",
+        "cur_down_distance_R",
+        "cur_width_R",
+        "cur_log_distance_ratio",
+        "upper_oldest_age_bars",
+        "upper_newest_age_bars",
+        "upper_n_active_identities",
+        "lower_oldest_age_bars",
+        "lower_newest_age_bars",
+        "lower_n_active_identities"
+      ],
+      "categorical": [
+        "prev_event_mask"
+      ]
+    }
+  },
+  "windows": [
+    {
+      "name": "A_TB1_to_TB2",
+      "train": [
+        "TB1"
+      ],
+      "eval": "TB2",
+      "seed": 20260916
+    },
+    {
+      "name": "B_TB1TB2_to_TB3",
+      "train": [
+        "TB1",
+        "TB2"
+      ],
+      "eval": "TB3",
+      "seed": 20260917
+    }
+  ],
+  "bootstrap_reps": 1000,
+  "sample_parity": {
+    "n_samples": 37224,
+    "sample_key_sha256": "ddf034ed30a90597aa86dbad71d6397b1934d532afb348b8a93b406984787c12",
+    "repl0_hash": "ddf034ed30a90597aa86dbad71d6397b1934d532afb348b8a93b406984787c12",
+    "matches": true
+  },
+  "provenance_audit": {
+    "n_samples": 37224,
+    "n_provenance_ok": 37224,
+    "n_provenance_missing": 0,
+    "upper_oldest_age_bars": {
+      "mean": 200.75338491295938,
+      "p50": 7.0,
+      "p90": 234.0,
+      "max": 29288
+    },
+    "upper_newest_age_bars": {
+      "mean": 173.4728132387707,
+      "p50": 3.0,
+      "min": 0
+    },
+    "upper_n_active_identities": {
+      "mean": 1.4466204599183323,
+      "p50": 1.0,
+      "max": 11
+    },
+    "lower_oldest_age_bars": {
+      "mean": 143.51987964753923,
+      "p50": 7.0,
+      "p90": 206.0,
+      "max": 16805
+    },
+    "frac_upper_newest_age_zero": 0.4117773479475607,
+    "frac_lower_newest_age_zero": 0.41553836234687297
+  },
+  "prev_event_to_provenance_coupling": {
+    "frac_upper_age0_given_prev_NEW_UPPER": 0.9989015012815818,
+    "frac_upper_age0_given_prev_no_NEW_UPPER": 0.07161950019092876,
+    "frac_lower_age0_given_prev_NEW_LOWER": 0.9986326016552717,
+    "frac_lower_age0_given_prev_no_NEW_LOWER": 0.0682412448026062
+  },
+  "results": [
+    {
+      "window": "A_TB1_to_TB2",
+      "n_train": 11813,
+      "n_eval": 12892,
+      "n_days": 102,
+      "mean_bit_metrics": {
+        "S0_GEOMETRY": {
+          "logloss": 0.5365384129920694,
+          "brier": 0.17880357920606776,
+          "ece": 0.05019043159743121
+        },
+        "S1_GEOMETRY_PROVENANCE": {
+          "logloss": 0.5428810705174,
+          "brier": 0.18080112560890882,
+          "ece": 0.04832996635499677
+        },
+        "S2_GEOMETRY_PREV_EVENT": {
+          "logloss": 0.5293842840850347,
+          "brier": 0.17668578672573482,
+          "ece": 0.030165798746937915
+        },
+        "S3_GEOMETRY_PROVENANCE_PREV_EVENT": {
+          "logloss": 0.5313857496168897,
+          "brier": 0.1774707447484342,
+          "ece": 0.02904632113302973
+        }
+      }
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "n_train": 24705,
+      "n_eval": 12519,
+      "n_days": 102,
+      "mean_bit_metrics": {
+        "S0_GEOMETRY": {
+          "logloss": 0.5387084449824948,
+          "brier": 0.17997502557575845,
+          "ece": 0.04753864031413053
+        },
+        "S1_GEOMETRY_PROVENANCE": {
+          "logloss": 0.5391079600212555,
+          "brier": 0.18029226983916935,
+          "ece": 0.04381687276962348
+        },
+        "S2_GEOMETRY_PREV_EVENT": {
+          "logloss": 0.5307990955906807,
+          "brier": 0.17749121142975993,
+          "ece": 0.02355932116898437
+        },
+        "S3_GEOMETRY_PROVENANCE_PREV_EVENT": {
+          "logloss": 0.5312624353157329,
+          "brier": 0.17768781873679013,
+          "ece": 0.02304855371410254
+        }
+      }
+    }
+  ],
+  "bootstrap": [
+    {
+      "window": "A_TB1_to_TB2",
+      "comparison": "S3_GEOMETRY_PROVENANCE_PREV_EVENT - S1_GEOMETRY_PROVENANCE",
+      "role": "PRIMARY",
+      "delta_sample_weighted": -0.011495320900510262,
+      "delta_daily_mean": -0.011352202102284034,
+      "n_days": 102,
+      "ci_lo": -0.013485876693365905,
+      "ci_hi": -0.009511788561703096,
+      "verdict": "CI_below_zero"
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "comparison": "S1_GEOMETRY_PROVENANCE - S0_GEOMETRY",
+      "role": "SECONDARY",
+      "delta_sample_weighted": 0.006342657525330565,
+      "delta_daily_mean": 0.006112285683154332,
+      "n_days": 102,
+      "ci_lo": 0.00307267604809997,
+      "ci_hi": 0.009014774866052587,
+      "verdict": "CI_above_zero"
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "comparison": "S2_GEOMETRY_PREV_EVENT - S0_GEOMETRY",
+      "role": "SECONDARY",
+      "delta_sample_weighted": -0.00715412890703474,
+      "delta_daily_mean": -0.007165155454171992,
+      "n_days": 102,
+      "ci_lo": -0.00875074999307713,
+      "ci_hi": -0.005625913278412719,
+      "verdict": "CI_below_zero"
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "comparison": "S3_GEOMETRY_PROVENANCE_PREV_EVENT - S2_GEOMETRY_PREV_EVENT",
+      "role": "SECONDARY",
+      "delta_sample_weighted": 0.002001465531855045,
+      "delta_daily_mean": 0.001925239035042285,
+      "n_days": 102,
+      "ci_lo": 0.0008317859839776348,
+      "ci_hi": 0.003117608199264791,
+      "verdict": "CI_above_zero"
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "comparison": "S3_GEOMETRY_PROVENANCE_PREV_EVENT - S1_GEOMETRY_PROVENANCE",
+      "role": "PRIMARY",
+      "delta_sample_weighted": -0.007845524705522444,
+      "delta_daily_mean": -0.008078892138109655,
+      "n_days": 102,
+      "ci_lo": -0.009706949198460633,
+      "ci_hi": -0.006489077871752781,
+      "verdict": "CI_below_zero"
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "comparison": "S1_GEOMETRY_PROVENANCE - S0_GEOMETRY",
+      "role": "SECONDARY",
+      "delta_sample_weighted": 0.0003995150387605305,
+      "delta_daily_mean": 0.0003952912918988626,
+      "n_days": 102,
+      "ci_lo": -0.0005497406847338762,
+      "ci_hi": 0.0014722294612569734,
+      "verdict": "CI_contains_zero"
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "comparison": "S2_GEOMETRY_PREV_EVENT - S0_GEOMETRY",
+      "role": "SECONDARY",
+      "delta_sample_weighted": -0.007909349391814206,
+      "delta_daily_mean": -0.00813512230487083,
+      "n_days": 102,
+      "ci_lo": -0.009999359004420135,
+      "ci_hi": -0.0064979109116405954,
+      "verdict": "CI_below_zero"
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "comparison": "S3_GEOMETRY_PROVENANCE_PREV_EVENT - S2_GEOMETRY_PREV_EVENT",
+      "role": "SECONDARY",
+      "delta_sample_weighted": 0.0004633397250522911,
+      "delta_daily_mean": 0.00045152145866003793,
+      "n_days": 102,
+      "ci_lo": -1.7349836413218992e-05,
+      "ci_hi": 0.001084857787998474,
+      "verdict": "CI_contains_zero"
+    }
+  ],
+  "per_bit_S3_minus_S1": [
+    {
+      "window": "A_TB1_to_TB2",
+      "bit": "UP_PEN",
+      "n": 12892,
+      "prevalence": 0.29855724480297857,
+      "S3_minus_S1": -0.0027863317235660074,
+      "S3_minus_S1_ci_lo": -0.004449282703412655,
+      "S3_minus_S1_ci_hi": -0.0013254631251700235,
+      "S2_minus_S0": -0.0002045608327180866,
+      "S2_minus_S0_ci_lo": -0.0016591063657004626,
+      "S2_minus_S0_ci_hi": 0.0008952210052050829
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "bit": "DOWN_PEN",
+      "n": 12892,
+      "prevalence": 0.2829661805771021,
+      "S3_minus_S1": -0.0012792623912201658,
+      "S3_minus_S1_ci_lo": -0.0024026939068044987,
+      "S3_minus_S1_ci_hi": -9.100177025358317e-05,
+      "S2_minus_S0": -0.001161276194821698,
+      "S2_minus_S0_ci_lo": -0.002600851012738575,
+      "S2_minus_S0_ci_hi": 0.00019534259007547453
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "bit": "NEW_UPPER",
+      "n": 12892,
+      "prevalence": 0.3640242010549178,
+      "S3_minus_S1": -0.02376499230744193,
+      "S3_minus_S1_ci_lo": -0.028716107912912913,
+      "S3_minus_S1_ci_hi": -0.018648568209502298,
+      "S2_minus_S0": -0.01433703361641202,
+      "S2_minus_S0_ci_lo": -0.01789225453362474,
+      "S2_minus_S0_ci_hi": -0.011084802714343383
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "bit": "NEW_LOWER",
+      "n": 12892,
+      "prevalence": 0.3676698727893267,
+      "S3_minus_S1": -0.018150697179812932,
+      "S3_minus_S1_ci_lo": -0.02129220229912023,
+      "S3_minus_S1_ci_hi": -0.014140087368348746,
+      "S2_minus_S0": -0.012913644984187154,
+      "S2_minus_S0_ci_lo": -0.01601997307478302,
+      "S2_minus_S0_ci_hi": -0.00930643327654327
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "bit": "UP_PEN",
+      "n": 12519,
+      "prevalence": 0.3040178928029395,
+      "S3_minus_S1": -0.0017349535587048365,
+      "S3_minus_S1_ci_lo": -0.002873249756213182,
+      "S3_minus_S1_ci_hi": -0.000651537604311351,
+      "S2_minus_S0": -0.0019561130925321436,
+      "S2_minus_S0_ci_lo": -0.003419964639633818,
+      "S2_minus_S0_ci_hi": -0.0006026118940975568
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "bit": "DOWN_PEN",
+      "n": 12519,
+      "prevalence": 0.2774982027318476,
+      "S3_minus_S1": -0.0016909829506668004,
+      "S3_minus_S1_ci_lo": -0.003423412367192894,
+      "S3_minus_S1_ci_hi": -0.0005586099638139844,
+      "S2_minus_S0": -0.001970057850794126,
+      "S2_minus_S0_ci_lo": -0.003939152535793519,
+      "S2_minus_S0_ci_hi": -0.0007093088200007733
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "bit": "NEW_UPPER",
+      "n": 12519,
+      "prevalence": 0.3572170301142264,
+      "S3_minus_S1": -0.014540014086541476,
+      "S3_minus_S1_ci_lo": -0.01849088680764223,
+      "S3_minus_S1_ci_hi": -0.011641322817064512,
+      "S2_minus_S0": -0.01439557179644638,
+      "S2_minus_S0_ci_lo": -0.017877772450920863,
+      "S2_minus_S0_ci_hi": -0.011396228251424619
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "bit": "NEW_LOWER",
+      "n": 12519,
+      "prevalence": 0.3755092259765157,
+      "S3_minus_S1": -0.013416148226176665,
+      "S3_minus_S1_ci_lo": -0.016641780138911332,
+      "S3_minus_S1_ci_hi": -0.01052125969473762,
+      "S2_minus_S0": -0.013315654827484164,
+      "S2_minus_S0_ci_lo": -0.016644988639379375,
+      "S2_minus_S0_ci_hi": -0.010046948220876883
+    }
+  ],
+  "by_symbol": {
+    "n_rows": 30,
+    "n_symbol_per_window": 15,
+    "window_A_n_negative": 15,
+    "window_A_n_positive": 0,
+    "window_B_n_negative": 15,
+    "window_B_n_positive": 0
+  },
+  "crosscheck_vs_frozen_rounds": {
+    "note": "S2 - S0 must reproduce the already-frozen M1 - M0 / REPL-A numbers exactly, because S2 uses the identical feature set and window split",
+    "window_A_S2_minus_S0": -0.007165155454171992,
+    "path0_M1_minus_M0": -0.007165155454171992,
+    "window_B_S2_minus_S0": -0.00813512230487083,
+    "repl0_M1_minus_M0": -0.00813512230487083
+  },
+  "tb4_analytically_used": false,
+  "tb4_note": "TB4 may be present in the raw loader output for cache reuse, but no TB4 value contributes to episode endpoints, sample inclusion, features, labels, fit, preprocessing fit, metrics, bootstrap or diagnostics; it remains blind for final evaluation.",
+  "timing": {
+    "cache_load_seconds": 9.73,
+    "provenance_feature_seconds": 0.76,
+    "fit_seconds": 0.98,
+    "bootstrap_seconds": 0.15,
+    "total_seconds": 11.66
+  },
+  "interpretation_limits": "STATE-1 is a mechanism decomposition on already-consumed development evidence (TB1/TB2/TB3). It does NOT establish SMC, event sequencing, latent psychology, tradability or RL.",
+  "STATE1_VERDICT": "PREV_EVENT_MEMORY_BEYOND_CURRENT_PROVENANCE_SUPPORTED",
+  "STATE1_CONCLUSION": "previous structural endpoint contains information about the next structural transition beyond current local geometry and current boundary activation provenance (first-order event memory candidate supported). Latent psychology is still NOT observed."
+}
