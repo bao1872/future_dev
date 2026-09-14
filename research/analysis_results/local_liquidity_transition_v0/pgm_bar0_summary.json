@@ -1,0 +1,640 @@
+{
+  "experiment": "PGM-BAR-0 5m dynamic path + SMC transition increment",
+  "base": "2ccb912ea00ba0fcf3f0bc1d694cb89eae169668",
+  "question": "does 5m dynamic update / intra-episode path / SMC structure / OB lifecycle each add stable episode-NLL increment over the frozen 15-mask pairwise CRF endpoint head?",
+  "models": {
+    "M0_START_STATE": {
+      "n_numeric": 15,
+      "n_categorical": 1,
+      "numeric": [
+        "start_up_distance_R",
+        "start_down_distance_R",
+        "start_width_R",
+        "start_log_ratio",
+        "upper_oldest_log_age",
+        "upper_newest_log_age",
+        "upper_newest_age_zero",
+        "upper_oldest_age_zero",
+        "upper_n_active_identities",
+        "lower_oldest_log_age",
+        "lower_newest_log_age",
+        "lower_newest_age_zero",
+        "lower_oldest_age_zero",
+        "lower_n_active_identities",
+        "elapsed_log"
+      ],
+      "categorical": [
+        "prev_event_mask"
+      ]
+    },
+    "M1_CURRENT_5M_SNAPSHOT": {
+      "n_numeric": 19,
+      "n_categorical": 1,
+      "numeric": [
+        "start_up_distance_R",
+        "start_down_distance_R",
+        "start_width_R",
+        "start_log_ratio",
+        "upper_oldest_log_age",
+        "upper_newest_log_age",
+        "upper_newest_age_zero",
+        "upper_oldest_age_zero",
+        "upper_n_active_identities",
+        "lower_oldest_log_age",
+        "lower_newest_log_age",
+        "lower_newest_age_zero",
+        "lower_oldest_age_zero",
+        "lower_n_active_identities",
+        "elapsed_log",
+        "cur_up_distance_R",
+        "cur_down_distance_R",
+        "cur_width_R",
+        "cur_log_ratio"
+      ],
+      "categorical": [
+        "prev_event_mask"
+      ]
+    },
+    "M2_INTRA_EPISODE_PATH": {
+      "n_numeric": 25,
+      "n_categorical": 1,
+      "numeric": [
+        "start_up_distance_R",
+        "start_down_distance_R",
+        "start_width_R",
+        "start_log_ratio",
+        "upper_oldest_log_age",
+        "upper_newest_log_age",
+        "upper_newest_age_zero",
+        "upper_oldest_age_zero",
+        "upper_n_active_identities",
+        "lower_oldest_log_age",
+        "lower_newest_log_age",
+        "lower_newest_age_zero",
+        "lower_oldest_age_zero",
+        "lower_n_active_identities",
+        "elapsed_log",
+        "cur_up_distance_R",
+        "cur_down_distance_R",
+        "cur_width_R",
+        "cur_log_ratio",
+        "path_total_variation_R",
+        "path_max_up_excursion_R",
+        "path_max_down_excursion_R",
+        "path_direction_change_rate",
+        "path_last_return_R",
+        "path_current_bar_range_R"
+      ],
+      "categorical": [
+        "prev_event_mask"
+      ]
+    },
+    "M3_SMC_STRUCTURE": {
+      "n_numeric": 35,
+      "n_categorical": 1,
+      "numeric": [
+        "start_up_distance_R",
+        "start_down_distance_R",
+        "start_width_R",
+        "start_log_ratio",
+        "upper_oldest_log_age",
+        "upper_newest_log_age",
+        "upper_newest_age_zero",
+        "upper_oldest_age_zero",
+        "upper_n_active_identities",
+        "lower_oldest_log_age",
+        "lower_newest_log_age",
+        "lower_newest_age_zero",
+        "lower_oldest_age_zero",
+        "lower_n_active_identities",
+        "elapsed_log",
+        "cur_up_distance_R",
+        "cur_down_distance_R",
+        "cur_width_R",
+        "cur_log_ratio",
+        "path_total_variation_R",
+        "path_max_up_excursion_R",
+        "path_max_down_excursion_R",
+        "path_direction_change_rate",
+        "path_last_return_R",
+        "path_current_bar_range_R",
+        "bos_internal_bull",
+        "bos_internal_bear",
+        "choch_internal_bull",
+        "choch_internal_bear",
+        "bos_swing_bull",
+        "bos_swing_bear",
+        "choch_swing_bull",
+        "choch_swing_bear",
+        "internal_bias",
+        "swing_bias"
+      ],
+      "categorical": [
+        "prev_event_mask"
+      ]
+    },
+    "M4_OB_LIFECYCLE": {
+      "n_numeric": 42,
+      "n_categorical": 1,
+      "numeric": [
+        "start_up_distance_R",
+        "start_down_distance_R",
+        "start_width_R",
+        "start_log_ratio",
+        "upper_oldest_log_age",
+        "upper_newest_log_age",
+        "upper_newest_age_zero",
+        "upper_oldest_age_zero",
+        "upper_n_active_identities",
+        "lower_oldest_log_age",
+        "lower_newest_log_age",
+        "lower_newest_age_zero",
+        "lower_oldest_age_zero",
+        "lower_n_active_identities",
+        "elapsed_log",
+        "cur_up_distance_R",
+        "cur_down_distance_R",
+        "cur_width_R",
+        "cur_log_ratio",
+        "path_total_variation_R",
+        "path_max_up_excursion_R",
+        "path_max_down_excursion_R",
+        "path_direction_change_rate",
+        "path_last_return_R",
+        "path_current_bar_range_R",
+        "bos_internal_bull",
+        "bos_internal_bear",
+        "choch_internal_bull",
+        "choch_internal_bear",
+        "bos_swing_bull",
+        "bos_swing_bear",
+        "choch_swing_bull",
+        "choch_swing_bear",
+        "internal_bias",
+        "swing_bias",
+        "ob_created_bull",
+        "ob_created_bear",
+        "ob_entered_bull",
+        "ob_entered_bear",
+        "ob_mitigated_bull",
+        "ob_mitigated_bear",
+        "active_internal_ob_count"
+      ],
+      "categorical": [
+        "prev_event_mask"
+      ]
+    }
+  },
+  "nested": "M0\u2282M1\u2282M2\u2282M3\u2282M4 (strict)",
+  "windows": [
+    {
+      "name": "A_TB1_to_TB2",
+      "train": [
+        "TB1"
+      ],
+      "eval": "TB2",
+      "seed": 20260920
+    },
+    {
+      "name": "B_TB1TB2_to_TB3",
+      "train": [
+        "TB1",
+        "TB2"
+      ],
+      "eval": "TB3",
+      "seed": 20260921
+    }
+  ],
+  "primary_metric": "mean episode NLL",
+  "endpoint_head": "15-mask pairwise conditional CRF (PGM-0, frozen)",
+  "smc_source": "panji_indicators.compute_smc_pine canonical defaults; internal OB only (swing OB disabled by canonical default)",
+  "tb4_analytically_used": false,
+  "sample_audit": {
+    "n_episodes": 37987,
+    "n_bar_rows": 359714,
+    "n_terminals": 37987,
+    "episode_identity_sha256": "cf840a7191e0265e31442f7b8d8d5ae4173751b0cba15729f95d5c146ab9355c",
+    "episode_hash_matches_frozen": true,
+    "frozen_episode_hash": "cf840a7191e0265e31442f7b8d8d5ae4173751b0cba15729f95d5c146ab9355c",
+    "tb4_analytically_used": false,
+    "per_symbol": {
+      "AG": {
+        "n_episodes": 2699,
+        "n_bar_rows": 29888,
+        "n_zero_dur": 0,
+        "n_censor": 2,
+        "n_atr0": 0
+      },
+      "AL": {
+        "n_episodes": 5178,
+        "n_bar_rows": 26540,
+        "n_zero_dur": 0,
+        "n_censor": 1,
+        "n_atr0": 0
+      },
+      "AU": {
+        "n_episodes": 7986,
+        "n_bar_rows": 30045,
+        "n_zero_dur": 0,
+        "n_censor": 2,
+        "n_atr0": 0
+      },
+      "CF": {
+        "n_episodes": 10301,
+        "n_bar_rows": 20154,
+        "n_zero_dur": 0,
+        "n_censor": 1,
+        "n_atr0": 0
+      },
+      "CU": {
+        "n_episodes": 12816,
+        "n_bar_rows": 26152,
+        "n_zero_dur": 0,
+        "n_censor": 2,
+        "n_atr0": 0
+      },
+      "I": {
+        "n_episodes": 15165,
+        "n_bar_rows": 20414,
+        "n_zero_dur": 0,
+        "n_censor": 2,
+        "n_atr0": 0
+      },
+      "M": {
+        "n_episodes": 17615,
+        "n_bar_rows": 20340,
+        "n_zero_dur": 0,
+        "n_censor": 2,
+        "n_atr0": 0
+      },
+      "MA": {
+        "n_episodes": 19992,
+        "n_bar_rows": 19894,
+        "n_zero_dur": 0,
+        "n_censor": 2,
+        "n_atr0": 0
+      },
+      "NI": {
+        "n_episodes": 22745,
+        "n_bar_rows": 27033,
+        "n_zero_dur": 0,
+        "n_censor": 1,
+        "n_atr0": 0
+      },
+      "P": {
+        "n_episodes": 25127,
+        "n_bar_rows": 20137,
+        "n_zero_dur": 0,
+        "n_censor": 2,
+        "n_atr0": 0
+      },
+      "RB": {
+        "n_episodes": 27608,
+        "n_bar_rows": 20379,
+        "n_zero_dur": 0,
+        "n_censor": 2,
+        "n_atr0": 0
+      },
+      "RU": {
+        "n_episodes": 30149,
+        "n_bar_rows": 20460,
+        "n_zero_dur": 0,
+        "n_censor": 2,
+        "n_atr0": 0
+      },
+      "SC": {
+        "n_episodes": 32814,
+        "n_bar_rows": 31654,
+        "n_zero_dur": 0,
+        "n_censor": 1,
+        "n_atr0": 0
+      },
+      "SN": {
+        "n_episodes": 35563,
+        "n_bar_rows": 26545,
+        "n_zero_dur": 0,
+        "n_censor": 1,
+        "n_atr0": 0
+      },
+      "TA": {
+        "n_episodes": 37987,
+        "n_bar_rows": 20079,
+        "n_zero_dur": 0,
+        "n_censor": 1,
+        "n_atr0": 0
+      }
+    },
+    "smc_causality": {
+      "n_checks": 75,
+      "n_pass": 75,
+      "all_pass": true
+    }
+  },
+  "bootstrap_reps": 1000,
+  "model_metrics": {
+    "A_TB1_to_TB2": {
+      "M0_START_STATE": {
+        "hazard_nll": 0.3326945173649956,
+        "hazard_brier": 0.09309813523054272,
+        "endpoint_joint_nll": 1.4399928663744932,
+        "marginal_bit_ece": 0.042668967320269334,
+        "mean_episode_nll": 4.627861033534613,
+        "n_episodes": 12999,
+        "n_obs": 124556,
+        "mean_pred_duration": 4.988877097715374,
+        "mean_actual_duration": 9.581967843680284
+      },
+      "M1_CURRENT_5M_SNAPSHOT": {
+        "hazard_nll": 0.3327117036460518,
+        "hazard_brier": 0.09309028006885249,
+        "endpoint_joint_nll": 1.1612149122799693,
+        "marginal_bit_ece": 0.04273267731131156,
+        "mean_episode_nll": 4.349247757832522,
+        "n_episodes": 12999,
+        "n_obs": 124556,
+        "mean_pred_duration": 4.989975038716676,
+        "mean_actual_duration": 9.581967843680284
+      },
+      "M2_INTRA_EPISODE_PATH": {
+        "hazard_nll": 0.32685943187249134,
+        "hazard_brier": 0.09195203211758984,
+        "endpoint_joint_nll": 1.157716106882962,
+        "marginal_bit_ece": 0.04134012836443055,
+        "mean_episode_nll": 4.289672672488781,
+        "n_episodes": 12999,
+        "n_obs": 124556,
+        "mean_pred_duration": 5.056042547066644,
+        "mean_actual_duration": 9.581967843680284
+      },
+      "M3_SMC_STRUCTURE": {
+        "hazard_nll": 0.3267278976070313,
+        "hazard_brier": 0.09191782838558538,
+        "endpoint_joint_nll": 1.1585981685075382,
+        "marginal_bit_ece": 0.039904436079583466,
+        "mean_episode_nll": 4.289294377011376,
+        "n_episodes": 12999,
+        "n_obs": 124556,
+        "mean_pred_duration": 5.0628387124663385,
+        "mean_actual_duration": 9.581967843680284
+      },
+      "M4_OB_LIFECYCLE": {
+        "hazard_nll": 0.32664845380418417,
+        "hazard_brier": 0.0918968513137682,
+        "endpoint_joint_nll": 1.160019397261591,
+        "marginal_bit_ece": 0.043575938616614726,
+        "mean_episode_nll": 4.289954377801168,
+        "n_episodes": 12999,
+        "n_obs": 124556,
+        "mean_pred_duration": 5.084329874668537,
+        "mean_actual_duration": 9.581967843680284
+      }
+    },
+    "B_TB1TB2_to_TB3": {
+      "M0_START_STATE": {
+        "hazard_nll": 0.3360156308361051,
+        "hazard_brier": 0.09437251289705746,
+        "endpoint_joint_nll": 1.453392887666186,
+        "marginal_bit_ece": 0.044610700545569884,
+        "mean_episode_nll": 4.622873973443056,
+        "n_episodes": 12741,
+        "n_obs": 120180,
+        "mean_pred_duration": 4.976346455351979,
+        "mean_actual_duration": 9.432540616906051
+      },
+      "M1_CURRENT_5M_SNAPSHOT": {
+        "hazard_nll": 0.3360329186124427,
+        "hazard_brier": 0.09437383564675104,
+        "endpoint_joint_nll": 1.1833308806381528,
+        "marginal_bit_ece": 0.04165568826787536,
+        "mean_episode_nll": 4.352975034067505,
+        "n_episodes": 12741,
+        "n_obs": 120180,
+        "mean_pred_duration": 4.978040805055579,
+        "mean_actual_duration": 9.432540616906051
+      },
+      "M2_INTRA_EPISODE_PATH": {
+        "hazard_nll": 0.3320504750304253,
+        "hazard_brier": 0.09361768484431493,
+        "endpoint_joint_nll": 1.177383965457132,
+        "marginal_bit_ece": 0.04029749028103336,
+        "mean_episode_nll": 4.309463558044567,
+        "n_episodes": 12741,
+        "n_obs": 120180,
+        "mean_pred_duration": 5.05981255954653,
+        "mean_actual_duration": 9.432540616906051
+      },
+      "M3_SMC_STRUCTURE": {
+        "hazard_nll": 0.3318718050617579,
+        "hazard_brier": 0.09357656894114669,
+        "endpoint_joint_nll": 1.1762543646973307,
+        "marginal_bit_ece": 0.040200193663785175,
+        "mean_episode_nll": 4.3066486455482895,
+        "n_episodes": 12741,
+        "n_obs": 120180,
+        "mean_pred_duration": 5.061349984287548,
+        "mean_actual_duration": 9.432540616906051
+      },
+      "M4_OB_LIFECYCLE": {
+        "hazard_nll": 0.33167672120837616,
+        "hazard_brier": 0.09352354775602259,
+        "endpoint_joint_nll": 1.17669894920157,
+        "marginal_bit_ece": 0.04336655916617445,
+        "mean_episode_nll": 4.305253093681803,
+        "n_episodes": 12741,
+        "n_obs": 120180,
+        "mean_pred_duration": 5.123995820573799,
+        "mean_actual_duration": 9.432540616906051
+      }
+    }
+  },
+  "bootstrap": [
+    {
+      "window": "A_TB1_to_TB2",
+      "comparison": "M1-M0",
+      "gate": "BAR_STATE_UPDATE",
+      "model_hi": "M1_CURRENT_5M_SNAPSHOT",
+      "model_lo": "M0_START_STATE",
+      "delta_sample_mean": -0.2786132757020906,
+      "ci_lo": -0.2936076076706886,
+      "ci_hi": -0.26220580326751347,
+      "verdict": "CI_below_zero"
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "comparison": "M2-M1",
+      "gate": "INTRA_EPISODE_PATH_MEMORY",
+      "model_hi": "M2_INTRA_EPISODE_PATH",
+      "model_lo": "M1_CURRENT_5M_SNAPSHOT",
+      "delta_sample_mean": -0.0595750853437416,
+      "ci_lo": -0.06688663440111012,
+      "ci_hi": -0.05089098144815399,
+      "verdict": "CI_below_zero"
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "comparison": "M3-M2",
+      "gate": "SMC_STRUCTURE_INCREMENT",
+      "model_hi": "M3_SMC_STRUCTURE",
+      "model_lo": "M2_INTRA_EPISODE_PATH",
+      "delta_sample_mean": -0.0003782954774042943,
+      "ci_lo": -0.0026425104337494698,
+      "ci_hi": 0.0023732658716117947,
+      "verdict": "CI_contains_zero"
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "comparison": "M4-M3",
+      "gate": "OB_LIFECYCLE_INCREMENT",
+      "model_hi": "M4_OB_LIFECYCLE",
+      "model_lo": "M3_SMC_STRUCTURE",
+      "delta_sample_mean": 0.0006600007897920037,
+      "ci_lo": -0.0008404540402439881,
+      "ci_hi": 0.0025032410790820506,
+      "verdict": "CI_contains_zero"
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "comparison": "M1-M0",
+      "gate": "BAR_STATE_UPDATE",
+      "model_hi": "M1_CURRENT_5M_SNAPSHOT",
+      "model_lo": "M0_START_STATE",
+      "delta_sample_mean": -0.26989893937555165,
+      "ci_lo": -0.28563909774513824,
+      "ci_hi": -0.2513490457315414,
+      "verdict": "CI_below_zero"
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "comparison": "M2-M1",
+      "gate": "INTRA_EPISODE_PATH_MEMORY",
+      "model_hi": "M2_INTRA_EPISODE_PATH",
+      "model_lo": "M1_CURRENT_5M_SNAPSHOT",
+      "delta_sample_mean": -0.04351147602293813,
+      "ci_lo": -0.05028753867691826,
+      "ci_hi": -0.035999385518479234,
+      "verdict": "CI_below_zero"
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "comparison": "M3-M2",
+      "gate": "SMC_STRUCTURE_INCREMENT",
+      "model_hi": "M3_SMC_STRUCTURE",
+      "model_lo": "M2_INTRA_EPISODE_PATH",
+      "delta_sample_mean": -0.0028149124962770803,
+      "ci_lo": -0.004709669693731886,
+      "ci_hi": -0.00043421527848922886,
+      "verdict": "CI_below_zero"
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "comparison": "M4-M3",
+      "gate": "OB_LIFECYCLE_INCREMENT",
+      "model_hi": "M4_OB_LIFECYCLE",
+      "model_lo": "M3_SMC_STRUCTURE",
+      "delta_sample_mean": -0.0013955518664864601,
+      "ci_lo": -0.0035020935871987414,
+      "ci_hi": 0.0016025465166090368,
+      "verdict": "CI_contains_zero"
+    }
+  ],
+  "by_symbol": {
+    "n_rows": 120,
+    "windows": {
+      "A_TB1_to_TB2": {
+        "M1-M0": {
+          "n_negative": 15,
+          "n_positive": 15
+        },
+        "M2-M1": {
+          "n_negative": 15,
+          "n_positive": 15
+        },
+        "M3-M2": {
+          "n_negative": 15,
+          "n_positive": 15
+        },
+        "M4-M3": {
+          "n_negative": 15,
+          "n_positive": 15
+        }
+      },
+      "B_TB1TB2_to_TB3": {
+        "M1-M0": {
+          "n_negative": 15,
+          "n_positive": 15
+        },
+        "M2-M1": {
+          "n_negative": 15,
+          "n_positive": 15
+        },
+        "M3-M2": {
+          "n_negative": 15,
+          "n_positive": 15
+        },
+        "M4-M3": {
+          "n_negative": 15,
+          "n_positive": 15
+        }
+      }
+    }
+  },
+  "verdict": {
+    "BAR_STATE_UPDATE": {
+      "supported": true,
+      "windows": {
+        "A_TB1_to_TB2": {
+          "ci_hi": -0.26220580326751347
+        },
+        "B_TB1TB2_to_TB3": {
+          "ci_hi": -0.2513490457315414
+        }
+      }
+    },
+    "INTRA_EPISODE_PATH_MEMORY": {
+      "supported": true,
+      "windows": {
+        "A_TB1_to_TB2": {
+          "ci_hi": -0.05089098144815399
+        },
+        "B_TB1TB2_to_TB3": {
+          "ci_hi": -0.035999385518479234
+        }
+      }
+    },
+    "SMC_STRUCTURE_INCREMENT": {
+      "supported": false,
+      "windows": {
+        "A_TB1_to_TB2": {
+          "ci_hi": 0.0023732658716117947
+        },
+        "B_TB1TB2_to_TB3": {
+          "ci_hi": -0.00043421527848922886
+        }
+      }
+    },
+    "OB_LIFECYCLE_INCREMENT": {
+      "supported": false,
+      "windows": {
+        "A_TB1_to_TB2": {
+          "ci_hi": 0.0025032410790820506
+        },
+        "B_TB1TB2_to_TB3": {
+          "ci_hi": 0.0016025465166090368
+        }
+      }
+    }
+  },
+  "gates": {
+    "BAR_STATE_UPDATE": "M1-M0 CI_hi<0 in both windows",
+    "INTRA_EPISODE_PATH_MEMORY": "M2-M1 CI_hi<0 in both windows",
+    "SMC_STRUCTURE_INCREMENT": "M3-M2 CI_hi<0 in both windows",
+    "OB_LIFECYCLE_INCREMENT": "M4-M3 CI_hi<0 in both windows"
+  },
+  "interpretation_limits": "PGM-BAR-0 only tests whether dynamic 5m / path / SMC / OB features reduce episode NLL beyond the frozen endpoint CRF head. It does NOT authorise RL, PnL, latent state, HMM/HSMM, new Sweep definitions, SMC parameter tuning, or tradability.",
+  "timing": {
+    "cache_load_seconds": 13.08,
+    "hash_seconds": 0.2,
+    "symbol_build_seconds": 25.93,
+    "total_seconds": 108.12
+  }
+}

@@ -1,0 +1,121 @@
+{
+  "n_episodes": 37987,
+  "n_bar_rows": 359714,
+  "n_terminals": 37987,
+  "episode_identity_sha256": "cf840a7191e0265e31442f7b8d8d5ae4173751b0cba15729f95d5c146ab9355c",
+  "episode_hash_matches_frozen": true,
+  "frozen_episode_hash": "cf840a7191e0265e31442f7b8d8d5ae4173751b0cba15729f95d5c146ab9355c",
+  "tb4_analytically_used": false,
+  "per_symbol": {
+    "AG": {
+      "n_episodes": 2699,
+      "n_bar_rows": 29888,
+      "n_zero_dur": 0,
+      "n_censor": 2,
+      "n_atr0": 0
+    },
+    "AL": {
+      "n_episodes": 5178,
+      "n_bar_rows": 26540,
+      "n_zero_dur": 0,
+      "n_censor": 1,
+      "n_atr0": 0
+    },
+    "AU": {
+      "n_episodes": 7986,
+      "n_bar_rows": 30045,
+      "n_zero_dur": 0,
+      "n_censor": 2,
+      "n_atr0": 0
+    },
+    "CF": {
+      "n_episodes": 10301,
+      "n_bar_rows": 20154,
+      "n_zero_dur": 0,
+      "n_censor": 1,
+      "n_atr0": 0
+    },
+    "CU": {
+      "n_episodes": 12816,
+      "n_bar_rows": 26152,
+      "n_zero_dur": 0,
+      "n_censor": 2,
+      "n_atr0": 0
+    },
+    "I": {
+      "n_episodes": 15165,
+      "n_bar_rows": 20414,
+      "n_zero_dur": 0,
+      "n_censor": 2,
+      "n_atr0": 0
+    },
+    "M": {
+      "n_episodes": 17615,
+      "n_bar_rows": 20340,
+      "n_zero_dur": 0,
+      "n_censor": 2,
+      "n_atr0": 0
+    },
+    "MA": {
+      "n_episodes": 19992,
+      "n_bar_rows": 19894,
+      "n_zero_dur": 0,
+      "n_censor": 2,
+      "n_atr0": 0
+    },
+    "NI": {
+      "n_episodes": 22745,
+      "n_bar_rows": 27033,
+      "n_zero_dur": 0,
+      "n_censor": 1,
+      "n_atr0": 0
+    },
+    "P": {
+      "n_episodes": 25127,
+      "n_bar_rows": 20137,
+      "n_zero_dur": 0,
+      "n_censor": 2,
+      "n_atr0": 0
+    },
+    "RB": {
+      "n_episodes": 27608,
+      "n_bar_rows": 20379,
+      "n_zero_dur": 0,
+      "n_censor": 2,
+      "n_atr0": 0
+    },
+    "RU": {
+      "n_episodes": 30149,
+      "n_bar_rows": 20460,
+      "n_zero_dur": 0,
+      "n_censor": 2,
+      "n_atr0": 0
+    },
+    "SC": {
+      "n_episodes": 32814,
+      "n_bar_rows": 31654,
+      "n_zero_dur": 0,
+      "n_censor": 1,
+      "n_atr0": 0
+    },
+    "SN": {
+      "n_episodes": 35563,
+      "n_bar_rows": 26545,
+      "n_zero_dur": 0,
+      "n_censor": 1,
+      "n_atr0": 0
+    },
+    "TA": {
+      "n_episodes": 37987,
+      "n_bar_rows": 20079,
+      "n_zero_dur": 0,
+      "n_censor": 1,
+      "n_atr0": 0
+    }
+  },
+  "smc_causality": {
+    "n_checks": 75,
+    "n_pass": 75,
+    "all_pass": true
+  }
+}
