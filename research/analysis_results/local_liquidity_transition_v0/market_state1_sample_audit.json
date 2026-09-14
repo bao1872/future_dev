@@ -1,0 +1,11 @@
+{
+  "n_episodes": 37987,
+  "n_bar_rows": 359714,
+  "n_terminals": 37987,
+  "provenance_parity_ok": true,
+  "n_provenance_parity_points": 1500,
+  "tempo_firstbar_zero": true,
+  "provenance_firstbar_residual_max": 0.0,
+  "base_sample": "pgm_bar0_samples.parquet (reused, unmodified)",
+  "base_commit": "099fbb87b0fa5db5cce6e03342decb4838cb7c07"
+}

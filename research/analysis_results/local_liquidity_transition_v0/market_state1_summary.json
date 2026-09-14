@@ -1,0 +1,534 @@
+{
+  "experiment": "MARKET-STATE-1 minimal sufficient 5m observable state",
+  "base": "099fbb87b0fa5db5cce6e03342decb4838cb7c07",
+  "question": "given current 5m geometry + running path + previous endpoint, do dynamic provenance and arrival tempo each add stable, independent episode-NLL increments?",
+  "baseline": "PGM-BAR-0 M2 (frozen)",
+  "models": {
+    "B0_VALIDATED_STATE": {
+      "n_numeric": 25,
+      "n_categorical": 1,
+      "numeric": [
+        "start_up_distance_R",
+        "start_down_distance_R",
+        "start_width_R",
+        "start_log_ratio",
+        "upper_oldest_log_age",
+        "upper_newest_log_age",
+        "upper_newest_age_zero",
+        "upper_oldest_age_zero",
+        "upper_n_active_identities",
+        "lower_oldest_log_age",
+        "lower_newest_log_age",
+        "lower_newest_age_zero",
+        "lower_oldest_age_zero",
+        "lower_n_active_identities",
+        "elapsed_log",
+        "cur_up_distance_R",
+        "cur_down_distance_R",
+        "cur_width_R",
+        "cur_log_ratio",
+        "path_total_variation_R",
+        "path_max_up_excursion_R",
+        "path_max_down_excursion_R",
+        "path_direction_change_rate",
+        "path_last_return_R",
+        "path_current_bar_range_R"
+      ],
+      "categorical": [
+        "prev_event_mask"
+      ]
+    },
+    "P_CURRENT_PROVENANCE": {
+      "n_numeric": 35,
+      "n_categorical": 1,
+      "numeric": [
+        "start_up_distance_R",
+        "start_down_distance_R",
+        "start_width_R",
+        "start_log_ratio",
+        "upper_oldest_log_age",
+        "upper_newest_log_age",
+        "upper_newest_age_zero",
+        "upper_oldest_age_zero",
+        "upper_n_active_identities",
+        "lower_oldest_log_age",
+        "lower_newest_log_age",
+        "lower_newest_age_zero",
+        "lower_oldest_age_zero",
+        "lower_n_active_identities",
+        "elapsed_log",
+        "cur_up_distance_R",
+        "cur_down_distance_R",
+        "cur_width_R",
+        "cur_log_ratio",
+        "path_total_variation_R",
+        "path_max_up_excursion_R",
+        "path_max_down_excursion_R",
+        "path_direction_change_rate",
+        "path_last_return_R",
+        "path_current_bar_range_R",
+        "upper_oldest_log_age_residual",
+        "upper_newest_log_age_residual",
+        "upper_current_newest_age_zero",
+        "upper_current_oldest_age_zero",
+        "upper_active_identity_count_delta",
+        "lower_oldest_log_age_residual",
+        "lower_newest_log_age_residual",
+        "lower_current_newest_age_zero",
+        "lower_current_oldest_age_zero",
+        "lower_active_identity_count_delta"
+      ],
+      "categorical": [
+        "prev_event_mask"
+      ]
+    },
+    "T_ARRIVAL_TEMPO": {
+      "n_numeric": 29,
+      "n_categorical": 1,
+      "numeric": [
+        "start_up_distance_R",
+        "start_down_distance_R",
+        "start_width_R",
+        "start_log_ratio",
+        "upper_oldest_log_age",
+        "upper_newest_log_age",
+        "upper_newest_age_zero",
+        "upper_oldest_age_zero",
+        "upper_n_active_identities",
+        "lower_oldest_log_age",
+        "lower_newest_log_age",
+        "lower_newest_age_zero",
+        "lower_oldest_age_zero",
+        "lower_n_active_identities",
+        "elapsed_log",
+        "cur_up_distance_R",
+        "cur_down_distance_R",
+        "cur_width_R",
+        "cur_log_ratio",
+        "path_total_variation_R",
+        "path_max_up_excursion_R",
+        "path_max_down_excursion_R",
+        "path_direction_change_rate",
+        "path_last_return_R",
+        "path_current_bar_range_R",
+        "tempo_signed_speed",
+        "tempo_abs_speed",
+        "tempo_signed_efficiency",
+        "tempo_abs_efficiency"
+      ],
+      "categorical": [
+        "prev_event_mask"
+      ]
+    },
+    "PT_PROVENANCE_TEMPO": {
+      "n_numeric": 39,
+      "n_categorical": 1,
+      "numeric": [
+        "start_up_distance_R",
+        "start_down_distance_R",
+        "start_width_R",
+        "start_log_ratio",
+        "upper_oldest_log_age",
+        "upper_newest_log_age",
+        "upper_newest_age_zero",
+        "upper_oldest_age_zero",
+        "upper_n_active_identities",
+        "lower_oldest_log_age",
+        "lower_newest_log_age",
+        "lower_newest_age_zero",
+        "lower_oldest_age_zero",
+        "lower_n_active_identities",
+        "elapsed_log",
+        "cur_up_distance_R",
+        "cur_down_distance_R",
+        "cur_width_R",
+        "cur_log_ratio",
+        "path_total_variation_R",
+        "path_max_up_excursion_R",
+        "path_max_down_excursion_R",
+        "path_direction_change_rate",
+        "path_last_return_R",
+        "path_current_bar_range_R",
+        "upper_oldest_log_age_residual",
+        "upper_newest_log_age_residual",
+        "upper_current_newest_age_zero",
+        "upper_current_oldest_age_zero",
+        "upper_active_identity_count_delta",
+        "lower_oldest_log_age_residual",
+        "lower_newest_log_age_residual",
+        "lower_current_newest_age_zero",
+        "lower_current_oldest_age_zero",
+        "lower_active_identity_count_delta",
+        "tempo_signed_speed",
+        "tempo_abs_speed",
+        "tempo_signed_efficiency",
+        "tempo_abs_efficiency"
+      ],
+      "categorical": [
+        "prev_event_mask"
+      ]
+    }
+  },
+  "design": "2x2 factorial: B0 / P(provenance) / T(tempo) / PT(both)",
+  "new_features": {
+    "provenance_residual": [
+      "upper_oldest_log_age_residual",
+      "upper_newest_log_age_residual",
+      "upper_current_newest_age_zero",
+      "upper_current_oldest_age_zero",
+      "upper_active_identity_count_delta",
+      "lower_oldest_log_age_residual",
+      "lower_newest_log_age_residual",
+      "lower_current_newest_age_zero",
+      "lower_current_oldest_age_zero",
+      "lower_active_identity_count_delta"
+    ],
+    "tempo": [
+      "tempo_signed_speed",
+      "tempo_abs_speed",
+      "tempo_signed_efficiency",
+      "tempo_abs_efficiency"
+    ]
+  },
+  "windows": [
+    {
+      "name": "A_TB1_to_TB2",
+      "train": [
+        "TB1"
+      ],
+      "eval": "TB2",
+      "seed": 20260920
+    },
+    {
+      "name": "B_TB1TB2_to_TB3",
+      "train": [
+        "TB1",
+        "TB2"
+      ],
+      "eval": "TB3",
+      "seed": 20260921
+    }
+  ],
+  "primary_metric": "mean episode NLL",
+  "tb4_analytically_used": false,
+  "model_metrics": {
+    "A_TB1_to_TB2": {
+      "B0_VALIDATED_STATE": {
+        "hazard_nll": 0.32685943187249134,
+        "hazard_brier": 0.09195203211758984,
+        "endpoint_joint_nll": 1.157716106882962,
+        "marginal_bit_ece": 0.04134012836443055,
+        "mean_episode_nll": 4.289672672488781,
+        "n_episodes": 12999,
+        "n_obs": 124556,
+        "mean_pred_duration": 5.056042547066644,
+        "mean_actual_duration": 9.581967843680284
+      },
+      "P_CURRENT_PROVENANCE": {
+        "hazard_nll": 0.32676334689829994,
+        "hazard_brier": 0.09192104465373442,
+        "endpoint_joint_nll": 1.1518694682481498,
+        "marginal_bit_ece": 0.04115011936356524,
+        "mean_episode_nll": 4.282905350721005,
+        "n_episodes": 12999,
+        "n_obs": 124556,
+        "mean_pred_duration": 5.066874163390908,
+        "mean_actual_duration": 9.581967843680284
+      },
+      "T_ARRIVAL_TEMPO": {
+        "hazard_nll": 0.3268538520952031,
+        "hazard_brier": 0.09194740645465317,
+        "endpoint_joint_nll": 1.1553545927312658,
+        "marginal_bit_ece": 0.04086381779898012,
+        "mean_episode_nll": 4.287257693090534,
+        "n_episodes": 12999,
+        "n_obs": 124556,
+        "mean_pred_duration": 5.061235776806807,
+        "mean_actual_duration": 9.581967843680284
+      },
+      "PT_PROVENANCE_TEMPO": {
+        "hazard_nll": 0.3267950304475606,
+        "hazard_brier": 0.09192820078823355,
+        "endpoint_joint_nll": 1.148291487495102,
+        "marginal_bit_ece": 0.03949348207977292,
+        "mean_episode_nll": 4.279630960718146,
+        "n_episodes": 12999,
+        "n_obs": 124556,
+        "mean_pred_duration": 5.063230010526041,
+        "mean_actual_duration": 9.581967843680284
+      }
+    },
+    "B_TB1TB2_to_TB3": {
+      "B0_VALIDATED_STATE": {
+        "hazard_nll": 0.3320504750304253,
+        "hazard_brier": 0.09361768484431493,
+        "endpoint_joint_nll": 1.177383965457132,
+        "marginal_bit_ece": 0.04029749028103336,
+        "mean_episode_nll": 4.309463558044567,
+        "n_episodes": 12741,
+        "n_obs": 120180,
+        "mean_pred_duration": 5.05981255954653,
+        "mean_actual_duration": 9.432540616906051
+      },
+      "P_CURRENT_PROVENANCE": {
+        "hazard_nll": 0.3318154085815902,
+        "hazard_brier": 0.09355876793790345,
+        "endpoint_joint_nll": 1.1740868350884128,
+        "marginal_bit_ece": 0.040283866129072386,
+        "mean_episode_nll": 4.303949153849539,
+        "n_episodes": 12741,
+        "n_obs": 120180,
+        "mean_pred_duration": 5.0638558811121825,
+        "mean_actual_duration": 9.432540616906051
+      },
+      "T_ARRIVAL_TEMPO": {
+        "hazard_nll": 0.33200302453501473,
+        "hazard_brier": 0.09360263524656977,
+        "endpoint_joint_nll": 1.1741149184627004,
+        "marginal_bit_ece": 0.04035814545870778,
+        "mean_episode_nll": 4.305746932324882,
+        "n_episodes": 12741,
+        "n_obs": 120180,
+        "mean_pred_duration": 5.063340460715823,
+        "mean_actual_duration": 9.432540616906051
+      },
+      "PT_PROVENANCE_TEMPO": {
+        "hazard_nll": 0.3318040546457984,
+        "hazard_brier": 0.09355556675197643,
+        "endpoint_joint_nll": 1.16967306861352,
+        "marginal_bit_ece": 0.040254164182904645,
+        "mean_episode_nll": 4.299428290914128,
+        "n_episodes": 12741,
+        "n_obs": 120180,
+        "mean_pred_duration": 5.063606346162589,
+        "mean_actual_duration": 9.432540616906051
+      }
+    }
+  },
+  "bootstrap": [
+    {
+      "window": "A_TB1_to_TB2",
+      "comparison": "P-B0",
+      "gate": "PROVENANCE_STANDALONE",
+      "model_hi": "P_CURRENT_PROVENANCE",
+      "model_lo": "B0_VALIDATED_STATE",
+      "delta_sample_mean": -0.006767321767775148,
+      "ci_lo": -0.009391933219046454,
+      "ci_hi": -0.004986026205346549,
+      "verdict": "CI_below_zero"
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "comparison": "T-B0",
+      "gate": "TEMPO_STANDALONE",
+      "model_hi": "T_ARRIVAL_TEMPO",
+      "model_lo": "B0_VALIDATED_STATE",
+      "delta_sample_mean": -0.00241497939824674,
+      "ci_lo": -0.0038059686068488956,
+      "ci_hi": -0.0012155486414240058,
+      "verdict": "CI_below_zero"
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "comparison": "PT-T",
+      "gate": "PROVENANCE_UNIQUE",
+      "model_hi": "PT_PROVENANCE_TEMPO",
+      "model_lo": "T_ARRIVAL_TEMPO",
+      "delta_sample_mean": -0.007626732372387413,
+      "ci_lo": -0.010098654356133647,
+      "ci_hi": -0.0057387387295547735,
+      "verdict": "CI_below_zero"
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "comparison": "PT-P",
+      "gate": "TEMPO_UNIQUE",
+      "model_hi": "PT_PROVENANCE_TEMPO",
+      "model_lo": "P_CURRENT_PROVENANCE",
+      "delta_sample_mean": -0.003274390002859005,
+      "ci_lo": -0.004680195188185126,
+      "ci_hi": -0.0021106111567829574,
+      "verdict": "CI_below_zero"
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "comparison": "P-B0",
+      "gate": "PROVENANCE_STANDALONE",
+      "model_hi": "P_CURRENT_PROVENANCE",
+      "model_lo": "B0_VALIDATED_STATE",
+      "delta_sample_mean": -0.005514404195027937,
+      "ci_lo": -0.007940906601217861,
+      "ci_hi": -0.003669422806779785,
+      "verdict": "CI_below_zero"
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "comparison": "T-B0",
+      "gate": "TEMPO_STANDALONE",
+      "model_hi": "T_ARRIVAL_TEMPO",
+      "model_lo": "B0_VALIDATED_STATE",
+      "delta_sample_mean": -0.0037166257196836966,
+      "ci_lo": -0.005461478793476222,
+      "ci_hi": -0.0024794857797407733,
+      "verdict": "CI_below_zero"
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "comparison": "PT-T",
+      "gate": "PROVENANCE_UNIQUE",
+      "model_hi": "PT_PROVENANCE_TEMPO",
+      "model_lo": "T_ARRIVAL_TEMPO",
+      "delta_sample_mean": -0.006318641410754894,
+      "ci_lo": -0.008999954852331172,
+      "ci_hi": -0.00424615684714016,
+      "verdict": "CI_below_zero"
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "comparison": "PT-P",
+      "gate": "TEMPO_UNIQUE",
+      "model_hi": "PT_PROVENANCE_TEMPO",
+      "model_lo": "P_CURRENT_PROVENANCE",
+      "delta_sample_mean": -0.004520862935410654,
+      "ci_lo": -0.0062142651701067595,
+      "ci_hi": -0.003219991039046634,
+      "verdict": "CI_below_zero"
+    }
+  ],
+  "by_symbol": {
+    "n_rows": 120,
+    "windows": {
+      "A_TB1_to_TB2": {
+        "P-B0": {
+          "n_negative": 15,
+          "n_positive": 15,
+          "n_symbols_mean_delta_neg": 13
+        },
+        "T-B0": {
+          "n_negative": 15,
+          "n_positive": 15,
+          "n_symbols_mean_delta_neg": 11
+        },
+        "PT-T": {
+          "n_negative": 15,
+          "n_positive": 15,
+          "n_symbols_mean_delta_neg": 13
+        },
+        "PT-P": {
+          "n_negative": 15,
+          "n_positive": 15,
+          "n_symbols_mean_delta_neg": 13
+        }
+      },
+      "B_TB1TB2_to_TB3": {
+        "P-B0": {
+          "n_negative": 15,
+          "n_positive": 15,
+          "n_symbols_mean_delta_neg": 12
+        },
+        "T-B0": {
+          "n_negative": 15,
+          "n_positive": 15,
+          "n_symbols_mean_delta_neg": 15
+        },
+        "PT-T": {
+          "n_negative": 15,
+          "n_positive": 15,
+          "n_symbols_mean_delta_neg": 13
+        },
+        "PT-P": {
+          "n_negative": 15,
+          "n_positive": 15,
+          "n_symbols_mean_delta_neg": 14
+        }
+      }
+    }
+  },
+  "verdict": {
+    "PROVENANCE_STANDALONE": {
+      "supported": true,
+      "windows": {
+        "A_TB1_to_TB2": {
+          "ci_hi": -0.004986026205346549
+        },
+        "B_TB1TB2_to_TB3": {
+          "ci_hi": -0.003669422806779785
+        }
+      },
+      "n_symbols_delta_neg": {
+        "A_TB1_to_TB2": 13,
+        "B_TB1TB2_to_TB3": 12
+      }
+    },
+    "TEMPO_STANDALONE": {
+      "supported": true,
+      "windows": {
+        "A_TB1_to_TB2": {
+          "ci_hi": -0.0012155486414240058
+        },
+        "B_TB1TB2_to_TB3": {
+          "ci_hi": -0.0024794857797407733
+        }
+      },
+      "n_symbols_delta_neg": {
+        "A_TB1_to_TB2": 11,
+        "B_TB1TB2_to_TB3": 15
+      }
+    },
+    "PROVENANCE_UNIQUE": {
+      "supported": true,
+      "windows": {
+        "A_TB1_to_TB2": {
+          "ci_hi": -0.0057387387295547735
+        },
+        "B_TB1TB2_to_TB3": {
+          "ci_hi": -0.00424615684714016
+        }
+      },
+      "n_symbols_delta_neg": {
+        "A_TB1_to_TB2": 13,
+        "B_TB1TB2_to_TB3": 13
+      }
+    },
+    "TEMPO_UNIQUE": {
+      "supported": true,
+      "windows": {
+        "A_TB1_to_TB2": {
+          "ci_hi": -0.0021106111567829574
+        },
+        "B_TB1TB2_to_TB3": {
+          "ci_hi": -0.003219991039046634
+        }
+      },
+      "n_symbols_delta_neg": {
+        "A_TB1_to_TB2": 13,
+        "B_TB1TB2_to_TB3": 14
+      }
+    }
+  },
+  "gates": {
+    "PROVENANCE_STANDALONE": "P-B0 CI_hi<0 both windows",
+    "TEMPO_STANDALONE": "T-B0 CI_hi<0 both windows",
+    "PROVENANCE_UNIQUE": "PT-T CI_hi<0 both windows AND >=10/15 sym",
+    "TEMPO_UNIQUE": "PT-P CI_hi<0 both windows AND >=10/15 sym"
+  },
+  "b0_parity_vs_pgm_bar0_m2": "PASS",
+  "sample_audit": {
+    "n_episodes": 37987,
+    "n_bar_rows": 359714,
+    "n_terminals": 37987,
+    "provenance_parity_ok": true,
+    "n_provenance_parity_points": 1500,
+    "tempo_firstbar_zero": true,
+    "provenance_firstbar_residual_max": 0.0,
+    "base_sample": "pgm_bar0_samples.parquet (reused, unmodified)",
+    "base_commit": "099fbb87b0fa5db5cce6e03342decb4838cb7c07"
+  },
+  "bootstrap_reps": 1000,
+  "timing": {
+    "cache_load_seconds": 0.56,
+    "enrich_seconds": 5.93,
+    "provenance_parity_seconds": 0.09,
+    "total_seconds": 58.12
+  }
+}
