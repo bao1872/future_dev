@@ -39,15 +39,20 @@ def test_block_definition():
     assert kinds["z_d_up"] == "gaussian_delta"
     assert kinds["z_dmfe"] == "hurdle_ln_delta"
     assert kinds["z_dmae"] == "hurdle_ln_delta"
-    assert kinds["z_range"] == "ln_value"
-    assert kinds["z_uresid"] == "hurdle_ln_value"
-    assert kinds["z_lresid"] == "hurdle_ln_value"
+    assert kinds["z_range"] == "hurdle_ln_value"
+    assert kinds["z_uresid"] == "hurdle_ln_neg"
+    assert kinds["z_lresid"] == "hurdle_ln_neg"
     assert kinds["z_dcr"] == "zero_interior_one"
     assert len(m.COUNT_Z) == 2
     assert m.DISC_Z == "z_agezero_code"
-    # every z column is referenced exactly once across nodes
-    seen = [c for _, cols in m.Z_LAYOUT for c in cols]
-    assert seen == m.ALL_Z_COLS
+    # Z_LAYOUT = [(node, contiguous integer offsets into the concatenated Z matrix)];
+    # ALL_Z_COLS = the flat z-column names. Verify the layout is a faithful,
+    # non-overlapping indexing: offsets cover range(n) and each offset maps to the
+    # corresponding node's z-column name.
+    offs = [i for _, cols in m.Z_LAYOUT for i in cols]
+    assert offs == list(range(len(m.ALL_Z_COLS)))
+    names = [m.NODE_ZCOLS[n][k] for n, cols in m.Z_LAYOUT for k in range(len(cols))]
+    assert names == m.ALL_Z_COLS
 
 
 def test_ztp_rate_differs_from_positive_mean():
@@ -95,15 +100,20 @@ def test_build_transition_sample_count_invariant(monkeypatch):
     df = pd.DataFrame({
         "episode_id": [0, 0],
         "bar_t": [0, 1],
+        "start_bar": [0, 0],
         "hazard": [0, 0],
         "cur_width_R": [1.0, 1.0],
         "cur_up_distance_R": [10.0, 10.5],
+        "cur_down_distance_R": [20.0, 20.0],
+        "cur_log_ratio": [-0.693, -0.647],
         "path_max_up_excursion_R": [1.0, 1.2],
         "path_max_down_excursion_R": [0.5, 0.6],
         "path_direction_change_rate": [0.1, 0.2],
         "path_current_bar_range_R": [2.0, 2.1],
-        "upper_newest_log_age_residual": [0.1, 0.2],
-        "lower_newest_log_age_residual": [0.3, 0.4],
+        "upper_newest_log_age_residual": [-0.1, -0.2],
+        "lower_newest_log_age_residual": [-0.3, -0.4],
+        "upper_newest_log_age": [np.log1p(5.0), 0.0],
+        "lower_newest_log_age": [0.0, np.log1p(3.0)],
         "upper_active_identity_count_delta": [5.0, 5.0],
         "lower_active_identity_count_delta": [3.0, 3.0],
         "upper_current_newest_age_zero": [0, 1],
@@ -124,28 +134,37 @@ def test_full_reconstruction_closure(monkeypatch):
     """F(S_t, Z_{t+1}) == S_{t+1} exactly (synthetic, invariants obeyed)."""
     monkeypatch.setattr(m, "EXPECTED_TRANSITIONS", 2)
     price = np.array([10.0, 10.5, 11.2])
+    dn_price = np.array([20.0, 19.5, 18.8])
+    width = 30.0
+    clr = np.log((price * 1.0 + 1e-9) / (dn_price * 1.0 + 1e-9))
     mfe = np.array([1.0, 1.2, 1.5])
     mae = np.array([0.5, 0.6, 0.7])
     tv = np.concatenate([[0.0], np.cumsum(np.abs(np.diff(price)))])
     dcr = np.array([0.1, 0.2, 0.3])
     rng = np.array([2.0, 2.1, 2.2])
-    ures = np.array([0.1, 0.2, 0.3])
-    lres = np.array([0.3, 0.4, 0.5])
+    ures = np.array([0.0, -0.1, -0.2])
+    lres = np.array([0.0, -0.3, -0.4])
     ucount = np.array([5.0, 5.0, 5.0])
     lcount = np.array([3.0, 3.0, 3.0])
-    uaz = np.array([0, 1, 0])
-    laz = np.array([1, 0, 1])
     n = 3
+    ulog = np.log1p(np.full(n, 5.0))
+    llog = np.zeros(n)
+    uaz = np.array([0, 0, 0])
+    laz = np.array([1, 0, 0])
     df = pd.DataFrame({
-        "episode_id": [0] * n, "bar_t": [0, 1, 2], "hazard": [0] * n,
-        "cur_width_R": [1.0] * n,
+        "episode_id": [0] * n, "bar_t": [0, 1, 2], "start_bar": [0] * n, "hazard": [0] * n,
+        "cur_width_R": [width] * n,
         "cur_up_distance_R": price,
+        "cur_down_distance_R": dn_price,
+        "cur_log_ratio": clr,
         "path_max_up_excursion_R": mfe,
         "path_max_down_excursion_R": mae,
         "path_direction_change_rate": dcr,
         "path_current_bar_range_R": rng,
         "upper_newest_log_age_residual": ures,
         "lower_newest_log_age_residual": lres,
+        "upper_newest_log_age": ulog,
+        "lower_newest_log_age": llog,
         "upper_active_identity_count_delta": ucount,
         "lower_active_identity_count_delta": lcount,
         "upper_current_newest_age_zero": uaz,
@@ -157,7 +176,8 @@ def test_full_reconstruction_closure(monkeypatch):
     assert len(cur) == 2
     recon = m.reconstruct_next_state(cur, cur)
     state_cols = [
-        "cur_up_distance_R", "path_max_up_excursion_R", "path_max_down_excursion_R",
+        "cur_up_distance_R", "cur_down_distance_R", "cur_width_R", "cur_log_ratio",
+        "path_max_up_excursion_R", "path_max_down_excursion_R",
         "path_direction_change_rate", "path_current_bar_range_R",
         "upper_newest_log_age_residual", "lower_newest_log_age_residual",
         "upper_active_identity_count_delta", "lower_active_identity_count_delta",
@@ -237,23 +257,68 @@ def test_ztp_finite_diff_gradient():
 
 
 def test_agezero_audit_harness():
-    codes = np.array([0, 1, 2, 3, 1])
-    df = pd.DataFrame({"z_agezero_code": codes})
-    # identity reconstruction -> exact (validates harness only)
-    res = m.audit_agezero_reconstruction(df, df, reconstruct_fn=None)
-    assert res["exact"] is True and res["n_mismatch"] == 0
-    # wrong reconstruction -> detected mismatch
-    def wrong(cur, z):
-        return (z["z_agezero_code"].to_numpy(int) + 1) % 4
-    res2 = m.audit_agezero_reconstruction(df, df, reconstruct_fn=wrong)
-    assert res2["exact"] is False and res2["n_mismatch"] == 5
+    """audit_agezero_reconstruction(cur_df, z_df, nxt_df=None) -> per-side exactness.
+
+    Canonical provenance reconstruction:
+        newest_{t+1} = exp(r_{t+1} + log1p(new_0 + elapsed_{t+1})) - 1
+        age_zero_{t+1} = 1[newest_{t+1} == 0]
+    """
+    n = 4
+    ulog = np.log1p(np.array([0.0, 5.0, 0.0, 5.0]))
+    llog = np.log1p(np.array([5.0, 5.0, 0.0, 0.0]))
+    cur = pd.DataFrame({
+        "upper_newest_log_age": ulog,
+        "lower_newest_log_age": llog,
+        "upper_newest_log_age_residual": [0.0] * n,
+        "lower_newest_log_age_residual": [0.0] * n,
+        "bar_t": np.array([0, 1, 0, 1], dtype=np.int64),
+        "start_bar": np.array([0, 0, 0, 0], dtype=np.int64),
+    })
+    # create matching next state where newest age advances or is reset
+    exp_u = np.expm1(ulog) + (cur["bar_t"] + 1 - cur["start_bar"])
+    res_u = np.array([0.0, -np.log1p(7.0), -np.log1p(1.0), 0.0])
+    age_next_u = np.expm1(res_u + np.log1p(exp_u))
+    az_u = np.isclose(age_next_u, 0.0, atol=1e-10).astype(int)
+
+    exp_l = np.expm1(llog) + (cur["bar_t"] + 1 - cur["start_bar"])
+    res_l = np.array([-np.log1p(6.0), 0.0, 0.0, -np.log1p(2.0)])
+    age_next_l = np.expm1(res_l + np.log1p(exp_l))
+    az_l = np.isclose(age_next_l, 0.0, atol=1e-10).astype(int)
+
+    # z_df with the residuals
+    z_u = m.build_z_columns("z_uresid", "hurdle_ln_neg", res_u)
+    z_l = m.build_z_columns("z_lresid", "hurdle_ln_neg", res_l)
+    z_df = pd.DataFrame({**z_u, **z_l})
+    nxt = pd.DataFrame({
+        "upper_newest_log_age_residual": res_u,
+        "lower_newest_log_age_residual": res_l,
+        "upper_current_newest_age_zero": az_u,
+        "lower_current_newest_age_zero": az_l,
+    })
+    res = m.audit_agezero_reconstruction(cur, z_df, nxt)
+    assert res["upper"]["exact"] is True and res["upper"]["n_mismatch"] == 0
+    assert res["lower"]["exact"] is True and res["lower"]["n_mismatch"] == 0
+    assert "delta_newest_age" in res["upper"]
+
+    # a mismatched next state -> mismatch is detected
+    bad_nxt = nxt.copy()
+    bad_nxt["upper_current_newest_age_zero"] = 1 - bad_nxt["upper_current_newest_age_zero"]
+    res_bad = m.audit_agezero_reconstruction(cur, z_df, bad_nxt)
+    assert res_bad["upper"]["exact"] is False and res_bad["upper"]["n_mismatch"] > 0
 
 
 if __name__ == "__main__":
+    class _MonkeyPatch:
+        def setattr(self, target, name, value):
+            setattr(target, name, value)
+
     test_block_definition()
     test_ztp_rate_differs_from_positive_mean()
     test_ztp_pmf_sums_to_one()
     test_ztp_nll_finite_and_min_near_mle()
     test_hurdle_nll_decomposes()
-    print("test_dynamic_pgm1a1_support_semantics_v1 (static parts) OK; "
-          "run pytest for monkeypatch-based tests.")
+    test_build_transition_sample_count_invariant(_MonkeyPatch())
+    test_full_reconstruction_closure(_MonkeyPatch())
+    test_ridge_parity()
+    test_agezero_audit_harness()
+    print("ALL tests in test_dynamic_pgm1a1_support_semantics_v1 PASSED successfully.")

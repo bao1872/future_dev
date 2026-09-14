@@ -128,57 +128,181 @@ LAG_BASE = [
 #     hurdle_ln_delta     : delta>=0; P(=0)+log(delta) on +      -> Hurdle-LogNormal
 #     ln_value           : S_{t+1}>0; log(S_{t+1})               -> LogNormal
 #     hurdle_ln_value     : S_{t+1}>=0; P(=0)+log(S_{t+1}) on +  -> Hurdle-LogNormal
+#     hurdle_ln_neg       : delta<=0; model q=-delta>=0 via P(=0)+log(q) on +
+#                           -> Hurdle-LogNormal (sign flips recon to -exp(log))
+#     signed_hurdle       : delta in R; sign{0,-,+} multinomial + log|delta| Gaussian
 #     zero_interior_one   : S_{t+1} in {0}U(0,1)U{1}            -> 3-class + logit-Normal
-# NODE_SPECS: (name, kind, source_state_col, recon_state_col, block)
+#
+# Residual / range support is DATA-DRIVEN: a real support audit (audit_support_*)
+# selects the kind from the realized sign distribution (pre-registered rules). The
+# baked NODE_SPECS below encode the audit outcome for the current 321,727-transition
+# dataset (residuals are all <= 0 -> hurdle_ln_neg; range has zeros -> hurdle_ln_value).
+# main() re-runs the audit on real data and RAISES STOP if the selection disagrees
+# with the baked kind (i.e. the data support moved and the transform must be
+# re-decided). This prevents "force positive because the code is convenient".
 # ===========================================================================
 NODE_SPECS = [
     ("z_d_up",   "gaussian_delta",    "cur_up_distance_R",            "cur_up_distance_R",            "Location"),
     ("z_dmfe",   "hurdle_ln_delta",   "path_max_up_excursion_R",      "path_max_up_excursion_R",      "Path"),
     ("z_dmae",   "hurdle_ln_delta",   "path_max_down_excursion_R",    "path_max_down_excursion_R",    "Path"),
     ("z_dcr",    "zero_interior_one", "path_direction_change_rate",   "path_direction_change_rate",   "Path"),
-    ("z_range",  "ln_value",          "path_current_bar_range_R",     "path_current_bar_range_R",     "Path"),
-    ("z_uresid", "hurdle_ln_value",   "upper_newest_log_age_residual", "upper_newest_log_age_residual", "LiquidityComposition"),
-    ("z_lresid", "hurdle_ln_value",   "lower_newest_log_age_residual", "lower_newest_log_age_residual", "LiquidityComposition"),
+    ("z_range",  "hurdle_ln_value",   "path_current_bar_range_R",     "path_current_bar_range_R",     "Path"),
+    ("z_uresid", "hurdle_ln_neg",     "upper_newest_log_age_residual", "upper_newest_log_age_residual", "LiquidityComposition"),
+    ("z_lresid", "hurdle_ln_neg",     "lower_newest_log_age_residual", "lower_newest_log_age_residual", "LiquidityComposition"),
 ]
 # count 节点：episode 内累计 activation 计数的单步增量（非负整数 -> Hurdle-Poisson）。
 # stored *_active_identity_count_delta 是 cumulative activation counter，不是当前 active 数差。
 COUNT_Z = ["z_delta_upper_count", "z_delta_lower_count"]
 DISC_Z = "z_agezero_code"
 
+# Set True by main() after the real age-zero reconstruction audit proves the
+# 4-class age-zero node is a deterministic derived state (mismatch == 0). When
+# True the stochastic 4-class node is dropped from the model (BLOCKS disc emptied).
+AGEZERO_DETERMINISTIC = False
+
 
 def _node_zcols(name, kind):
     if kind == "gaussian_delta":
         return [name]
-    if kind in ("hurdle_ln_delta", "hurdle_ln_value"):
+    if kind in ("hurdle_ln_delta", "hurdle_ln_value", "hurdle_ln_neg"):
         return [f"{name}_ispos", f"{name}_log"]
     if kind == "ln_value":
         return [f"{name}_log"]
+    if kind == "signed_hurdle":
+        return [f"{name}_is0", f"{name}_isneg", f"{name}_ispos", f"{name}_logabs"]
     if kind == "zero_interior_one":
         return [f"{name}_is0", f"{name}_is1", f"{name}_logit"]
     raise ValueError(f"unknown kind {kind}")
 
 
-NODE_ZCOLS = {name: _node_zcols(name, kind) for name, kind, _, _, _ in NODE_SPECS}
+# ---- support audit (data-driven kind selection; pre-registered rules) ----
+def audit_support_residual(res, name="residual"):
+    """residual sign distribution -> recommended model kind + stats.
 
-# Zc column layout = concatenation of NODE_ZCOLS in NODE_SPECS order
+    Pre-registered rule:
+      only (<=0):  negatives + zeros  -> hurdle_ln_neg  (model q = -res >= 0)
+      only (>=0):  positives + zeros  -> hurdle_ln_value(model q = res  >= 0)
+      both signs:                      -> signed_hurdle (sign{0,-,+} + log|res|)
+    """
+    res = np.asarray(res, dtype=np.float64)
+    n_neg = int((res < -1e-12).sum())
+    n_zero = int((np.abs(res) <= 1e-12).sum())
+    n_pos = int((res > 1e-12).sum())
+    if n_neg > 0 and n_pos == 0:
+        kind = "hurdle_ln_neg"
+    elif n_pos > 0 and n_neg == 0:
+        kind = "hurdle_ln_value"
+    else:
+        kind = "signed_hurdle"
+    return dict(name=name, min=float(res.min()), max=float(res.max()),
+                n_neg=n_neg, n_zero=n_zero, n_pos=n_pos,
+                recommended_kind=kind)
+
+
+def audit_support_range(rng, name="range"):
+    """range support -> recommended model kind + stats.
+
+    Pre-registered rule: zero_count == 0 -> LogNormal; zero_count > 0 -> Hurdle-LogNormal.
+    """
+    rng = np.asarray(rng, dtype=np.float64)
+    n_zero = int((rng <= 0).sum())
+    n_pos = int((rng > 0).sum())
+    kind = "hurdle_ln_value" if n_zero > 0 else "ln_value"
+    return dict(name=name, min=float(rng.min()), max=float(rng.max()),
+                n_zero=n_zero, n_pos=n_pos, recommended_kind=kind)
+
+
+def _kind_of(name):
+    for n, k, _, _, _ in NODE_SPECS:
+        if n == name:
+            return k
+    raise KeyError(name)
+
+
+NODE_ZCOLS = {name: _node_zcols(name, kind) for name, kind, _, _, _ in NODE_SPECS}
+NODE_KIND = {name: kind for name, kind, _, _, _ in NODE_SPECS}
+
+# Zc column layout = concatenation of NODE_ZCOLS in NODE_SPECS order.
+# Z_LAYOUT stores (node_name, integer offsets into the concatenated Z matrix) for
+# slicing numpy arrays; ALL_Z_COLS is the flat list of actual z *column names* used
+# to select from the pandas frame.
 Z_LAYOUT = []
 _OFF = 0
 for _n, _c in NODE_ZCOLS.items():
     Z_LAYOUT.append((_n, list(range(_OFF, _OFF + len(_c)))))
     _OFF += len(_c)
-ALL_Z_COLS = [c for _, cols in Z_LAYOUT for c in cols]
+ALL_Z_COLS = [c for _cols in NODE_ZCOLS.values() for c in _cols]
+
+
+def build_z_columns(node, kind, raw):
+    """Transform a raw next-value (or delta) array into its Z columns.
+
+    Returns dict {z_col_name: (n,) array} ready to assign onto the transition frame.
+    """
+    raw = np.asarray(raw, dtype=np.float64)
+    cols = _node_zcols(node, kind)
+    if kind == "gaussian_delta":
+        return {cols[0]: raw}
+    if kind in ("hurdle_ln_value", "hurdle_ln_neg"):
+        q = raw if kind == "hurdle_ln_value" else -raw
+        ispos = (q > 0).astype(float)
+        logv = np.where(ispos > 0.5, np.log(np.maximum(q, 1e-12)), 0.0)
+        return {cols[0]: ispos, cols[1]: logv}
+    if kind == "ln_value":
+        return {cols[0]: np.log(np.maximum(raw, 1e-12))}
+    if kind == "signed_hurdle":
+        is0 = (np.abs(raw) <= 1e-12).astype(float)
+        isneg = (raw < -1e-12).astype(float)
+        ispos = (raw > 1e-12).astype(float)
+        logabs = np.where(is0 < 0.5, np.log(np.maximum(np.abs(raw), 1e-12)), 0.0)
+        return {cols[0]: is0, cols[1]: isneg, cols[2]: ispos, cols[3]: logabs}
+    raise ValueError(f"build_z_columns unhandled kind {kind}")
+
+
+def reconstruct_value(kind, z):
+    """Reconstruct the original-space value from a node's Z columns.
+
+    `z` is a list/array of the node's Z columns in _node_zcols order.
+    """
+    z = [np.asarray(c, dtype=np.float64) for c in z]
+    if kind == "gaussian_delta":
+        return z[0]
+    if kind in ("hurdle_ln_value", "hurdle_ln_delta"):
+        ispos, logv = z[0], z[1]
+        return np.where(ispos > 0.5, np.exp(logv), 0.0)
+    if kind == "hurdle_ln_neg":
+        ispos, logv = z[0], z[1]
+        return np.where(ispos > 0.5, -np.exp(logv), 0.0)
+    if kind == "ln_value":
+        return np.exp(z[0])
+    if kind == "zero_interior_one":
+        is0, is1, logit = z[0], z[1], z[2]
+        return np.where(is0 > 0.5, 0.0,
+                       np.where(is1 > 0.5, 1.0, 1.0 / (1.0 + np.exp(-logit))))
+    if kind == "signed_hurdle":
+        is0, isneg, ispos, logabs = z
+        sign = np.where(isneg > 0.5, -1.0,
+                       np.where(ispos > 0.5, 1.0, 0.0))
+        mag = np.where(is0 < 0.5, np.exp(logabs), 0.0)
+        return sign * mag
+    raise ValueError(f"reconstruct_value unhandled kind {kind}")
+
 
 # Source columns consumed from the enriched frame by build_transition_sample
 # (both `cur` and the shifted `nxt`). Kept at float64 so the exact deterministic
-# invariants (TV update / last-return / monotonic excursion) retain precision.
+# invariants (TV update / last-return / monotonic excursion / age-zero recon) retain
+# precision. upper/lower *_newest_log_age are needed to deterministically reconstruct
+# the next age-zero from the residual + current age (see reconstruct_agezero).
 BUILD_SRC_COLS = [
-    "cur_width_R", "cur_up_distance_R", "path_max_up_excursion_R",
-    "path_max_down_excursion_R", "path_direction_change_rate",
-    "path_current_bar_range_R", "upper_newest_log_age_residual",
-    "lower_newest_log_age_residual", "upper_active_identity_count_delta",
-    "lower_active_identity_count_delta", "upper_current_newest_age_zero",
-    "lower_current_newest_age_zero", "path_total_variation_R",
-    "path_last_return_R",
+    "cur_width_R", "cur_up_distance_R", "cur_down_distance_R", "cur_log_ratio",
+    "path_max_up_excursion_R", "path_max_down_excursion_R",
+    "path_direction_change_rate", "path_current_bar_range_R",
+    "upper_newest_log_age_residual", "lower_newest_log_age_residual",
+    "upper_newest_log_age", "lower_newest_log_age",
+    "upper_active_identity_count_delta", "lower_active_identity_count_delta",
+    "upper_current_newest_age_zero", "lower_current_newest_age_zero",
+    "path_total_variation_R", "path_last_return_R",
+    "start_bar", "bar_t",
 ]
 
 BLOCKS = {
@@ -187,6 +311,14 @@ BLOCKS = {
     "LiquidityComposition": dict(nodes=["z_uresid", "z_lresid"],
                                 disc=["z_agezero_code"], count=COUNT_Z),
 }
+
+
+def disc_spec():
+    """Current set of stochastic discrete (4-class) nodes from BLOCKS.
+
+    Empty once the age-zero node is proven deterministic and removed (see main()).
+    """
+    return [d for b in BLOCKS.values() for d in b["disc"]]
 
 
 # ===========================================================================
@@ -244,21 +376,25 @@ def build_transition_sample(df):
     interior = (dcr > 1e-9) & (dcr < 1 - 1e-9)
     cur["z_dcr_logit"] = np.where(interior, np.log(dcr / (1.0 - dcr)), 0.0)
 
-    # Range next value: LogNormal (assumes Range > 0; Hurdle variant if zeros exist)
+    # Range next value: LogNormal if no zeros, else Hurdle-LogNormal. The support is
+    # selected by the real-data audit (audit_support_range); the baked NODE_KIND is
+    # "hurdle_ln_value" because the data contains zeros. Do NOT force Range > 0.
     rng = nxt["path_current_bar_range_R"].to_numpy(float)
-    if rng.min() <= 0:
-        raise SystemExit("STOP_DYNAMIC_PGM1A_RANGE_NONPOSITIVE_NEEDS_HURDLE")
-    cur["z_range_log"] = np.log(rng)
+    _zc_range = build_z_columns("z_range", NODE_KIND["z_range"], rng)
+    for _c, _v in _zc_range.items():
+        cur[_c] = _v
 
     for side in ("upper", "lower"):
         res = nxt[f"{side}_newest_log_age_residual"].to_numpy(float)
-        if res.min() < -1e-9:
-            raise SystemExit(
-                "STOP_DYNAMIC_PGM1A_RESID_NEGATIVE_NEEDS_SIGNED")
-        # Hurdle-LogNormal value: point mass at 0 + LogNormal on positives
-        cur[f"z_{side[0]}resid_ispos"] = (res > 0).astype(float)
-        cur[f"z_{side[0]}resid_log"] = np.where(
-            res > 0, np.log(np.maximum(res, 1e-12)), 0.0)
+        # Residual support is all <= 0 in the data -> hurdle_ln_neg (q = -res >= 0).
+        # Kind is data-selected by the real audit (audit_support_residual); the baked
+        # NODE_KIND must match (else STOP_DYNAMIC_PGM1A_SUPPORT_SELECTION_MISMATCH in
+        # main). Do NOT force residual >= 0; a negative residual is the dominant
+        # provenance signal (new liquidity activation => newest age < expected => r<0).
+        node = "z_uresid" if side == "upper" else "z_lresid"
+        _zc = build_z_columns(node, NODE_KIND[node], res)
+        for _c, _v in _zc.items():
+            cur[_c] = _v
         cur[f"z_delta_{side}_count"] = (
             nxt[f"{side}_active_identity_count_delta"].to_numpy(float)
             - cur[f"{side}_active_identity_count_delta"].to_numpy(float))
@@ -279,6 +415,8 @@ def build_transition_sample(df):
         if not np.allclose(curc + inc, nxtc, atol=1e-9):
             raise SystemExit("STOP_DYNAMIC_PGM1A_ACTIVATION_RECON_FAIL")
 
+    # 4-class age-zero code from the current-newest-age-zero columns, which the
+    # provenance residual + current state deterministically reconstruct.
     up0 = nxt["upper_current_newest_age_zero"].to_numpy(np.int64)
     lo0 = nxt["lower_current_newest_age_zero"].to_numpy(np.int64)
     cur["z_agezero_code"] = up0 + 2 * lo0
@@ -299,10 +437,34 @@ def build_transition_sample(df):
     if not set(np.unique(cur["z_agezero_code"])).issubset({0, 1, 2, 3}):
         raise SystemExit("STOP_DYNAMIC_PGM1A_AGEZERO_CODE_RANGE")
 
+    # Map episode start upper/lower prices to compute exact atr0 = (U - D) / cur_width_R
+    if "symbol" in cur.columns and "start_bar" in cur.columns and "cur_width_R" in cur.columns:
+        ep0_path = CACHE / "episode0_episodes.parquet"
+        ep3_path = CACHE / "episode_repl0_through_tb3.parquet"
+        if ep0_path.exists() and ep3_path.exists():
+            ep0 = pd.read_parquet(ep0_path, columns=["symbol", "start_bar", "start_upper_price", "start_lower_price"])
+            ep3 = pd.read_parquet(ep3_path, columns=["symbol", "start_bar", "start_upper_price", "start_lower_price"])
+            ep_all = pd.concat([ep0, ep3]).drop_duplicates(subset=["symbol", "start_bar"])
+            ep_all["span_price"] = ep_all["start_upper_price"].astype(float) - ep_all["start_lower_price"].astype(float)
+            ep_map = dict(zip(zip(ep_all["symbol"], ep_all["start_bar"].astype(int)), ep_all["span_price"]))
+            keys = list(zip(cur["symbol"], cur["start_bar"].astype(int)))
+            spans = np.array([ep_map.get(k, 1.0) for k in keys], dtype=float)
+            cur["atr0"] = spans / cur["cur_width_R"].to_numpy(float)
+            nxt["atr0"] = cur["atr0"].to_numpy(float)
+        else:
+            cur["atr0"] = 1.0
+            nxt["atr0"] = 1.0
+    else:
+        cur["atr0"] = 1.0
+        nxt["atr0"] = 1.0
+
     # slim the shifted `nxt` to only the source columns actually consumed by the
     # invariants / z_* computations -> avoids holding the full (86-col) shift
     # copy in memory through the rest of the pipeline.
-    nxt = nxt[BUILD_SRC_COLS].copy()
+    nxt_cols = [c for c in BUILD_SRC_COLS if c in nxt.columns]
+    if "atr0" in nxt.columns and "atr0" not in nxt_cols:
+        nxt_cols.append("atr0")
+    nxt = nxt[nxt_cols].copy()
     return cur, nxt
 
 
@@ -388,12 +550,17 @@ class ConstantGaussianHead:
 class HurdleLogNormalHead:
     """Hurdle-LogNormal node: P(Δ=0) via Logistic + log(Δ) ~ Gaussian on Δ>0.
 
-    Consumes z columns [ispos, log]; ispos in {0,1}, log = log(Δ) for Δ>0 else 0.
-    Recon: Δ = 0 if ispos==0 else exp(log).  Support of Δ is [0, inf).
+    Consumes z columns [ispos, log]; ispos in {0,1}, log = log(|Δ|) for Δ!=0 else 0.
+    `sign` (+1 / -1) selects the original-space reconstruction:
+        sign=+1  ->  Δ = 0 if ispos==0 else +exp(log)   (Δ >= 0)
+        sign=-1  ->  Δ = 0 if ispos==0 else -exp(log)   (Δ <= 0, used for residual)
+    The Jacobian of y = sign*exp(z) is |dy/dz| = exp(z) = |y|, so the original-space
+    NLL gains +log|z| on positive rows: NLL_orig = NLL_log + log|z|.
     """
 
-    def __init__(self, alpha=1.0):
+    def __init__(self, alpha=1.0, sign=1.0):
         self.alpha = alpha
+        self.sign = float(sign)
 
     def fit(self, X, Z):
         Z = np.asarray(Z, dtype=np.float64)
@@ -416,11 +583,16 @@ class HurdleLogNormalHead:
         nll_ispos = np.where(pos, -np.log(p0), -np.log1p(-p0))
         nll_log = self.g.nll_per_row(X, logv.reshape(-1, 1))
         nll_log = np.where(pos, nll_log, 0.0)
-        return nll_ispos + nll_log
+        # change-of-variable: y = sign*exp(z) -> |J| = exp(z) -> log|J| = z = logv
+        jac = np.where(pos, logv, 0.0)
+        return nll_ispos + nll_log + jac
 
 
 class LogNormalHead:
-    """LogNormal node: log(S_{t+1}) ~ Gaussian. Consumes [log] z column."""
+    """LogNormal node: log(S_{t+1}) ~ Gaussian. Consumes [log] z column.
+
+    Original-space NLL gains +log(S) = +log(z_column) (since S = exp(z)).
+    """
 
     def __init__(self, alpha=1.0):
         self.alpha = alpha
@@ -434,7 +606,8 @@ class LogNormalHead:
 
     def nll_per_row(self, X, Z):
         Z = np.asarray(Z, dtype=np.float64)
-        return self.g.nll_per_row(X, Z.reshape(-1, 1))
+        # Jacobian: S = exp(z) -> log|J| = z
+        return self.g.nll_per_row(X, Z.reshape(-1, 1)) + Z.reshape(-1)
 
 
 class ZeroInteriorOneHead:
@@ -473,16 +646,76 @@ class ZeroInteriorOneHead:
         nll_cat = -np.log(p[np.arange(len(y3)), y3])
         nll_logit = self.g.nll_per_row(X, logit.reshape(-1, 1))
         nll_logit = np.where(interior, nll_logit, 0.0)
-        return nll_cat + nll_logit
+        # change-of-variable for y = sigmoid(z): |J| = y(1-y); log|J| = z - 2*log1p(e^z)
+        # (only on interior rows; boundaries are deterministic point masses).
+        jac = np.where(interior, _logit_jacobian(logit), 0.0)
+        return nll_cat + nll_logit + jac
+
+
+class SignedHurdleHead:
+    """Signed-Hurdle node: sign in {0,-,+} multinomial Logistic + log|Δ| ~ Gaussian on Δ!=0.
+
+    Consumes z columns [is0, isneg, ispos, logabs]; logabs = log(|Δ|) for Δ!=0 else 0.
+    Used when a residual/value has BOTH signs in the real data (pre-registered fallback).
+    Recon: Δ = 0 if is0==1 else sign*exp(logabs). Jacobian: |Δ| = exp(logabs) -> +logabs.
+    """
+
+    def __init__(self, alpha=1.0):
+        self.alpha = alpha
+
+    def fit(self, X, Z):
+        Z = np.asarray(Z, dtype=np.float64)
+        is0 = Z[:, 0]
+        isneg = Z[:, 1]
+        ispos = Z[:, 2]
+        logabs = Z[:, 3]
+        nonzero = (is0 < 0.5)
+        y3 = np.where(isneg > 0.5, 0, np.where(ispos > 0.5, 2, 1)).astype(int)
+        self.cat = LogisticRegression(penalty="l2", C=1.0, solver="lbfgs",
+                                     max_iter=3000,
+                                     multi_class="multinomial").fit(X, y3)
+        self.g = GaussianTransitionHead(alpha=self.alpha).fit(
+            X[nonzero], logabs[nonzero].reshape(-1, 1))
+        self.n_params = (X.shape[1] * 3 + 3) + (X.shape[1] * 1 + 1)
+        return self
+
+    def nll_per_row(self, X, Z):
+        Z = np.asarray(Z, dtype=np.float64)
+        is0 = Z[:, 0]
+        isneg = Z[:, 1]
+        ispos = Z[:, 2]
+        logabs = Z[:, 3]
+        nonzero = (is0 < 0.5)
+        y3 = np.where(isneg > 0.5, 0, np.where(ispos > 0.5, 2, 1)).astype(int)
+        p = np.clip(self.cat.predict_proba(X), 1e-12, 1.0)
+        nll_cat = -np.log(p[np.arange(len(y3)), y3])
+        nll_log = self.g.nll_per_row(X, logabs.reshape(-1, 1))
+        nll_log = np.where(nonzero, nll_log, 0.0)
+        jac = np.where(nonzero, logabs, 0.0)
+        return nll_cat + nll_log + jac
+
+
+def _logit_jacobian(z):
+    """log|J| for y = sigmoid(z): log[y(1-y)] = z - 2*log1p(exp(z)), numerically stable."""
+    z = np.asarray(z, dtype=np.float64)
+    # log1p(exp(z)) stable: for z>=0 -> z + log1p(exp(-z)); for z<0 -> log1p(exp(z))
+    l1e = np.where(z >= 0, z + np.log1p(np.exp(-z)), np.log1p(np.exp(z)))
+    return z - 2.0 * l1e
 
 
 def _head_for(kind):
     if kind == "gaussian_delta":
         return GaussianTransitionHead(alpha=1.0)
-    if kind in ("hurdle_ln_delta", "hurdle_ln_value"):
-        return HurdleLogNormalHead(alpha=1.0)
+    if kind == "hurdle_ln_delta":
+        return HurdleLogNormalHead(alpha=1.0, sign=1.0)
+    if kind == "hurdle_ln_value":
+        return HurdleLogNormalHead(alpha=1.0, sign=1.0)
+    if kind == "hurdle_ln_neg":
+        return HurdleLogNormalHead(alpha=1.0, sign=-1.0)
     if kind == "ln_value":
         return LogNormalHead(alpha=1.0)
+    if kind == "signed_hurdle":
+        return SignedHurdleHead(alpha=1.0)
     if kind == "zero_interior_one":
         return ZeroInteriorOneHead(alpha=1.0)
     raise ValueError(f"unknown kind {kind}")
@@ -526,28 +759,45 @@ def _fit_disc(Xtr, Xev, yd_tr, yd_ev):
 
 
 def fit_state_heads(Xtr, Xev, Zc_tr, Zc_ev, yd_tr, yd_ev):
-    """K1/K2: per-node support-correct heads + 4-class Logistic for age-zero."""
+    """K1/K2: per-node support-correct heads + 4-class Logistic for age-zero.
+
+    If the 4-class age-zero node has been removed (disc_spec() empty), disc is
+    skipped and the discrete NLL terms are zero (so joint NLL == continuous NLL).
+    """
     Zc_tr = np.asarray(Zc_tr, dtype=np.float64)
     Zc_ev = np.asarray(Zc_ev, dtype=np.float64)
     nodes, np_cont = _fit_nodes(Xtr, Xev, Zc_tr, Zc_ev)
-    disc, disc_tr, disc_ev, np_disc = _fit_disc(Xtr, Xev, yd_tr, yd_ev)
+    if disc_spec():
+        disc, disc_tr, disc_ev, np_disc = _fit_disc(Xtr, Xev, yd_tr, yd_ev)
+    else:
+        n_tr, n_ev = len(Xtr), len(Xev)
+        disc, disc_tr, disc_ev, np_disc = None, np.zeros(n_tr), np.zeros(n_ev), 0
     return dict(nodes=nodes, disc=disc, disc_tr=disc_tr, disc_ev=disc_ev,
                 n_params=np_cont + np_disc)
 
 
 def fit_constant_heads(Zc_tr, Zc_ev, yd_tr, yd_ev):
-    """K0: per-node marginal heads (X = constant) + marginal 4-class."""
+    """K0: per-node marginal heads (X = constant) + marginal 4-class.
+
+    Skips the discrete node when disc_spec() is empty (see fit_state_heads).
+    """
     Zc_tr = np.asarray(Zc_tr, dtype=np.float64)
     Zc_ev = np.asarray(Zc_ev, dtype=np.float64)
     Xtr = np.ones((len(Zc_tr), 1))
     Xev = np.ones((len(Zc_ev), 1))
     nodes, np_cont = _fit_nodes(Xtr, Xev, Zc_tr, Zc_ev)
-    counts = np.bincount(yd_tr, minlength=4).astype(float)
-    prob = (counts + 0.5) / (len(yd_tr) + 2.0)
-    disc_tr = -np.log(prob[yd_tr])
-    disc_ev = -np.log(prob[yd_ev])
+    if disc_spec():
+        counts = np.bincount(yd_tr, minlength=4).astype(float)
+        prob = (counts + 0.5) / (len(yd_tr) + 2.0)
+        disc_tr = -np.log(prob[yd_tr])
+        disc_ev = -np.log(prob[yd_ev])
+        np_disc = 4
+    else:
+        disc_tr = np.zeros(len(Xtr))
+        disc_ev = np.zeros(len(Xev))
+        np_disc = 0
     return dict(nodes=nodes, disc_tr=disc_tr, disc_ev=disc_ev,
-                n_params=np_cont + 4)
+                n_params=np_cont + np_disc)
 
 
 # ===========================================================================
@@ -734,64 +984,208 @@ def boot_cluster(delta_per_row, day_per_row, eid_per_row, seed):
     return float(np.percentile(ests, 2.5)), float(np.percentile(ests, 97.5)), point
 
 
+def reconstruct_agezero(cur_df, z_df, side):
+    """Deterministically reconstruct the next newest age-zero flag.
+
+    Canonical provenance definition:
+        expected_new_{t+1} = new_0 + elapsed_{t+1}
+        where new_0 = expm1(start_newest_log_age)
+              elapsed_{t+1} = bar_{t+1} - start_bar = bar_t + 1 - start_bar
+        r_{t+1} = log1p(newest_{t+1}) - log1p(expected_new_{t+1})
+
+    Therefore:
+        newest_{t+1} = exp(r_{t+1} + log1p(new_0 + elapsed_{t+1})) - 1
+        age_zero_{t+1} = 1[newest_{t+1} == 0]
+    """
+    node = "z_uresid" if side == "upper" else "z_lresid"
+    cols = NODE_ZCOLS[node]
+    resid_next = reconstruct_value(NODE_KIND[node],
+                                   [z_df[col].to_numpy(float) for col in cols])
+    start_age = np.expm1(cur_df[f"{side}_newest_log_age"].to_numpy(float))
+    elapsed_next = (cur_df["bar_t"].to_numpy(np.int64) + 1 - cur_df["start_bar"].to_numpy(np.int64))
+    expected_next = start_age + elapsed_next
+    age_next = np.expm1(resid_next + np.log1p(expected_next))
+    return np.isclose(age_next, 0.0, atol=1e-10).astype(int)
+
+
 def reconstruct_next_state(cur_df, z_df):
     """Reconstruct S_{t+1} from S_t and the realized Z_{t+1} innovations.
 
     Returns a dict mapping each state column to a float64 numpy array. Must hold
     F(S_t, Z_{t+1}) == S_{t+1} exactly (<=1e-8) when Z is the realized draw, i.e.
     Z is *sufficient* to drive the within-episode transition. This is the core of
-    the support-correct closure.
+    the support-correct closure. Includes the 7 continuous nodes, the 2 count nodes,
+    the deterministic companions (down-distance, width, ratio, TV, last-return) and
+    the deterministically-reconstructed age-zero flags.
     """
+    c = cur_df
+    z = z_df
     out = {}
     out["cur_up_distance_R"] = (
-        cur_df["cur_up_distance_R"].to_numpy(float)
-        + z_df["z_d_up"].to_numpy(float))
+        c["cur_up_distance_R"].to_numpy(float) + z["z_d_up"].to_numpy(float))
     for node, src in [("z_dmfe", "path_max_up_excursion_R"),
                       ("z_dmae", "path_max_down_excursion_R")]:
-        ispos = z_df[f"{node}_ispos"].to_numpy(float)
-        logv = z_df[f"{node}_log"].to_numpy(float)
-        d = np.where(ispos > 0.5, np.exp(logv), 0.0)
-        out[src] = cur_df[src].to_numpy(float) + d
-    is0 = z_df["z_dcr_is0"].to_numpy(float)
-    is1 = z_df["z_dcr_is1"].to_numpy(float)
-    logit = z_df["z_dcr_logit"].to_numpy(float)
-    dcr = np.where(is0 > 0.5, 0.0,
-                   np.where(is1 > 0.5, 1.0, 1.0 / (1.0 + np.exp(-logit))))
-    out["path_direction_change_rate"] = dcr
-    out["path_current_bar_range_R"] = np.exp(z_df["z_range_log"].to_numpy(float))
-    for side, node in [("upper", "z_uresid"), ("lower", "z_lresid")]:
-        ispos = z_df[f"{node}_ispos"].to_numpy(float)
-        logv = z_df[f"{node}_log"].to_numpy(float)
-        out[f"{side}_newest_log_age_residual"] = np.where(
-            ispos > 0.5, np.exp(logv), 0.0)
+        cols = NODE_ZCOLS[node]
+        val = reconstruct_value(NODE_KIND[node],
+                                [z[col].to_numpy(float) for col in cols])
+        out[src] = c[src].to_numpy(float) + val
+    for node, src in [("z_dcr", "path_direction_change_rate"),
+                      ("z_range", "path_current_bar_range_R"),
+                      ("z_uresid", "upper_newest_log_age_residual"),
+                      ("z_lresid", "lower_newest_log_age_residual")]:
+        cols = NODE_ZCOLS[node]
+        out[src] = reconstruct_value(NODE_KIND[node],
+                                     [z[col].to_numpy(float) for col in cols])
+    # deterministic companions (exact by construction)
+    out["cur_down_distance_R"] = (
+        c["cur_down_distance_R"].to_numpy(float) - z["z_d_up"].to_numpy(float))
+    out["cur_width_R"] = c["cur_width_R"].to_numpy(float)  # constant within episode
+
+    up = out["cur_up_distance_R"]
+    dn = out["cur_down_distance_R"]
+    # snap floating point subtraction noise near zero (< 1e-12)
+    up = np.where(np.abs(up) < 1e-12, 0.0, up)
+    dn = np.where(np.abs(dn) < 1e-12, 0.0, dn)
+    out["cur_up_distance_R"] = up
+    out["cur_down_distance_R"] = dn
+
+    atr0 = c["atr0"].to_numpy(float) if "atr0" in c.columns else 1.0
+    out["cur_log_ratio"] = np.log((up * atr0 + 1e-9) / (dn * atr0 + 1e-9))
+
+    out["path_total_variation_R"] = (
+        c["path_total_variation_R"].to_numpy(float)
+        + np.abs(z["z_d_up"].to_numpy(float)))
+    out["path_last_return_R"] = -z["z_d_up"].to_numpy(float)
     for side in ("upper", "lower"):
         out[f"{side}_active_identity_count_delta"] = (
-            cur_df[f"{side}_active_identity_count_delta"].to_numpy(float)
-            + z_df[f"z_delta_{side}_count"].to_numpy(float))
+            c[f"{side}_active_identity_count_delta"].to_numpy(float)
+            + z[f"z_delta_{side}_count"].to_numpy(float))
+    azo_u = reconstruct_agezero(c, z, "upper")
+    azo_l = reconstruct_agezero(c, z, "lower")
+    out["upper_current_newest_age_zero"] = azo_u.astype(float)
+    out["lower_current_newest_age_zero"] = azo_l.astype(float)
+    out["z_agezero_code"] = (azo_u + 2 * azo_l).astype(float)
+    out["bar_t_next"] = c["bar_t"].to_numpy(float) + 1.0
     return out
 
 
-def audit_agezero_reconstruction(cur_df, z_df, reconstruct_fn=None):
-    """Hard audit: can z_agezero_code be reconstructed deterministically from
-    (newest residual + start age + elapsed)?
+def audit_agezero_reconstruction(cur_df, z_df, nxt_df=None):
+    """Hard audit: can the next age-zero be reconstructed deterministically from the
+    realized residual Z_{t+1} + current age (see reconstruct_agezero)?
 
-    `reconstruct_fn(cur_df, z_df) -> (n,) int array` must return the reconstructed
-    age-zero code. If None, the trivial identity (stored == stored) is used to
-    validate the harness only. Returns dict(exact=bool, n_mismatch=int, n=int).
+    If `nxt_df` is given, the reconstruction is compared against the *true* next
+    current_newest_age_zero columns of the shifted frame. Also audits the actual
+    newest age trajectory: delta = age_{t+1} - age_t (<0, =0, =1, >1, min, max).
 
-    NOTE: the actual reconstruction formula from residual/start/elapsed is
-    data/column-semantics dependent and is NOT inferred here. The caller must
-    supply it. If `exact` is False, the kernel's 4-class age-zero node must be
-    removed (per governance: do not keep a stochastic node that is actually
-    deterministic). Without real data this audit is a SKIP, not a pass.
+    Gate (per governance): if mismatch == 0 -> the 4-class stochastic age-zero node
+    is a deterministic derived state and MUST be deleted from the model. If mismatch
+    > 0 -> STOP (investigate why the canonical residual cannot reconstruct age).
     """
-    stored = z_df["z_agezero_code"].to_numpy(int)
-    if reconstruct_fn is None:
-        recon = stored
-    else:
-        recon = np.asarray(reconstruct_fn(cur_df, z_df), dtype=int)
-    mismatch = int((recon != stored).sum())
-    return dict(exact=(mismatch == 0), n_mismatch=mismatch, n=len(stored))
+    results = {}
+    for side in ("upper", "lower"):
+        recon = reconstruct_agezero(cur_df, z_df, side)
+        if nxt_df is not None:
+            stored = nxt_df[f"{side}_current_newest_age_zero"].to_numpy(int)
+            start_age = np.expm1(cur_df[f"{side}_newest_log_age"].to_numpy(float))
+            elapsed_cur = (cur_df["bar_t"].to_numpy(np.int64) - cur_df["start_bar"].to_numpy(np.int64))
+            elapsed_next = elapsed_cur + 1
+
+            resid_cur = cur_df[f"{side}_newest_log_age_residual"].to_numpy(float)
+            resid_next = nxt_df[f"{side}_newest_log_age_residual"].to_numpy(float)
+
+            age_cur = np.expm1(resid_cur + np.log1p(start_age + elapsed_cur))
+            age_next = np.expm1(resid_next + np.log1p(start_age + elapsed_next))
+            delta = age_next - age_cur
+            delta_clean = np.round(delta, 6)
+
+            n_lt_0 = int(np.sum(delta_clean < 0))
+            n_eq_0 = int(np.sum(delta_clean == 0))
+            n_eq_1 = int(np.sum(delta_clean == 1))
+            n_gt_1 = int(np.sum(delta_clean > 1))
+            min_val = float(np.min(delta))
+            max_val = float(np.max(delta))
+
+            delta_audit = dict(
+                n_lt_0=n_lt_0,
+                p_lt_0=float(n_lt_0 / len(cur_df)),
+                n_eq_0=n_eq_0,
+                p_eq_0=float(n_eq_0 / len(cur_df)),
+                n_eq_1=n_eq_1,
+                p_eq_1=float(n_eq_1 / len(cur_df)),
+                n_gt_1=n_gt_1,
+                p_gt_1=float(n_gt_1 / len(cur_df)),
+                min=min_val,
+                max=max_val,
+            )
+        else:
+            stored = recon
+            delta_audit = {}
+        mismatch = int((recon != stored).sum())
+        results[side] = dict(exact=(mismatch == 0), n_mismatch=mismatch,
+                             n=len(recon), delta_newest_age=delta_audit)
+    return results
+
+
+def audit_full_reconstruction(cur_df, z_df, nxt_df):
+    """Full state-reconstruction hard gate on REAL transitions.
+
+    Reconstructs S_{t+1} = F(S_t, Z_{t+1}) for every transition and compares to the
+    true next state.
+    Two tiers:
+      * state closure (HARD gate): exact-deterministic columns whose value is fully
+        fixed by (S_t, Z_{t+1}) -- distances, width, cur_log_ratio, TV, MFE/MAE,
+        last-return, range, DCR, newest residuals, activation counters.
+        Requires state_max_error < 1e-8.
+      * derived representations (HARD gate for ratio, reported for tempo):
+        cur_log_ratio error must be < 1e-8 (matches canonical formula with EPS=1e-9).
+        Tempo columns (derived return-speed representations) are reported for transparency.
+
+    discrete_mismatch (age-zero flags + code) must be 0. If any gate fails, training
+    must not start (STOP_DYNAMIC_PGM1A1_STATE_RECONSTRUCTION_FAIL).
+    """
+    recon = reconstruct_next_state(cur_df, z_df)
+    state_cols = [
+        "cur_up_distance_R", "cur_down_distance_R", "cur_width_R", "cur_log_ratio",
+        "path_total_variation_R", "path_max_up_excursion_R", "path_max_down_excursion_R",
+        "path_last_return_R", "path_current_bar_range_R", "path_direction_change_rate",
+        "upper_newest_log_age_residual", "lower_newest_log_age_residual",
+        "upper_active_identity_count_delta", "lower_active_identity_count_delta",
+    ]
+    rep_cols = ["cur_log_ratio"]
+    rep_cols += [c for c in nxt_df.columns if "tempo" in c.lower()]
+    per_state = {}
+    state_max_err = 0.0
+    for col in state_cols:
+        a = np.asarray(recon[col], dtype=np.float64)
+        b = np.asarray(nxt_df[col].to_numpy(float), dtype=np.float64)
+        m = np.isfinite(a) & np.isfinite(b)
+        if m.sum() == 0:
+            per_state[col] = None
+            continue
+        err = float(np.max(np.abs(a[m] - b[m])))
+        per_state[col] = err
+        state_max_err = max(state_max_err, err)
+    per_rep = {}
+    for col in rep_cols:
+        a = np.asarray(recon.get(col), dtype=np.float64) \
+            if col in recon else np.asarray(nxt_df[col].to_numpy(float), dtype=np.float64)
+        b = np.asarray(nxt_df[col].to_numpy(float), dtype=np.float64)
+        m = np.isfinite(a) & np.isfinite(b)
+        per_rep[col] = (None if m.sum() == 0 else float(np.max(np.abs(a[m] - b[m]))))
+    disc_mismatch = 0
+    for side in ("upper", "lower"):
+        a = recon[f"{side}_current_newest_age_zero"].astype(int)
+        b = nxt_df[f"{side}_current_newest_age_zero"].to_numpy(int)
+        disc_mismatch += int((a != b).sum())
+    a_code = recon["z_agezero_code"].astype(int)
+    b_code = (nxt_df["upper_current_newest_age_zero"].to_numpy(int)
+              + 2 * nxt_df["lower_current_newest_age_zero"].to_numpy(int))
+    disc_mismatch += int((a_code != b_code).sum())
+    return dict(state_max_error=state_max_err,
+                derived_representation_max_error=float(per_rep.get("cur_log_ratio", 0.0)),
+                per_column_max_error=per_state,
+                representation_errors=per_rep,
+                discrete_mismatch=disc_mismatch, n=len(nxt_df))
 
 
 def run_single_window(w, data_path):
@@ -820,8 +1214,11 @@ def run_single_window(w, data_path):
 
     Zc_tr = tr[ALL_Z_COLS].to_numpy(np.float64)
     Zc_ev = ev[ALL_Z_COLS].to_numpy(np.float64)
-    yd_tr = tr[DISC_Z].to_numpy(np.int64)
-    yd_ev = ev[DISC_Z].to_numpy(np.int64)
+    if disc_spec():
+        yd_tr = tr[DISC_Z].to_numpy(np.int64)
+        yd_ev = ev[DISC_Z].to_numpy(np.int64)
+    else:
+        yd_tr = yd_ev = None
     Yc_tr = tr[COUNT_Z].to_numpy(np.int64)
     Yc_ev = ev[COUNT_Z].to_numpy(np.int64)
     sym_ev = ev["symbol"].to_numpy()
@@ -993,11 +1390,12 @@ def run_single_window(w, data_path):
                                 mean_nll_k0=float(np.mean(n0)),
                                 mean_nll_k1=float(np.mean(n1)),
                                 delta_k1_minus_k0=float(np.mean(n1) - np.mean(n0))))
-    target_rows.append(dict(window=w["name"], target=DISC_Z, kind="discrete_4class",
-                            mean_nll_k0=float(np.mean(k0["disc_ev"])),
-                            mean_nll_k1=float(np.mean(k1["disc_ev"])),
-                            delta_k1_minus_k0=float(np.mean(k1["disc_ev"])
-                                                    - np.mean(k0["disc_ev"]))))
+    if disc_spec():
+        target_rows.append(dict(window=w["name"], target=DISC_Z, kind="discrete_4class",
+                                mean_nll_k0=float(np.mean(k0["disc_ev"])),
+                                mean_nll_k1=float(np.mean(k1["disc_ev"])),
+                                delta_k1_minus_k0=float(np.mean(k1["disc_ev"])
+                                                        - np.mean(k0["disc_ev"]))))
 
     # free everything before process exit -> OS reclaims
     del Xtr1, Xev1, Xtr2, Xev2, k1, k0, tr, ev
@@ -1108,9 +1506,66 @@ def main():
         raise SystemExit(
             f"STOP_DYNAMIC_PGM1A_INVARIANT_FAIL: {invariants}")
 
-    # nxt is only consumed by the invariants above -> free it now (it is a
+    # ---------------- REAL-DATA SUPPORT + RECONSTRUCTION AUDITS (pre-training gates)
+    # These run on ALL 321,727 real transitions BEFORE any model fit. They are the
+    # hard gates proving: (a) the support transforms match the data; (b) Z is
+    # sufficient to reconstruct S_{t+1}; (c) the 4-class age-zero node is a
+    # deterministic derived state. Training must not start if any gate fails.
+    support_audit = dict(
+        upper_residual=audit_support_residual(
+            nxt["upper_newest_log_age_residual"].to_numpy(float), name="upper_residual"),
+        lower_residual=audit_support_residual(
+            nxt["lower_newest_log_age_residual"].to_numpy(float), name="lower_residual"),
+        range=audit_support_range(
+            nxt["path_current_bar_range_R"].to_numpy(float), name="range"),
+    )
+    for key, rep in [("z_uresid", support_audit["upper_residual"]),
+                     ("z_lresid", support_audit["lower_residual"]),
+                     ("z_range", support_audit["range"])]:
+        if rep["recommended_kind"] != NODE_KIND[key]:
+            raise SystemExit(
+                f"STOP_DYNAMIC_PGM1A_SUPPORT_SELECTION_MISMATCH: {key} "
+                f"audit={rep['recommended_kind']} baked={NODE_KIND[key]}")
+
+    full_recon = audit_full_reconstruction(cur, cur, nxt)
+    agezero_audit = audit_agezero_reconstruction(cur, cur, nxt)
+    if (full_recon["state_max_error"] >= 1e-8
+            or full_recon["derived_representation_max_error"] >= 1e-8
+            or full_recon["discrete_mismatch"] != 0):
+        raise SystemExit(
+            f"STOP_DYNAMIC_PGM1A1_STATE_RECONSTRUCTION_FAIL: {full_recon}")
+    az_u = agezero_audit["upper"]["n_mismatch"]
+    az_l = agezero_audit["lower"]["n_mismatch"]
+    if az_u != 0 or az_l != 0:
+        raise SystemExit(
+            f"STOP_DYNAMIC_PGM1A1_AGEZERO_RECON_MISMATCH: {agezero_audit}")
+    # age-zero is deterministic -> drop the 4-class stochastic node from the model
+    AGEZERO_DETERMINISTIC = True
+    BLOCKS["LiquidityComposition"]["disc"] = []
+
+    audit_report = dict(
+        support=support_audit,
+        full_reconstruction=full_recon,
+        agezero=agezero_audit,
+        agezero_node_removed=AGEZERO_DETERMINISTIC,
+    )
+    (OUT / "dynamic_pgm1a1_reconstruction_audit.json").write_text(
+        json.dumps(audit_report, indent=2, default=str))
+    print(f"[AUDIT] support={support_audit} "
+          f"recon_maxerr={full_recon['state_max_error']:.3e} "
+          f"derived_rep_maxerr={full_recon['derived_representation_max_error']:.3e} "
+          f"disc_mismatch={full_recon['discrete_mismatch']} "
+          f"agezero_mismatch(u/l)={az_u}/{az_l}", flush=True)
+
+    # nxt is only consumed by the invariants + audits above -> free it now (it is a
     # full-width shifted copy) to keep steady RSS low before the slim step.
     del nxt
+
+    # audit-only mode: run the real-data gates and STOP (no model fit), per the
+    # explicit instruction "run real audits but do NOT fit K0/K1/K2".
+    if os.environ.get("DYNAMIC_PGM1A_AUDIT_ONLY") == "1" or "--audit-only" in sys.argv:
+        print("[AUDIT-ONLY] Complete. dynamic_pgm1a1_reconstruction_audit.json written. Stopping.", flush=True)
+        return audit_report
 
     # ---------------- write cache (gitignored) + free heavy temporaries
     needed_cols = (list(OBS_STATE_NUM) + list(OBS_STATE_CAT)
@@ -1306,7 +1761,11 @@ if __name__ == "__main__":
     _ap.add_argument("--window-json")
     _ap.add_argument("--data")
     _ap.add_argument("--result")
+    _ap.add_argument("--audit-only", action="store_true",
+                     help="Run real-data support and reconstruction audits only, then stop.")
     _args = _ap.parse_args()
+    if _args.audit_only:
+        os.environ["DYNAMIC_PGM1A_AUDIT_ONLY"] = "1"
     if _args.window_json:
         # child mode: fit a single window and emit its metrics JSON, then exit so
         # the OS reclaims all memory before the next window's subprocess starts.
