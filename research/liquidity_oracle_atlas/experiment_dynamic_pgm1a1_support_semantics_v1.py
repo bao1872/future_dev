@@ -86,6 +86,7 @@ from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.metrics import log_loss, brier_score_loss, average_precision_score
 from scipy.optimize import minimize, brentq
 from scipy.special import gammaln
 
@@ -499,6 +500,14 @@ def add_lag1(df):
 # ===========================================================================
 # transition heads
 # ===========================================================================
+def _check_logistic_convergence(clf, name="logistic"):
+    if hasattr(clf, "n_iter_"):
+        max_iter = int(np.max(clf.n_iter_))
+        if max_iter >= 3000:
+            raise SystemExit(
+                f"STOP_DYNAMIC_PGM1A1_LOGISTIC_MAXITER: {name} reached max_iter={max_iter}")
+
+
 class GaussianTransitionHead:
     """Multi-output Gaussian transition head.
 
@@ -589,6 +598,7 @@ class HurdleLogNormalHead:
         pos = ispos > 0.5
         self.logit = LogisticRegression(penalty="l2", C=1.0, solver="lbfgs",
                                         max_iter=3000).fit(X, ispos.astype(int))
+        _check_logistic_convergence(self.logit, "hurdle_ln_logit")
         self.g = GaussianTransitionHead(alpha=self.alpha).fit(
             X[pos], logv[pos].reshape(-1, 1))
         self.n_params = (X.shape[1] + 1) + (X.shape[1] * 1 + 1)
@@ -649,6 +659,7 @@ class ZeroInteriorOneHead:
         y3 = np.where(is0 > 0.5, 0, np.where(is1 > 0.5, 2, 1)).astype(int)
         self.cat = LogisticRegression(penalty="l2", C=1.0, solver="lbfgs",
                                      max_iter=3000).fit(X, y3)
+        _check_logistic_convergence(self.cat, "dcr_cat")
         self.g = GaussianTransitionHead(alpha=self.alpha).fit(
             X[interior], logit[interior].reshape(-1, 1))
         self.n_params = (X.shape[1] * 3 + 3) + (X.shape[1] * 1 + 1)
@@ -692,6 +703,7 @@ class SignedHurdleHead:
         y3 = np.where(isneg > 0.5, 0, np.where(ispos > 0.5, 2, 1)).astype(int)
         self.cat = LogisticRegression(penalty="l2", C=1.0, solver="lbfgs",
                                      max_iter=3000).fit(X, y3)
+        _check_logistic_convergence(self.cat, "signed_hurdle_cat")
         self.g = GaussianTransitionHead(alpha=self.alpha).fit(
             X[nonzero], logabs[nonzero].reshape(-1, 1))
         self.n_params = (X.shape[1] * 3 + 3) + (X.shape[1] * 1 + 1)
@@ -769,6 +781,7 @@ def _fit_disc(Xtr, Xev, yd_tr, yd_ev):
     disc = LogisticRegression(penalty="l2", C=1.0, solver="lbfgs",
                              max_iter=3000)
     disc.fit(Xtr, yd_tr)
+    _check_logistic_convergence(disc, "disc_4class")
     p_tr = disc.predict_proba(Xtr)[np.arange(len(yd_tr)), yd_tr]
     p_ev = disc.predict_proba(Xev)[np.arange(len(yd_ev)), yd_ev]
     disc_tr = -np.log(np.clip(p_tr, 1e-12, 1.0))
@@ -868,6 +881,9 @@ class ZeroTruncatedPoissonRegressor:
     def __init__(self, alpha=1.0):
         self.alpha = alpha
         self.n_eta_clipped = 0
+        self.success = False
+        self.nit = 0
+        self.message = ""
 
     def fit(self, X, y):
         X = np.asarray(X, np.float64)
@@ -882,7 +898,15 @@ class ZeroTruncatedPoissonRegressor:
             raise RuntimeError(f"STOP_ZTP_OPTIMIZER_FAIL: {res.message}")
         self.intercept_ = res.x[0]
         self.coef_ = res.x[1:]
+        self.success = bool(res.success)
+        self.nit = int(res.nit)
+        self.message = str(res.message)
         return self
+
+    def count_eta_clipped(self, X):
+        X = np.asarray(X, np.float64)
+        eta = self.intercept_ + X @ self.coef_
+        return int((np.abs(eta) > 20.0).sum())
 
     def _eta_lam(self, theta, X):
         b = theta[0]
@@ -942,13 +966,18 @@ def fit_constant_count_head(Ytr, Yev):
     Yev = np.asarray(Yev, dtype=np.int64)
     nll_tr = np.zeros((len(Ytr), Ytr.shape[1]))
     nll_ev = np.zeros((len(Yev), Yev.shape[1]))
+    p0_ev_all = np.zeros((len(Yev), Ytr.shape[1]))
+    rate_ev_all = np.zeros((len(Yev), Ytr.shape[1]))
     for j in range(Ytr.shape[1]):
         yt, ye = Ytr[:, j], Yev[:, j]
         p0 = float(np.mean(yt > 0))
         rate = _fit_constant_ztp_rate(yt)
+        p0_ev_all[:, j] = p0
+        rate_ev_all[:, j] = rate
         nll_tr[:, j] = _hurdle_nll(yt, p0, rate)
         nll_ev[:, j] = _hurdle_nll(ye, p0, rate)
     return dict(nll_tr=nll_tr, nll_ev=nll_ev,
+                p0_ev=p0_ev_all, rate_ev=rate_ev_all,
                 n_params=int(2 * Ytr.shape[1]))
 
 
@@ -962,42 +991,76 @@ def fit_count_head(Xtr, Ytr, Xev, Yev):
     n_tr, n_ev = len(Ytr), len(Yev)
     nll_tr = np.zeros((n_tr, Ytr.shape[1]))
     nll_ev = np.zeros((n_ev, Yev.shape[1]))
+    p0_ev_all = np.zeros((n_ev, Ytr.shape[1]))
+    rate_ev_all = np.zeros((n_ev, Ytr.shape[1]))
+    tr_clipped_list, ev_clipped_list = [], []
+    ztp_nit_list, ztp_success_list, ztp_msg_list = [], [], []
+
     for j in range(Ytr.shape[1]):
         yt, ye = Ytr[:, j], Yev[:, j]
         zt = (yt > 0).astype(np.int64)
         logit = LogisticRegression(penalty="l2", C=1.0, solver="lbfgs",
                                    max_iter=3000).fit(Xtr, zt)
-        p0_tr = np.clip(logit.predict_proba(Xtr)[:, 1], 1e-6, 1 - 1e-6)
-        p0_ev = np.clip(logit.predict_proba(Xev)[:, 1], 1e-6, 1 - 1e-6)
+        _check_logistic_convergence(logit, f"count_{COUNT_Z[j]}_occurrence")
+        p0_tr = np.clip(logit.predict_proba(Xtr)[:, 1], 1e-6, 1.0 - 1e-6)
+        p0_ev = np.clip(logit.predict_proba(Xev)[:, 1], 1e-6, 1.0 - 1e-6)
+        p0_ev_all[:, j] = p0_ev
         pos = yt > 0
         if pos.sum() > 0:
             ztp = ZeroTruncatedPoissonRegressor(alpha=1.0).fit(Xtr[pos], yt[pos])
+            tr_clipped = ztp.count_eta_clipped(Xtr)
+            ev_clipped = ztp.count_eta_clipped(Xev)
+            if tr_clipped > 0 or ev_clipped > 0:
+                raise SystemExit(
+                    f"STOP_DYNAMIC_PGM1A1_ZTP_ETA_CLIPPED: {COUNT_Z[j]} "
+                    f"tr={tr_clipped} ev={ev_clipped}"
+                )
             rate_tr = ztp.predict_rate(Xtr)
             rate_ev = ztp.predict_rate(Xev)
+            tr_clipped_list.append(tr_clipped)
+            ev_clipped_list.append(ev_clipped)
+            ztp_nit_list.append(ztp.nit)
+            ztp_success_list.append(ztp.success)
+            ztp_msg_list.append(ztp.message)
         else:
             rate_tr = np.full(n_tr, 1e-6)
             rate_ev = np.full(n_ev, 1e-6)
+            tr_clipped_list.append(0)
+            ev_clipped_list.append(0)
+            ztp_nit_list.append(0)
+            ztp_success_list.append(True)
+            ztp_msg_list.append("no_positives")
+
+        rate_ev_all[:, j] = rate_ev
         nll_tr[:, j] = _hurdle_nll(yt, p0_tr, rate_tr)
         nll_ev[:, j] = _hurdle_nll(ye, p0_ev, rate_ev)
-    return dict(nll_tr=nll_tr, nll_ev=nll_ev,
-                n_params=int((Xtr.shape[1] + 1) * 2 * Ytr.shape[1]))
+
+    return dict(
+        nll_tr=nll_tr, nll_ev=nll_ev,
+        p0_ev=p0_ev_all, rate_ev=rate_ev_all,
+        tr_clipped=tr_clipped_list, ev_clipped=ev_clipped_list,
+        ztp_nit=ztp_nit_list, ztp_success=ztp_success_list,
+        ztp_message=ztp_msg_list,
+        n_params=int((Xtr.shape[1] + 1) * 2 * Ytr.shape[1]),
+    )
 
 
 # ===========================================================================
-# cluster bootstrap (by episode_start_trading_day)
+# cluster bootstrap (by episode_start_trading_day, exact cluster multiplicity)
 # ===========================================================================
 def boot_cluster(delta_per_row, day_per_row, eid_per_row, seed):
     df = pd.DataFrame({"d": delta_per_row, "day": day_per_row,
                        "eid": eid_per_row})
-    ep = df.groupby("eid").agg(d=("d", "mean"), day=("day", "first"))
+    ep = df.groupby("eid", as_index=False).agg(d=("d", "mean"), day=("day", "first"))
+    day_stats = ep.groupby("day")["d"].agg(["sum", "count"]).reset_index()
+    day_sums = day_stats["sum"].to_numpy(dtype=np.float64)
+    day_counts = day_stats["count"].to_numpy(dtype=np.float64)
+    n_days = len(day_stats)
     rng = np.random.default_rng(seed)
-    days = ep["day"].to_numpy()
-    uniq_days = np.unique(days)
     ests = np.empty(BOOTSTRAP_REPS)
     for b in range(BOOTSTRAP_REPS):
-        sel = rng.choice(uniq_days, size=len(uniq_days), replace=True)
-        mask = ep["day"].isin(sel).to_numpy()
-        ests[b] = ep.loc[mask, "d"].mean()
+        idx = rng.integers(0, n_days, size=n_days)
+        ests[b] = day_sums[idx].sum() / day_counts[idx].sum()
     point = float(ep["d"].mean())
     return float(np.percentile(ests, 2.5)), float(np.percentile(ests, 97.5)), point
 
@@ -1244,8 +1307,9 @@ def run_single_window(w, data_path):
     eid_ev = ev["episode_id"].to_numpy()
 
     model_metrics, opt_rows, block_rows, target_rows = [], [], [], []
+    node_diag_rows = []
 
-    def _node_cont(nodes):
+    def _node_eval_nll(nodes):
         # sum per-node NLL over all nodes -> (n,) array
         return np.sum([nodes[n]["ev"] for n, _ in Z_LAYOUT], axis=0)
 
@@ -1256,15 +1320,22 @@ def run_single_window(w, data_path):
     opt_rows.append(dict(window=w["name"], model="K0_UNCONDITIONAL",
                         n_params=k0["n_params"] + k0_count["n_params"], success=True,
                         elapsed_seconds=round(time.perf_counter() - t_k0, 3)))
-    j_k0_tr = (_node_cont(k0["nodes"]) + k0["disc_tr"]
-               + k0_count["nll_tr"].sum(axis=1))
-    j_k0_ev = (_node_cont(k0["nodes"]) + k0["disc_ev"]
-               + k0_count["nll_ev"].sum(axis=1))
+    cont_ev_k0 = _node_eval_nll(k0["nodes"])
+    count_ev_k0 = k0_count["nll_ev"].sum(axis=1)
+    disc_ev_k0 = k0["disc_ev"]
+    j_k0_ev = cont_ev_k0 + disc_ev_k0 + count_ev_k0
+
+    mean_cont_k0 = float(np.mean(cont_ev_k0))
+    mean_count_k0 = float(np.mean(count_ev_k0))
+    mean_disc_k0 = float(np.mean(disc_ev_k0))
+    mean_joint_k0 = float(np.mean(j_k0_ev))
+    assert abs(mean_joint_k0 - mean_cont_k0 - mean_disc_k0 - mean_count_k0) < 1e-10
+
     model_metrics.append(dict(window=w["name"], model="K0_UNCONDITIONAL",
-                            mean_joint_nll=float(np.mean(j_k0_ev)),
-                            mean_cont_nll=float(np.mean(_node_cont(k0["nodes"]))),
-                            mean_disc_nll=float(np.mean(k0["disc_ev"])),
-                            mean_count_nll=float(np.mean(k0_count["nll_ev"])),
+                            mean_joint_nll=mean_joint_k0,
+                            mean_cont_nll=mean_cont_k0,
+                            mean_disc_nll=mean_disc_k0,
+                            mean_count_nll=mean_count_k0,
                             n_rows=int(len(ev))))
 
     # ---------------- shared preprocessing (K1 + K2 in one pass)
@@ -1294,15 +1365,22 @@ def run_single_window(w, data_path):
     opt_rows.append(dict(window=w["name"], model="K1_STATE",
                         n_params=k1["n_params"] + k1_count["n_params"], success=True,
                         elapsed_seconds=round(time.perf_counter() - t_k1, 3)))
-    j_k1_tr = (_node_cont(k1["nodes"]) + k1["disc_tr"]
-               + k1_count["nll_tr"].sum(axis=1))
-    j_k1_ev = (_node_cont(k1["nodes"]) + k1["disc_ev"]
-               + k1_count["nll_ev"].sum(axis=1))
+    cont_ev_k1 = _node_eval_nll(k1["nodes"])
+    count_ev_k1 = k1_count["nll_ev"].sum(axis=1)
+    disc_ev_k1 = k1["disc_ev"]
+    j_k1_ev = cont_ev_k1 + disc_ev_k1 + count_ev_k1
+
+    mean_cont_k1 = float(np.mean(cont_ev_k1))
+    mean_count_k1 = float(np.mean(count_ev_k1))
+    mean_disc_k1 = float(np.mean(disc_ev_k1))
+    mean_joint_k1 = float(np.mean(j_k1_ev))
+    assert abs(mean_joint_k1 - mean_cont_k1 - mean_disc_k1 - mean_count_k1) < 1e-10
+
     model_metrics.append(dict(window=w["name"], model="K1_STATE",
-                            mean_joint_nll=float(np.mean(j_k1_ev)),
-                            mean_cont_nll=float(np.mean(_node_cont(k1["nodes"]))),
-                            mean_disc_nll=float(np.mean(k1["disc_ev"])),
-                            mean_count_nll=float(np.mean(k1_count["nll_ev"])),
+                            mean_joint_nll=mean_joint_k1,
+                            mean_cont_nll=mean_cont_k1,
+                            mean_disc_nll=mean_disc_k1,
+                            mean_count_nll=mean_count_k1,
                             n_rows=int(len(ev))))
 
     # ---------------- covariance PD audit (per Gaussian-based node head)
@@ -1327,22 +1405,28 @@ def run_single_window(w, data_path):
     opt_rows.append(dict(window=w["name"], model="K2_STATE_LAG1",
                         n_params=k2["n_params"] + k2_count["n_params"], success=True,
                         elapsed_seconds=round(time.perf_counter() - t_k2, 3)))
-    j_k2_tr = (_node_cont(k2["nodes"]) + k2["disc_tr"]
-               + k2_count["nll_tr"].sum(axis=1))
-    j_k2_ev = (_node_cont(k2["nodes"]) + k2["disc_ev"]
-               + k2_count["nll_ev"].sum(axis=1))
+    cont_ev_k2 = _node_eval_nll(k2["nodes"])
+    count_ev_k2 = k2_count["nll_ev"].sum(axis=1)
+    disc_ev_k2 = k2["disc_ev"]
+    j_k2_ev = cont_ev_k2 + disc_ev_k2 + count_ev_k2
+
+    mean_cont_k2 = float(np.mean(cont_ev_k2))
+    mean_count_k2 = float(np.mean(count_ev_k2))
+    mean_disc_k2 = float(np.mean(disc_ev_k2))
+    mean_joint_k2 = float(np.mean(j_k2_ev))
+    assert abs(mean_joint_k2 - mean_cont_k2 - mean_disc_k2 - mean_count_k2) < 1e-10
+
     model_metrics.append(dict(window=w["name"], model="K2_STATE_LAG1",
-                            mean_joint_nll=float(np.mean(j_k2_ev)),
-                            mean_cont_nll=float(np.mean(_node_cont(k2["nodes"]))),
-                            mean_disc_nll=float(np.mean(k2["disc_ev"])),
-                            mean_count_nll=float(np.mean(k2_count["nll_ev"])),
+                            mean_joint_nll=mean_joint_k2,
+                            mean_cont_nll=mean_cont_k2,
+                            mean_disc_nll=mean_disc_k2,
+                            mean_count_nll=mean_count_k2,
                             n_rows=int(len(ev))))
-    del k2, ct
 
     if not (len(j_k0_ev) == len(j_k1_ev) == len(j_k2_ev)):
         raise SystemExit("STOP_DYNAMIC_PGM1A_SAMPLE_MISMATCH")
 
-    # ---------------- bootstrap K1-K0, K2-K1 (vectorized by-symbol)
+    # ---------------- bootstrap K1-K0, K2-K1 (vectorized by-symbol, episode-weighted)
     boots, bysym = [], []
     for label, hi, lo in [("K1-K0", j_k1_ev, j_k0_ev),
                           ("K2-K1", j_k2_ev, j_k1_ev)]:
@@ -1355,76 +1439,183 @@ def run_single_window(w, data_path):
             w["seed"] + (0 if label == "K1-K0" else 1))
         print(f"[STAGE] window {w['name']} bootstrap {label} done "
               f"took={round(time.perf_counter() - t_b, 2)}", flush=True)
-        codes, sym_names = pd.factorize(sym_ev)
-        cnt = np.bincount(codes, minlength=len(sym_names))
-        for s in range(len(sym_names)):
-            if cnt[s] == 0:
-                continue
-            d = delta[codes == s]
-            bysym.append(dict(window=w["name"], comparison=label,
-                              symbol=sym_names[s], n=int(cnt[s]),
-                              mean_delta=float(d.mean()),
-                              n_negative=int((d < 0).sum()),
-                              n_positive=int((d > 0).sum())))
+
+        df_d = pd.DataFrame({"symbol": sym_ev, "eid": eid_ev, "delta": delta})
+        ep_d = df_d.groupby(["symbol", "eid"], as_index=False)["delta"].mean()
+        for sym, grp in ep_d.groupby("symbol"):
+            m_ep = float(grp["delta"].mean())
+            raw_grp = df_d[df_d["symbol"] == sym]
+            m_row = float(raw_grp["delta"].mean())
+            d_raw = raw_grp["delta"].to_numpy()
+            bysym.append(dict(
+                window=w["name"], comparison=label, symbol=sym,
+                n_episodes=int(len(grp)),
+                n_rows=int(len(raw_grp)),
+                mean_delta_episode=m_ep,
+                mean_delta_row=m_row,
+                mean_delta=m_ep,
+                n_negative=int((d_raw < 0).sum()),
+                n_positive=int((d_raw > 0).sum()),
+            ))
         boots.append(dict(window=w["name"], comparison=label,
                           delta_sample_mean=point, ci_lo=lo_ci, ci_hi=hi_ci,
                           verdict=("CI_below_zero" if hi_ci < 0
                                    else "CI_above_zero" if lo_ci > 0
                                    else "CI_contains_zero")))
 
-    # ---------------- block contribution (eval, reuse K1 design)
-    def _block_nll(k_nodes, bdef):
+    # ---------------- block contribution (eval, explicit model isolation across K0, K1, K2)
+    def _block_nll(nodes, disc_ev, count_ev, bdef):
         if bdef["nodes"]:
-            s = np.sum([k_nodes[n]["ev"] for n in bdef["nodes"]], axis=0)
+            s = np.sum([nodes[n]["ev"] for n in bdef["nodes"]], axis=0)
         else:
-            s = np.zeros(len(k_nodes[list(k_nodes)[0]]["ev"]))
+            s = np.zeros(len(nodes[list(nodes)[0]]["ev"]))
         if bdef["disc"]:
-            s = s + k1["disc_ev"]
+            s = s + disc_ev
         if bdef.get("count"):
             idx = [COUNT_Z.index(c) for c in bdef["count"]]
-            s = s + k1_count["nll_ev"][:, idx].sum(axis=1)
+            s = s + count_ev[:, idx].sum(axis=1)
         return s
+
     for bname, bdef in BLOCKS.items():
-        bjoint_k1 = _block_nll(k1["nodes"], bdef)
-        bjoint_k0 = _block_nll(k0["nodes"], bdef)
+        bjoint_k0 = _block_nll(k0["nodes"], k0["disc_ev"], k0_count["nll_ev"], bdef)
+        bjoint_k1 = _block_nll(k1["nodes"], k1["disc_ev"], k1_count["nll_ev"], bdef)
+        bjoint_k2 = _block_nll(k2["nodes"], k2["disc_ev"], k2_count["nll_ev"], bdef)
+        m0 = float(np.mean(bjoint_k0))
+        m1 = float(np.mean(bjoint_k1))
+        m2 = float(np.mean(bjoint_k2))
         block_rows.append(dict(
             window=w["name"], block=bname,
-            mean_joint_k0=float(np.mean(bjoint_k0)),
-            mean_joint_k1=float(np.mean(bjoint_k1)),
-            delta_k1_minus_k0=float(np.mean(bjoint_k1) - np.mean(bjoint_k0))))
+            mean_joint_k0=m0,
+            mean_joint_k1=m1,
+            mean_joint_k2=m2,
+            delta_k1_minus_k0=m1 - m0,
+            delta_k2_minus_k1=m2 - m1))
 
-    # ---------------- per-target (eval, reuse K1 design)
+    # ---------------- per-target (eval, explicit K0, K1, K2 + both deltas)
     for nm, cols in Z_LAYOUT:
-        n1 = k1["nodes"][nm]["ev"]
         n0 = k0["nodes"][nm]["ev"]
+        n1 = k1["nodes"][nm]["ev"]
+        n2 = k2["nodes"][nm]["ev"]
+        m0, m1, m2 = float(np.mean(n0)), float(np.mean(n1)), float(np.mean(n2))
         target_rows.append(dict(window=w["name"], target=nm, kind="node",
-                                mean_nll_k0=float(np.mean(n0)),
-                                mean_nll_k1=float(np.mean(n1)),
-                                delta_k1_minus_k0=float(np.mean(n1) - np.mean(n0))))
+                                mean_nll_k0=m0,
+                                mean_nll_k1=m1,
+                                mean_nll_k2=m2,
+                                delta_k1_minus_k0=m1 - m0,
+                                delta_k2_minus_k1=m2 - m1))
     for j, c in enumerate(COUNT_Z):
-        n1 = k1_count["nll_ev"][:, j]
         n0 = k0_count["nll_ev"][:, j]
+        n1 = k1_count["nll_ev"][:, j]
+        n2 = k2_count["nll_ev"][:, j]
+        m0, m1, m2 = float(np.mean(n0)), float(np.mean(n1)), float(np.mean(n2))
         target_rows.append(dict(window=w["name"], target=c, kind="discrete_count",
-                                mean_nll_k0=float(np.mean(n0)),
-                                mean_nll_k1=float(np.mean(n1)),
-                                delta_k1_minus_k0=float(np.mean(n1) - np.mean(n0))))
+                                mean_nll_k0=m0,
+                                mean_nll_k1=m1,
+                                mean_nll_k2=m2,
+                                delta_k1_minus_k0=m1 - m0,
+                                delta_k2_minus_k1=m2 - m1))
     if disc_spec():
+        m0 = float(np.mean(k0["disc_ev"]))
+        m1 = float(np.mean(k1["disc_ev"]))
+        m2 = float(np.mean(k2["disc_ev"]))
         target_rows.append(dict(window=w["name"], target=DISC_Z, kind="discrete_4class",
-                                mean_nll_k0=float(np.mean(k0["disc_ev"])),
-                                mean_nll_k1=float(np.mean(k1["disc_ev"])),
-                                delta_k1_minus_k0=float(np.mean(k1["disc_ev"])
-                                                        - np.mean(k0["disc_ev"]))))
+                                mean_nll_k0=m0,
+                                mean_nll_k1=m1,
+                                mean_nll_k2=m2,
+                                delta_k1_minus_k0=m1 - m0,
+                                delta_k2_minus_k1=m2 - m1))
+
+    # ---------------- node diagnostics (K1 eval metrics)
+    z_layout_map = dict(Z_LAYOUT)
+    for nm in ["z_dmfe", "z_dmae", "z_range", "z_uresid", "z_lresid"]:
+        if nm in k1["nodes"]:
+            h = k1["nodes"][nm]["head"]
+            if hasattr(h, "logit"):
+                cols_idx = z_layout_map[nm]
+                ispos_col_idx = cols_idx[0]
+                y_true = (Zc_ev[:, ispos_col_idx] > 0.5).astype(int)
+                prob = np.clip(h.logit.predict_proba(Xev1)[:, 1], 1e-6, 1.0 - 1e-6)
+                prev = float(np.mean(y_true))
+                ll = float(log_loss(y_true, prob, labels=[0, 1]))
+                brier = float(brier_score_loss(y_true, prob))
+                prauc = float(average_precision_score(y_true, prob)) if len(np.unique(y_true)) > 1 else float("nan")
+                node_diag_rows.append(dict(
+                    window=w["name"], model="K1_STATE", target=nm, kind="hurdle_occurrence",
+                    prevalence=prev, logloss=ll, brier=brier, pr_auc=prauc,
+                    p_zero=None, p_interior=None, p_one=None, cat_nll=None, interior_nll=None,
+                    actual_mean_increment=None, predicted_mean_increment=None, mean_ztp_lambda=None,
+                    train_eta_clipped=None, eval_eta_clipped=None,
+                    ztp_nit=None, ztp_success=None, ztp_message=None,
+                ))
+
+    if "z_dcr" in k1["nodes"]:
+        hdcr = k1["nodes"]["z_dcr"]["head"]
+        if hasattr(hdcr, "cat") and hasattr(hdcr, "g"):
+            cols_idx = z_layout_map["z_dcr"]
+            is0_ev = Zc_ev[:, cols_idx[0]] > 0.5
+            is1_ev = Zc_ev[:, cols_idx[1]] > 0.5
+            int_ev = (~is0_ev) & (~is1_ev)
+            y3_ev = np.where(is0_ev, 0, np.where(is1_ev, 2, 1)).astype(int)
+            p3 = np.clip(hdcr.cat.predict_proba(Xev1), 1e-12, 1.0)
+            p3 = p3 / p3.sum(axis=1, keepdims=True)
+            cat_nll = float(log_loss(y3_ev, p3, labels=[0, 1, 2]))
+            if int_ev.sum() > 0:
+                logit_ev = Zc_ev[int_ev, cols_idx[2]]
+                nll_logit = hdcr.g.nll_per_row(Xev1[int_ev], logit_ev.reshape(-1, 1))
+                jac = _logit_jacobian(logit_ev)
+                int_nll = float(np.mean(nll_logit + jac))
+            else:
+                int_nll = 0.0
+            node_diag_rows.append(dict(
+                window=w["name"], model="K1_STATE", target="z_dcr", kind="dcr",
+                prevalence=None, logloss=None, brier=None, pr_auc=None,
+                p_zero=float(np.mean(is0_ev)),
+                p_interior=float(np.mean(int_ev)),
+                p_one=float(np.mean(is1_ev)),
+                cat_nll=cat_nll, interior_nll=int_nll,
+                actual_mean_increment=None, predicted_mean_increment=None, mean_ztp_lambda=None,
+                train_eta_clipped=None, eval_eta_clipped=None,
+                ztp_nit=None, ztp_success=None, ztp_message=None,
+            ))
+
+    for j, c in enumerate(COUNT_Z):
+        ye = Yc_ev[:, j]
+        ze = (ye > 0).astype(int)
+        p0_ev = k1_count["p0_ev"][:, j]
+        rate_ev = k1_count["rate_ev"][:, j]
+        prev = float(np.mean(ze))
+        ll = float(log_loss(ze, p0_ev, labels=[0, 1]))
+        brier = float(brier_score_loss(ze, p0_ev))
+        prauc = float(average_precision_score(ze, p0_ev)) if len(np.unique(ze)) > 1 else float("nan")
+        act_inc = float(np.mean(ye))
+        denom = np.maximum(-np.expm1(-rate_ev), 1e-12)
+        pred_inc = float(np.mean(p0_ev * (rate_ev / denom)))
+        mean_lam = float(np.mean(rate_ev))
+        tr_clip = k1_count["tr_clipped"][j]
+        ev_clip = k1_count["ev_clipped"][j]
+        nit = k1_count["ztp_nit"][j]
+        succ = k1_count["ztp_success"][j]
+        msg = k1_count["ztp_message"][j]
+        node_diag_rows.append(dict(
+            window=w["name"], model="K1_STATE", target=c, kind="hurdle_count",
+            prevalence=prev, logloss=ll, brier=brier, pr_auc=prauc,
+            p_zero=None, p_interior=None, p_one=None, cat_nll=None, interior_nll=None,
+            actual_mean_increment=act_inc, predicted_mean_increment=pred_inc, mean_ztp_lambda=mean_lam,
+            train_eta_clipped=tr_clip, eval_eta_clipped=ev_clip,
+            ztp_nit=nit, ztp_success=succ, ztp_message=msg,
+        ))
 
     # free everything before process exit -> OS reclaims
-    del Xtr1, Xev1, Xtr2, Xev2, k1, k0, tr, ev
+    del Xtr1, Xev1, Xtr2, Xev2, k2, k1, k0, tr, ev, ct
     del Zc_tr, Zc_ev, yd_tr, yd_ev
-    del j_k0_tr, j_k0_ev, j_k1_tr, j_k1_ev, j_k2_tr, j_k2_ev
+    del j_k0_ev, j_k1_ev, j_k2_ev
 
     print(f"[STAGE] window {w['name']} done "
           f"took={round(time.perf_counter() - t_w, 2)}s", flush=True)
     return dict(window=w["name"], model_metrics=model_metrics,
                 opt_rows=opt_rows, boots=boots, bysym=bysym,
                 block_rows=block_rows, target_rows=target_rows,
+                node_diag_rows=node_diag_rows,
                 cov_audit=cov_audit)
 
 
@@ -1626,7 +1817,7 @@ def main():
         win_env[_bt] = "1"
 
     model_metrics, opt_rows, boots, bysym = [], [], [], []
-    block_rows, target_rows = [], []
+    block_rows, target_rows, node_diag_rows = [], [], []
     cov_audit = {}
     for w in WINDOWS:
         result_path = CACHE / f"_dynamic_pgm1a1_window_{w['name']}.json"
@@ -1653,6 +1844,7 @@ def main():
         bysym += res["bysym"]
         block_rows += res["block_rows"]
         target_rows += res["target_rows"]
+        node_diag_rows += res.get("node_diag_rows", [])
         cov_audit.update(res["cov_audit"])
         print(f"[STAGE] window {w['name']} subprocess done "
               f"took={round(time.perf_counter() - t_w, 2)}s", flush=True)
@@ -1661,7 +1853,7 @@ def main():
     def sym_neg(wname, label):
         sub = pd.DataFrame(bysym)
         sub = sub[(sub["window"] == wname) & (sub["comparison"] == label)]
-        return int((sub["mean_delta"] < 0).sum())
+        return int((sub["mean_delta_episode"] < 0).sum())
 
     verdict = {}
     # Gate A: transition signal
@@ -1673,8 +1865,12 @@ def main():
                               n_sym_neg=sym_neg(w["name"], "K1-K0"))
     gateA = (all(wsA[w["name"]]["ci_hi"] < 0 for w in WINDOWS)
              and all(wsA[w["name"]]["n_sym_neg"] >= 10 for w in WINDOWS))
-    verdict["WITHIN_EPISODE_TRANSITION_SIGNAL_SUPPORTED"] = dict(
-        supported=bool(gateA), windows=wsA)
+    transition_verdict = (
+        "SUPPORT_CORRECT_TRANSITION_SIGNAL_SUPPORTED" if gateA
+        else "SUPPORT_CORRECT_TRANSITION_SIGNAL_NOT_SUPPORTED"
+    )
+    verdict["SUPPORT_CORRECT_TRANSITION_SIGNAL_SUPPORTED"] = dict(
+        supported=bool(gateA), verdict=transition_verdict, windows=wsA)
 
     # Markov closure: lag1
     wsL = {w["name"]: {} for w in WINDOWS}
@@ -1685,8 +1881,12 @@ def main():
                               n_sym_neg=sym_neg(w["name"], "K2-K1"))
     lag_stable = (all(wsL[w["name"]]["ci_hi"] < 0 for w in WINDOWS)
                   and all(wsL[w["name"]]["n_sym_neg"] >= 10 for w in WINDOWS))
-    verdict["LAG1_RESIDUAL_DEPENDENCE_SUPPORTED"] = dict(
-        supported=bool(lag_stable), windows=wsL,
+    lag_verdict = (
+        "SUPPORT_CORRECT_LAG1_RESIDUAL_SUPPORTED" if lag_stable
+        else "NO_STABLE_LAG1_INCREMENT_DETECTED"
+    )
+    verdict["SUPPORT_CORRECT_LAG1_RESIDUAL_SUPPORTED"] = dict(
+        supported=bool(lag_stable), verdict=lag_verdict, windows=wsL,
         note=("Stable lag1 increment detected; do NOT interpret as latent "
               "state without checking functional form / interaction / "
               "state omission first." if lag_stable else
@@ -1702,6 +1902,8 @@ def main():
         OUT / "dynamic_pgm1a1_target_metrics.csv", index=False)
     pd.DataFrame(opt_rows).to_csv(
         OUT / "dynamic_pgm1a1_optimizer_audit.csv", index=False)
+    pd.DataFrame(node_diag_rows).to_csv(
+        OUT / "dynamic_pgm1a1_node_diagnostics.csv", index=False)
     (OUT / "dynamic_pgm1a1_sample_audit.json").write_text(
         json.dumps(sample_audit, indent=2))
     (OUT / "dynamic_pgm1a1_transition_invariants.json").write_text(
@@ -1710,36 +1912,41 @@ def main():
     summary = dict(
         experiment="DYNAMIC-PGM-1A.1 Support-Correct Within-Episode Transition Kernel",
         parent_commit=BASE_SHA,
+        transition_verdict=transition_verdict,
+        lag_verdict=lag_verdict,
         design=dict(
             scope="within-episode 5m state transition, terminal reset excluded",
             target="P(S_{t+1} | S_t, H_{t+1}=0)",
             predicted_innovations=dict(
                 nodes=[n for n, _ in NODE_SPECS],
                 z_columns=ALL_Z_COLS,
-                discrete=DISC_Z, count_increments=COUNT_Z,
+                discrete="deterministic derived state; stochastic node removed",
+                count_increments=COUNT_Z,
                 note="S_{t+1}=F(S_t,Z_{t+1}); each node Z^{(k)} uses a "
                      "support-correct distribution: price return = Gaussian "
-                     "delta; MFE/MAE = Hurdle-LogNormal delta; Range = LogNormal "
-                     "value; composition residuals = Hurdle-LogNormal value; "
+                     "delta; MFE/MAE = Hurdle-LogNormal delta; Range = Hurdle-LogNormal "
+                     "value; composition residuals = Hurdle-LogNormal on q = -residual >= 0; "
                      "DCR = 0/interior/1; count increments = Hurdle-Poisson "
-                     "(Logistic P(>0) + exact zero-truncated Poisson on positives). "
+                     "(Logistic P(>0) + exact zero-truncated Poisson on positives); "
+                     "age-zero = deterministic derived state; stochastic node removed. "
                      "stored *_active_identity_count_delta is the cumulative "
                      "activation counter; count_increments is its single-step diff."),
             models=dict(
-                K0_UNCONDITIONAL="no state; per-node constant heads + marginal 4-class",
+                K0_UNCONDITIONAL="no state; per-node constant heads (stochastic age-zero removed)",
                 K1_STATE="OBSERVED-STATE-v1 (35 numeric + prev_event_mask)",
                 K2_STATE_LAG1="K1 + 15 lag1_* + lag1_available"),
             kernel=dict(
                 z_d_up="Gaussian delta (any real)",
                 z_dmfe="Hurdle-LogNormal delta (P(=0) Logistic + log(Δ) Gaussian)",
                 z_dmae="Hurdle-LogNormal delta (P(=0) Logistic + log(Δ) Gaussian)",
-                z_range="LogNormal value (log(S_{t+1}) Gaussian)",
-                z_uresid="Hurdle-LogNormal value (point mass at 0 + log(S) Gaussian)",
-                z_lresid="Hurdle-LogNormal value (point mass at 0 + log(S) Gaussian)",
+                z_range="Hurdle-LogNormal value (P(=0) Logistic + log(S) Gaussian)",
+                z_uresid="Hurdle-LogNormal on q = -residual >= 0 (point mass at 0 + log(q) Gaussian)",
+                z_lresid="Hurdle-LogNormal on q = -residual >= 0 (point mass at 0 + log(q) Gaussian)",
                 z_dcr="0/interior/1 (3-class Logistic + logit(S) Gaussian on interior)",
-                z_delta_upper_count="Hurdle-Poisson (Logistic P(>0) + exact ZTP)",
-                z_delta_lower_count="Hurdle-Poisson (Logistic P(>0) + exact ZTP)",
-                discrete="4-class Logistic; Z^c perp Z^d | S_t (v1)"),
+                z_delta_upper_count="Logistic occurrence + exact ZTP",
+                z_delta_lower_count="Logistic occurrence + exact ZTP",
+                age_zero="deterministic derived state; stochastic node removed",
+                discrete="deterministic derived state; stochastic node removed"),
             obs_state_numeric=OBS_STATE_NUM,
             obs_state_categorical=OBS_STATE_CAT,
             lag_base=LAG_BASE,
@@ -1758,6 +1965,7 @@ def main():
             "K2-K1": sym_neg(w["name"], "K2-K1")} for w in WINDOWS},
         block_contribution=block_rows,
         per_target=target_rows,
+        node_diagnostics_file="dynamic_pgm1a1_node_diagnostics.csv",
         covariance_audit=cov_audit,
         verdict=verdict,
         bootstrap_reps=BOOTSTRAP_REPS,

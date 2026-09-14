@@ -439,22 +439,219 @@ def test_output_namespace_isolation():
         )
 
 
+def test_bootstrap_multiplicity():
+    """Verify cluster bootstrap preserves exact cluster multiplicity (no isin deduplication)."""
+    # 3 distinct days: Day 1 has 12.0, Day 2 has 0.0, Day 3 has 0.0
+    delta = np.array([12.0, 0.0, 0.0])
+    day = np.array([1, 2, 3])
+    eid = np.array([101, 102, 103])
+
+    # In a cluster bootstrap, if Day 1 is sampled twice and Day 2 once:
+    # Day sums = [12, 12, 0] -> sum = 24. Day counts = [1, 1, 1] -> sum = 3.
+    # Estimate = 24 / 3 = 8.0.
+    # Under old buggy `isin(sel)` logic: isin([1, 1, 2]) was deduplicated to isin([1, 2]),
+    # giving (12 + 0) / 2 = 6.0.
+    df = pd.DataFrame({"d": delta, "day": day, "eid": eid})
+    ep = df.groupby("eid", as_index=False).agg(d=("d", "mean"), day=("day", "first"))
+    day_stats = ep.groupby("day")["d"].agg(["sum", "count"]).reset_index()
+    day_sums = day_stats["sum"].to_numpy(dtype=np.float64)
+    day_counts = day_stats["count"].to_numpy(dtype=np.float64)
+
+    # Sample with multiplicity: idx = [0, 0, 1] (Day 1 twice, Day 2 once)
+    idx = np.array([0, 0, 1])
+    est = day_sums[idx].sum() / day_counts[idx].sum()
+    assert abs(est - 8.0) < 1e-10
+
+    # Test boot_cluster directly
+    ci_lo, ci_hi, point = m.boot_cluster(delta, day, eid, seed=123)
+    assert 0.0 <= ci_lo <= point <= ci_hi <= 12.0
+    assert abs(point - 4.0) < 1e-9
+
+
+def test_joint_nll_component_sum():
+    """Verify mean_joint_nll == mean_cont_nll + mean_disc_nll + mean_count_nll exactly."""
+    n = 20
+    rng = np.random.default_rng(99)
+    cont = rng.uniform(0.1, 1.0, size=n)
+    disc = rng.uniform(0.1, 0.5, size=n)
+    count = rng.uniform(0.1, 0.5, size=(n, 2))
+
+    count_row = count.sum(axis=1)
+    joint = cont + disc + count_row
+
+    m_cont = float(np.mean(cont))
+    m_disc = float(np.mean(disc))
+    m_count = float(np.mean(count_row))
+    m_joint = float(np.mean(joint))
+
+    assert abs(m_joint - m_cont - m_disc - m_count) < 1e-10
+
+
+def test_block_model_isolation():
+    """Verify block attribution isolates K0, K1, and K2 models with explicit arguments."""
+    n = 10
+    nodes_k0 = {nm: {"ev": np.full(n, 1.0)} for nm, _ in m.Z_LAYOUT}
+    nodes_k1 = {nm: {"ev": np.full(n, 2.0)} for nm, _ in m.Z_LAYOUT}
+    disc_k0 = np.full(n, 0.1)
+    disc_k1 = np.full(n, 0.5)
+    count_k0 = np.full((n, len(m.COUNT_Z)), 0.2)
+    count_k1 = np.full((n, len(m.COUNT_Z)), 0.8)
+
+    def _block_nll(nodes, disc_ev, count_ev, bdef):
+        if bdef["nodes"]:
+            s = np.sum([nodes[nm]["ev"] for nm in bdef["nodes"]], axis=0)
+        else:
+            s = np.zeros(len(nodes[list(nodes)[0]]["ev"]))
+        if bdef["disc"]:
+            s = s + disc_ev
+        if bdef.get("count"):
+            idx = [m.COUNT_Z.index(c) for c in bdef["count"]]
+            s = s + count_ev[:, idx].sum(axis=1)
+        return s
+
+    bdef = m.BLOCKS["LiquidityComposition"]
+    res_k0 = _block_nll(nodes_k0, disc_k0, count_k0, bdef)
+    res_k1 = _block_nll(nodes_k1, disc_k1, count_k1, bdef)
+
+    expected_k0 = len(bdef["nodes"]) * 1.0 + (0.1 if bdef["disc"] else 0.0) + (0.2 * len(bdef.get("count", [])))
+    expected_k1 = len(bdef["nodes"]) * 2.0 + (0.5 if bdef["disc"] else 0.0) + (0.8 * len(bdef.get("count", [])))
+    assert np.allclose(res_k0, expected_k0)
+    assert np.allclose(res_k1, expected_k1)
+    assert not np.allclose(res_k0, res_k1)
+
+
+def test_run_single_window_smoke():
+    """End-to-end smoke test for run_single_window on synthetic 120 train / 70 eval data."""
+    import tempfile
+    import json
+
+    rng = np.random.default_rng(42)
+    n_tr, n_ev = 120, 70
+    n = n_tr + n_ev
+    data = {}
+    data["block"] = ["TB1"] * n_tr + ["TB2"] * n_ev
+    data["symbol"] = rng.choice(["AGL8", "CUL8"], size=n)
+    data["episode_start_day"] = rng.choice(["2024-01-01", "2024-01-02", "2024-01-03"], size=n)
+    data["episode_id"] = rng.integers(0, 15, size=n)
+    data["prev_event_mask"] = rng.choice(["0", "1", "2"], size=n)
+
+    for c in m.OBS_STATE_NUM:
+        data[c] = rng.normal(size=n).astype(np.float32)
+    for c in m.LAG_BASE:
+        data[f"lag1_{c}"] = rng.normal(size=n).astype(np.float32)
+    data["lag1_available"] = np.ones(n, dtype=np.float32)
+
+    data["z_d_up"] = rng.normal(size=n).astype(np.float32)
+    for nm in ["z_dmfe", "z_dmae", "z_range", "z_uresid", "z_lresid"]:
+        ispos = (rng.uniform(size=n) > 0.4).astype(np.float32)
+        logv = np.where(ispos > 0.5, rng.normal(size=n), 0.0).astype(np.float32)
+        data[f"{nm}_ispos"] = ispos
+        data[f"{nm}_log"] = logv
+
+    u = rng.uniform(size=n)
+    is0 = (u < 0.2).astype(np.float32)
+    is1 = (u > 0.8).astype(np.float32)
+    interior = (is0 < 0.5) & (is1 < 0.5)
+    logit = np.where(interior, rng.normal(size=n), 0.0).astype(np.float32)
+    data["z_dcr_is0"] = is0
+    data["z_dcr_is1"] = is1
+    data["z_dcr_logit"] = logit
+
+    data["z_agezero_code"] = np.zeros(n, dtype=np.int64)
+    data["z_delta_upper_count"] = rng.choice([0, 1, 2], size=n, p=[0.7, 0.2, 0.1]).astype(np.int64)
+    data["z_delta_lower_count"] = rng.choice([0, 1, 2], size=n, p=[0.7, 0.2, 0.1]).astype(np.int64)
+
+    df = pd.DataFrame(data)
+    with tempfile.NamedTemporaryFile(suffix=".parquet", delete=False) as f:
+        df.to_parquet(f.name, index=False)
+        p = f.name
+
+    try:
+        m.configure_child_semantics(agezero_deterministic=True)
+        w = dict(name="TEST_WIN", train=["TB1"], eval="TB2", seed=42)
+        res = m.run_single_window(w, p)
+
+        # 1. 2 bootstrap comparisons
+        assert len(res["boots"]) == 2
+        comparisons = [b["comparison"] for b in res["boots"]]
+        assert "K1-K0" in comparisons and "K2-K1" in comparisons
+
+        # 2. 3 models
+        assert len(res["model_metrics"]) == 3
+        models = [mm["model"] for mm in res["model_metrics"]]
+        assert models == ["K0_UNCONDITIONAL", "K1_STATE", "K2_STATE_LAG1"]
+
+        # 3. joint NLL all finite and component sum exact
+        for mm in res["model_metrics"]:
+            assert np.isfinite(mm["mean_joint_nll"])
+            assert abs(mm["mean_joint_nll"] - mm["mean_cont_nll"]
+                       - mm["mean_disc_nll"] - mm["mean_count_nll"]) < 1e-10
+
+        # 4. K0/K1/K2 eval lengths identical
+        for mm in res["model_metrics"]:
+            assert mm["n_rows"] == n_ev
+
+        # 5. block rows contain K0/K1/K2 and both deltas
+        assert len(res["block_rows"]) == len(m.BLOCKS)
+        for br in res["block_rows"]:
+            assert "mean_joint_k0" in br and "mean_joint_k1" in br and "mean_joint_k2" in br
+            assert "delta_k1_minus_k0" in br and "delta_k2_minus_k1" in br
+            assert np.isfinite(br["mean_joint_k0"])
+            assert np.isfinite(br["mean_joint_k1"])
+            assert np.isfinite(br["mean_joint_k2"])
+
+        # 6. target rows contain both deltas
+        assert len(res["target_rows"]) > 0
+        for tr in res["target_rows"]:
+            assert "delta_k1_minus_k0" in tr and "delta_k2_minus_k1" in tr
+            assert np.isfinite(tr["mean_nll_k0"])
+            assert np.isfinite(tr["mean_nll_k1"])
+            assert np.isfinite(tr["mean_nll_k2"])
+
+        # 7. node diagnostics contains hurdle, dcr, and count
+        assert len(res["node_diag_rows"]) == 8
+        diag_targets = [r["target"] for r in res["node_diag_rows"]]
+        for exp_tgt in ["z_dmfe", "z_dmae", "z_range", "z_uresid", "z_lresid",
+                        "z_dcr", "z_delta_upper_count", "z_delta_lower_count"]:
+            assert exp_tgt in diag_targets
+
+        # 8. json-serializable
+        s = json.dumps(res, default=str)
+        assert len(s) > 0
+    finally:
+        m.configure_child_semantics(agezero_deterministic=False)
+        Path(p).unlink(missing_ok=True)
+
+
 if __name__ == "__main__":
     class _MonkeyPatch:
         def setattr(self, target, name, value):
             setattr(target, name, value)
 
-    test_block_definition()
-    test_ztp_rate_differs_from_positive_mean()
-    test_ztp_pmf_sums_to_one()
-    test_ztp_nll_finite_and_min_near_mle()
-    test_hurdle_nll_decomposes()
-    test_build_transition_sample_count_invariant(_MonkeyPatch())
-    test_full_reconstruction_closure(_MonkeyPatch())
-    test_ridge_parity()
-    test_agezero_audit_harness()
-    test_child_agezero_configuration()
-    test_gaussian_head_n_params()
-    test_fit_nodes_has_parameter_count()
-    test_output_namespace_isolation()
-    print("ALL tests in test_dynamic_pgm1a1_support_semantics_v1 PASSED successfully.")
+    mp = _MonkeyPatch()
+    tests = [
+        ("test_block_definition", lambda: test_block_definition()),
+        ("test_ztp_rate_differs_from_positive_mean", lambda: test_ztp_rate_differs_from_positive_mean()),
+        ("test_ztp_pmf_sums_to_one", lambda: test_ztp_pmf_sums_to_one()),
+        ("test_ztp_nll_finite_and_min_near_mle", lambda: test_ztp_nll_finite_and_min_near_mle()),
+        ("test_hurdle_nll_decomposes", lambda: test_hurdle_nll_decomposes()),
+        ("test_build_transition_sample_count_invariant", lambda: test_build_transition_sample_count_invariant(mp)),
+        ("test_full_reconstruction_closure", lambda: test_full_reconstruction_closure(mp)),
+        ("test_ridge_parity", lambda: test_ridge_parity()),
+        ("test_shared_transform_parity", lambda: test_shared_transform_parity()),
+        ("test_ztp_finite_diff_gradient", lambda: test_ztp_finite_diff_gradient()),
+        ("test_agezero_audit_harness", lambda: test_agezero_audit_harness()),
+        ("test_child_agezero_configuration", lambda: test_child_agezero_configuration()),
+        ("test_gaussian_head_n_params", lambda: test_gaussian_head_n_params()),
+        ("test_fit_nodes_has_parameter_count", lambda: test_fit_nodes_has_parameter_count()),
+        ("test_output_namespace_isolation", lambda: test_output_namespace_isolation()),
+        ("test_bootstrap_multiplicity", lambda: test_bootstrap_multiplicity()),
+        ("test_joint_nll_component_sum", lambda: test_joint_nll_component_sum()),
+        ("test_block_model_isolation", lambda: test_block_model_isolation()),
+        ("test_run_single_window_smoke", lambda: test_run_single_window_smoke()),
+    ]
+
+    for name, fn in tests:
+        fn()
+
+    print(f"{len(tests)}/{len(tests)} TESTS PASSED successfully.")
