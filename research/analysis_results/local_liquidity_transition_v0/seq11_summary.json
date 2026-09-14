@@ -1,0 +1,468 @@
+{
+  "experiment": "SEQ-1.1 hierarchical ordered bit interactions",
+  "base": "e9405f8b004b87330f53d66763dedcb50495959e",
+  "question": "after keeping BOTH event main effects, do 16 fixed ordered structural-bit interactions still add OOS information?",
+  "reviewer_correction": "SEQ-1 Q3-Q1 was not nested: Q3 replaced the E_n main effect with 97-108 sparse pair categories. SEQ-1 can only be frozen as 'pair-only replacement representation not stable'.",
+  "frozen_context": {
+    "seq1_sample_hash": "7b28e3aa9a41a0b27e400cf9bb060f1048a8e3ebf95e0e33780855f190989067",
+    "seq1_sample_hash_ok": true,
+    "seq1_verdict": "SECOND_ORDER_EVENT_SEQUENCE_NOT_STABLE",
+    "seq1_frozen_conclusions": [
+      "first-order E_n effect remains supported",
+      "additive older-event E_{n-1} effect is not established",
+      "full pair-category replacement representation is not stable"
+    ]
+  },
+  "models": {
+    "R0_CURRENT_STATE": {
+      "numeric": [
+        "cur_up_distance_R",
+        "cur_down_distance_R",
+        "cur_width_R",
+        "cur_log_distance_ratio",
+        "upper_oldest_log_age",
+        "upper_newest_log_age",
+        "upper_newest_age_zero",
+        "upper_oldest_age_zero",
+        "upper_n_active_identities",
+        "lower_oldest_log_age",
+        "lower_newest_log_age",
+        "lower_newest_age_zero",
+        "lower_oldest_age_zero",
+        "lower_n_active_identities"
+      ],
+      "categorical": []
+    },
+    "R1_FIRST_ORDER": {
+      "numeric": [
+        "cur_up_distance_R",
+        "cur_down_distance_R",
+        "cur_width_R",
+        "cur_log_distance_ratio",
+        "upper_oldest_log_age",
+        "upper_newest_log_age",
+        "upper_newest_age_zero",
+        "upper_oldest_age_zero",
+        "upper_n_active_identities",
+        "lower_oldest_log_age",
+        "lower_newest_log_age",
+        "lower_newest_age_zero",
+        "lower_oldest_age_zero",
+        "lower_n_active_identities"
+      ],
+      "categorical": [
+        "prev_event_mask"
+      ]
+    },
+    "R2_SECOND_ORDER_MAIN_EFFECTS": {
+      "numeric": [
+        "cur_up_distance_R",
+        "cur_down_distance_R",
+        "cur_width_R",
+        "cur_log_distance_ratio",
+        "upper_oldest_log_age",
+        "upper_newest_log_age",
+        "upper_newest_age_zero",
+        "upper_oldest_age_zero",
+        "upper_n_active_identities",
+        "lower_oldest_log_age",
+        "lower_newest_log_age",
+        "lower_newest_age_zero",
+        "lower_oldest_age_zero",
+        "lower_n_active_identities"
+      ],
+      "categorical": [
+        "prev_event_mask",
+        "prevprev_event_mask"
+      ]
+    },
+    "R3_HIERARCHICAL_INTERACTIONS": {
+      "numeric": [
+        "cur_up_distance_R",
+        "cur_down_distance_R",
+        "cur_width_R",
+        "cur_log_distance_ratio",
+        "upper_oldest_log_age",
+        "upper_newest_log_age",
+        "upper_newest_age_zero",
+        "upper_oldest_age_zero",
+        "upper_n_active_identities",
+        "lower_oldest_log_age",
+        "lower_newest_log_age",
+        "lower_newest_age_zero",
+        "lower_oldest_age_zero",
+        "lower_n_active_identities",
+        "pp_UP_PEN_x_p_UP_PEN",
+        "pp_UP_PEN_x_p_DOWN_PEN",
+        "pp_UP_PEN_x_p_NEW_UPPER",
+        "pp_UP_PEN_x_p_NEW_LOWER",
+        "pp_DOWN_PEN_x_p_UP_PEN",
+        "pp_DOWN_PEN_x_p_DOWN_PEN",
+        "pp_DOWN_PEN_x_p_NEW_UPPER",
+        "pp_DOWN_PEN_x_p_NEW_LOWER",
+        "pp_NEW_UPPER_x_p_UP_PEN",
+        "pp_NEW_UPPER_x_p_DOWN_PEN",
+        "pp_NEW_UPPER_x_p_NEW_UPPER",
+        "pp_NEW_UPPER_x_p_NEW_LOWER",
+        "pp_NEW_LOWER_x_p_UP_PEN",
+        "pp_NEW_LOWER_x_p_DOWN_PEN",
+        "pp_NEW_LOWER_x_p_NEW_UPPER",
+        "pp_NEW_LOWER_x_p_NEW_LOWER"
+      ],
+      "categorical": [
+        "prev_event_mask",
+        "prevprev_event_mask"
+      ]
+    }
+  },
+  "interactions": {
+    "n": 16,
+    "names": [
+      "pp_UP_PEN_x_p_UP_PEN",
+      "pp_UP_PEN_x_p_DOWN_PEN",
+      "pp_UP_PEN_x_p_NEW_UPPER",
+      "pp_UP_PEN_x_p_NEW_LOWER",
+      "pp_DOWN_PEN_x_p_UP_PEN",
+      "pp_DOWN_PEN_x_p_DOWN_PEN",
+      "pp_DOWN_PEN_x_p_NEW_UPPER",
+      "pp_DOWN_PEN_x_p_NEW_LOWER",
+      "pp_NEW_UPPER_x_p_UP_PEN",
+      "pp_NEW_UPPER_x_p_DOWN_PEN",
+      "pp_NEW_UPPER_x_p_NEW_UPPER",
+      "pp_NEW_UPPER_x_p_NEW_LOWER",
+      "pp_NEW_LOWER_x_p_UP_PEN",
+      "pp_NEW_LOWER_x_p_DOWN_PEN",
+      "pp_NEW_LOWER_x_p_NEW_UPPER",
+      "pp_NEW_LOWER_x_p_NEW_LOWER"
+    ],
+    "definition": "interaction(i,j)=1 iff (prevprev_event_mask & bit_i)!=0 AND (prev_event_mask & bit_j)!=0; ordered, non-commutative; 4 bits UP_PEN=1 DOWN_PEN=2 NEW_UPPER=4 NEW_LOWER=8",
+    "policy": "fixed 16, never deleted or added based on results; always kept alongside both main effects",
+    "pipeline": "numeric 0/1 with median imputer + StandardScaler"
+  },
+  "windows": [
+    {
+      "name": "A_TB1_to_TB2",
+      "train": [
+        "TB1"
+      ],
+      "eval": "TB2",
+      "seed": 20260920
+    },
+    {
+      "name": "B_TB1TB2_to_TB3",
+      "train": [
+        "TB1",
+        "TB2"
+      ],
+      "eval": "TB3",
+      "seed": 20260921
+    }
+  ],
+  "bootstrap_reps": 1000,
+  "bootstrap_note": "each comparison uses its own deterministic seed (window seed + index); delta values are independent of RNG and are what the frozen cross-check verifies",
+  "frozen_crosscheck": {
+    "A_TB1_to_TB2": {
+      "R1_minus_R0": -0.001224671572183827,
+      "seq1_Q1_minus_Q0": -0.001224671572183827,
+      "R2_minus_R1": 0.00010692322796242554,
+      "seq1_Q2_minus_R1": 0.00010692322796242554,
+      "exact": true
+    },
+    "B_TB1TB2_to_TB3": {
+      "R1_minus_R0": -0.0022653539718950053,
+      "seq1_Q1_minus_Q0": -0.0022653539718950053,
+      "R2_minus_R1": -0.00023514478872465615,
+      "seq1_Q2_minus_R1": -0.00023514478872465615,
+      "exact": true
+    }
+  },
+  "interaction_sparsity": {
+    "A_TB1_to_TB2": {
+      "n_interactions": 16,
+      "positive_rate_min": 0.030450247245597292,
+      "positive_rate_p50": 0.1172464648217229,
+      "positive_rate_max": 0.1385442873254099,
+      "n_always_zero_in_train": 0,
+      "n_positive_min": 351,
+      "n_positive_max": 1597
+    },
+    "B_TB1TB2_to_TB3": {
+      "n_interactions": 16,
+      "positive_rate_min": 0.028828384871257853,
+      "positive_rate_p50": 0.1183524290583549,
+      "positive_rate_max": 0.1367500307995565,
+      "n_always_zero_in_train": 0,
+      "n_positive_min": 702,
+      "n_positive_max": 3330
+    }
+  },
+  "results": [
+    {
+      "window": "A_TB1_to_TB2",
+      "n_train": 11527,
+      "n_eval": 12824,
+      "n_days": 102,
+      "mean_bit_metrics": {
+        "R0_CURRENT_STATE": {
+          "logloss": 0.5293795639655069,
+          "brier": 0.17695746982391433,
+          "ece": 0.024621211660510206
+        },
+        "R1_FIRST_ORDER": {
+          "logloss": 0.5282094791739252,
+          "brier": 0.17658348216498343,
+          "ece": 0.02770524927517331
+        },
+        "R2_SECOND_ORDER_MAIN_EFFECTS": {
+          "logloss": 0.5283053868626703,
+          "brier": 0.17663846098751104,
+          "ece": 0.024677808115144813
+        },
+        "R3_HIERARCHICAL_INTERACTIONS": {
+          "logloss": 0.5283236000868348,
+          "brier": 0.1766485753910105,
+          "ece": 0.02029481594073242
+        }
+      }
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "n_train": 24351,
+      "n_eval": 12364,
+      "n_days": 102,
+      "mean_bit_metrics": {
+        "R0_CURRENT_STATE": {
+          "logloss": 0.5319206701066954,
+          "brier": 0.17794122615337962,
+          "ece": 0.02403754241491382
+        },
+        "R1_FIRST_ORDER": {
+          "logloss": 0.5296749512752261,
+          "brier": 0.17723973720516467,
+          "ece": 0.023212635252555833
+        },
+        "R2_SECOND_ORDER_MAIN_EFFECTS": {
+          "logloss": 0.5294179463374906,
+          "brier": 0.17714585179727002,
+          "ece": 0.022644607596261926
+        },
+        "R3_HIERARCHICAL_INTERACTIONS": {
+          "logloss": 0.5288902263762681,
+          "brier": 0.17699565847038146,
+          "ece": 0.022070315152787217
+        }
+      }
+    }
+  ],
+  "bootstrap": [
+    {
+      "window": "A_TB1_to_TB2",
+      "comparison": "R3_HIERARCHICAL_INTERACTIONS - R2_SECOND_ORDER_MAIN_EFFECTS",
+      "role": "PRIMARY",
+      "delta_sample_weighted": 1.821322416462662e-05,
+      "delta_daily_mean": 2.023416199730681e-05,
+      "n_days": 102,
+      "ci_lo": -0.00043215094543629605,
+      "ci_hi": 0.0004903584695893114,
+      "verdict": "CI_contains_zero"
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "comparison": "R2_SECOND_ORDER_MAIN_EFFECTS - R1_FIRST_ORDER",
+      "role": "SECONDARY",
+      "delta_sample_weighted": 9.590768874490208e-05,
+      "delta_daily_mean": 0.00010692322796242554,
+      "n_days": 102,
+      "ci_lo": -0.00035215981350758877,
+      "ci_hi": 0.0005774015986120386,
+      "verdict": "CI_contains_zero"
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "comparison": "R1_FIRST_ORDER - R0_CURRENT_STATE",
+      "role": "SECONDARY",
+      "delta_sample_weighted": -0.0011700847915816388,
+      "delta_daily_mean": -0.001224671572183827,
+      "n_days": 102,
+      "ci_lo": -0.0018598918016976432,
+      "ci_hi": -0.0004937756675456869,
+      "verdict": "CI_below_zero"
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "comparison": "R3_HIERARCHICAL_INTERACTIONS - R1_FIRST_ORDER",
+      "role": "SECONDARY",
+      "delta_sample_weighted": 0.00011412091290952884,
+      "delta_daily_mean": 0.00012715738995973226,
+      "n_days": 102,
+      "ci_lo": -0.0004548599213771378,
+      "ci_hi": 0.0007355864893043351,
+      "verdict": "CI_contains_zero"
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "comparison": "R3_HIERARCHICAL_INTERACTIONS - R2_SECOND_ORDER_MAIN_EFFECTS",
+      "role": "PRIMARY",
+      "delta_sample_weighted": -0.0005277199612224291,
+      "delta_daily_mean": -0.0005338858583785771,
+      "n_days": 102,
+      "ci_lo": -0.0009228060027990822,
+      "ci_hi": -0.0001227003326893038,
+      "verdict": "CI_below_zero"
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "comparison": "R2_SECOND_ORDER_MAIN_EFFECTS - R1_FIRST_ORDER",
+      "role": "SECONDARY",
+      "delta_sample_weighted": -0.0002570049377355956,
+      "delta_daily_mean": -0.00023514478872465615,
+      "n_days": 102,
+      "ci_lo": -0.000620463159733567,
+      "ci_hi": 0.00011252867171050427,
+      "verdict": "CI_contains_zero"
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "comparison": "R1_FIRST_ORDER - R0_CURRENT_STATE",
+      "role": "SECONDARY",
+      "delta_sample_weighted": -0.002245718831469127,
+      "delta_daily_mean": -0.0022653539718950053,
+      "n_days": 102,
+      "ci_lo": -0.0028639713304267804,
+      "ci_hi": -0.0016396334028907361,
+      "verdict": "CI_below_zero"
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "comparison": "R3_HIERARCHICAL_INTERACTIONS - R1_FIRST_ORDER",
+      "role": "SECONDARY",
+      "delta_sample_weighted": -0.0007847248989580247,
+      "delta_daily_mean": -0.0007690306471032333,
+      "n_days": 102,
+      "ci_lo": -0.0013531777148643204,
+      "ci_hi": -0.00015246360411097983,
+      "verdict": "CI_below_zero"
+    }
+  ],
+  "per_bit_R3_minus_R2": [
+    {
+      "window": "A_TB1_to_TB2",
+      "bit": "UP_PEN",
+      "n": 12824,
+      "prevalence": 0.29858078602620086,
+      "R3_minus_R2": 0.0003858336739970044,
+      "R3_minus_R2_ci_lo": -0.00034431574339256185,
+      "R3_minus_R2_ci_hi": 0.0010248183333048633,
+      "R2_minus_R1": 0.0002939424703660212,
+      "R2_minus_R1_ci_lo": -0.00016212160724572914,
+      "R2_minus_R1_ci_hi": 0.0007110780957357449
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "bit": "DOWN_PEN",
+      "n": 12824,
+      "prevalence": 0.28243917654398004,
+      "R3_minus_R2": 9.288913810506571e-05,
+      "R3_minus_R2_ci_lo": -0.0005275428879972594,
+      "R3_minus_R2_ci_hi": 0.0007235279803457951,
+      "R2_minus_R1": 0.0003269533135707376,
+      "R2_minus_R1_ci_lo": -0.0005143320504985735,
+      "R2_minus_R1_ci_hi": 0.0011681308283308443
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "bit": "NEW_UPPER",
+      "n": 12824,
+      "prevalence": 0.36439488459139113,
+      "R3_minus_R2": 0.000309878385684183,
+      "R3_minus_R2_ci_lo": -0.0006096355158709153,
+      "R3_minus_R2_ci_hi": 0.0012661536418498384,
+      "R2_minus_R1": 0.00021041189687432475,
+      "R2_minus_R1_ci_lo": -0.0005308365901040804,
+      "R2_minus_R1_ci_hi": 0.0010072036831092603
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "bit": "NEW_LOWER",
+      "n": 12824,
+      "prevalence": 0.36790393013100436,
+      "R3_minus_R2": -0.0007157483011277455,
+      "R3_minus_R2_ci_lo": -0.001462645095760971,
+      "R3_minus_R2_ci_hi": 8.265740202555525e-05,
+      "R2_minus_R1": -0.00044767692583147983,
+      "R2_minus_R1_ci_lo": -0.0012936053667079467,
+      "R2_minus_R1_ci_hi": 0.0003904714186541458
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "bit": "UP_PEN",
+      "n": 12364,
+      "prevalence": 0.30451310255580716,
+      "R3_minus_R2": 0.000375917439387823,
+      "R3_minus_R2_ci_lo": -0.0001078135842252334,
+      "R3_minus_R2_ci_hi": 0.0009783534274498706,
+      "R2_minus_R1": 5.942705252400532e-06,
+      "R2_minus_R1_ci_lo": -0.00038730662969479145,
+      "R2_minus_R1_ci_hi": 0.00036229553675510233
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "bit": "DOWN_PEN",
+      "n": 12364,
+      "prevalence": 0.2774183112261404,
+      "R3_minus_R2": -0.0003522476209220583,
+      "R3_minus_R2_ci_lo": -0.0010505145874922612,
+      "R3_minus_R2_ci_hi": 0.00020602565365207564,
+      "R2_minus_R1": 0.0003004576199380075,
+      "R2_minus_R1_ci_lo": -0.0002434129185381214,
+      "R2_minus_R1_ci_hi": 0.0009139665244332878
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "bit": "NEW_UPPER",
+      "n": 12364,
+      "prevalence": 0.35716596570689096,
+      "R3_minus_R2": -0.0011169144281228157,
+      "R3_minus_R2_ci_lo": -0.0019008375022769044,
+      "R3_minus_R2_ci_hi": -0.00030303823565858276,
+      "R2_minus_R1": -0.0008968094857358863,
+      "R2_minus_R1_ci_lo": -0.0014487550671896086,
+      "R2_minus_R1_ci_hi": -0.00014138550303557213
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "bit": "NEW_LOWER",
+      "n": 12364,
+      "prevalence": 0.3750404399870592,
+      "R3_minus_R2": -0.0010176352352326674,
+      "R3_minus_R2_ci_lo": -0.0018247918496571438,
+      "R3_minus_R2_ci_hi": -0.0002692322022080876,
+      "R2_minus_R1": -0.00043761059039690135,
+      "R2_minus_R1_ci_lo": -0.0011852579973088597,
+      "R2_minus_R1_ci_hi": 0.00029019672302310764
+    }
+  ],
+  "by_symbol": {
+    "n_rows": 30,
+    "n_symbol_per_window": 15,
+    "window_A_n_negative": 7,
+    "window_A_n_positive": 8,
+    "window_B_n_negative": 10,
+    "window_B_n_positive": 5
+  },
+  "coefficient_note": "post-StandardScaler coefficients are reported for direction/relative interpretation only; they are NOT economic effect sizes and were NOT used for feature selection or re-fitting",
+  "tb4_analytically_used": false,
+  "timing": {
+    "cache_load_seconds": 0.25,
+    "feature_seconds": 0.01,
+    "raw_bars_loaded": false,
+    "note": "no raw bar file is opened by this script at all; every input comes from seq1_samples.parquet",
+    "fit_seconds": 2.31,
+    "bootstrap_seconds": 0.15,
+    "total_seconds": 2.76
+  },
+  "interpretation_limits": "SEQ-1.1 is the final second-order closure on already-consumed development evidence. It does NOT prove a second-order Markov process, latent state, SMC validity, tradability or RL, and it does not authorise third-order history or HMM/HSMM.",
+  "SEQ11_VERDICT": "SECOND_ORDER_INTERACTION_NOT_STABLE",
+  "SEQ11_CONCLUSION": "no stable second-order interaction increment: formally stop second-order escalation and freeze the world-state history as current state + immediately previous structural endpoint. No third-order sequence, no FULL pair re-encoding, no pattern picking from the SEQ-1 transition tables.",
+  "NEXT_AUTHORISED": "no longer event history. Redirect effort either to improving the current-state representation or to testing whether the already stable first-order world model carries trading value."
+}
