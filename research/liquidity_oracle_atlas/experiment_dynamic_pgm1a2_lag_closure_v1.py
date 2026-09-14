@@ -20,10 +20,31 @@ Everything frozen from 1A.1b is REUSED by importing it as `base`:
     transition sample, support-correct heads, reconstruction,
     count magnitude closure, bootstrap, invariants.
 
-The ONLY new objects in this file are:
+The only new objects in this file are:
 
     1. lag1 construction (causal, episode-internal) + `lag1_available`
-    2. K2 = the single new model  p2(Z_{t+1} | S_t, L_t)
+    2. K1A and K2 (two new models)
+
+Four nested models
+------------------
+    K0  = P(Z)                        no state
+    K1  = P(Z | S_t)                  frozen 1A.1b baseline
+    K1A = P(Z | S_t, A_t)             CONTROL: availability indicator only
+    K2  = P(Z | S_t, A_t, S_{t-1})    lag1 block
+
+Why K1A exists (confound control)
+---------------------------------
+`lag1_available` is essentially an "is this the episode's first bar" indicator.
+Although it is in principle derivable from S_t, our heads are linear
+(Logistic / Ridge), so a 0/1 column also acts as an extra nonlinear basis
+function. Without a control we could not tell whether a K2-K1 gain came from
+genuine one-step memory or from the model more easily identifying episode
+starts. Therefore:
+
+    K1A - K1   -> episode-start / representation effect      (reported only)
+    K2  - K1A  -> genuine S_{t-1} residual memory            (PRIMARY gate)
+
+The lag verdict reads K2-K1A ONLY.
 
 K0 and K1 are re-fitted here and MUST reproduce the frozen 1A.1b numbers
 (rows / z_feature_hash / joint NLL) -- see PARITY gate below.
@@ -36,10 +57,10 @@ no terminal/reset, no rollout, no PnL/RL, no new feature mining.
 Count Magnitude Closure
 -----------------------
 P(A|S) = P(A>0|S) * P(A|A>0).  Occurrence is state-dependent Logistic and may
-differ between K1 and K2.  Magnitude is a state-independent exact ZTP with a
-TRAIN-ONLY constant lambda SHARED IDENTICALLY by K0, K1 and K2.  Therefore
-K2-K1 count gain can only come from predicting *whether* an activation happens,
-never from predicting its magnitude.
+differ across K1 / K1A / K2.  Magnitude is a state-independent exact ZTP with a
+TRAIN-ONLY constant lambda SHARED IDENTICALLY by K0, K1, K1A and K2.  Therefore
+both K2-K1A and K2-K1 count gains can only come from predicting *whether* an
+activation happens, never from predicting its magnitude.
 """
 from __future__ import annotations
 
@@ -100,10 +121,27 @@ LAG_BASE = [
 
 LAG_COLS = [f"lag1_{c}" for c in LAG_BASE]
 LAG_AVAIL = "lag1_available"
-K2_EXTRA = LAG_COLS + [LAG_AVAIL]          # 16 new columns
+# K1A control: ONLY the availability indicator, never any lag VALUE.
+K1A_EXTRA = [LAG_AVAIL]
+# K2: availability indicator + the 15 previous-bar dynamic states.
+K2_EXTRA = list(K1A_EXTRA) + LAG_COLS     # 16 new columns
+
+# model tags / comparisons
+MODEL_K0 = "K0_UNCONDITIONAL"       # P(Z)
+MODEL_K1 = "K1_STATE"               # P(Z | S_t)
+MODEL_K1A = "K1A_STATE_AVAIL"       # P(Z | S_t, A_t)          <-- control
+MODEL_K2 = "K2_STATE_LAG1"          # P(Z | S_t, A_t, S_{t-1})
+
+# PRIMARY lag-memory comparison. It isolates S_{t-1} from the episode-start
+# representation effect carried by `lag1_available`.
+PRIMARY_COMPARISON = "K2-K1A"
+SECONDARY_COMPARISONS = ["K1A-K1", "K2-K1", "K1-K0"]
 
 if LAG_BASE != list(base.LAG_BASE):
     raise SystemExit("STOP_DYNAMIC_PGM1A2_LAG_BASE_MISMATCH")
+# K1A must contain the indicator only -- no lag values may leak into it.
+if set(K1A_EXTRA) & set(LAG_COLS):
+    raise SystemExit("STOP_DYNAMIC_PGM1A2_K1A_CONTAINS_LAG_VALUES")
 
 # ===========================================================================
 # attribution blocks (1A.2 splits Count OUT of LiquidityComposition)
@@ -256,38 +294,62 @@ def run_single_window_1a2(w, data_path):
                          success=True,
                          elapsed_seconds=round(time.perf_counter() - t_k0, 3)))
 
-    # ---------------- K1 / K2 design matrices (INDEPENDENT transformers) ----
+    # ------------- K1 / K1A / K2 design matrices (INDEPENDENT transformers) --
+    #   X1  = OBSERVED_STATE
+    #   X1A = OBSERVED_STATE + lag1_available                (control)
+    #   X2  = OBSERVED_STATE + lag1_available + 15 lag vars
+    obs_num = list(base.OBS_STATE_NUM)
+    num1 = obs_num
+    num1a = obs_num + list(K1A_EXTRA)
+    num2 = obs_num + list(K2_EXTRA)
+
     t_k1 = time.perf_counter()
-    num1 = list(base.OBS_STATE_NUM)
-    num2 = list(base.OBS_STATE_NUM) + list(K2_EXTRA)
     ct1 = _make_ct(num1)
     Xtr1 = ct1.fit_transform(tr).astype(np.float32)
     Xev1 = ct1.transform(ev).astype(np.float32)
+    t_k1a = time.perf_counter()
+    ct1a = _make_ct(num1a)
+    Xtr1a = ct1a.fit_transform(tr).astype(np.float32)
+    Xev1a = ct1a.transform(ev).astype(np.float32)
     t_k2 = time.perf_counter()
     ct2 = _make_ct(num2)
     Xtr2 = ct2.fit_transform(tr).astype(np.float32)
     Xev2 = ct2.transform(ev).astype(np.float32)
 
-    # K1 and K2 MUST see identical rows
-    if Xev1.shape[0] != Xev2.shape[0]:
+    # K1 / K1A / K2 MUST see identical rows
+    if not (Xev1.shape[0] == Xev1a.shape[0] == Xev2.shape[0] == len(ev)):
         raise SystemExit("STOP_DYNAMIC_PGM1A2_EVAL_ROW_MISMATCH")
+    # nested design dimensions
+    if not (Xtr1a.shape[1] == Xtr1.shape[1] + len(K1A_EXTRA)
+            and Xtr2.shape[1] == Xtr1a.shape[1] + len(LAG_COLS)):
+        raise SystemExit("STOP_DYNAMIC_PGM1A2_NESTED_DESIGN_MISMATCH")
 
     # ---------------- K1 ----------------
     k1 = base.fit_state_heads(Xtr1, Xev1, Zc_tr, Zc_ev, yd_tr, yd_ev)
     k1_count = base.fit_state_count_head(
         Xtr1, Yc_tr, Xev1, Yc_ev,
         constant_rates=k0_count["constant_rates"])
-    opt_rows.append(dict(window=w["name"], model="K1_STATE",
+    opt_rows.append(dict(window=w["name"], model=MODEL_K1,
                          n_params=k1["n_params"] + k1_count["n_params"],
                          success=True,
                          elapsed_seconds=round(time.perf_counter() - t_k1, 3)))
+
+    # ---------------- K1A (control: availability indicator only) -------------
+    k1a = base.fit_state_heads(Xtr1a, Xev1a, Zc_tr, Zc_ev, yd_tr, yd_ev)
+    k1a_count = base.fit_state_count_head(
+        Xtr1a, Yc_tr, Xev1a, Yc_ev,
+        constant_rates=k0_count["constant_rates"])
+    opt_rows.append(dict(window=w["name"], model=MODEL_K1A,
+                         n_params=k1a["n_params"] + k1a_count["n_params"],
+                         success=True,
+                         elapsed_seconds=round(time.perf_counter() - t_k1a, 3)))
 
     # ---------------- K2 ----------------
     k2 = base.fit_state_heads(Xtr2, Xev2, Zc_tr, Zc_ev, yd_tr, yd_ev)
     k2_count = base.fit_state_count_head(
         Xtr2, Yc_tr, Xev2, Yc_ev,
         constant_rates=k0_count["constant_rates"])
-    opt_rows.append(dict(window=w["name"], model="K2_STATE_LAG1",
+    opt_rows.append(dict(window=w["name"], model=MODEL_K2,
                          n_params=k2["n_params"] + k2_count["n_params"],
                          success=True,
                          elapsed_seconds=round(time.perf_counter() - t_k2, 3)))
@@ -301,12 +363,14 @@ def run_single_window_1a2(w, data_path):
 
     (cont0, disc0, cnt0, j0) = _joint(k0, k0_count)
     (cont1, disc1, cnt1, j1) = _joint(k1, k1_count)
+    (cont1a, disc1a, cnt1a, j1a) = _joint(k1a, k1a_count)
     (cont2, disc2, cnt2, j2) = _joint(k2, k2_count)
 
     for tag, cont, disc, cnt, j in [
-            ("K0_UNCONDITIONAL", cont0, disc0, cnt0, j0),
-            ("K1_STATE", cont1, disc1, cnt1, j1),
-            ("K2_STATE_LAG1", cont2, disc2, cnt2, j2)]:
+            (MODEL_K0, cont0, disc0, cnt0, j0),
+            (MODEL_K1, cont1, disc1, cnt1, j1),
+            (MODEL_K1A, cont1a, disc1a, cnt1a, j1a),
+            (MODEL_K2, cont2, disc2, cnt2, j2)]:
         m_c, m_d, m_n, m_j = (float(np.mean(cont)), float(np.mean(disc)),
                               float(np.mean(cnt)), float(np.mean(j)))
         assert abs(m_j - m_c - m_d - m_n) < 1e-10
@@ -317,29 +381,40 @@ def run_single_window_1a2(w, data_path):
                                   n_rows=int(len(ev))))
 
     # ---------------- Count Magnitude Closure hard assertions ----------------
+    # lambda_K0 == lambda_K1 == lambda_K1A == lambda_K2 (train-only constant)
     for j in range(len(base.COUNT_Z)):
         r0 = k0_count["rate_ev"][:, j]
-        r1 = k1_count["rate_ev"][:, j]
-        r2 = k2_count["rate_ev"][:, j]
-        if not (np.array_equal(r0, r1) and np.array_equal(r0, r2)):
-            raise SystemExit(
-                "STOP_DYNAMIC_PGM1A2_COUNT_MAGNITUDE_NOT_CANCELLED")
+        for other in (k1_count["rate_ev"][:, j], k1a_count["rate_ev"][:, j],
+                      k2_count["rate_ev"][:, j]):
+            if not np.array_equal(r0, other):
+                raise SystemExit(
+                    "STOP_DYNAMIC_PGM1A2_COUNT_MAGNITUDE_NOT_CANCELLED")
 
+    occ0 = _occ_nll(Yc_ev, k0_count["p0_ev"])
     occ1 = _occ_nll(Yc_ev, k1_count["p0_ev"])
+    occ1a = _occ_nll(Yc_ev, k1a_count["p0_ev"])
     occ2 = _occ_nll(Yc_ev, k2_count["p0_ev"])
-    delta_count_21 = cnt2 - cnt1
-    delta_occ_21 = occ2.sum(axis=1) - occ1.sum(axis=1)
-    max_cancel_err = float(np.max(np.abs(delta_count_21 - delta_occ_21)))
+
+    # PRIMARY: K2 - K1A count delta must come from occurrence only
+    d_count_21a = cnt2 - cnt1a
+    d_occ_21a = occ2.sum(axis=1) - occ1a.sum(axis=1)
+    max_cancel_err = float(np.max(np.abs(d_count_21a - d_occ_21a)))
     if max_cancel_err >= 1e-10:
         raise SystemExit(
             "STOP_DYNAMIC_PGM1A2_COUNT_MAGNITUDE_NOT_CANCELLED:"
             f"{max_cancel_err}")
 
-    # ---------------- primary deltas + bootstrap ----------------
-    delta10 = j1 - j0
-    delta21 = j2 - j1
+    # ---------------- deltas + bootstrap ----------------
+    # PRIMARY   : K2-K1A  (isolates S_{t-1} from the availability indicator)
+    # SECONDARY : K1A-K1 (episode-start representation effect),
+    #             K2-K1  (total lag-block gain), K1-K0 (state baseline)
+    delta10 = j1 - j0            # K1  - K0
+    delta_a1 = j1a - j1          # K1A - K1
+    delta_21a = j2 - j1a         # K2  - K1A   <-- PRIMARY
+    delta21 = j2 - j1            # K2  - K1    <-- secondary (total)
 
-    for label, d in (("K1-K0", delta10), ("K2-K1", delta21)):
+    for label, d in (("K1-K0", delta10), ("K1A-K1", delta_a1),
+                     ("K2-K1A", delta_21a), ("K2-K1", delta21)):
         lo, hi, point = base.boot_cluster(d, day_ev, eid_ev, w["seed"])
         boots.append(dict(window=w["name"], comparison=label,
                           delta_sample_mean=point, ci_lo=lo, ci_hi=hi,
@@ -361,71 +436,94 @@ def run_single_window_1a2(w, data_path):
                               n_negative=int((d_raw < 0).sum()),
                               n_positive=int((d_raw > 0).sum())))
 
-    # ---------------- block attribution (K1 -> K2) ----------------
+    # ---------------- block attribution (PRIMARY column: K2 - K1A) -----------
+    def _blk(k, nodes):
+        return np.sum([k["nodes"][n]["ev"] for n in nodes], axis=0)
+
     for bname, nodes in ATTRIB_NODE_BLOCKS.items():
-        s1 = np.sum([k1["nodes"][n]["ev"] for n in nodes], axis=0)
-        s2 = np.sum([k2["nodes"][n]["ev"] for n in nodes], axis=0)
-        s0 = np.sum([k0["nodes"][n]["ev"] for n in nodes], axis=0)
+        s0, s1 = _blk(k0, nodes), _blk(k1, nodes)
+        s1a, s2 = _blk(k1a, nodes), _blk(k2, nodes)
         block_rows.append(dict(
             window=w["name"], block=bname,
             mean_nll_k0=float(np.mean(s0)), mean_nll_k1=float(np.mean(s1)),
-            mean_nll_k2=float(np.mean(s2)),
+            mean_nll_k1a=float(np.mean(s1a)), mean_nll_k2=float(np.mean(s2)),
+            delta_k2_minus_k1a=float(np.mean(s2 - s1a)),
+            delta_k1a_minus_k1=float(np.mean(s1a - s1)),
             delta_k2_minus_k1=float(np.mean(s2 - s1)),
             delta_k1_minus_k0=float(np.mean(s1 - s0))))
+    o0, o1 = occ0.sum(axis=1), occ1.sum(axis=1)
+    o1a, o2 = occ1a.sum(axis=1), occ2.sum(axis=1)
     block_rows.append(dict(
         window=w["name"], block=COUNT_OCCURRENCE_BLOCK,
-        mean_nll_k0=float(np.mean(_occ_nll(Yc_ev, k0_count["p0_ev"]).sum(axis=1))),
-        mean_nll_k1=float(np.mean(occ1.sum(axis=1))),
-        mean_nll_k2=float(np.mean(occ2.sum(axis=1))),
-        delta_k2_minus_k1=float(np.mean(delta_occ_21)),
-        delta_k1_minus_k0=float(np.mean(
-            occ1.sum(axis=1)
-            - _occ_nll(Yc_ev, k0_count["p0_ev"]).sum(axis=1)))))
+        mean_nll_k0=float(np.mean(o0)), mean_nll_k1=float(np.mean(o1)),
+        mean_nll_k1a=float(np.mean(o1a)), mean_nll_k2=float(np.mean(o2)),
+        delta_k2_minus_k1a=float(np.mean(o2 - o1a)),
+        delta_k1a_minus_k1=float(np.mean(o1a - o1)),
+        delta_k2_minus_k1=float(np.mean(o2 - o1)),
+        delta_k1_minus_k0=float(np.mean(o1 - o0))))
 
     # ---------------- per-target ----------------
     for nm, _cols in base.Z_LAYOUT:
-        n0, n1, n2 = (k0["nodes"][nm]["ev"], k1["nodes"][nm]["ev"],
-                      k2["nodes"][nm]["ev"])
+        n0 = k0["nodes"][nm]["ev"]
+        n1 = k1["nodes"][nm]["ev"]
+        n1a = k1a["nodes"][nm]["ev"]
+        n2 = k2["nodes"][nm]["ev"]
         target_rows.append(dict(
             window=w["name"], target=nm, kind="node",
             mean_nll_k0=float(np.mean(n0)), mean_nll_k1=float(np.mean(n1)),
-            mean_nll_k2=float(np.mean(n2)),
+            mean_nll_k1a=float(np.mean(n1a)), mean_nll_k2=float(np.mean(n2)),
             delta_k1_minus_k0=float(np.mean(n1 - n0)),
+            delta_k1a_minus_k1=float(np.mean(n1a - n1)),
+            delta_k2_minus_k1a=float(np.mean(n2 - n1a)),
             delta_k2_minus_k1=float(np.mean(n2 - n1))))
     for j, c in enumerate(base.COUNT_Z):
         n0 = k0_count["nll_ev"][:, j]
         n1 = k1_count["nll_ev"][:, j]
+        n1a = k1a_count["nll_ev"][:, j]
         n2 = k2_count["nll_ev"][:, j]
         target_rows.append(dict(
             window=w["name"], target=c, kind="discrete_count",
             mean_nll_k0=float(np.mean(n0)), mean_nll_k1=float(np.mean(n1)),
-            mean_nll_k2=float(np.mean(n2)),
+            mean_nll_k1a=float(np.mean(n1a)), mean_nll_k2=float(np.mean(n2)),
             delta_k1_minus_k0=float(np.mean(n1 - n0)),
+            delta_k1a_minus_k1=float(np.mean(n1a - n1)),
+            delta_k2_minus_k1a=float(np.mean(n2 - n1a)),
             delta_k2_minus_k1=float(np.mean(n2 - n1))))
         # count occurrence diagnostics (+ closure evidence)
         ye = Yc_ev[:, j]
         ze = (ye > 0).astype(int)
-        p1, p2 = k1_count["p0_ev"][:, j], k2_count["p0_ev"][:, j]
+        p1 = k1_count["p0_ev"][:, j]
+        p1a = k1a_count["p0_ev"][:, j]
+        p2 = k2_count["p0_ev"][:, j]
         count_occ_rows.append(dict(
             window=w["name"], target=c,
             constant_ztp_lambda=float(k0_count["constant_rates"][j]),
             state_dependent_magnitude=False,
             k1_occ_logloss=float(log_loss(ze, np.clip(p1, 1e-6, 1 - 1e-6),
                                           labels=[0, 1])),
+            k1a_occ_logloss=float(log_loss(ze, np.clip(p1a, 1e-6, 1 - 1e-6),
+                                           labels=[0, 1])),
             k2_occ_logloss=float(log_loss(ze, np.clip(p2, 1e-6, 1 - 1e-6),
                                           labels=[0, 1])),
             k1_occ_brier=float(brier_score_loss(ze, p1)),
+            k1a_occ_brier=float(brier_score_loss(ze, p1a)),
             k2_occ_brier=float(brier_score_loss(ze, p2)),
             k1_occ_pr_auc=(float(average_precision_score(ze, p1))
                            if len(np.unique(ze)) > 1 else float("nan")),
+            k1a_occ_pr_auc=(float(average_precision_score(ze, p1a))
+                            if len(np.unique(ze)) > 1 else float("nan")),
             k2_occ_pr_auc=(float(average_precision_score(ze, p2))
                            if len(np.unique(ze)) > 1 else float("nan")),
             mean_occ_nll_k1=float(np.mean(occ1[:, j])),
+            mean_occ_nll_k1a=float(np.mean(occ1a[:, j])),
             mean_occ_nll_k2=float(np.mean(occ2[:, j])),
+            delta_occ_nll_k2_minus_k1a=float(np.mean(occ2[:, j] - occ1a[:, j])),
+            delta_count_nll_k2_minus_k1a=float(np.mean(n2 - n1a)),
+            delta_occ_nll_k1a_minus_k1=float(np.mean(occ1a[:, j] - occ1[:, j])),
             delta_occ_nll_k2_minus_k1=float(np.mean(occ2[:, j] - occ1[:, j])),
             delta_count_nll_k2_minus_k1=float(np.mean(n2 - n1)),
             count_minus_occurrence_residual=float(np.max(np.abs(
-                (n2 - n1) - (occ2[:, j] - occ1[:, j])))),
+                (n2 - n1a) - (occ2[:, j] - occ1a[:, j])))),
         ))
 
     # ---------------- covariance PD audit ----------------
@@ -443,7 +541,7 @@ def run_single_window_1a2(w, data_path):
             min_eig=(e if e is not None else "n/a"),
             pd=bool(e is not None and e > 0))
 
-    del Xtr1, Xev1, Xtr2, Xev2, k1, k2, k0, tr, ev
+    del (Xtr1, Xev1, Xtr1a, Xev1a, Xtr2, Xev2, k1, k1a, k2, k0, tr, ev)
     print(f"[STAGE] window {w['name']} done "
           f"took={round(time.perf_counter() - t_w, 2)}s", flush=True)
     return dict(window=w["name"], model_metrics=model_metrics,
@@ -648,17 +746,34 @@ def main():
 
     windows_report = {}
     for w in base.WINDOWS:
-        r21, r10 = _row(w["name"], "K2-K1"), _row(w["name"], "K1-K0")
-        n_neg = _sym_neg(w["name"], "K2-K1")
-        ratio = (abs(r21["delta_sample_mean"]) / abs(r10["delta_sample_mean"])
-                 if r10["delta_sample_mean"] != 0 else float("nan"))
+        # ---- PRIMARY: K2 - K1A. This is the ONLY comparison the lag verdict
+        # may read; it isolates S_{t-1} from the `lag1_available` indicator.
+        r_21a = _row(w["name"], PRIMARY_COMPARISON)
+        n_neg = _sym_neg(w["name"], PRIMARY_COMPARISON)
+        # ---- secondary (reported only)
+        r10 = _row(w["name"], "K1-K0")
+        r_a1 = _row(w["name"], "K1A-K1")
+        r21 = _row(w["name"], "K2-K1")
+        denom = abs(r10["delta_sample_mean"])
+        ratio = (abs(r_21a["delta_sample_mean"]) / denom
+                 if denom != 0 else float("nan"))
+        total_ratio = (abs(r21["delta_sample_mean"]) / denom
+                       if denom != 0 else float("nan"))
         windows_report[w["name"]] = dict(
-            delta_k2_minus_k1=r21["delta_sample_mean"],
-            ci_lo=r21["ci_lo"], ci_hi=r21["ci_hi"],
+            delta_k2_minus_k1a=r_21a["delta_sample_mean"],
+            ci_lo=r_21a["ci_lo"], ci_hi=r_21a["ci_hi"],
             n_symbols_negative=n_neg, n_symbols_total=n_symbols,
             delta_k1_minus_k0=r10["delta_sample_mean"],
             increment_ratio=ratio,
-            passes=bool(r21["ci_hi"] < 0 and n_neg >= SYMBOL_BREADTH_MIN))
+            total_increment_ratio=total_ratio,
+            secondary=dict(
+                delta_k1a_minus_k1=r_a1["delta_sample_mean"],
+                k1a_minus_k1_ci_lo=r_a1["ci_lo"],
+                k1a_minus_k1_ci_hi=r_a1["ci_hi"],
+                delta_k2_minus_k1=r21["delta_sample_mean"],
+                k2_minus_k1_ci_lo=r21["ci_lo"],
+                k2_minus_k1_ci_hi=r21["ci_hi"]),
+            passes=bool(r_21a["ci_hi"] < 0 and n_neg >= SYMBOL_BREADTH_MIN))
     n_pass = sum(1 for v in windows_report.values() if v["passes"])
     if n_pass == len(base.WINDOWS):
         verdict = "LAG1_RESIDUAL_SUPPORTED"
@@ -692,17 +807,34 @@ def main():
         question=("Given S_t, does S_{t-1} add stable extra information "
                   "for Z_{t+1}?"),
         verdict=verdict,
+        primary_comparison=PRIMARY_COMPARISON,
+        secondary_comparisons=SECONDARY_COMPARISONS,
+        models=dict(
+            K0_UNCONDITIONAL="P(Z)",
+            K1_STATE="P(Z | S_t)",
+            K1A_STATE_AVAIL="P(Z | S_t, A_t)  [control: availability only]",
+            K2_STATE_LAG1="P(Z | S_t, A_t, S_{t-1})"),
         windows=windows_report,
         symbol_breadth_min=SYMBOL_BREADTH_MIN,
         lag_block=dict(n_lag_columns=len(LAG_COLS), columns=LAG_COLS,
                        availability_column=LAG_AVAIL,
+                       k1a_extra=K1A_EXTRA, k2_extra=K2_EXTRA,
                        excluded=["start_geometry", "previous_endpoint",
                                  "episode_context", "TEMPO", "lag2",
                                  "static_context"]),
+        confound_control=dict(
+            issue=("lag1_available is essentially an 'episode first bar' "
+                   "indicator; as a 0/1 column it also acts as an extra "
+                   "nonlinear basis function for the linear heads."),
+            control_model="K1A_STATE_AVAIL = OBSERVED_STATE + lag1_available",
+            resolution=("K1A-K1 measures the episode-start representation "
+                        "effect; K2-K1A isolates genuine S_{t-1} memory and "
+                        "is the ONLY input to the lag verdict.")),
         count_magnitude_closure=dict(
-            magnitude="state-independent train-constant exact ZTP shared by K0/K1/K2",
-            occurrence="state-dependent Logistic (may differ K1 vs K2)",
-            k2_minus_k1_count_gain_source="occurrence only"),
+            magnitude=("state-independent train-constant exact ZTP shared "
+                       "by K0/K1/K1A/K2"),
+            occurrence="state-dependent Logistic (may differ across K1/K1A/K2)",
+            k2_minus_k1a_count_gain_source="occurrence only"),
         model_metrics=model_metrics,
         bootstrap=boots,
         block_attribution=block_rows,
@@ -724,8 +856,20 @@ def main():
     print(f"[BOOTSTRAP]\n{pd.DataFrame(boots).to_string(index=False)}")
     print(f"[BLOCK ATTRIBUTION]\n{pd.DataFrame(block_rows).to_string(index=False)}")
     print(f"[VERDICT] {verdict}")
+    print("[PRIMARY K2-K1A] " + ", ".join(
+        f"{k}: {v['delta_k2_minus_k1a']:.4f} "
+        f"CI=[{v['ci_lo']:.4f},{v['ci_hi']:.4f}] "
+        f"neg={v['n_symbols_negative']}/{v['n_symbols_total']}"
+        for k, v in windows_report.items()))
+    print("[SECONDARY] " + ", ".join(
+        f"{k}: K1A-K1={v['secondary']['delta_k1a_minus_k1']:.4f} "
+        f"K2-K1={v['secondary']['delta_k2_minus_k1']:.4f} "
+        f"K1-K0={v['delta_k1_minus_k0']:.4f}"
+        for k, v in windows_report.items()))
     print("[INCREMENT RATIO] " + ", ".join(
-        f"{k}: {v['increment_ratio']:.4f}" for k, v in windows_report.items()))
+        f"{k}: {v['increment_ratio']:.4f} "
+        f"(total {v['total_increment_ratio']:.4f})"
+        for k, v in windows_report.items()))
     print(f"[DONE] -> {base.OUT}")
     return summary
 

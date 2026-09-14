@@ -13,6 +13,7 @@ Covers:
   * output namespace isolation (dynamic_pgm1a2_* only)
   * JSON serializable results
 """
+import inspect
 import json
 import sys
 import tempfile
@@ -177,55 +178,82 @@ def _synthetic_transition_frame(n_ep=30, bars=20, seed=7):
 
 
 def _design_matrices(df):
+    """K1 / K1A / K2 each get their OWN ColumnTransformer (independent fit)."""
     tr = df[df["block"] == "TB1"].reset_index(drop=True)
     ev = df[df["block"] == "TB2"].reset_index(drop=True)
-    ct1 = T._make_ct(list(base.OBS_STATE_NUM))
-    ct2 = T._make_ct(list(base.OBS_STATE_NUM) + list(T.K2_EXTRA))
-    return (tr, ev,
-            ct1.fit_transform(tr).astype(np.float32),
-            ct1.transform(ev).astype(np.float32),
-            ct2.fit_transform(tr).astype(np.float32),
-            ct2.transform(ev).astype(np.float32))
+    obs = list(base.OBS_STATE_NUM)
+    ct1 = T._make_ct(obs)
+    ct1a = T._make_ct(obs + list(T.K1A_EXTRA))
+    ct2 = T._make_ct(obs + list(T.K2_EXTRA))
+    return dict(
+        tr=tr, ev=ev,
+        Xtr1=ct1.fit_transform(tr).astype(np.float32),
+        Xev1=ct1.transform(ev).astype(np.float32),
+        Xtr1a=ct1a.fit_transform(tr).astype(np.float32),
+        Xev1a=ct1a.transform(ev).astype(np.float32),
+        Xtr2=ct2.fit_transform(tr).astype(np.float32),
+        Xev2=ct2.transform(ev).astype(np.float32))
 
 
-def test_k0_k1_k2_shared_constant_ztp_magnitude():
-    df = _synthetic_transition_frame()
-    tr, ev, Xtr1, Xev1, Xtr2, Xev2 = _design_matrices(df)
+def test_k1a_contains_only_availability_indicator():
+    """K1A must carry lag1_available and NO lag value whatsoever."""
+    assert T.K1A_EXTRA == [T.LAG_AVAIL]
+    assert set(T.K1A_EXTRA).isdisjoint(set(T.LAG_COLS))
+    # nested: X2 = X1A + the 15 lag values
+    assert set(T.K2_EXTRA) == set(T.K1A_EXTRA) | set(T.LAG_COLS)
+    assert len(T.K2_EXTRA) == len(T.K1A_EXTRA) + len(T.LAG_COLS)
+    # and the design matrices confirm the nesting numerically
+    m = _design_matrices(_synthetic_transition_frame())
+    assert m["Xtr1a"].shape[1] == m["Xtr1"].shape[1] + 1
+    assert m["Xtr2"].shape[1] == m["Xtr1a"].shape[1] + len(T.LAG_COLS)
+
+
+def test_four_models_same_eval_rows_and_shared_ztp_magnitude():
+    m = _design_matrices(_synthetic_transition_frame())
+    tr, ev = m["tr"], m["ev"]
+    # identical eval rows across K1 / K1A / K2
+    assert m["Xev1"].shape[0] == m["Xev1a"].shape[0] == m["Xev2"].shape[0] == len(ev)
+
     Ytr = tr[base.COUNT_Z].to_numpy(np.int64)
     Yev = ev[base.COUNT_Z].to_numpy(np.int64)
-
-    # K1 / K2 evaluate identical rows
-    assert Xev1.shape[0] == Xev2.shape[0] == len(ev)
-    assert Xtr2.shape[1] == Xtr1.shape[1] + len(T.K2_EXTRA)
-
     k0c = base.fit_constant_count_head(Ytr, Yev)
-    k1c = base.fit_state_count_head(Xtr1, Ytr, Xev1, Yev,
+    k1c = base.fit_state_count_head(m["Xtr1"], Ytr, m["Xev1"], Yev,
                                     constant_rates=k0c["constant_rates"])
-    k2c = base.fit_state_count_head(Xtr2, Ytr, Xev2, Yev,
+    k1ac = base.fit_state_count_head(m["Xtr1a"], Ytr, m["Xev1a"], Yev,
+                                     constant_rates=k0c["constant_rates"])
+    k2c = base.fit_state_count_head(m["Xtr2"], Ytr, m["Xev2"], Yev,
                                     constant_rates=k0c["constant_rates"])
     for j in range(len(base.COUNT_Z)):
-        # identical magnitude across all three models
-        assert np.array_equal(k0c["rate_ev"][:, j], k1c["rate_ev"][:, j])
-        assert np.array_equal(k0c["rate_ev"][:, j], k2c["rate_ev"][:, j])
-        # magnitude is state-INDEPENDENT (a single constant per column)
+        r0 = k0c["rate_ev"][:, j]
+        # one shared, state-INDEPENDENT constant magnitude across all four
+        for other in (k1c["rate_ev"][:, j], k1ac["rate_ev"][:, j],
+                      k2c["rate_ev"][:, j]):
+            assert np.array_equal(r0, other)
         assert len(np.unique(k2c["rate_ev"][:, j])) == 1
-        # but occurrence IS state-dependent (otherwise K2 could not differ)
+        # occurrence remains state-dependent so K1A/K2 can differ at all
         assert len(np.unique(k2c["p0_ev"][:, j])) > 1
 
 
 def test_count_delta_equals_occurrence_delta():
-    df = _synthetic_transition_frame()
-    tr, ev, Xtr1, Xev1, Xtr2, Xev2 = _design_matrices(df)
+    m = _design_matrices(_synthetic_transition_frame())
+    tr, ev = m["tr"], m["ev"]
     Ytr = tr[base.COUNT_Z].to_numpy(np.int64)
     Yev = ev[base.COUNT_Z].to_numpy(np.int64)
     k0c = base.fit_constant_count_head(Ytr, Yev)
-    k1c = base.fit_state_count_head(Xtr1, Ytr, Xev1, Yev,
+    k1c = base.fit_state_count_head(m["Xtr1"], Ytr, m["Xev1"], Yev,
                                     constant_rates=k0c["constant_rates"])
-    k2c = base.fit_state_count_head(Xtr2, Ytr, Xev2, Yev,
+    k1ac = base.fit_state_count_head(m["Xtr1a"], Ytr, m["Xev1a"], Yev,
+                                     constant_rates=k0c["constant_rates"])
+    k2c = base.fit_state_count_head(m["Xtr2"], Ytr, m["Xev2"], Yev,
                                     constant_rates=k0c["constant_rates"])
-    d_count = k2c["nll_ev"] - k1c["nll_ev"]
-    d_occ = T._occ_nll(Yev, k2c["p0_ev"]) - T._occ_nll(Yev, k1c["p0_ev"])
+    # PRIMARY comparison K2 - K1A
+    d_count = k2c["nll_ev"] - k1ac["nll_ev"]
+    d_occ = T._occ_nll(Yev, k2c["p0_ev"]) - T._occ_nll(Yev, k1ac["p0_ev"])
     assert np.max(np.abs(d_count - d_occ)) < 1e-10
+    # secondary comparison K2 - K1 also cancels
+    d_count2 = k2c["nll_ev"] - k1c["nll_ev"]
+    d_occ2 = T._occ_nll(Yev, k2c["p0_ev"]) - T._occ_nll(Yev, k1c["p0_ev"])
+    assert np.max(np.abs(d_count2 - d_occ2)) < 1e-10
 
 
 def test_synthetic_window_k0_k1_k2_smoke():
@@ -241,26 +269,30 @@ def test_synthetic_window_k0_k1_k2_smoke():
         base.configure_child_semantics(agezero_deterministic=False)
 
     models = {m["model"]: m for m in res["model_metrics"]}
-    assert set(models) == {"K0_UNCONDITIONAL", "K1_STATE", "K2_STATE_LAG1"}
+    assert set(models) == {T.MODEL_K0, T.MODEL_K1, T.MODEL_K1A, T.MODEL_K2}
     for m in res["model_metrics"]:
         assert np.isfinite(m["mean_joint_nll"])
         assert m["n_rows"] == len(df[df["block"] == "TB2"])
-    # every model sees the same eval rows
+    # all four models evaluate the same eval rows
     assert len({m["n_rows"] for m in res["model_metrics"]}) == 1
 
     # optimizer audit: all fits succeeded
     assert all(r["success"] for r in res["opt_rows"])
     assert {r["model"] for r in res["opt_rows"]} == set(models)
 
-    # primary + reference comparisons both bootstrapped
+    # all four comparisons bootstrapped (primary + secondaries)
     comps = {b["comparison"] for b in res["boots"]}
-    assert comps == {"K1-K0", "K2-K1"}
+    assert comps == {"K1-K0", "K1A-K1", "K2-K1A", "K2-K1"}
+    # breadth is produced for the PRIMARY comparison too
+    assert {b["comparison"] for b in res["bysym"]} == comps
 
-    # count magnitude closure evidence
+    # count magnitude closure evidence (PRIMARY K2-K1A)
     assert res["count_occ_rows"], "count occurrence diagnostics missing"
     for r in res["count_occ_rows"]:
         assert r["state_dependent_magnitude"] is False
         assert r["count_minus_occurrence_residual"] < 1e-10
+        # every model shares one constant lambda
+        assert r["constant_ztp_lambda"] > 0
 
     # attribution blocks: Count split out of LiquidityComposition
     blocks = {b["block"] for b in res["block_rows"]}
@@ -269,6 +301,25 @@ def test_synthetic_window_k0_k1_k2_smoke():
 
     # JSON serializable (production writes results with default=str)
     assert json.loads(json.dumps(res, default=str))
+
+
+def test_verdict_reads_only_primary_comparison():
+    """The lag verdict must be driven by K2-K1A only, never by K2-K1."""
+    assert T.PRIMARY_COMPARISON == "K2-K1A"
+    assert set(T.SECONDARY_COMPARISONS) == {"K1A-K1", "K2-K1", "K1-K0"}
+    assert T.MODEL_K1A == "K1A_STATE_AVAIL"
+
+    src = inspect.getsource(T.main)
+    verdict_part = src[src.index("# ---------------- verdict"):]
+    # the gate expression
+    passes_lines = [l for l in verdict_part.splitlines() if "passes=" in l]
+    assert len(passes_lines) == 1
+    gate = passes_lines[0]
+    assert "r_21a" in gate, "gate must use the K2-K1A bootstrap row"
+    assert "n_neg" in gate, "gate must use the K2-K1A symbol breadth"
+    assert "r21[" not in gate, "gate must NOT use the K2-K1 row"
+    # breadth is computed on the primary comparison
+    assert '_sym_neg(w["name"], PRIMARY_COMPARISON)' in verdict_part
 
 
 def test_output_namespace_isolation():
