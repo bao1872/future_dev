@@ -1,0 +1,2 @@
+n_episodes,n_end_has_immediate_pair,n_end_needs_gap,gap_bars_mean,gap_bars_p50,gap_bars_p90,gap_bars_max,total_gap_bars,start_pair_equal_end,one_side_changed,both_sides_changed
+25287,24761,526,0.5075335152449876,0.0,0.0,162,12834,84,17700,7503
