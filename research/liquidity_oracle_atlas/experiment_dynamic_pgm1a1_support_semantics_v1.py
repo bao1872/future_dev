@@ -537,6 +537,7 @@ class GaussianTransitionHead:
         self.chol = np.linalg.cholesky(self.cov)
         self.logdet = 2.0 * np.log(np.diag(self.chol)).sum()
         self.k = q
+        self.n_params = p * q + q
         return self
 
     def nll_per_row(self, X, Z):
@@ -647,8 +648,7 @@ class ZeroInteriorOneHead:
         interior = (is0 < 0.5) & (is1 < 0.5)
         y3 = np.where(is0 > 0.5, 0, np.where(is1 > 0.5, 2, 1)).astype(int)
         self.cat = LogisticRegression(penalty="l2", C=1.0, solver="lbfgs",
-                                     max_iter=3000,
-                                     multi_class="multinomial").fit(X, y3)
+                                     max_iter=3000).fit(X, y3)
         self.g = GaussianTransitionHead(alpha=self.alpha).fit(
             X[interior], logit[interior].reshape(-1, 1))
         self.n_params = (X.shape[1] * 3 + 3) + (X.shape[1] * 1 + 1)
@@ -691,8 +691,7 @@ class SignedHurdleHead:
         nonzero = (is0 < 0.5)
         y3 = np.where(isneg > 0.5, 0, np.where(ispos > 0.5, 2, 1)).astype(int)
         self.cat = LogisticRegression(penalty="l2", C=1.0, solver="lbfgs",
-                                     max_iter=3000,
-                                     multi_class="multinomial").fit(X, y3)
+                                     max_iter=3000).fit(X, y3)
         self.g = GaussianTransitionHead(alpha=self.alpha).fit(
             X[nonzero], logabs[nonzero].reshape(-1, 1))
         self.n_params = (X.shape[1] * 3 + 3) + (X.shape[1] * 1 + 1)

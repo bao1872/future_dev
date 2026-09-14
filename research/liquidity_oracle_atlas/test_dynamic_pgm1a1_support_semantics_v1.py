@@ -350,6 +350,61 @@ def test_child_agezero_configuration():
     assert "STOP_DYNAMIC_PGM1A1_CHILD_DISC_SPEC_NONEMPTY" not in (r_flag.stderr + r_flag.stdout)
 
 
+def test_gaussian_head_n_params():
+    rng = np.random.default_rng(42)
+    n, p, q = 50, 4, 3
+    X = rng.normal(size=(n, p))
+    Z = rng.normal(size=(n, q))
+    head = m.GaussianTransitionHead(alpha=1.0)
+    head.fit(X, Z)
+    assert hasattr(head, "n_params")
+    assert head.n_params == p * q + q
+
+
+def test_fit_nodes_has_parameter_count():
+    rng = np.random.default_rng(123)
+    n_tr, n_ev, p = 100, 30, 5
+    Xtr = rng.normal(size=(n_tr, p))
+    Xev = rng.normal(size=(n_ev, p))
+
+    def make_z(n):
+        d = {}
+        d["z_d_up"] = rng.normal(size=n)
+        for k in ["z_dmfe", "z_dmae", "z_range", "z_uresid", "z_lresid"]:
+            ispos = (rng.uniform(size=n) > 0.3).astype(float)
+            logv = np.where(ispos > 0.5, rng.normal(size=n), 0.0)
+            d[f"{k}_ispos"] = ispos
+            d[f"{k}_log"] = logv
+        u = rng.uniform(size=n)
+        is0 = (u < 0.1).astype(float)
+        is1 = (u > 0.9).astype(float)
+        interior = (is0 < 0.5) & (is1 < 0.5)
+        logit = np.where(interior, rng.normal(size=n), 0.0)
+        d["z_dcr_is0"] = is0
+        d["z_dcr_is1"] = is1
+        d["z_dcr_logit"] = logit
+        df = pd.DataFrame(d)[m.ALL_Z_COLS]
+        return df.to_numpy(np.float64)
+
+    Zc_tr = make_z(n_tr)
+    Zc_ev = make_z(n_ev)
+
+    m.configure_child_semantics(agezero_deterministic=True)
+    nodes, n_params = m._fit_nodes(Xtr, Xev, Zc_tr, Zc_ev)
+    assert isinstance(n_params, int)
+    assert n_params > 0
+    for n, _ in m.Z_LAYOUT:
+        assert n in nodes
+        assert hasattr(nodes[n]["head"], "n_params")
+        assert isinstance(nodes[n]["head"].n_params, int)
+        assert nodes[n]["head"].n_params > 0
+
+    k0 = m.fit_constant_heads(Zc_tr, Zc_ev, None, None)
+    assert isinstance(k0["n_params"], int)
+    assert k0["n_params"] > 0
+    m.configure_child_semantics(agezero_deterministic=False)
+
+
 if __name__ == "__main__":
     class _MonkeyPatch:
         def setattr(self, target, name, value):
@@ -365,4 +420,6 @@ if __name__ == "__main__":
     test_ridge_parity()
     test_agezero_audit_harness()
     test_child_agezero_configuration()
+    test_gaussian_head_n_params()
+    test_fit_nodes_has_parameter_count()
     print("ALL tests in test_dynamic_pgm1a1_support_semantics_v1 PASSED successfully.")
