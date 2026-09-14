@@ -44,12 +44,35 @@ Gates
 
     R = |MZ-M0| / |MF-M0|  (retention) is EXPLANATORY ONLY, never a gate.
 
-Z_t definition
---------------
-In the transition frame, row r's z columns ARE Z_{r+1}. Therefore Z_t for
-row r is the z vector of the previous row; with bar_t gaps proven == 0 that
-previous row is exactly bar_t - 1. Episode-first rows have no Z_t (NaN ->
-train-median imputed, flagged by `lag1_available`).
+Z_t definition (FULL stochastic innovation)
+-------------------------------------------
+In the transition frame, row r's encoded innovation columns ARE Z_{r+1}.
+Therefore Z_t for row r is the previous row's encoded innovation vector; with
+bar_t gaps proven == 0 that previous row is exactly bar_t - 1. Episode-first
+rows have no Z_t (NaN -> train-median imputed, flagged by `lag1_available`).
+
+Z_t must cover EVERY stochastic node of the 1A.1b kernel:
+
+    7 support-correct nodes   -> 14 encoded columns (base.ALL_Z_COLS)
+    2 hurdle-Poisson counts   ->  2 encoded columns (base.COUNT_Z)
+    -------------------------------------------------------------
+    9 native stochastic nodes -> 16 encoded predictor columns
+
+Testing only the 14 continuous columns would silently evaluate
+Z_t^{continuous} instead of the pre-registered Z_t^{full}.
+
+On "compression"
+----------------
+The compression being tested is SEMANTIC, not a raw column-count comparison:
+
+    full previous-state memory  S_{t-1}   (15 history state variables)
+      ->  most recent transition innovation  Z_t   (9 native stochastic nodes)
+
+The design matrices are MF = +16 columns vs MZ = +17 columns, because the
+9 native innovations are expanded to 16 encoded columns to reuse the existing
+support representation. NO compactness claim is made from column counts; the
+structural simplification is that 15 remembered state variables are replaced
+by the 9 native innovations that generated the current state.
 
 Frozen scope
 ------------
@@ -111,18 +134,48 @@ MODEL_MZP = "MZ_PATH_INNOV"          # Path Z_t inputs only
 MODEL_MZN = "MZ_NONPATH_INNOV"       # non-Path Z_t inputs only
 
 LAG_AVAIL = lag.LAG_AVAIL
-ZT_COLS = [f"zt_{c}" for c in base.ALL_Z_COLS]
 
-# Path innovation block (dmfe, dmae, dcr, range) vs the rest
+# ---------------------------------------------------------------------------
+# Z_t = the FULL stochastic innovation of the transition S_{t-1} -> S_t.
+# It must cover EVERY stochastic node of the 1A.1b transition kernel:
+#     * 7 support-correct nodes, encoded as 14 columns  (base.ALL_Z_COLS)
+#     * 2 hurdle-Poisson count nodes                    (base.COUNT_Z)
+# Omitting the count nodes would silently test Z_t^{continuous} instead of the
+# pre-registered Z_t^{full}, making a negative MF-MZ uninterpretable.
+# ---------------------------------------------------------------------------
+INNOV_SOURCE_COLS = list(base.ALL_Z_COLS) + list(base.COUNT_Z)
+ZT_COLS = [f"zt_{c}" for c in INNOV_SOURCE_COLS]
+
+# native stochastic objects vs encoded predictor columns
+N_NATIVE_STOCHASTIC_NODES = len(base.NODE_SPECS) + len(base.COUNT_Z)   # 9
+N_ENCODED_INNOV_COLS = len(ZT_COLS)                                    # 16
+
+if len(base.ALL_Z_COLS) != 14:
+    raise SystemExit("STOP_DYNAMIC_PGM1A2B_INNOV_SOURCE_UNEXPECTED:ALL_Z!=14")
+if len(base.COUNT_Z) != 2:
+    raise SystemExit("STOP_DYNAMIC_PGM1A2B_INNOV_SOURCE_UNEXPECTED:COUNT!=2")
+if len(INNOV_SOURCE_COLS) != 16 or len(ZT_COLS) != 16:
+    raise SystemExit("STOP_DYNAMIC_PGM1A2B_INNOV_SOURCE_UNEXPECTED:ZT!=16")
+if N_NATIVE_STOCHASTIC_NODES != 9:
+    raise SystemExit("STOP_DYNAMIC_PGM1A2B_NATIVE_NODE_COUNT_UNEXPECTED")
+
+# Path innovation block (dmfe, dmae, dcr, range) vs everything else.
+# NOTE: the count innovations fall in the NON-Path side.
 _PATH_NODES = lag.ATTRIB_NODE_BLOCKS["Path"]
 PATH_ZT_COLS = [f"zt_{c}" for n in _PATH_NODES for c in base.NODE_ZCOLS[n]]
 NONPATH_ZT_COLS = [c for c in ZT_COLS if c not in set(PATH_ZT_COLS)]
+if sorted(PATH_ZT_COLS + NONPATH_ZT_COLS) != sorted(ZT_COLS):
+    raise SystemExit("STOP_DYNAMIC_PGM1A2B_INNOV_SPLIT_NOT_A_PARTITION")
+if set(PATH_ZT_COLS) & set(NONPATH_ZT_COLS):
+    raise SystemExit("STOP_DYNAMIC_PGM1A2B_INNOV_SPLIT_OVERLAP")
+if len(PATH_ZT_COLS) != 9 or len(NONPATH_ZT_COLS) != 7:
+    raise SystemExit("STOP_DYNAMIC_PGM1A2B_INNOV_SPLIT_SIZE_UNEXPECTED")
 
-M0_EXTRA = [LAG_AVAIL]                            # 1
-MF_EXTRA = [LAG_AVAIL] + list(lag.LAG_COLS)       # 16
-MZ_EXTRA = [LAG_AVAIL] + list(ZT_COLS)            # 15
+M0_EXTRA = [LAG_AVAIL]                            #  1
+MF_EXTRA = [LAG_AVAIL] + list(lag.LAG_COLS)       # 16  (15 lag states)
+MZ_EXTRA = [LAG_AVAIL] + list(ZT_COLS)            # 17  (16 encoded innov)
 MZP_EXTRA = [LAG_AVAIL] + PATH_ZT_COLS            # 10
-MZN_EXTRA = [LAG_AVAIL] + NONPATH_ZT_COLS         # 6
+MZN_EXTRA = [LAG_AVAIL] + NONPATH_ZT_COLS         #  8
 
 # comparisons
 C_REF = "K1-K0"        # state baseline (ratio denominator)
@@ -134,21 +187,23 @@ PREFIX = "dynamic_pgm1a2b"
 
 
 def add_zt_causal(df):
-    """Add Z_t = the realized innovation that produced S_t from S_{t-1}.
+    """Add Z_t = the FULL realized innovation that produced S_t from S_{t-1}.
 
-    Row r's z columns are Z_{r+1}, so Z_t is the previous row's z vector
+    Row r's encoded innovation columns (14 support-correct + 2 count) are
+    Z_{r+1}, so Z_t is the previous row's encoded innovation vector
     (bar_t gaps are proven == 0, so that row is exactly bar_t - 1).
-    Episode-first rows have no Z_t -> NaN (imputed later).
+    Episode-first rows have no Z_t -> NaN (imputed later), and availability
+    is identical to `lag1_available`.
     """
     x = df.sort_values(["episode_id", "bar_t"], kind="stable").copy()
     g = x.groupby("episode_id", sort=False)
     prev_bar = g["bar_t"].shift(1)
-    for c in base.ALL_Z_COLS:
+    for c in INNOV_SOURCE_COLS:
         x[f"zt_{c}"] = g[c].shift(1)
 
-    # hard audit: Z_t is exactly the episode-internal previous row's z vector
+    # hard audit: Z_t is exactly the episode-internal previous row's vector
     avail = prev_bar.notna().to_numpy()
-    for c in base.ALL_Z_COLS:
+    for c in INNOV_SOURCE_COLS:
         a = x.loc[avail, f"zt_{c}"].to_numpy(dtype=np.float64)
         b = g[c].shift(1).loc[avail].to_numpy(dtype=np.float64)
         if not np.array_equal(a, b, equal_nan=True):
@@ -178,6 +233,12 @@ def audit_zt(cur):
     avail = cur[LAG_AVAIL].to_numpy().astype(bool)
     return dict(
         n_rows=int(len(cur)),
+        # native stochastic objects vs encoded design-matrix columns
+        n_native_stochastic_nodes=N_NATIVE_STOCHASTIC_NODES,
+        native_node_names=[n for n, *_ in base.NODE_SPECS] + list(base.COUNT_Z),
+        n_encoded_innov_columns=N_ENCODED_INNOV_COLS,
+        n_support_encoded_columns=len(base.ALL_Z_COLS),
+        n_count_innovation_columns=len(base.COUNT_Z),
         n_zt_columns=len(ZT_COLS),
         zt_columns=ZT_COLS,
         n_zt_available=int(avail.sum()),
@@ -185,6 +246,8 @@ def audit_zt(cur):
         bar_t_gap_count=int(gap.sum()),
         path_zt_columns=PATH_ZT_COLS,
         nonpath_zt_columns=NONPATH_ZT_COLS,
+        n_path_encoded=len(PATH_ZT_COLS),
+        n_nonpath_encoded=len(NONPATH_ZT_COLS),
         cross_episode_leakage=bool(int((~same_ep & prev.notna()).sum()) != 0),
     )
 
@@ -695,10 +758,20 @@ def main():
         sample=sample_audit,
         zt_audit=zt_audit,
         parity=parity_audit,
-        zt_block=dict(n_zt_columns=len(ZT_COLS), zt_columns=ZT_COLS,
-                      path_zt_columns=PATH_ZT_COLS,
-                      nonpath_zt_columns=NONPATH_ZT_COLS,
-                      availability_column=LAG_AVAIL),
+        zt_block=dict(
+            n_native_stochastic_nodes=N_NATIVE_STOCHASTIC_NODES,
+            n_encoded_innov_columns=N_ENCODED_INNOV_COLS,
+            n_support_encoded_columns=len(base.ALL_Z_COLS),
+            n_count_innovation_columns=len(base.COUNT_Z),
+            n_zt_columns=len(ZT_COLS), zt_columns=ZT_COLS,
+            path_zt_columns=PATH_ZT_COLS,
+            nonpath_zt_columns=NONPATH_ZT_COLS,
+            n_path_encoded=len(PATH_ZT_COLS),
+            n_nonpath_encoded=len(NONPATH_ZT_COLS),
+            availability_column=LAG_AVAIL,
+            note=("9 native stochastic nodes (7 support-correct + 2 count) "
+                  "expanded to 16 encoded predictor columns to reuse the "
+                  "existing support representation")),
         count_magnitude_closure=dict(
             magnitude=("state-independent train-constant exact ZTP shared by "
                        "K0/K1/M0/MF/MZ/MZ_PATH/MZ_NONPATH"),

@@ -52,17 +52,34 @@ def test_frozen_parity_targets_match_committed_outputs():
 
 
 def test_zt_block_definition():
-    assert len(T.ZT_COLS) == len(base.ALL_Z_COLS) == 14
+    # Z_t source must be exactly ALL_Z_COLS U COUNT_Z (the FULL innovation)
+    assert T.INNOV_SOURCE_COLS == list(base.ALL_Z_COLS) + list(base.COUNT_Z)
+    assert len(base.ALL_Z_COLS) == 14
+    assert len(base.COUNT_Z) == 2
+    assert len(T.INNOV_SOURCE_COLS) == 16
+    assert len(T.ZT_COLS) == 16
+    assert T.ZT_COLS == [f"zt_{c}" for c in T.INNOV_SOURCE_COLS]
     assert all(c.startswith("zt_") for c in T.ZT_COLS)
-    # M0 / MF / MZ nesting: MF = M0 + 15 lag values, MZ = M0 + 14 innovations
+    # count innovations are explicitly present
+    for c in base.COUNT_Z:
+        assert f"zt_{c}" in T.ZT_COLS
+    # native stochastic nodes = 7 support-correct + 2 count = 9
+    assert T.N_NATIVE_STOCHASTIC_NODES == 9
+    assert T.N_NATIVE_STOCHASTIC_NODES == len(base.NODE_SPECS) + len(base.COUNT_Z)
+    assert T.N_ENCODED_INNOV_COLS == 16
+
+    # nesting: MF = M0 + 15 lag states, MZ = M0 + 16 encoded innovations
     assert T.M0_EXTRA == [T.LAG_AVAIL]
     assert len(T.MF_EXTRA) == 1 + len(lag.LAG_COLS) == 16
-    assert len(T.MZ_EXTRA) == 1 + len(T.ZT_COLS) == 15
-    # MZ is more compact than the full lag block
-    assert len(T.MZ_EXTRA) < len(T.MF_EXTRA)
-    # explanatory split covers every innovation column exactly once
+    assert len(T.MZ_EXTRA) == 1 + len(T.ZT_COLS) == 17
+    # explanatory split partitions every innovation column exactly once
     assert sorted(T.PATH_ZT_COLS + T.NONPATH_ZT_COLS) == sorted(T.ZT_COLS)
     assert not (set(T.PATH_ZT_COLS) & set(T.NONPATH_ZT_COLS))
+    assert len(T.PATH_ZT_COLS) == 9
+    assert len(T.NONPATH_ZT_COLS) == 7
+    # count innovations belong to the non-Path side
+    for c in base.COUNT_Z:
+        assert f"zt_{c}" in T.NONPATH_ZT_COLS
     # MZ must never carry a previous-bar STATE value
     assert not (set(T.MZ_EXTRA) & set(lag.LAG_COLS))
 
@@ -92,6 +109,9 @@ def _small_frame():
         "z_uresid_log": [0.0, 0.0, 0.4, 0.0, 0.6, 0.0],
         "z_lresid_ispos": [0., 1., 0., 1., 0., 1.],
         "z_lresid_log": [0.0, 0.9, 0.0, 0.8, 0.0, 0.7],
+        # count innovations (stochastic nodes of the transition kernel)
+        "z_delta_upper_count": [0, 1, 2, 0, 3, 0],
+        "z_delta_lower_count": [1, 0, 0, 2, 0, 1],
     })
     return pd.DataFrame(d)
 
@@ -119,6 +139,23 @@ def test_zt_availability_matches_lag1():
     assert rep["n_zt_available"] == 4 and rep["n_zt_missing"] == 2
     assert rep["bar_t_gap_count"] == 0
     assert rep["cross_episode_leakage"] is False
+
+
+def test_count_innovation_shift_and_availability():
+    """The two count nodes must be lagged exactly like the continuous ones."""
+    x = T.add_zt_causal(_small_frame())
+    # row1/row2 Z_t count = previous row's count; episode-first rows -> NaN
+    assert x.loc[1, "zt_z_delta_upper_count"] == 0
+    assert x.loc[2, "zt_z_delta_upper_count"] == 1
+    assert x.loc[1, "zt_z_delta_lower_count"] == 1
+    assert x.loc[2, "zt_z_delta_lower_count"] == 0
+    assert np.isnan(x.loc[3, "zt_z_delta_upper_count"])
+    assert np.isnan(x.loc[0, "zt_z_delta_lower_count"])
+    # no cross-episode: episode 1 first row must NOT see episode 0 last row
+    assert x.loc[3, "zt_z_delta_upper_count"] != 2
+    # episode-1 rows use episode-1 predecessors
+    assert x.loc[4, "zt_z_delta_upper_count"] == 0
+    assert x.loc[5, "zt_z_delta_upper_count"] == 3
 
 
 def test_zt_bar_gap_guard():
