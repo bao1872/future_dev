@@ -1,0 +1,145 @@
+{
+  "frozen_episode_hash": "cf840a7191e0265e31442f7b8d8d5ae4173751b0cba15729f95d5c146ab9355c",
+  "frozen_hash_matches_reviewer": true,
+  "n_frozen_episodes": 25273,
+  "n_frozen_non_terminal": 25260,
+  "hash_frozen_non_terminal": "c0c5bb04914eb27e018b8f5fd32592f225e23723b542edd09336b3b96315ac13",
+  "n_new_tb12_episodes": 25260,
+  "hash_new_tb12_subset": "c0c5bb04914eb27e018b8f5fd32592f225e23723b542edd09336b3b96315ac13",
+  "tb12_subset_parity": true,
+  "parity_definition": "episodes fully inside TB1/TB2 and NOT the terminal CENSOR_ANALYSIS_END episode are byte-identical; extending the scan window can only rewrite each symbol's terminal censored episode, verified below as strict prefix extension",
+  "n_terminal_censored_extended": 13,
+  "terminal_extensions": [
+    {
+      "symbol": "AG",
+      "start_bar": 22230,
+      "frozen_end_bar": 22247,
+      "extended_end_bar": 22248,
+      "extended_end_block": "TB3",
+      "extended_event_mask": 8
+    },
+    {
+      "symbol": "AU",
+      "start_bar": 22230,
+      "frozen_end_bar": 22247,
+      "extended_end_bar": 22248,
+      "extended_end_block": "TB3",
+      "extended_event_mask": 9
+    },
+    {
+      "symbol": "CF",
+      "start_bar": 13914,
+      "frozen_end_bar": 13931,
+      "extended_end_bar": 13938,
+      "extended_end_block": "TB3",
+      "extended_event_mask": 1
+    },
+    {
+      "symbol": "CU",
+      "start_bar": 18667,
+      "frozen_end_bar": 18683,
+      "extended_end_bar": 18684,
+      "extended_end_block": "TB3",
+      "extended_event_mask": 4
+    },
+    {
+      "symbol": "I",
+      "start_bar": 13929,
+      "frozen_end_bar": 13931,
+      "extended_end_bar": 13932,
+      "extended_end_block": "TB3",
+      "extended_event_mask": 12
+    },
+    {
+      "symbol": "M",
+      "start_bar": 13914,
+      "frozen_end_bar": 13931,
+      "extended_end_bar": 13932,
+      "extended_end_block": "TB3",
+      "extended_event_mask": 12
+    },
+    {
+      "symbol": "MA",
+      "start_bar": 13918,
+      "frozen_end_bar": 13931,
+      "extended_end_bar": 13932,
+      "extended_end_block": "TB3",
+      "extended_event_mask": 4
+    },
+    {
+      "symbol": "NI",
+      "start_bar": 18666,
+      "frozen_end_bar": 18683,
+      "extended_end_bar": 18684,
+      "extended_end_block": "TB3",
+      "extended_event_mask": 9
+    },
+    {
+      "symbol": "P",
+      "start_bar": 13920,
+      "frozen_end_bar": 13931,
+      "extended_end_bar": 13932,
+      "extended_end_block": "TB3",
+      "extended_event_mask": 12
+    },
+    {
+      "symbol": "RB",
+      "start_bar": 13914,
+      "frozen_end_bar": 13931,
+      "extended_end_bar": 13932,
+      "extended_end_block": "TB3",
+      "extended_event_mask": 8
+    },
+    {
+      "symbol": "RU",
+      "start_bar": 13919,
+      "frozen_end_bar": 13931,
+      "extended_end_bar": 13932,
+      "extended_end_block": "TB3",
+      "extended_event_mask": 12
+    },
+    {
+      "symbol": "SC",
+      "start_bar": 22246,
+      "frozen_end_bar": 22247,
+      "extended_end_bar": 22248,
+      "extended_end_block": "TB3",
+      "extended_event_mask": 4
+    },
+    {
+      "symbol": "SN",
+      "start_bar": 18672,
+      "frozen_end_bar": 18683,
+      "extended_end_bar": 18684,
+      "extended_end_block": "TB3",
+      "extended_event_mask": 8
+    }
+  ],
+  "n_new_episodes_through_tb3": 38026,
+  "block_boundaries": [
+    {
+      "block": "TB1",
+      "first_day": "2025-01-02",
+      "last_day": "2025-06-09",
+      "n_days": 102
+    },
+    {
+      "block": "TB2",
+      "first_day": "2025-06-10",
+      "last_day": "2025-11-06",
+      "n_days": 102
+    },
+    {
+      "block": "TB3",
+      "first_day": "2025-11-07",
+      "last_day": "2026-04-10",
+      "n_days": 102
+    },
+    {
+      "block": "TB4",
+      "first_day": "2026-04-13",
+      "last_day": "2026-09-04",
+      "n_days": 101
+    }
+  ]
+}

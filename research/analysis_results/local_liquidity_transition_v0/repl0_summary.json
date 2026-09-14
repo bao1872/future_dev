@@ -1,0 +1,415 @@
+{
+  "experiment": "REPL-0 frozen replication on TB3",
+  "base": "de7af87d55d01d2b8725578cfddbaa341f39429a",
+  "frozen_episode_hash": "cf840a7191e0265e31442f7b8d8d5ae4173751b0cba15729f95d5c146ab9355c",
+  "episode_parity": {
+    "frozen_episode_hash": "cf840a7191e0265e31442f7b8d8d5ae4173751b0cba15729f95d5c146ab9355c",
+    "frozen_hash_matches_reviewer": true,
+    "n_frozen_episodes": 25273,
+    "n_frozen_non_terminal": 25260,
+    "hash_frozen_non_terminal": "c0c5bb04914eb27e018b8f5fd32592f225e23723b542edd09336b3b96315ac13",
+    "n_new_tb12_episodes": 25260,
+    "hash_new_tb12_subset": "c0c5bb04914eb27e018b8f5fd32592f225e23723b542edd09336b3b96315ac13",
+    "tb12_subset_parity": true,
+    "parity_definition": "episodes fully inside TB1/TB2 and NOT the terminal CENSOR_ANALYSIS_END episode are byte-identical; extending the scan window can only rewrite each symbol's terminal censored episode, verified below as strict prefix extension",
+    "n_terminal_censored_extended": 13,
+    "terminal_extensions": [
+      {
+        "symbol": "AG",
+        "start_bar": 22230,
+        "frozen_end_bar": 22247,
+        "extended_end_bar": 22248,
+        "extended_end_block": "TB3",
+        "extended_event_mask": 8
+      },
+      {
+        "symbol": "AU",
+        "start_bar": 22230,
+        "frozen_end_bar": 22247,
+        "extended_end_bar": 22248,
+        "extended_end_block": "TB3",
+        "extended_event_mask": 9
+      },
+      {
+        "symbol": "CF",
+        "start_bar": 13914,
+        "frozen_end_bar": 13931,
+        "extended_end_bar": 13938,
+        "extended_end_block": "TB3",
+        "extended_event_mask": 1
+      },
+      {
+        "symbol": "CU",
+        "start_bar": 18667,
+        "frozen_end_bar": 18683,
+        "extended_end_bar": 18684,
+        "extended_end_block": "TB3",
+        "extended_event_mask": 4
+      },
+      {
+        "symbol": "I",
+        "start_bar": 13929,
+        "frozen_end_bar": 13931,
+        "extended_end_bar": 13932,
+        "extended_end_block": "TB3",
+        "extended_event_mask": 12
+      },
+      {
+        "symbol": "M",
+        "start_bar": 13914,
+        "frozen_end_bar": 13931,
+        "extended_end_bar": 13932,
+        "extended_end_block": "TB3",
+        "extended_event_mask": 12
+      },
+      {
+        "symbol": "MA",
+        "start_bar": 13918,
+        "frozen_end_bar": 13931,
+        "extended_end_bar": 13932,
+        "extended_end_block": "TB3",
+        "extended_event_mask": 4
+      },
+      {
+        "symbol": "NI",
+        "start_bar": 18666,
+        "frozen_end_bar": 18683,
+        "extended_end_bar": 18684,
+        "extended_end_block": "TB3",
+        "extended_event_mask": 9
+      },
+      {
+        "symbol": "P",
+        "start_bar": 13920,
+        "frozen_end_bar": 13931,
+        "extended_end_bar": 13932,
+        "extended_end_block": "TB3",
+        "extended_event_mask": 12
+      },
+      {
+        "symbol": "RB",
+        "start_bar": 13914,
+        "frozen_end_bar": 13931,
+        "extended_end_bar": 13932,
+        "extended_end_block": "TB3",
+        "extended_event_mask": 8
+      },
+      {
+        "symbol": "RU",
+        "start_bar": 13919,
+        "frozen_end_bar": 13931,
+        "extended_end_bar": 13932,
+        "extended_end_block": "TB3",
+        "extended_event_mask": 12
+      },
+      {
+        "symbol": "SC",
+        "start_bar": 22246,
+        "frozen_end_bar": 22247,
+        "extended_end_bar": 22248,
+        "extended_end_block": "TB3",
+        "extended_event_mask": 4
+      },
+      {
+        "symbol": "SN",
+        "start_bar": 18672,
+        "frozen_end_bar": 18683,
+        "extended_end_bar": 18684,
+        "extended_end_block": "TB3",
+        "extended_event_mask": 8
+      }
+    ],
+    "n_new_episodes_through_tb3": 38026,
+    "block_boundaries": [
+      {
+        "block": "TB1",
+        "first_day": "2025-01-02",
+        "last_day": "2025-06-09",
+        "n_days": 102
+      },
+      {
+        "block": "TB2",
+        "first_day": "2025-06-10",
+        "last_day": "2025-11-06",
+        "n_days": 102
+      },
+      {
+        "block": "TB3",
+        "first_day": "2025-11-07",
+        "last_day": "2026-04-10",
+        "n_days": 102
+      },
+      {
+        "block": "TB4",
+        "first_day": "2026-04-13",
+        "last_day": "2026-09-04",
+        "n_days": 101
+      }
+    ]
+  },
+  "sample_audit": {
+    "data_roles": {
+      "TB1": "early development",
+      "TB2": "development / model-selection validation",
+      "TB3": "untouched replication (consumed by this round)",
+      "TB4": "final holdout (never read)"
+    },
+    "frozen_episode_contract_commit": "930b595c1aa2580d96c4c12444b70c2f0030fb73",
+    "frozen_path0_commit": "de7af87d55d01d2b8725578cfddbaa341f39429a",
+    "blocks": [
+      {
+        "block": "TB1",
+        "first_day": "2025-01-02",
+        "last_day": "2025-06-09",
+        "n_days": 102
+      },
+      {
+        "block": "TB2",
+        "first_day": "2025-06-10",
+        "last_day": "2025-11-06",
+        "n_days": 102
+      },
+      {
+        "block": "TB3",
+        "first_day": "2025-11-07",
+        "last_day": "2026-04-10",
+        "n_days": 102
+      },
+      {
+        "block": "TB4",
+        "first_day": "2026-04-13",
+        "last_day": "2026-09-04",
+        "n_days": 101
+      }
+    ],
+    "n_pairs_total": 37263,
+    "dev_candidates": 24705,
+    "repl_candidates": 12530,
+    "excluded_target_censor": 11,
+    "excluded_cross_block_target": 28,
+    "excluded_invalid_atr": 0,
+    "n_after_censor_and_block_exclusion": 37224,
+    "n_dev_final": 24705,
+    "n_repl_final": 12519,
+    "n_repl_prev_crosses_tb2_tb3": 14,
+    "n_unique_sample_keys": 37224,
+    "n_path_increments_scanned": 354223,
+    "tb4_read_for_values": false,
+    "tb4_cap_applied": "all per-symbol arrays sliced to the last TB3 bar"
+  },
+  "feature_parity_note": "MODELS / CUR_NUM / PATH_NUM / path_morphology / make_pipeline / metrics are imported directly from the frozen PATH-0 module",
+  "metrics": {
+    "M0_CURRENT_GEOMETRY": {
+      "n": 12519.0,
+      "prevalence": 0.3285605879063823,
+      "logloss": 0.5387084449824948,
+      "brier": 0.17997502557575845,
+      "ece": 0.04753864031413053
+    },
+    "M1_GEOMETRY_PREV_EVENT": {
+      "n": 12519.0,
+      "prevalence": 0.3285605879063823,
+      "logloss": 0.5307990955906807,
+      "brier": 0.17749121142975993,
+      "ece": 0.02355932116898437
+    },
+    "M2_GEOMETRY_PREV_EVENT_DURATION": {
+      "n": 12519.0,
+      "prevalence": 0.3285605879063823,
+      "logloss": 0.5307647749085512,
+      "brier": 0.17746087568168087,
+      "ece": 0.02357350954177835
+    },
+    "M3_GEOMETRY_PREV_EVENT_DURATION_PATH": {
+      "n": 12519.0,
+      "prevalence": 0.3285605879063823,
+      "logloss": 0.5310449047731165,
+      "brier": 0.17751944159312844,
+      "ece": 0.022136301345768265
+    },
+    "B_PRIOR": {
+      "n": 12519.0,
+      "prevalence": 0.3285605879063823,
+      "logloss": 0.6297789890998429,
+      "brier": 0.2191246120878446,
+      "ece": 0.008531447500345929
+    }
+  },
+  "bootstrap": [
+    {
+      "comparison": "M3_GEOMETRY_PREV_EVENT_DURATION_PATH - M2_GEOMETRY_PREV_EVENT_DURATION",
+      "role": "PRIMARY_path_morphology_given_event_duration",
+      "mean_bit_logloss_A": 0.5310449047731165,
+      "mean_bit_logloss_B": 0.5307647749085512,
+      "delta_sample_weighted": 0.00028012986456524513,
+      "delta_daily_mean": 0.0002337514609821189,
+      "n_days": 102,
+      "ci_lo": -0.0010556838990622782,
+      "ci_hi": 0.002172864879215738,
+      "verdict": "CI_contains_zero"
+    },
+    {
+      "comparison": "M1_GEOMETRY_PREV_EVENT - M0_CURRENT_GEOMETRY",
+      "role": "SECONDARY_prev_endpoint_given_geometry",
+      "mean_bit_logloss_A": 0.5307990955906807,
+      "mean_bit_logloss_B": 0.5387084449824948,
+      "delta_sample_weighted": -0.007909349391814206,
+      "delta_daily_mean": -0.00813512230487083,
+      "n_days": 102,
+      "ci_lo": -0.010012892311709777,
+      "ci_hi": -0.006495780402105119,
+      "verdict": "CI_below_zero"
+    },
+    {
+      "comparison": "M2_GEOMETRY_PREV_EVENT_DURATION - M1_GEOMETRY_PREV_EVENT",
+      "role": "SECONDARY_duration_given_endpoint",
+      "mean_bit_logloss_A": 0.5307647749085512,
+      "mean_bit_logloss_B": 0.5307990955906807,
+      "delta_sample_weighted": -3.432068212949187e-05,
+      "delta_daily_mean": -3.2582267862527055e-05,
+      "n_days": 102,
+      "ci_lo": -0.00010991990998988235,
+      "ci_hi": 4.7259707453585666e-05,
+      "verdict": "CI_contains_zero"
+    },
+    {
+      "comparison": "M3_GEOMETRY_PREV_EVENT_DURATION_PATH - M0_CURRENT_GEOMETRY",
+      "role": "SECONDARY_total_prev_history",
+      "mean_bit_logloss_A": 0.5310449047731165,
+      "mean_bit_logloss_B": 0.5387084449824948,
+      "delta_sample_weighted": -0.007663540209378451,
+      "delta_daily_mean": -0.007933953111751239,
+      "n_days": 102,
+      "ci_lo": -0.010398832717616767,
+      "ci_hi": -0.005532475562751181,
+      "verdict": "CI_below_zero"
+    }
+  ],
+  "per_bit": [
+    {
+      "bit": "UP_PEN",
+      "n": 12519,
+      "prevalence": 0.3040178928029395,
+      "M3_minus_M2": -0.0006130906020899916,
+      "M3_minus_M2_ci_lo": -0.0018798130788631115,
+      "M3_minus_M2_ci_hi": 0.000730242719226333,
+      "M1_minus_M0": -0.0019561130925321436,
+      "M1_minus_M0_ci_lo": -0.003519993277198063,
+      "M1_minus_M0_ci_hi": -0.0006273954001040877
+    },
+    {
+      "bit": "DOWN_PEN",
+      "n": 12519,
+      "prevalence": 0.2774982027318476,
+      "M3_minus_M2": -0.0005461073500909774,
+      "M3_minus_M2_ci_lo": -0.0016268599541669746,
+      "M3_minus_M2_ci_hi": 0.0003021786371812765,
+      "M1_minus_M0": -0.001970057850794126,
+      "M1_minus_M0_ci_lo": -0.003882047452001959,
+      "M1_minus_M0_ci_hi": -0.0006640929268226736
+    },
+    {
+      "bit": "NEW_UPPER",
+      "n": 12519,
+      "prevalence": 0.3572170301142264,
+      "M3_minus_M2": -5.3607447326174776e-05,
+      "M3_minus_M2_ci_lo": -0.0013932011132721828,
+      "M3_minus_M2_ci_hi": 0.001202946294885037,
+      "M1_minus_M0": -0.01439557179644638,
+      "M1_minus_M0_ci_lo": -0.017811941757360512,
+      "M1_minus_M0_ci_hi": -0.01133156243791338
+    },
+    {
+      "bit": "NEW_LOWER",
+      "n": 12519,
+      "prevalence": 0.3755092259765157,
+      "M3_minus_M2": 0.002333324857768127,
+      "M3_minus_M2_ci_lo": -0.001525270669484359,
+      "M3_minus_M2_ci_hi": 0.008223642491899847,
+      "M1_minus_M0": -0.013315654827484164,
+      "M1_minus_M0_ci_lo": -0.016910788866701727,
+      "M1_minus_M0_ci_hi": -0.010204333527735338
+    }
+  ],
+  "stability_tb2_vs_tb3": [
+    {
+      "comparison": "M3_GEOMETRY_PREV_EVENT_DURATION_PATH - M2_GEOMETRY_PREV_EVENT_DURATION",
+      "tb2_delta": -0.000285603150414768,
+      "tb3_delta": 0.0002337514609821189,
+      "tb2_ci": [
+        -0.0009557476470100261,
+        0.0004152090356011136
+      ],
+      "tb3_ci": [
+        -0.0010556838990622782,
+        0.002172864879215738
+      ],
+      "same_sign": "False"
+    },
+    {
+      "comparison": "M1_GEOMETRY_PREV_EVENT - M0_CURRENT_GEOMETRY",
+      "tb2_delta": -0.007165155454171992,
+      "tb3_delta": -0.00813512230487083,
+      "tb2_ci": [
+        -0.008842670912332002,
+        -0.005595849860387131
+      ],
+      "tb3_ci": [
+        -0.010012892311709777,
+        -0.006495780402105119
+      ],
+      "same_sign": "True"
+    },
+    {
+      "comparison": "M2_GEOMETRY_PREV_EVENT_DURATION - M1_GEOMETRY_PREV_EVENT",
+      "tb2_delta": 0.00041186953379937334,
+      "tb3_delta": -3.2582267862527055e-05,
+      "tb2_ci": [
+        0.00012208039290670023,
+        0.0006965268717406411
+      ],
+      "tb3_ci": [
+        -0.00010991990998988235,
+        4.7259707453585666e-05
+      ],
+      "same_sign": "False"
+    },
+    {
+      "comparison": "M3_GEOMETRY_PREV_EVENT_DURATION_PATH - M0_CURRENT_GEOMETRY",
+      "tb2_delta": -0.007038889070787387,
+      "tb3_delta": -0.007933953111751239,
+      "tb2_ci": [
+        -0.00914205215338211,
+        -0.004970167322220971
+      ],
+      "tb3_ci": [
+        -0.010398832717616767,
+        -0.005532475562751181
+      ],
+      "same_sign": "True"
+    }
+  ],
+  "by_symbol": {
+    "n_symbol": 15,
+    "n_delta_M1_M0_negative": 15,
+    "n_delta_M1_M0_positive": 0,
+    "n_delta_M3_M2_negative": 11,
+    "n_delta_M3_M2_positive": 4
+  },
+  "bootstrap_seed": 20260915,
+  "bootstrap_reps": 1000,
+  "repl0_sample_key_sha256": "ddf034ed30a90597aa86dbad71d6397b1934d532afb348b8a93b406984787c12",
+  "timing": {
+    "load_seconds": 11.06,
+    "episode_extend_seconds": 0.9,
+    "sample_seconds": 3.88,
+    "feature_seconds": 0.84,
+    "fit_seconds": 0.84,
+    "bootstrap_seconds": 0.06,
+    "total_seconds": 17.91
+  },
+  "interpretation_limits": "REPL-0 only replicates frozen EPISODE-0 / PATH-0 definitions on TB3. It does NOT establish SMC validity, path-signature value, event sequencing, latent state, tradability or RL. TB3 is spent after this run; TB4 remains final holdout.",
+  "REPL_A_prev_endpoint": "PREV_ENDPOINT_INCREMENT_REPLICATED",
+  "REPL_B_path_morphology": "PATH_MORPHOLOGY_STILL_UNCONFIRMED",
+  "REPL_C_duration": "DURATION_EFFECT_NOT_ESTABLISHED"
+}
