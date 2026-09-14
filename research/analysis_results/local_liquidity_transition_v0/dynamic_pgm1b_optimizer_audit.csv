@@ -1,0 +1,15 @@
+window,part,model,success,elapsed_seconds
+A_TB1_to_TB2,terminal,TP_FROZEN_PTc,True,3.753
+A_TB1_to_TB2,terminal,T0_STATE_AVAIL,True,4.22
+A_TB1_to_TB2,terminal,T1_STATE_PHI,True,4.293
+A_TB1_to_TB2,terminal,T2_STATE_PHI_MEM,True,5.704
+A_TB1_to_TB2,reset,R0_ENDPOINT_ONLY,True,0.159
+A_TB1_to_TB2,reset,R1_STATE_PHI,True,0.52
+A_TB1_to_TB2,reset,R2_STATE_PHI_MEM,True,0.474
+B_TB1TB2_to_TB3,terminal,TP_FROZEN_PTc,True,8.434
+B_TB1TB2_to_TB3,terminal,T0_STATE_AVAIL,True,8.42
+B_TB1TB2_to_TB3,terminal,T1_STATE_PHI,True,10.162
+B_TB1TB2_to_TB3,terminal,T2_STATE_PHI_MEM,True,10.381
+B_TB1TB2_to_TB3,reset,R0_ENDPOINT_ONLY,True,0.227
+B_TB1TB2_to_TB3,reset,R1_STATE_PHI,True,1.301
+B_TB1TB2_to_TB3,reset,R2_STATE_PHI_MEM,True,1.258

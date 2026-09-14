@@ -1,0 +1,33 @@
+{
+  "frozen": {
+    "A_TB1_to_TB2": {
+      "hazard_nll": 0.32684498811981755,
+      "endpoint_joint_nll": 1.1485103775491436,
+      "mean_episode_nll": 4.2803285435813
+    },
+    "B_TB1TB2_to_TB3": {
+      "hazard_nll": 0.33178405258140786,
+      "endpoint_joint_nll": 1.1698024167403347,
+      "mean_episode_nll": 4.299368968756157
+    }
+  },
+  "windows": {
+    "A_TB1_to_TB2": {
+      "abs_diff": {
+        "hazard_nll": 0.0,
+        "endpoint_joint_nll": 0.0,
+        "mean_episode_nll": 0.0
+      },
+      "ok": true
+    },
+    "B_TB1TB2_to_TB3": {
+      "abs_diff": {
+        "hazard_nll": 0.0,
+        "endpoint_joint_nll": 0.0,
+        "mean_episode_nll": 0.0
+      },
+      "ok": true
+    }
+  },
+  "ok": true
+}

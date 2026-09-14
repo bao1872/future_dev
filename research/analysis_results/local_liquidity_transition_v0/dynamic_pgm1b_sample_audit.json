@@ -1,0 +1,13 @@
+{
+  "n_rows": 359714,
+  "n_episodes": 37987,
+  "n_terminals": 37987,
+  "episode_identity_hash": "cf840a7191e0265e31442f7b8d8d5ae4173751b0cba15729f95d5c146ab9355c",
+  "no_tb4": true,
+  "first_row_is_start_bar_ok": 1,
+  "blocks": {
+    "TB1": 114978,
+    "TB2": 124556,
+    "TB3": 120180
+  }
+}
