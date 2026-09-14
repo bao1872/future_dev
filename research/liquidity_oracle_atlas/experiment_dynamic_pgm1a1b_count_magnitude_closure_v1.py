@@ -1782,7 +1782,7 @@ def main():
             target="P(S_{t+1} | S_t, H_{t+1}=0)",
             count_magnitude_closure="P(A|S) = P(A>0|S) * P(A|A>0); occurrence state-dependent Logistic; magnitude state-independent train-constant exact ZTP",
             predicted_innovations=dict(
-                nodes=[n for n, _ in NODE_SPECS],
+                nodes=[row[0] for row in NODE_SPECS],
                 z_columns=ALL_Z_COLS,
                 discrete="deterministic derived state; stochastic node removed",
                 count_increments=COUNT_Z,
