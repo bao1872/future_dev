@@ -115,8 +115,16 @@ def group_min_activation_in(grp, g: int, lo: int, hi: int) -> int:
 def build_episodes_symbol(sym: str, seq: dict, grp: dict, high: np.ndarray,
                           low: np.ndarray, disc: np.ndarray,
                           close: np.ndarray, block_of_bar: np.ndarray,
-                          analysis_end: int):
-    """forward state machine：每根 bar 最多被访问一次，episodes 不重叠。"""
+                          bar_end_time: np.ndarray, analysis_end: int):
+    """forward state machine：每根 bar 最多被访问一次，episodes 不重叠。
+
+    终点 / gap 规则（本轮 closure 修正）：
+      * analysis_end censor 后 **直接终止** 该 symbol，不再 chain；
+      * start 必须留有未来 increment（cursor < analysis_end）；
+      * discontinuity censor 后下一次 search 从 discontinuity bar d 开始，
+        increment (d-1, d] 归 DISCONTINUITY_GAP 且必须 unowned；
+      * 任何 episode 必须 duration > 0。
+    """
     ug = seq["upper_group"]
     dg = seq["lower_group"]
     upx = seq["upper_price"]
@@ -127,17 +135,22 @@ def build_episodes_symbol(sym: str, seq: dict, grp: dict, high: np.ndarray,
     owner = np.full(n, -1, dtype=np.int64)   # owner[j] for increment (j-1, j]
     episodes = []
     owned = 0
-    gap_bars_total = 0
-    gap_list = []
+
+    def valid_pair(i: int) -> bool:
+        return bool(ug[i] >= 0 and dg[i] >= 0
+                    and upx[i] > close[i] and dnx[i] < close[i])
 
     def next_disc_after(i: int) -> int:
         k = np.searchsorted(disc_idx, i, side="right")
         return int(disc_idx[k]) if k < len(disc_idx) else -1
 
-    pending_gap = 0
+    prev_end = 0          # 上一个 episode 的 end（第一个 episode 前视作 bar 0）
     cursor = 0
     while cursor <= analysis_end:
-        if ug[cursor] < 0 or dg[cursor] < 0:
+        # 没有未来 increment 的 bar 不得独立形成 episode
+        if cursor >= analysis_end:
+            break
+        if not valid_pair(cursor):
             cursor += 1
             continue
         s = cursor
@@ -145,13 +158,14 @@ def build_episodes_symbol(sym: str, seq: dict, grp: dict, high: np.ndarray,
         s_dn = int(dg[s])
         s_upx = float(upx[s])
         s_dnx = float(dnx[s])
-        if not (s_upx > close[s] and s_dnx < close[s]):
-            cursor += 1
-            continue
 
         limit_disc = next_disc_after(s)      # exclusive end of this segment
         scan_hi = analysis_end if limit_disc < 0 else min(analysis_end,
                                                           limit_disc - 1)
+        if scan_hi < s + 1:
+            cursor += 1                      # 不可能产生 duration > 0
+            continue
+
         e = -1
         mask = 0
         new_up_g = -1
@@ -196,10 +210,11 @@ def build_episodes_symbol(sym: str, seq: dict, grp: dict, high: np.ndarray,
             j += 1
         if e < 0:
             censor_end = True
-            e = scan_hi if scan_hi >= s else s
-        if (not censor_end) and (not censor_disc) and e <= s:
+            e = scan_hi
+        if e <= s:
             raise SystemExit(
-                f"STOP_EPISODE0_ZERO_LENGTH: {sym} start={s} end={e}")
+                "STOP_EPISODE0_NONPOSITIVE_DURATION: "
+                f"{sym} start={s} end={e}")
 
         for k in range(s + 1, e + 1):
             if owner[k] != -1:
@@ -212,6 +227,7 @@ def build_episodes_symbol(sym: str, seq: dict, grp: dict, high: np.ndarray,
         episodes.append(dict(
             episode_id=len(episodes), symbol=sym,
             start_bar=s, end_bar=e, duration_bars=int(e - s),
+            start_time=bar_end_time[s], end_time=bar_end_time[e],
             start_block=str(block_of_bar[s]), end_block=str(block_of_bar[e]),
             start_close=float(close[s]), end_close=float(close[e]),
             start_upper_group=s_up, start_lower_group=s_dn,
@@ -225,7 +241,8 @@ def build_episodes_symbol(sym: str, seq: dict, grp: dict, high: np.ndarray,
             new_lower_inward=bool(mask & BIT_NEW_LOWER_INWARD),
             censor_analysis_end=bool(mask == 0 and censor_end),
             censor_discontinuity=bool(mask == 0 and censor_disc),
-            gap_bars_before_episode=int(pending_gap),
+            gap_bars_before_episode=int(s - prev_end),
+            gap_bars_after_episode=0,
             new_upper_group=new_up_g, new_lower_group=new_dn_g,
             new_upper_activation_min_bar=(
                 group_min_activation_in(grp, new_up_g, s, e)
@@ -234,28 +251,71 @@ def build_episodes_symbol(sym: str, seq: dict, grp: dict, high: np.ndarray,
                 group_min_activation_in(grp, new_dn_g, s, e)
                 if new_dn_g >= 0 else -1),
         ))
+        prev_end = e
 
-        # ---- 下一 episode：从 e 开始；若无合法双边 pair 则向前找，记 gap ----
-        # 零长度 censored episode（e == s）必须至少前进一根 bar，避免死循环。
-        q = e if e > s else e + 1
-        while q <= analysis_end and (ug[q] < 0 or dg[q] < 0
-                                     or not (upx[q] > close[q]
-                                             and dnx[q] < close[q])):
+        # ---- analysis-end censor：终止该 symbol，不再 chain ----
+        if censor_end:
+            episodes[-1]["gap_bars_after_episode"] = int(analysis_end - e)
+            break
+
+        # ---- 寻找下一个合法 start ----
+        # discontinuity censor：下一次 search 至少从 discontinuity bar d 开始，
+        # 因此 increment (e, d] 归 gap（其中 crossing increment 属
+        # DISCONTINUITY_GAP）。
+        q = int(limit_disc) if censor_disc else e
+        while q <= analysis_end and not valid_pair(q):
             q += 1
-        gap = q - e
-        pending_gap = int(gap)
-        if gap > 0:
-            gap_bars_total += gap
-            gap_list.append(int(gap))
+        if q <= analysis_end:
+            episodes[-1]["gap_bars_after_episode"] = int(q - e)
+        else:
+            episodes[-1]["gap_bars_after_episode"] = int(analysis_end - e)
         if q > analysis_end:
             break
-        if q <= cursor:                      # 安全：cursor 必须严格前进
-            q = cursor + 1
-            if q > analysis_end:
-                break
         cursor = q
 
-    return episodes, owner, owned, gap_bars_total, gap_list
+    # ------------------------------------------------------------------
+    # explicit gap accounting（四类必须精确覆盖所有 unowned increments）
+    # ------------------------------------------------------------------
+    idx = np.arange(1, analysis_end + 1, dtype=np.int64)
+    unowned = owner[1:analysis_end + 1] == -1 if analysis_end >= 1 else \
+        np.zeros(0, dtype=bool)
+    disc_gap = unowned & disc[1:analysis_end + 1] if analysis_end >= 1 else \
+        np.zeros(0, dtype=bool)
+    rest = unowned & ~disc_gap
+    if episodes:
+        first_start = int(episodes[0]["start_bar"])
+        last_end = int(episodes[-1]["end_bar"])
+    else:
+        first_start = analysis_end + 1
+        last_end = 0
+    init_gap = rest & (idx <= first_start)
+    term_gap = rest & ~init_gap & (idx > last_end)
+    inter_gap = rest & ~init_gap & ~term_gap
+
+    # discontinuity crossing increment 必须 unowned
+    for d in disc_idx:
+        if 1 <= int(d) <= analysis_end and owner[int(d)] != -1:
+            raise SystemExit(
+                "STOP_EPISODE0_OVERLAPPING_INCREMENT: discontinuity crossing "
+                f"increment {d} owned by episode {owner[int(d)]}")
+
+    stats = dict(
+        analysis_end=int(analysis_end),
+        owned=int(owned),
+        n_gap=int(unowned.sum()),
+        n_initial_gap=int(init_gap.sum()),
+        n_inter_episode_gap=int(inter_gap.sum()),
+        n_discontinuity_gap=int(disc_gap.sum()),
+        n_terminal_gap=int(term_gap.sum()),
+        n_episodes=len(episodes),
+    )
+    if (stats["n_initial_gap"] + stats["n_inter_episode_gap"]
+            + stats["n_discontinuity_gap"] + stats["n_terminal_gap"]) \
+            != stats["n_gap"]:
+        raise SystemExit(
+            "STOP_EPISODE0_GAP_ACCOUNTING_MISMATCH: "
+            f"{stats}")
+    return episodes, owner, stats
 
 
 # ===========================================================================
@@ -278,6 +338,7 @@ def main():
     timing["cache_load_seconds"] = round(time.perf_counter() - t0_, 2)
 
     # ---------------- frozen LOCAL-0 pair-key parity guard ----------------
+    t_parity = time.perf_counter()
     mism = 0
     for s in symbols:
         c = pd.read_parquet(CACHE / f"local0_samples_{s}.parquet")
@@ -294,10 +355,12 @@ def main():
     print(f"[PARITY] pair-key mismatches = {mism}")
     if mism:
         raise SystemExit("STOP_EPISODE0_PAIR_SEQUENCE_INCOMPATIBLE")
+    timing["parity_seconds"] = round(time.perf_counter() - t_parity, 2)
 
+    t_build = time.perf_counter()
     all_eps = []
     all_owner = {}
-    gap_lists = {}
+    sym_stats = {}
     for s in symbols:
         seq, grp = load_seq(s)
         bars = bars_by_sym[s]
@@ -308,31 +371,74 @@ def main():
         if not ok.any():
             continue
         analysis_end = int(np.flatnonzero(ok)[-1])
-        eps, owner, owned, gap_tot, gaps = build_episodes_symbol(
+        bar_end_time = np.asarray(bars["t"]).astype("datetime64[ns]") \
+            + np.timedelta64(5, "m")
+        eps, owner, st = build_episodes_symbol(
             s, seq, grp,
             np.asarray(bars["h"], float), np.asarray(bars["l"], float),
             np.asarray(bars["disc"], bool), np.asarray(bars["c"], float),
-            block_of_bar, analysis_end)
+            block_of_bar, bar_end_time, analysis_end)
         for e in eps:
             e["crosses_tb1_tb2"] = bool(e["start_block"] == TRAIN_BLOCK
                                         and e["end_block"] == TEST_BLOCK)
             e["symbol_analysis_end"] = analysis_end
+        # G: CENSOR_ANALYSIS_END 必须是该 symbol 的最后一条 episode
+        cens_idx = [i for i, e in enumerate(eps) if e["censor_analysis_end"]]
+        if cens_idx and cens_idx[-1] != len(eps) - 1:
+            raise SystemExit(
+                "STOP_EPISODE0_TERMINAL_CENSOR_NOT_LAST: "
+                f"{s} censored_at={cens_idx} n_episodes={len(eps)}")
+        # H: CENSOR_DISCONTINUITY 后下一 start 必须 >= discontinuity bar
+        d_idx = np.flatnonzero(np.asarray(bars["disc"], bool))
+        for i, e in enumerate(eps):
+            if e["censor_discontinuity"] and i + 1 < len(eps):
+                k = np.searchsorted(d_idx, e["end_bar"], side="right")
+                d = int(d_idx[k]) if k < len(d_idx) else -1
+                if d >= 0 and eps[i + 1]["start_bar"] < d:
+                    raise SystemExit(
+                        "STOP_EPISODE0_DISCONTINUITY_CHAINING: "
+                        f"{s} next_start={eps[i+1]['start_bar']} d={d}")
         all_eps += eps
         all_owner[s] = owner
-        gap_lists[s] = (owned, analysis_end, gaps)
+        sym_stats[s] = st
 
     ep = pd.DataFrame(all_eps)
-    timing["episode_build_seconds"] = round(time.perf_counter() - t0_, 2)
+    timing["episode_build_seconds"] = round(time.perf_counter() - t_build, 2)
 
-    n_analysis_bars = int(sum(a for _, a, _ in gap_lists.values()))
-    n_owned = int(sum(o for o, _, _ in gap_lists.values()))
-    n_gap = int(n_analysis_bars - n_owned)
-    # increment 重复占用：builder 内每次写入前 hard assert owner == -1，
-    # 因此每根 bar 的 increment owner count 恒为 1。这里再做一次长度一致校验。
+    # ---------------- hard guards ----------------
+    n_analysis_increments = int(sum(v["analysis_end"]
+                                    for v in sym_stats.values()))
+    n_owned = int(sum(v["owned"] for v in sym_stats.values()))
+    n_gap = int(sum(v["n_gap"] for v in sym_stats.values()))
+    # D: owned + gap == analysis increments
+    if n_owned + n_gap != n_analysis_increments:
+        raise SystemExit(
+            "STOP_EPISODE0_GAP_ACCOUNTING_MISMATCH: owned+gap != analysis "
+            f"({n_owned}+{n_gap}!={n_analysis_increments})")
+    # A: 所有 episode duration > 0
+    if len(ep) and int((ep["duration_bars"] <= 0).sum()):
+        raise SystemExit(
+            "STOP_EPISODE0_NONPOSITIVE_DURATION: "
+            f"{int((ep['duration_bars'] <= 0).sum())} episodes")
+    # C: sum(duration) == owned increments
     if int(ep["duration_bars"].sum()) != n_owned:
         raise SystemExit(
             "STOP_EPISODE0_OVERLAPPING_INCREMENT: sum(duration) != owned")
-    coverage_rate = float(n_owned) / max(n_analysis_bars, 1)
+    # E: 四类 gap 精确加总
+    gap_total = dict(
+        initial=int(sum(v["n_initial_gap"] for v in sym_stats.values())),
+        inter=int(sum(v["n_inter_episode_gap"] for v in sym_stats.values())),
+        disc=int(sum(v["n_discontinuity_gap"] for v in sym_stats.values())),
+        terminal=int(sum(v["n_terminal_gap"] for v in sym_stats.values())),
+    )
+    if sum(gap_total.values()) != n_gap:
+        raise SystemExit(
+            "STOP_EPISODE0_GAP_ACCOUNTING_MISMATCH: "
+            f"{gap_total} sum={sum(gap_total.values())} != {n_gap}")
+    # F: 没有任何 endpoint 超过 TB2 analysis cutoff
+    if len(ep) and int((ep["end_bar"] > ep["symbol_analysis_end"]).sum()):
+        raise SystemExit("STOP_EPISODE0_BLOCK_LEAK: endpoint after cutoff")
+    coverage_rate = float(n_owned) / max(n_analysis_increments, 1)
 
     # ---------------- TB boundary audit ----------------
     bad = ep[(~ep["start_block"].isin([TRAIN_BLOCK, TEST_BLOCK]))
@@ -372,7 +478,7 @@ def main():
     ep.to_parquet(CACHE / "episode0_episodes.parquet", index=False)
 
     # ---------------- analysis / outputs ----------------
-    t0_ = time.perf_counter()
+    t_audit = time.perf_counter()
     n_ep = int(len(ep))
     dur = ep["duration_bars"].to_numpy()
 
@@ -437,28 +543,80 @@ def main():
     up_ch = (ep["start_upper_group"] != ep["end_upper_group"]).to_numpy()
     dn_ch = (ep["start_lower_group"] != ep["end_lower_group"]).to_numpy()
     one_ch = (up_ch ^ dn_ch)
-    gap_col = ep["gap_bars_before_episode"].to_numpy()
+    # ---------------- gap audit（四类精确加总 + episode 间 gap 分布） ----
+    inter_gap = []
+    sym_gap_rows = []
+    for s, g in ep.groupby("symbol"):
+        gb = g["gap_bars_before_episode"].to_numpy(np.int64)
+        ga = g["gap_bars_after_episode"].to_numpy(np.int64)
+        inter_gap += list(gb[1:])
+        st = sym_stats[s]
+        sym_gap_rows.append(dict(
+            symbol=s,
+            n_episodes=int(len(g)),
+            analysis_increments=st["analysis_end"],
+            owned_increments=st["owned"],
+            initial_gap_increments=st["n_initial_gap"],
+            inter_episode_gap_increments=st["n_inter_episode_gap"],
+            discontinuity_gap_increments=st["n_discontinuity_gap"],
+            terminal_gap_increments=st["n_terminal_gap"],
+            gap_increments_total=st["n_gap"],
+            accounting_difference=int(
+                st["n_gap"] - st["n_initial_gap"] - st["n_inter_episode_gap"]
+                - st["n_discontinuity_gap"] - st["n_terminal_gap"]),
+            n_episode_pairs_contiguous=int((gb[1:] == 0).sum()),
+            initial_gap_bars=int(gb[0]) if len(gb) else st["analysis_end"],
+            terminal_gap_bars=int(ga[-1]) if len(ga) else st["analysis_end"],
+        ))
+    gap_df = pd.DataFrame(sym_gap_rows)
+    total_row = dict(
+        symbol="TOTAL", n_episodes=int(gap_df["n_episodes"].sum()),
+        analysis_increments=n_analysis_increments,
+        owned_increments=n_owned,
+        initial_gap_increments=gap_total["initial"],
+        inter_episode_gap_increments=gap_total["inter"],
+        discontinuity_gap_increments=gap_total["disc"],
+        terminal_gap_increments=gap_total["terminal"],
+        gap_increments_total=n_gap,
+        accounting_difference=int(gap_df["accounting_difference"].sum()),
+        n_episode_pairs_contiguous=int(
+            gap_df["n_episode_pairs_contiguous"].sum()),
+        initial_gap_bars=int(gap_df["initial_gap_bars"].sum()),
+        terminal_gap_bars=int(gap_df["terminal_gap_bars"].sum()),
+    )
+    gap_df = pd.concat([gap_df, pd.DataFrame([total_row])],
+                       ignore_index=True)
+    gap_df.to_csv(OUT / "episode0_gap_audit.csv", index=False)
+
+    ia = np.array(inter_gap, dtype=np.int64)
     gap_audit = dict(
-        n_episodes=n_ep,
-        n_end_has_immediate_pair=int((gap_col == 0).sum()),
-        n_end_needs_gap=int((gap_col > 0).sum()),
-        gap_bars_mean=float(gap_col.mean()),
-        gap_bars_p50=float(np.percentile(gap_col, 50)),
-        gap_bars_p90=float(np.percentile(gap_col, 90)),
-        gap_bars_max=int(gap_col.max()),
-        total_gap_bars=int(gap_col.sum()),
+        n_gap_increments_total=n_gap,
+        initial_gap_increments=gap_total["initial"],
+        inter_episode_gap_increments=gap_total["inter"],
+        discontinuity_gap_increments=gap_total["disc"],
+        terminal_gap_increments=gap_total["terminal"],
+        accounting_difference=int(n_gap - sum(gap_total.values())),
+        n_episode_transitions_immediate=int((ia == 0).sum()) if len(ia) else 0,
+        n_episode_transitions_with_gap=int((ia > 0).sum()) if len(ia) else 0,
+        inter_episode_gap_mean=float(ia.mean()) if len(ia) else 0.0,
+        inter_episode_gap_p50=float(np.percentile(ia, 50)) if len(ia) else 0.0,
+        inter_episode_gap_p90=float(np.percentile(ia, 90)) if len(ia) else 0.0,
+        inter_episode_gap_p99=float(np.percentile(ia, 99)) if len(ia) else 0.0,
+        inter_episode_gap_max=int(ia.max()) if len(ia) else 0,
+        n_episode_pairs_contiguous=int((ia == 0).sum()) if len(ia) else 0,
         start_pair_equal_end=int(same.sum()),
         one_side_changed=int(one_ch.sum()),
         both_sides_changed=int((up_ch & dn_ch).sum()),
+        note=("inter-episode gap distribution is over episode-to-episode "
+              "intervals (bars); the four family counters are increment "
+              "counts and are the exact partition of all gap increments"),
     )
-    pd.DataFrame([gap_audit]).to_csv(OUT / "episode0_gap_audit.csv",
-                                     index=False)
 
-    timing["audit_seconds"] = round(time.perf_counter() - t0_, 2)
+    timing["audit_seconds"] = round(time.perf_counter() - t_audit, 2)
     timing["total_seconds"] = round(time.perf_counter() - t_total, 2)
-    timing["bars_processed"] = int(n_analysis_bars)
-    timing["bars_per_second"] = float(
-        n_analysis_bars / max(timing["episode_build_seconds"], 1e-9))
+    timing["increments_processed"] = int(n_analysis_increments)
+    timing["increments_per_second"] = float(
+        n_analysis_increments / max(timing["episode_build_seconds"], 1e-9))
 
     # ---------------- episode key hash ----------------
     key = (ep["symbol"].astype(str) + "|" + ep["start_bar"].astype(str) + "|"
@@ -478,8 +636,12 @@ def main():
                                         "ACTIVATION_BAR_ELIGIBILITY"],
             same_bar_ties="bitmask, intrabar order never guessed",
         ),
-        analysis_window=dict(blocks=["TB1", "TB2"], blocks_source=boundaries,
-                             tb3_tb4_read=False),
+        analysis_window=dict(
+            blocks=["TB1", "TB2"], blocks_source=boundaries,
+            tb3_tb4_used_for_episode_endpoint=False,
+            note=("raw/cache files for all blocks may be loaded, but endpoint "
+                  "scan is hard-limited to the last TB2 bar; any endpoint "
+                  "beyond the TB2 cutoff raises STOP_EPISODE0_BLOCK_LEAK")),
         n_episodes=n_ep,
         duration=dur_stats,
         same_bar_events=dict(n_single_event=n_single, n_multi_event=n_multi,
@@ -488,7 +650,7 @@ def main():
         tb_boundary_audit=tb_audit,
         gap_audit=gap_audit,
         coverage=dict(
-            n_analysis_bars=n_analysis_bars,
+            n_analysis_increments=n_analysis_increments,
             n_owned_increments=int(n_owned),
             n_gap_increments=int(n_gap),
             coverage_rate=coverage_rate,
@@ -501,14 +663,34 @@ def main():
             note="describes data volume reduction only; it is NOT a sample "
                  "independence ratio"),
         episode_key_sha256=episode_key_sha256,
+        closure_guards={
+            "A_all_duration_positive": bool(
+                n_ep == 0 or int((ep["duration_bars"] <= 0).sum()) == 0),
+            "B_max_increment_owner_le_1": True,
+            "C_sum_duration_eq_owned": bool(
+                int(ep["duration_bars"].sum()) == n_owned),
+            "D_owned_plus_gap_eq_analysis": bool(
+                n_owned + n_gap == n_analysis_increments),
+            "E_four_gap_families_exact": bool(
+                sum(gap_total.values()) == n_gap),
+            "F_no_endpoint_after_tb2_cutoff": bool(
+                n_ep == 0 or int((ep["end_bar"]
+                                  > ep["symbol_analysis_end"]).sum()) == 0),
+            "G_terminal_censor_is_last": True,
+            "H_discontinuity_chaining": True,
+        },
         timing=timing,
         interpretation_limits=(
             "EPISODE-0 only builds a non-overlapping causal structural "
             "episode sequence. It does NOT establish path memory, SMC, "
             "latent state, Semi-Markov structure, tradability or RL."),
     )
+    summary["EPISODE0_CLOSED"] = bool(
+        all(summary["closure_guards"].values()))
     (OUT / "episode0_summary.json").write_text(
         json.dumps(summary, indent=2, default=str))
+    print(f"[CLOSURE] {summary['closure_guards']}")
+    print(f"[CLOSURE] EPISODE0_CLOSED = {summary['EPISODE0_CLOSED']}")
 
     print(f"[EPISODES] n={n_ep}")
     print(f"[DURATION] {dur_stats}")
@@ -516,8 +698,8 @@ def main():
     print(pd.DataFrame(fam_rows).to_string(index=False))
     print(f"[SAME-BAR] single={n_single} multi={n_multi} "
           f"rate={n_multi / max(n_ep, 1):.4f}")
-    print(f"[COVERAGE] bars={n_analysis_bars} owned={n_owned} gap={n_gap} "
-          f"rate={coverage_rate:.4f}")
+    print(f"[COVERAGE] increments={n_analysis_increments} owned={n_owned} "
+          f"gap={n_gap} rate={coverage_rate:.4f}")
     print(f"[TB] {tb_audit}")
     print(f"[GAP] {gap_audit}")
     print(f"[KEY] {episode_key_sha256}")

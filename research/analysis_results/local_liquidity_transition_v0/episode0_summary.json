@@ -47,12 +47,13 @@
         "n_days": 101
       }
     ],
-    "tb3_tb4_read": false
+    "tb3_tb4_used_for_episode_endpoint": false,
+    "note": "raw/cache files for all blocks may be loaded, but endpoint scan is hard-limited to the last TB2 bar; any endpoint beyond the TB2 cutoff raises STOP_EPISODE0_BLOCK_LEAK"
   },
-  "n_episodes": 25287,
+  "n_episodes": 25273,
   "duration": {
-    "n_episodes": 25287,
-    "mean": 9.484478190374501,
+    "n_episodes": 25273,
+    "mean": 9.489732125192894,
     "p50": 7.0,
     "p75": 13.0,
     "p90": 18.0,
@@ -63,55 +64,62 @@
   "same_bar_events": {
     "n_single_event": 17605,
     "n_multi_event": 7655,
-    "multi_event_rate": 0.3027247202119666
+    "multi_event_rate": 0.3028924148300558
   },
   "endpoint_family": {
     "PENETRATION_ONLY": {
       "family": "PENETRATION_ONLY",
       "n": 12403,
-      "rate": 0.49048918416577686
+      "rate": 0.4907608910695208
     },
     "NEW_ACTIVATION_ONLY": {
       "family": "NEW_ACTIVATION_ONLY",
       "n": 10483,
-      "rate": 0.41456084153913075
+      "rate": 0.41479048787243306
     },
     "PENETRATION_PLUS_NEW_ACTIVATION": {
       "family": "PENETRATION_PLUS_NEW_ACTIVATION",
       "n": 2374,
-      "rate": 0.09388223197690512
+      "rate": 0.09393423811973252
     },
     "CENSOR": {
       "family": "CENSOR",
-      "n": 27,
-      "rate": 0.0010677423181872107
+      "n": 13,
+      "rate": 0.0005143829383136154
     },
     "BOTH_PENETRATION_subset": {
       "family": "BOTH_PENETRATION_subset",
       "n": 4,
-      "rate": 0.00015818404713884604
+      "rate": 0.00015827167332726626
     }
   },
   "tb_boundary_audit": {
     "episodes_start_TB1": 12261,
-    "episodes_start_TB2": 13026,
+    "episodes_start_TB2": 13012,
     "episodes_cross_TB1_to_TB2": 14
   },
   "gap_audit": {
-    "n_episodes": 25287,
-    "n_end_has_immediate_pair": 24761,
-    "n_end_needs_gap": 526,
-    "gap_bars_mean": 0.5075335152449876,
-    "gap_bars_p50": 0.0,
-    "gap_bars_p90": 0.0,
-    "gap_bars_max": 162,
-    "total_gap_bars": 12834,
-    "start_pair_equal_end": 84,
+    "n_gap_increments_total": 13087,
+    "initial_gap_increments": 237,
+    "inter_episode_gap_increments": 12834,
+    "discontinuity_gap_increments": 0,
+    "terminal_gap_increments": 16,
+    "accounting_difference": 0,
+    "n_episode_transitions_immediate": 24732,
+    "n_episode_transitions_with_gap": 526,
+    "inter_episode_gap_mean": 0.5081162403990814,
+    "inter_episode_gap_p50": 0.0,
+    "inter_episode_gap_p90": 0.0,
+    "inter_episode_gap_p99": 18.0,
+    "inter_episode_gap_max": 162,
+    "n_episode_pairs_contiguous": 24732,
+    "start_pair_equal_end": 70,
     "one_side_changed": 17700,
-    "both_sides_changed": 7503
+    "both_sides_changed": 7503,
+    "note": "inter-episode gap distribution is over episode-to-episode intervals (bars); the four family counters are increment counts and are the exact partition of all gap increments"
   },
   "coverage": {
-    "n_analysis_bars": 252921,
+    "n_analysis_increments": 252921,
     "n_owned_increments": 239834,
     "n_gap_increments": 13087,
     "coverage_rate": 0.948256570233393,
@@ -120,18 +128,30 @@
   },
   "compression": {
     "old_decision_state_windows": 239510,
-    "new_episodes": 25287,
-    "compression_ratio": 9.471665282556254,
+    "new_episodes": 25273,
+    "compression_ratio": 9.476912119653385,
     "note": "describes data volume reduction only; it is NOT a sample independence ratio"
   },
-  "episode_key_sha256": "7bc2a8204f5959abe18d30fdc199bd18fbc15e9ba79bf35df5edc0dfe8853e37",
-  "timing": {
-    "cache_load_seconds": 9.3,
-    "episode_build_seconds": 10.17,
-    "audit_seconds": 0.04,
-    "total_seconds": 10.71,
-    "bars_processed": 252921,
-    "bars_per_second": 24869.321533923303
+  "episode_key_sha256": "cf840a7191e0265e31442f7b8d8d5ae4173751b0cba15729f95d5c146ab9355c",
+  "closure_guards": {
+    "A_all_duration_positive": true,
+    "B_max_increment_owner_le_1": true,
+    "C_sum_duration_eq_owned": true,
+    "D_owned_plus_gap_eq_analysis": true,
+    "E_four_gap_families_exact": true,
+    "F_no_endpoint_after_tb2_cutoff": true,
+    "G_terminal_censor_is_last": true,
+    "H_discontinuity_chaining": true
   },
-  "interpretation_limits": "EPISODE-0 only builds a non-overlapping causal structural episode sequence. It does NOT establish path memory, SMC, latent state, Semi-Markov structure, tradability or RL."
+  "timing": {
+    "cache_load_seconds": 8.94,
+    "parity_seconds": 0.23,
+    "episode_build_seconds": 0.54,
+    "audit_seconds": 0.03,
+    "total_seconds": 10.23,
+    "increments_processed": 252921,
+    "increments_per_second": 468372.2222222222
+  },
+  "interpretation_limits": "EPISODE-0 only builds a non-overlapping causal structural episode sequence. It does NOT establish path memory, SMC, latent state, Semi-Markov structure, tradability or RL.",
+  "EPISODE0_CLOSED": true
 }
