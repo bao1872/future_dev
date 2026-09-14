@@ -1,0 +1,21 @@
+{
+  "n_episodes_total": 25273,
+  "n_contiguous_episode_pairs": 24732,
+  "train_candidates": 11813,
+  "test_candidates": 12905,
+  "n_after_censor_and_block_exclusion": 24705,
+  "excluded_target_censor": 13,
+  "excluded_cross_block_target": 14,
+  "excluded_invalid_current_atr": 0,
+  "excluded_invalid_prev_atr": 0,
+  "n_train_final": 11813,
+  "n_test_final": 12892,
+  "n_test_prev_crosses_tb1_tb2": 14,
+  "n_unique_sample_keys": 24705,
+  "n_unique_episode_pairs": 24705,
+  "exclusion_priority": [
+    "cross_block_target",
+    "target_censor",
+    "invalid_atr"
+  ]
+}

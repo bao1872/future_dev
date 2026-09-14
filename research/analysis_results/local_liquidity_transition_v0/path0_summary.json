@@ -1,0 +1,337 @@
+{
+  "experiment": "PATH-0 simple episode path memory",
+  "base": "930b595c1aa2580d96c4c12444b70c2f0030fb73",
+  "frozen_episode_hash": "cf840a7191e0265e31442f7b8d8d5ae4173751b0cba15729f95d5c146ab9355c",
+  "recomputed_episode_hash": "cf840a7191e0265e31442f7b8d8d5ae4173751b0cba15729f95d5c146ab9355c",
+  "primary_question": "does previous completed episode simple price-path morphology add stable TB1->TB2 OOS information about the next episode structural endpoint bits, given current geometry, previous endpoint event and previous duration?",
+  "model_layers": {
+    "M0_CURRENT_GEOMETRY": [
+      "current geometry"
+    ],
+    "M1_GEOMETRY_PREV_EVENT": [
+      "+ prev_event_mask one-hot"
+    ],
+    "M2_GEOMETRY_PREV_EVENT_DURATION": [
+      "+ prev_duration_bars"
+    ],
+    "M3_GEOMETRY_PREV_EVENT_DURATION_PATH": [
+      "+ 14 prev path morphology features"
+    ]
+  },
+  "feature_names": {
+    "M0_CURRENT_GEOMETRY": {
+      "numeric": [
+        "cur_up_distance_R",
+        "cur_down_distance_R",
+        "cur_width_R",
+        "cur_log_distance_ratio"
+      ],
+      "categorical": []
+    },
+    "M1_GEOMETRY_PREV_EVENT": {
+      "numeric": [
+        "cur_up_distance_R",
+        "cur_down_distance_R",
+        "cur_width_R",
+        "cur_log_distance_ratio"
+      ],
+      "categorical": [
+        "prev_event_mask"
+      ]
+    },
+    "M2_GEOMETRY_PREV_EVENT_DURATION": {
+      "numeric": [
+        "cur_up_distance_R",
+        "cur_down_distance_R",
+        "cur_width_R",
+        "cur_log_distance_ratio",
+        "prev_duration_bars"
+      ],
+      "categorical": [
+        "prev_event_mask"
+      ]
+    },
+    "M3_GEOMETRY_PREV_EVENT_DURATION_PATH": {
+      "numeric": [
+        "cur_up_distance_R",
+        "cur_down_distance_R",
+        "cur_width_R",
+        "cur_log_distance_ratio",
+        "prev_duration_bars",
+        "prev_net_move_R",
+        "prev_total_variation_R",
+        "prev_signed_efficiency",
+        "prev_range_R",
+        "prev_max_up_excursion_R",
+        "prev_max_down_excursion_R",
+        "prev_direction_change_rate",
+        "prev_first_half_net_R",
+        "prev_second_half_net_R",
+        "prev_close_location_in_range",
+        "prev_min_upper_high_gap_frac",
+        "prev_min_lower_low_gap_frac",
+        "prev_upper_touch_rate",
+        "prev_lower_touch_rate"
+      ],
+      "categorical": [
+        "prev_event_mask"
+      ]
+    }
+  },
+  "n_features": {
+    "M0_CURRENT_GEOMETRY": 4,
+    "M1_GEOMETRY_PREV_EVENT": 5,
+    "M2_GEOMETRY_PREV_EVENT_DURATION": 6,
+    "M3_GEOMETRY_PREV_EVENT_DURATION_PATH": 20
+  },
+  "labels": "4 independent bits (UP_PEN, DOWN_PEN, NEW_UPPER, NEW_LOWER); same-bar multi-event kept, no bullish/bearish mapping, no multiclass collapse",
+  "blocks": {
+    "boundaries": [
+      {
+        "block": "TB1",
+        "first_day": "2025-01-02",
+        "last_day": "2025-06-09",
+        "n_days": 102
+      },
+      {
+        "block": "TB2",
+        "first_day": "2025-06-10",
+        "last_day": "2025-11-06",
+        "n_days": 102
+      },
+      {
+        "block": "TB3",
+        "first_day": "2025-11-07",
+        "last_day": "2026-04-10",
+        "n_days": 102
+      },
+      {
+        "block": "TB4",
+        "first_day": "2026-04-13",
+        "last_day": "2026-09-04",
+        "n_days": 101
+      }
+    ],
+    "tb2_start": "2025-06-10",
+    "tb3_tb4_used_for_feature_label_fit_metric_bootstrap": false
+  },
+  "sample_audit": {
+    "n_episodes_total": 25273,
+    "n_contiguous_episode_pairs": 24732,
+    "train_candidates": 11813,
+    "test_candidates": 12905,
+    "n_after_censor_and_block_exclusion": 24705,
+    "excluded_target_censor": 13,
+    "excluded_cross_block_target": 14,
+    "excluded_invalid_current_atr": 0,
+    "excluded_invalid_prev_atr": 0,
+    "n_train_final": 11813,
+    "n_test_final": 12892,
+    "n_test_prev_crosses_tb1_tb2": 14,
+    "n_unique_sample_keys": 24705,
+    "n_unique_episode_pairs": 24705,
+    "exclusion_priority": [
+      "cross_block_target",
+      "target_censor",
+      "invalid_atr"
+    ]
+  },
+  "metrics": {
+    "M0_CURRENT_GEOMETRY": {
+      "n": 12892.0,
+      "prevalence": 0.32830437480608127,
+      "logloss": 0.5365384129920694,
+      "brier": 0.17880357920606776,
+      "ece": 0.05019043159743121,
+      "train_prevalence": 0.32887496825531193
+    },
+    "M1_GEOMETRY_PREV_EVENT": {
+      "n": 12892.0,
+      "prevalence": 0.32830437480608127,
+      "logloss": 0.5293842840850347,
+      "brier": 0.17668578672573482,
+      "ece": 0.030165798746937915,
+      "train_prevalence": 0.32887496825531193
+    },
+    "M2_GEOMETRY_PREV_EVENT_DURATION": {
+      "n": 12892.0,
+      "prevalence": 0.32830437480608127,
+      "logloss": 0.5297769071049641,
+      "brier": 0.17676858752797764,
+      "ece": 0.029126355791364036,
+      "train_prevalence": 0.32887496825531193
+    },
+    "M3_GEOMETRY_PREV_EVENT_DURATION_PATH": {
+      "n": 12892.0,
+      "prevalence": 0.32830437480608127,
+      "logloss": 0.5295025308012573,
+      "brier": 0.17692592780864413,
+      "ece": 0.02311373176574246,
+      "train_prevalence": 0.32887496825531193
+    },
+    "B_PRIOR": {
+      "n": 12892.0,
+      "prevalence": 0.32830437480608127,
+      "logloss": 0.6297673634694853,
+      "brier": 0.21911021076808185,
+      "ece": 0.0044705739841456316,
+      "train_prevalence": 0.32887496825531193
+    }
+  },
+  "bootstrap": [
+    {
+      "comparison": "M3_GEOMETRY_PREV_EVENT_DURATION_PATH - M2_GEOMETRY_PREV_EVENT_DURATION",
+      "role": "PRIMARY_path_morphology_given_event_duration",
+      "mean_bit_logloss_A": 0.5295025308012573,
+      "mean_bit_logloss_B": 0.5297769071049641,
+      "delta_sample_weighted": -0.00027437630370668106,
+      "delta_daily_mean": -0.000285603150414768,
+      "n_days": 102,
+      "ci_lo": -0.0009557476470100261,
+      "ci_hi": 0.0004152090356011136,
+      "verdict": "CI_contains_zero"
+    },
+    {
+      "comparison": "M1_GEOMETRY_PREV_EVENT - M0_CURRENT_GEOMETRY",
+      "role": "SECONDARY_prev_endpoint_given_geometry",
+      "mean_bit_logloss_A": 0.5293842840850347,
+      "mean_bit_logloss_B": 0.5365384129920694,
+      "delta_sample_weighted": -0.00715412890703474,
+      "delta_daily_mean": -0.007165155454171992,
+      "n_days": 102,
+      "ci_lo": -0.008842670912332002,
+      "ci_hi": -0.005595849860387131,
+      "verdict": "CI_below_zero"
+    },
+    {
+      "comparison": "M2_GEOMETRY_PREV_EVENT_DURATION - M1_GEOMETRY_PREV_EVENT",
+      "role": "SECONDARY_duration_given_endpoint",
+      "mean_bit_logloss_A": 0.5297769071049641,
+      "mean_bit_logloss_B": 0.5293842840850347,
+      "delta_sample_weighted": 0.0003926230199293023,
+      "delta_daily_mean": 0.00041186953379937334,
+      "n_days": 102,
+      "ci_lo": 0.00012208039290670023,
+      "ci_hi": 0.0006965268717406411,
+      "verdict": "CI_above_zero"
+    },
+    {
+      "comparison": "M3_GEOMETRY_PREV_EVENT_DURATION_PATH - M0_CURRENT_GEOMETRY",
+      "role": "SECONDARY_total_prev_history",
+      "mean_bit_logloss_A": 0.5295025308012573,
+      "mean_bit_logloss_B": 0.5365384129920694,
+      "delta_sample_weighted": -0.007035882190812119,
+      "delta_daily_mean": -0.007038889070787387,
+      "n_days": 102,
+      "ci_lo": -0.00914205215338211,
+      "ci_hi": -0.004970167322220971,
+      "verdict": "CI_below_zero"
+    }
+  ],
+  "primary_comparison": {
+    "comparison": "M3_GEOMETRY_PREV_EVENT_DURATION_PATH - M2_GEOMETRY_PREV_EVENT_DURATION",
+    "delta_daily_mean": -0.000285603150414768,
+    "delta_sample_weighted": -0.00027437630370668106,
+    "ci_lo": -0.0009557476470100261,
+    "ci_hi": 0.0004152090356011136,
+    "n_days": 102,
+    "bootstrap_reps": 1000,
+    "seed": 20260914,
+    "verdict": "PATH_MORPHOLOGY_INCREMENT_AMBIGUOUS"
+  },
+  "layer_audit": {
+    "M3_GEOMETRY_PREV_EVENT_DURATION_PATH - M2_GEOMETRY_PREV_EVENT_DURATION": {
+      "role": "PRIMARY_path_morphology_given_event_duration",
+      "delta_daily_mean": -0.000285603150414768,
+      "ci_lo": -0.0009557476470100261,
+      "ci_hi": 0.0004152090356011136,
+      "verdict": "CI_contains_zero"
+    },
+    "M1_GEOMETRY_PREV_EVENT - M0_CURRENT_GEOMETRY": {
+      "role": "SECONDARY_prev_endpoint_given_geometry",
+      "delta_daily_mean": -0.007165155454171992,
+      "ci_lo": -0.008842670912332002,
+      "ci_hi": -0.005595849860387131,
+      "verdict": "CI_below_zero"
+    },
+    "M2_GEOMETRY_PREV_EVENT_DURATION - M1_GEOMETRY_PREV_EVENT": {
+      "role": "SECONDARY_duration_given_endpoint",
+      "delta_daily_mean": 0.00041186953379937334,
+      "ci_lo": 0.00012208039290670023,
+      "ci_hi": 0.0006965268717406411,
+      "verdict": "CI_above_zero"
+    },
+    "M3_GEOMETRY_PREV_EVENT_DURATION_PATH - M0_CURRENT_GEOMETRY": {
+      "role": "SECONDARY_total_prev_history",
+      "delta_daily_mean": -0.007038889070787387,
+      "ci_lo": -0.00914205215338211,
+      "ci_hi": -0.004970167322220971,
+      "verdict": "CI_below_zero"
+    }
+  },
+  "per_bit_M3_minus_M2": [
+    {
+      "bit": "UP_PEN",
+      "n": 12892,
+      "prevalence": 0.29855724480297857,
+      "logloss_M2": 0.46014264411798556,
+      "logloss_M3": 0.46018321735424145,
+      "delta_M3_minus_M2": 4.057323625586865e-05,
+      "delta_daily_mean": 8.103956943967894e-05,
+      "ci_lo": -0.0008510957963344128,
+      "ci_hi": 0.000986577711764893
+    },
+    {
+      "bit": "DOWN_PEN",
+      "n": 12892,
+      "prevalence": 0.2829661805771021,
+      "logloss_M2": 0.447078009456497,
+      "logloss_M3": 0.44685309971119924,
+      "delta_M3_minus_M2": -0.00022490974529783392,
+      "delta_daily_mean": -0.0002954418247661485,
+      "ci_lo": -0.0013079604826007544,
+      "ci_hi": 0.0007118306563681307
+    },
+    {
+      "bit": "NEW_UPPER",
+      "n": 12892,
+      "prevalence": 0.3640242010549178,
+      "logloss_M2": 0.6038278608611058,
+      "logloss_M3": 0.6035286245815151,
+      "delta_M3_minus_M2": -0.0002992362795907288,
+      "delta_daily_mean": -0.0003089398793353495,
+      "ci_lo": -0.0015037689333254978,
+      "ci_hi": 0.0008785706088449458
+    },
+    {
+      "bit": "NEW_LOWER",
+      "n": 12892,
+      "prevalence": 0.3676698727893267,
+      "logloss_M2": 0.6080591139842676,
+      "logloss_M3": 0.6074451815580735,
+      "delta_M3_minus_M2": -0.0006139324261940321,
+      "delta_daily_mean": -0.0006190704669972542,
+      "ci_lo": -0.0021320440781109873,
+      "ci_hi": 0.0008319730622085242
+    }
+  ],
+  "by_symbol": {
+    "n_symbol": 15,
+    "n_delta_negative": 6,
+    "n_delta_positive": 9
+  },
+  "path0_sample_key_sha256": "45856a34a3339fe821db8292e594d9169130293fa1b0432a4997409d470c8de8",
+  "n_path_increments_scanned": 235723,
+  "timing": {
+    "cache_load_seconds": 9.14,
+    "sample_pair_seconds": 2.37,
+    "path_feature_seconds": 0.55,
+    "fit_seconds": 0.45,
+    "metric_seconds": 0.02,
+    "bootstrap_seconds": 0.06,
+    "total_seconds": 12.67
+  },
+  "calibration_note": "ECE reported only. Even if logloss improves, the model output must NOT be called a calibrated belief; calibration is a separate future experiment.",
+  "interpretation_limits": "PATH-0 only tests whether simple price-path morphology of the previous completed episode adds OOS information. It does NOT establish SMC validity, path-signature value, Semi-Markov structure, latent psychological state, tradability or RL.",
+  "PATH0_VERDICT": "PATH_MORPHOLOGY_INCREMENT_AMBIGUOUS"
+}
