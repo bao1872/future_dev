@@ -1,0 +1,3 @@
+window,gain_mz_minus_m0_rowmean,gain_reencoding_mc_minus_m0_rowmean,gain_trueinnov_mmem_minus_m0_rowmean,reencoding_share_of_mz_gain,mem_share_of_mz_gain,n_cur_encoding_columns,n_true_innovation_columns,note
+A_TB1_to_TB2,-0.4178799435992123,-0.41255266725756123,-0.0021618142897554082,0.9872516582256446,0.012748341774355331,10,6,explanatory only; component gains are not additive and row-weighted (gates use episode-weighted bootstrap)
+B_TB1TB2_to_TB3,-0.3717234646478253,-0.3679582626559859,-0.003147288496948905,0.9898709595978651,0.010129040402134894,10,6,explanatory only; component gains are not additive and row-weighted (gates use episode-weighted bootstrap)

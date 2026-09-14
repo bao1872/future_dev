@@ -1,0 +1,257 @@
+{
+  "zt_classification": {
+    "n_zt_columns": 16,
+    "n_current_state_reencoding": 10,
+    "n_true_history_innovation": 6,
+    "zt_cur_columns": [
+      "zt_z_d_up",
+      "zt_z_dcr_is0",
+      "zt_z_dcr_is1",
+      "zt_z_dcr_logit",
+      "zt_z_range_ispos",
+      "zt_z_range_log",
+      "zt_z_uresid_ispos",
+      "zt_z_uresid_log",
+      "zt_z_lresid_ispos",
+      "zt_z_lresid_log"
+    ],
+    "zt_mem_columns": [
+      "zt_z_dmfe_ispos",
+      "zt_z_dmfe_log",
+      "zt_z_dmae_ispos",
+      "zt_z_dmae_log",
+      "zt_z_delta_upper_count",
+      "zt_z_delta_lower_count"
+    ],
+    "classification": {
+      "zt_z_d_up": "CURRENT_STATE_REENCODING",
+      "zt_z_dcr_is0": "CURRENT_STATE_REENCODING",
+      "zt_z_dcr_is1": "CURRENT_STATE_REENCODING",
+      "zt_z_dcr_logit": "CURRENT_STATE_REENCODING",
+      "zt_z_range_ispos": "CURRENT_STATE_REENCODING",
+      "zt_z_range_log": "CURRENT_STATE_REENCODING",
+      "zt_z_uresid_ispos": "CURRENT_STATE_REENCODING",
+      "zt_z_uresid_log": "CURRENT_STATE_REENCODING",
+      "zt_z_lresid_ispos": "CURRENT_STATE_REENCODING",
+      "zt_z_lresid_log": "CURRENT_STATE_REENCODING",
+      "zt_z_dmfe_ispos": "TRUE_HISTORY_INNOVATION",
+      "zt_z_dmfe_log": "TRUE_HISTORY_INNOVATION",
+      "zt_z_dmae_ispos": "TRUE_HISTORY_INNOVATION",
+      "zt_z_dmae_log": "TRUE_HISTORY_INNOVATION",
+      "zt_z_delta_upper_count": "TRUE_HISTORY_INNOVATION",
+      "zt_z_delta_lower_count": "TRUE_HISTORY_INNOVATION"
+    },
+    "checks": [
+      {
+        "node": "z_d_up",
+        "zt_column": "zt_z_d_up",
+        "source": "path_last_return_R",
+        "transform": "neg",
+        "classification": "CURRENT_STATE_REENCODING",
+        "max_abs_error": 1.021405182655144e-14,
+        "exact": false
+      },
+      {
+        "node": "z_dcr",
+        "zt_column": "zt_z_dcr_is0",
+        "source": "path_direction_change_rate",
+        "transform": "id",
+        "classification": "CURRENT_STATE_REENCODING",
+        "max_abs_error": 0.0,
+        "exact": true
+      },
+      {
+        "node": "z_dcr",
+        "zt_column": "zt_z_dcr_is1",
+        "source": "path_direction_change_rate",
+        "transform": "id",
+        "classification": "CURRENT_STATE_REENCODING",
+        "max_abs_error": 0.0,
+        "exact": true
+      },
+      {
+        "node": "z_dcr",
+        "zt_column": "zt_z_dcr_logit",
+        "source": "path_direction_change_rate",
+        "transform": "id",
+        "classification": "CURRENT_STATE_REENCODING",
+        "max_abs_error": 0.0,
+        "exact": true
+      },
+      {
+        "node": "z_range",
+        "zt_column": "zt_z_range_ispos",
+        "source": "path_current_bar_range_R",
+        "transform": "id",
+        "classification": "CURRENT_STATE_REENCODING",
+        "max_abs_error": 0.0,
+        "exact": true
+      },
+      {
+        "node": "z_range",
+        "zt_column": "zt_z_range_log",
+        "source": "path_current_bar_range_R",
+        "transform": "id",
+        "classification": "CURRENT_STATE_REENCODING",
+        "max_abs_error": 0.0,
+        "exact": true
+      },
+      {
+        "node": "z_uresid",
+        "zt_column": "zt_z_uresid_ispos",
+        "source": "upper_newest_log_age_residual",
+        "transform": "id",
+        "classification": "CURRENT_STATE_REENCODING",
+        "max_abs_error": 0.0,
+        "exact": true
+      },
+      {
+        "node": "z_uresid",
+        "zt_column": "zt_z_uresid_log",
+        "source": "upper_newest_log_age_residual",
+        "transform": "id",
+        "classification": "CURRENT_STATE_REENCODING",
+        "max_abs_error": 0.0,
+        "exact": true
+      },
+      {
+        "node": "z_lresid",
+        "zt_column": "zt_z_lresid_ispos",
+        "source": "lower_newest_log_age_residual",
+        "transform": "id",
+        "classification": "CURRENT_STATE_REENCODING",
+        "max_abs_error": 0.0,
+        "exact": true
+      },
+      {
+        "node": "z_lresid",
+        "zt_column": "zt_z_lresid_log",
+        "source": "lower_newest_log_age_residual",
+        "transform": "id",
+        "classification": "CURRENT_STATE_REENCODING",
+        "max_abs_error": 0.0,
+        "exact": true
+      },
+      {
+        "node": "z_dmfe",
+        "zt_column": "zt_z_dmfe_ispos",
+        "source": "path_max_up_excursion_R - lag1_path_max_up_excursion_R",
+        "transform": "delta",
+        "classification": "TRUE_HISTORY_INNOVATION",
+        "max_abs_error": 0.0,
+        "exact": true
+      },
+      {
+        "node": "z_dmfe",
+        "zt_column": "zt_z_dmfe_log",
+        "source": "path_max_up_excursion_R - lag1_path_max_up_excursion_R",
+        "transform": "delta",
+        "classification": "TRUE_HISTORY_INNOVATION",
+        "max_abs_error": 0.0,
+        "exact": true
+      },
+      {
+        "node": "z_dmae",
+        "zt_column": "zt_z_dmae_ispos",
+        "source": "path_max_down_excursion_R - lag1_path_max_down_excursion_R",
+        "transform": "delta",
+        "classification": "TRUE_HISTORY_INNOVATION",
+        "max_abs_error": 0.0,
+        "exact": true
+      },
+      {
+        "node": "z_dmae",
+        "zt_column": "zt_z_dmae_log",
+        "source": "path_max_down_excursion_R - lag1_path_max_down_excursion_R",
+        "transform": "delta",
+        "classification": "TRUE_HISTORY_INNOVATION",
+        "max_abs_error": 0.0,
+        "exact": true
+      },
+      {
+        "node": "z_delta_upper_count",
+        "zt_column": "zt_z_delta_upper_count",
+        "source": "upper_active_identity_count_delta - lag1_upper_active_identity_count_delta",
+        "transform": "increment",
+        "classification": "TRUE_HISTORY_INNOVATION",
+        "max_abs_error": 0.0,
+        "exact": true
+      },
+      {
+        "node": "z_delta_lower_count",
+        "zt_column": "zt_z_delta_lower_count",
+        "source": "lower_active_identity_count_delta - lag1_lower_active_identity_count_delta",
+        "transform": "increment",
+        "classification": "TRUE_HISTORY_INNOVATION",
+        "max_abs_error": 0.0,
+        "exact": true
+      }
+    ],
+    "method": "deterministic algebraic audit: each column re-encoded from the frozen definitions and compared by exact equality; no statistical screening, no feature selection"
+  },
+  "sample": {
+    "n_transition_rows": 321727,
+    "expected_transitions": 321727,
+    "count_ok": true,
+    "z_feature_hash": "ae9bcf818d9f8528409af1e11692b949fb6710e7f59fac73369a92630608ab30",
+    "blocks": {
+      "TB1": 102731,
+      "TB2": 111557,
+      "TB3": 107439
+    },
+    "n_episodes": 32220
+  },
+  "support": {
+    "upper_residual": {
+      "name": "upper_residual",
+      "min": -8.391176350832751,
+      "max": 0.0,
+      "n_neg": 14334,
+      "n_zero": 307393,
+      "n_pos": 0,
+      "recommended_kind": "hurdle_ln_neg"
+    },
+    "lower_residual": {
+      "name": "lower_residual",
+      "min": -8.81922185757494,
+      "max": 0.0,
+      "n_neg": 13779,
+      "n_zero": 307948,
+      "n_pos": 0,
+      "recommended_kind": "hurdle_ln_neg"
+    },
+    "range": {
+      "name": "range",
+      "min": 0.0,
+      "max": 56.25,
+      "n_zero": 462,
+      "n_pos": 321265,
+      "recommended_kind": "hurdle_ln_value"
+    }
+  },
+  "reconstruction": {
+    "state_max_error": 7.73070496506989e-12,
+    "derived_representation_max_error": 7.73070496506989e-12,
+    "per_column_max_error": {
+      "cur_up_distance_R": 1.7763568394002505e-15,
+      "cur_down_distance_R": 1.021405182655144e-14,
+      "cur_width_R": 0.0,
+      "cur_log_ratio": 7.73070496506989e-12,
+      "path_total_variation_R": 1.4210854715202004e-14,
+      "path_max_up_excursion_R": 3.552713678800501e-15,
+      "path_max_down_excursion_R": 3.552713678800501e-15,
+      "path_last_return_R": 1.021405182655144e-14,
+      "path_current_bar_range_R": 7.105427357601002e-15,
+      "path_direction_change_rate": 1.1102230246251565e-16,
+      "upper_newest_log_age_residual": 1.7763568394002505e-15,
+      "lower_newest_log_age_residual": 1.7763568394002505e-15,
+      "upper_active_identity_count_delta": 0.0,
+      "lower_active_identity_count_delta": 0.0
+    },
+    "representation_errors": {
+      "cur_log_ratio": 7.73070496506989e-12
+    },
+    "discrete_mismatch": 0,
+    "n": 321727
+  }
+}
