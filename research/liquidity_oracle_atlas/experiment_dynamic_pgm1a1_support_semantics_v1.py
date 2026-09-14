@@ -869,6 +869,11 @@ def _hurdle_nll(y, p0, rate):
     return np.where(pos, nll_pos, nll_zero)
 
 
+class ZTPSupportGateError(RuntimeError):
+    """Raised when ZTP support / tail clipping gates fail."""
+    pass
+
+
 class ZeroTruncatedPoissonRegressor:
     """Exact zero-truncated Poisson GLM: P(Y=y|Y>0, X) via truncated likelihood.
 
@@ -1029,21 +1034,21 @@ def fit_count_head(Xtr, Ytr, Xev, Yev):
 
             # Gate 1: Train positive rows: n_low == 0 AND n_high == 0
             if stats_tr_pos["n_low"] > 0 or stats_tr_pos["n_high"] > 0:
-                raise SystemExit(
+                raise ZTPSupportGateError(
                     f"STOP_DYNAMIC_PGM1A1_ZTP_POSITIVE_ETA_CLIPPED: {COUNT_Z[j]} train positive "
                     f"low={stats_tr_pos['n_low']} high={stats_tr_pos['n_high']}"
                 )
 
             # Gate 2: Eval positive rows: n_low == 0 AND n_high == 0
             if stats_ev_pos["n_low"] > 0 or stats_ev_pos["n_high"] > 0:
-                raise SystemExit(
+                raise ZTPSupportGateError(
                     f"STOP_DYNAMIC_PGM1A1_ZTP_POSITIVE_ETA_CLIPPED: {COUNT_Z[j]} eval positive "
                     f"low={stats_ev_pos['n_low']} high={stats_ev_pos['n_high']}"
                 )
 
             # Gate 3: ALL train/eval rows: n_high == 0 (no positive eta explosion)
             if stats_tr_all["n_high"] > 0 or stats_ev_all["n_high"] > 0:
-                raise SystemExit(
+                raise ZTPSupportGateError(
                     f"STOP_DYNAMIC_PGM1A1_ZTP_ALL_ETA_HIGH_EXPLOSION: {COUNT_Z[j]} "
                     f"tr_high={stats_tr_all['n_high']} ev_high={stats_ev_all['n_high']}"
                 )
@@ -1440,37 +1445,66 @@ def run_single_window(w, data_path):
 
     # ---------------- K2: K1 + lag1
     t_k2 = time.perf_counter()
-    k2 = fit_state_heads(Xtr2, Xev2, Zc_tr, Zc_ev, yd_tr, yd_ev)
-    k2_count = fit_count_head(Xtr2, Yc_tr, Xev2, Yc_ev)
+    k2_failed = False
+    k2_fail_reason = None
+    try:
+        k2 = fit_state_heads(Xtr2, Xev2, Zc_tr, Zc_ev, yd_tr, yd_ev)
+        k2_count = fit_count_head(Xtr2, Yc_tr, Xev2, Yc_ev)
+    except ZTPSupportGateError as e:
+        k2_failed = True
+        k2_fail_reason = str(e)
+        k2 = None
+        k2_count = None
+        print(f"[WARN] window {w['name']} K2 support gate failed: {k2_fail_reason}", flush=True)
+
     _peak(f"{w['name']} after K2 transform+fit")
-    opt_rows.append(dict(window=w["name"], model="K2_STATE_LAG1",
-                        n_params=k2["n_params"] + k2_count["n_params"], success=True,
-                        elapsed_seconds=round(time.perf_counter() - t_k2, 3)))
-    cont_ev_k2 = _node_eval_nll(k2["nodes"])
-    count_ev_k2 = k2_count["nll_ev"].sum(axis=1)
-    disc_ev_k2 = k2["disc_ev"]
-    j_k2_ev = cont_ev_k2 + disc_ev_k2 + count_ev_k2
+    if not k2_failed:
+        opt_rows.append(dict(window=w["name"], model="K2_STATE_LAG1",
+                            n_params=k2["n_params"] + k2_count["n_params"], success=True,
+                            elapsed_seconds=round(time.perf_counter() - t_k2, 3)))
+        cont_ev_k2 = _node_eval_nll(k2["nodes"])
+        count_ev_k2 = k2_count["nll_ev"].sum(axis=1)
+        disc_ev_k2 = k2["disc_ev"]
+        j_k2_ev = cont_ev_k2 + disc_ev_k2 + count_ev_k2
 
-    mean_cont_k2 = float(np.mean(cont_ev_k2))
-    mean_count_k2 = float(np.mean(count_ev_k2))
-    mean_disc_k2 = float(np.mean(disc_ev_k2))
-    mean_joint_k2 = float(np.mean(j_k2_ev))
-    assert abs(mean_joint_k2 - mean_cont_k2 - mean_disc_k2 - mean_count_k2) < 1e-10
+        mean_cont_k2 = float(np.mean(cont_ev_k2))
+        mean_count_k2 = float(np.mean(count_ev_k2))
+        mean_disc_k2 = float(np.mean(disc_ev_k2))
+        mean_joint_k2 = float(np.mean(j_k2_ev))
+        assert abs(mean_joint_k2 - mean_cont_k2 - mean_disc_k2 - mean_count_k2) < 1e-10
 
-    model_metrics.append(dict(window=w["name"], model="K2_STATE_LAG1",
-                            mean_joint_nll=mean_joint_k2,
-                            mean_cont_nll=mean_cont_k2,
-                            mean_disc_nll=mean_disc_k2,
-                            mean_count_nll=mean_count_k2,
-                            n_rows=int(len(ev))))
+        model_metrics.append(dict(window=w["name"], model="K2_STATE_LAG1",
+                                mean_joint_nll=mean_joint_k2,
+                                mean_cont_nll=mean_cont_k2,
+                                mean_disc_nll=mean_disc_k2,
+                                mean_count_nll=mean_count_k2,
+                                n_rows=int(len(ev))))
+    else:
+        opt_rows.append(dict(window=w["name"], model="K2_STATE_LAG1",
+                            n_params=None, success=False,
+                            fail_reason=k2_fail_reason,
+                            elapsed_seconds=round(time.perf_counter() - t_k2, 3)))
+        model_metrics.append(dict(window=w["name"], model="K2_STATE_LAG1",
+                                mean_joint_nll=None,
+                                mean_cont_nll=None,
+                                mean_disc_nll=None,
+                                mean_count_nll=None,
+                                n_rows=int(len(ev))))
 
-    if not (len(j_k0_ev) == len(j_k1_ev) == len(j_k2_ev)):
-        raise SystemExit("STOP_DYNAMIC_PGM1A_SAMPLE_MISMATCH")
+    if not k2_failed:
+        if not (len(j_k0_ev) == len(j_k1_ev) == len(j_k2_ev)):
+            raise SystemExit("STOP_DYNAMIC_PGM1A_SAMPLE_MISMATCH")
+    else:
+        if not (len(j_k0_ev) == len(j_k1_ev)):
+            raise SystemExit("STOP_DYNAMIC_PGM1A_SAMPLE_MISMATCH")
 
     # ---------------- bootstrap K1-K0, K2-K1 (vectorized by-symbol, episode-weighted)
     boots, bysym = [], []
-    for label, hi, lo in [("K1-K0", j_k1_ev, j_k0_ev),
-                          ("K2-K1", j_k2_ev, j_k1_ev)]:
+    comparisons = [("K1-K0", j_k1_ev, j_k0_ev)]
+    if not k2_failed:
+        comparisons.append(("K2-K1", j_k2_ev, j_k1_ev))
+
+    for label, hi, lo in comparisons:
         delta = hi - lo
         t_b = time.perf_counter()
         print(f"[STAGE] window {w['name']} bootstrap {label} start "
@@ -1504,6 +1538,11 @@ def run_single_window(w, data_path):
                                    else "CI_above_zero" if lo_ci > 0
                                    else "CI_contains_zero")))
 
+    if k2_failed:
+        boots.append(dict(window=w["name"], comparison="K2-K1",
+                          delta_sample_mean=None, ci_lo=None, ci_hi=None,
+                          verdict="SUPPORT_CORRECT_LAG1_MODEL_SUPPORT_GATE_FAILED"))
+
     # ---------------- block contribution (eval, explicit model isolation across K0, K1, K2)
     def _block_nll(nodes, disc_ev, count_ev, bdef):
         if bdef["nodes"]:
@@ -1520,51 +1559,73 @@ def run_single_window(w, data_path):
     for bname, bdef in BLOCKS.items():
         bjoint_k0 = _block_nll(k0["nodes"], k0["disc_ev"], k0_count["nll_ev"], bdef)
         bjoint_k1 = _block_nll(k1["nodes"], k1["disc_ev"], k1_count["nll_ev"], bdef)
-        bjoint_k2 = _block_nll(k2["nodes"], k2["disc_ev"], k2_count["nll_ev"], bdef)
         m0 = float(np.mean(bjoint_k0))
         m1 = float(np.mean(bjoint_k1))
-        m2 = float(np.mean(bjoint_k2))
+        if not k2_failed:
+            bjoint_k2 = _block_nll(k2["nodes"], k2["disc_ev"], k2_count["nll_ev"], bdef)
+            m2 = float(np.mean(bjoint_k2))
+            d2 = m2 - m1
+        else:
+            m2 = None
+            d2 = None
         block_rows.append(dict(
             window=w["name"], block=bname,
             mean_joint_k0=m0,
             mean_joint_k1=m1,
             mean_joint_k2=m2,
             delta_k1_minus_k0=m1 - m0,
-            delta_k2_minus_k1=m2 - m1))
+            delta_k2_minus_k1=d2))
 
     # ---------------- per-target (eval, explicit K0, K1, K2 + both deltas)
     for nm, cols in Z_LAYOUT:
         n0 = k0["nodes"][nm]["ev"]
         n1 = k1["nodes"][nm]["ev"]
-        n2 = k2["nodes"][nm]["ev"]
-        m0, m1, m2 = float(np.mean(n0)), float(np.mean(n1)), float(np.mean(n2))
+        m0, m1 = float(np.mean(n0)), float(np.mean(n1))
+        if not k2_failed:
+            n2 = k2["nodes"][nm]["ev"]
+            m2 = float(np.mean(n2))
+            d2 = m2 - m1
+        else:
+            m2 = None
+            d2 = None
         target_rows.append(dict(window=w["name"], target=nm, kind="node",
                                 mean_nll_k0=m0,
                                 mean_nll_k1=m1,
                                 mean_nll_k2=m2,
                                 delta_k1_minus_k0=m1 - m0,
-                                delta_k2_minus_k1=m2 - m1))
+                                delta_k2_minus_k1=d2))
     for j, c in enumerate(COUNT_Z):
         n0 = k0_count["nll_ev"][:, j]
         n1 = k1_count["nll_ev"][:, j]
-        n2 = k2_count["nll_ev"][:, j]
-        m0, m1, m2 = float(np.mean(n0)), float(np.mean(n1)), float(np.mean(n2))
+        m0, m1 = float(np.mean(n0)), float(np.mean(n1))
+        if not k2_failed:
+            n2 = k2_count["nll_ev"][:, j]
+            m2 = float(np.mean(n2))
+            d2 = m2 - m1
+        else:
+            m2 = None
+            d2 = None
         target_rows.append(dict(window=w["name"], target=c, kind="discrete_count",
                                 mean_nll_k0=m0,
                                 mean_nll_k1=m1,
                                 mean_nll_k2=m2,
                                 delta_k1_minus_k0=m1 - m0,
-                                delta_k2_minus_k1=m2 - m1))
+                                delta_k2_minus_k1=d2))
     if disc_spec():
         m0 = float(np.mean(k0["disc_ev"]))
         m1 = float(np.mean(k1["disc_ev"]))
-        m2 = float(np.mean(k2["disc_ev"]))
+        if not k2_failed:
+            m2 = float(np.mean(k2["disc_ev"]))
+            d2 = m2 - m1
+        else:
+            m2 = None
+            d2 = None
         target_rows.append(dict(window=w["name"], target=DISC_Z, kind="discrete_4class",
                                 mean_nll_k0=m0,
                                 mean_nll_k1=m1,
                                 mean_nll_k2=m2,
                                 delta_k1_minus_k0=m1 - m0,
-                                delta_k2_minus_k1=m2 - m1))
+                                delta_k2_minus_k1=d2))
 
     # ---------------- node diagnostics (K1 eval metrics)
     z_layout_map = dict(Z_LAYOUT)
@@ -1670,13 +1731,19 @@ def run_single_window(w, data_path):
         ))
 
     # free everything before process exit -> OS reclaims
-    del Xtr1, Xev1, Xtr2, Xev2, k2, k1, k0, tr, ev, ct
+    del Xtr1, Xev1, Xtr2, Xev2, k1, k0, tr, ev, ct
+    if not k2_failed:
+        del k2, k2_count
+        del j_k2_ev
     del Zc_tr, Zc_ev, yd_tr, yd_ev
-    del j_k0_ev, j_k1_ev, j_k2_ev
+    del j_k0_ev, j_k1_ev
 
     print(f"[STAGE] window {w['name']} done "
           f"took={round(time.perf_counter() - t_w, 2)}s", flush=True)
-    return dict(window=w["name"], model_metrics=model_metrics,
+    return dict(window=w["name"],
+                k2_status=("SUPPORT_CORRECT_LAG1_MODEL_SUPPORT_GATE_FAILED" if k2_failed else "SUCCESS"),
+                k2_fail_reason=k2_fail_reason,
+                model_metrics=model_metrics,
                 opt_rows=opt_rows, boots=boots, bysym=bysym,
                 block_rows=block_rows, target_rows=target_rows,
                 node_diag_rows=node_diag_rows,
@@ -1883,6 +1950,7 @@ def main():
     model_metrics, opt_rows, boots, bysym = [], [], [], []
     block_rows, target_rows, node_diag_rows = [], [], []
     cov_audit = {}
+    k2_window_status = {}
     for w in WINDOWS:
         result_path = CACHE / f"_dynamic_pgm1a1_window_{w['name']}.json"
         cmd = [sys.executable, str(Path(__file__)),
@@ -1902,6 +1970,7 @@ def main():
             raise SystemExit(
                 f"STOP_DYNAMIC_PGM1A_WINDOW_FAIL: {w['name']} rc={r.returncode}")
         res = json.loads(Path(result_path).read_text())
+        k2_window_status[w["name"]] = res.get("k2_status", "SUCCESS")
         model_metrics += res["model_metrics"]
         opt_rows += res["opt_rows"]
         boots += res["boots"]
@@ -1916,6 +1985,8 @@ def main():
     # ---------------- verdict
     def sym_neg(wname, label):
         sub = pd.DataFrame(bysym)
+        if len(sub) == 0:
+            return 0
         sub = sub[(sub["window"] == wname) & (sub["comparison"] == label)]
         return int((sub["mean_delta_episode"] < 0).sum())
 
@@ -1927,7 +1998,7 @@ def main():
                    and b["comparison"] == "K1-K0")
         wsA[w["name"]] = dict(ci_hi=row["ci_hi"],
                               n_sym_neg=sym_neg(w["name"], "K1-K0"))
-    gateA = (all(wsA[w["name"]]["ci_hi"] < 0 for w in WINDOWS)
+    gateA = (all(wsA[w["name"]]["ci_hi"] is not None and wsA[w["name"]]["ci_hi"] < 0 for w in WINDOWS)
              and all(wsA[w["name"]]["n_sym_neg"] >= 10 for w in WINDOWS))
     transition_verdict = (
         "SUPPORT_CORRECT_TRANSITION_SIGNAL_SUPPORTED" if gateA
@@ -1942,19 +2013,38 @@ def main():
         row = next(b for b in boots if b["window"] == w["name"]
                    and b["comparison"] == "K2-K1")
         wsL[w["name"]] = dict(ci_hi=row["ci_hi"],
-                              n_sym_neg=sym_neg(w["name"], "K2-K1"))
-    lag_stable = (all(wsL[w["name"]]["ci_hi"] < 0 for w in WINDOWS)
-                  and all(wsL[w["name"]]["n_sym_neg"] >= 10 for w in WINDOWS))
-    lag_verdict = (
-        "SUPPORT_CORRECT_LAG1_RESIDUAL_SUPPORTED" if lag_stable
-        else "NO_STABLE_LAG1_INCREMENT_DETECTED"
-    )
+                              n_sym_neg=sym_neg(w["name"], "K2-K1"),
+                              verdict=row["verdict"])
+
+    k2_any_failed = any(
+        b.get("verdict") == "SUPPORT_CORRECT_LAG1_MODEL_SUPPORT_GATE_FAILED"
+        for b in boots if b["comparison"] == "K2-K1"
+    ) or any(status == "SUPPORT_CORRECT_LAG1_MODEL_SUPPORT_GATE_FAILED"
+             for status in k2_window_status.values())
+
+    if k2_any_failed:
+        lag_stable = False
+        lag_verdict = "SUPPORT_CORRECT_LAG1_MODEL_SUPPORT_GATE_FAILED"
+        lag_note = (
+            "LAG1 INCREMENT UNRESOLVED — K2 MODEL INSTABILITY: "
+            "support gate failed on rare-event activation magnitude extrapolation. "
+            "Reserved for 1A.2 Lag Closure."
+        )
+    else:
+        lag_stable = (all(wsL[w["name"]]["ci_hi"] is not None and wsL[w["name"]]["ci_hi"] < 0 for w in WINDOWS)
+                      and all(wsL[w["name"]]["n_sym_neg"] >= 10 for w in WINDOWS))
+        lag_verdict = (
+            "SUPPORT_CORRECT_LAG1_RESIDUAL_SUPPORTED" if lag_stable
+            else "NO_STABLE_LAG1_INCREMENT_DETECTED"
+        )
+        lag_note = ("Stable lag1 increment detected; do NOT interpret as latent "
+                    "state without checking functional form / interaction / "
+                    "state omission first." if lag_stable else
+                    "No stable lag1 increment detected at current resolution.")
+
     verdict["SUPPORT_CORRECT_LAG1_RESIDUAL_SUPPORTED"] = dict(
         supported=bool(lag_stable), verdict=lag_verdict, windows=wsL,
-        note=("Stable lag1 increment detected; do NOT interpret as latent "
-              "state without checking functional form / interaction / "
-              "state omission first." if lag_stable else
-              "No stable lag1 increment detected at current resolution."))
+        note=lag_note)
 
     # ---------------- outputs
     print("[STAGE] writing outputs", flush=True)
@@ -1978,6 +2068,7 @@ def main():
         parent_commit=BASE_SHA,
         transition_verdict=transition_verdict,
         lag_verdict=lag_verdict,
+        k2_window_status=k2_window_status,
         design=dict(
             scope="within-episode 5m state transition, terminal reset excluded",
             target="P(S_{t+1} | S_t, H_{t+1}=0)",

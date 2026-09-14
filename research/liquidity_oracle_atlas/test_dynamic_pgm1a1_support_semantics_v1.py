@@ -657,8 +657,9 @@ def test_ztp_tail_clipping_semantics(monkeypatch):
     stopped_pos = False
     try:
         m.fit_count_head(Xtr, Ytr, Xev, Yev)
-    except SystemExit as e:
+    except (m.ZTPSupportGateError, SystemExit) as e:
         stopped_pos = True
+        assert isinstance(e, m.ZTPSupportGateError)
         assert "STOP_DYNAMIC_PGM1A1_ZTP_POSITIVE_ETA_CLIPPED" in str(e)
     assert stopped_pos, "Should have stopped on positive eta < -20"
 
@@ -673,8 +674,9 @@ def test_ztp_tail_clipping_semantics(monkeypatch):
     stopped_high = False
     try:
         m.fit_count_head(Xtr, Ytr, Xev, Yev)
-    except SystemExit as e:
+    except (m.ZTPSupportGateError, SystemExit) as e:
         stopped_high = True
+        assert isinstance(e, m.ZTPSupportGateError)
         assert "STOP_DYNAMIC_PGM1A1_ZTP_ALL_ETA_HIGH_EXPLOSION" in str(e)
     assert stopped_high, "Should have stopped on all-row eta > 20"
 
@@ -718,6 +720,125 @@ def test_ztp_small_lambda_limit():
         assert nll[1] > 0.0
 
 
+def test_k2_support_failure_graceful_handling(monkeypatch):
+    """Verify that when K2 fit raises ZTPSupportGateError, run_single_window:
+    * catches ZTPSupportGateError gracefully (does not crash)
+    * records k2_status == 'SUPPORT_CORRECT_LAG1_MODEL_SUPPORT_GATE_FAILED'
+    * records K2 metrics as None in model_metrics, block_rows, and target_rows
+    * records K2-K1 verdict as 'SUPPORT_CORRECT_LAG1_MODEL_SUPPORT_GATE_FAILED' in boots
+    * keeps K0 and K1 metrics completely intact and finite
+    """
+    import json
+    import tempfile
+    rng = np.random.default_rng(123)
+    n_tr = 40
+    n_ev = 20
+    n = n_tr + n_ev
+    data = {
+        "block": ["TB1"] * n_tr + ["TB2"] * n_ev,
+        "symbol": ["AG"] * n,
+        "episode_id": [f"EP_{i // 5}" for i in range(n)],
+        "episode_start_day": [f"2024010{1 + (i // 10)}" for i in range(n)],
+    }
+    for c in m.OBS_STATE_NUM:
+        data[c] = rng.normal(size=n).astype(np.float32)
+    for c in m.OBS_STATE_CAT:
+        data[c] = ["BAR"] * n
+    for c in m.LAG_BASE:
+        data[f"lag1_{c}"] = rng.normal(size=n).astype(np.float32)
+    data["lag1_available"] = np.ones(n, dtype=np.float32)
+
+    data["z_d_up"] = rng.normal(size=n).astype(np.float32)
+    for nm in ["z_dmfe", "z_dmae", "z_range", "z_uresid", "z_lresid"]:
+        ispos = (rng.uniform(size=n) > 0.4).astype(np.float32)
+        logv = np.where(ispos > 0.5, rng.normal(size=n), 0.0).astype(np.float32)
+        data[f"{nm}_ispos"] = ispos
+        data[f"{nm}_log"] = logv
+
+    u = rng.uniform(size=n)
+    is0 = (u < 0.2).astype(np.float32)
+    is1 = (u > 0.8).astype(np.float32)
+    interior = (is0 < 0.5) & (is1 < 0.5)
+    logit = np.where(interior, rng.normal(size=n), 0.0).astype(np.float32)
+    data["z_dcr_is0"] = is0
+    data["z_dcr_is1"] = is1
+    data["z_dcr_logit"] = logit
+
+    data["z_agezero_code"] = np.zeros(n, dtype=np.int64)
+    data["z_delta_upper_count"] = rng.choice([0, 1, 2], size=n, p=[0.7, 0.2, 0.1]).astype(np.int64)
+    data["z_delta_lower_count"] = rng.choice([0, 1, 2], size=n, p=[0.7, 0.2, 0.1]).astype(np.int64)
+
+    df = pd.DataFrame(data)
+    with tempfile.NamedTemporaryFile(suffix=".parquet", delete=False) as f:
+        df.to_parquet(f.name, index=False)
+        p = f.name
+
+    orig_fit_count = m.fit_count_head
+
+    def mock_fit_count_head(Xtr, Ytr, Xev, Yev):
+        # K1 design matrix has fewer features; K2 has full features including lag1
+        if Xtr.shape[1] > 40:  # K2 design matrix (OBS_STATE + LAG, dim 52 vs K1 dim 36)
+            raise m.ZTPSupportGateError("STOP_DYNAMIC_PGM1A1_ZTP_POSITIVE_ETA_CLIPPED: mock k2 failure")
+        return orig_fit_count(Xtr, Ytr, Xev, Yev)
+
+    monkeypatch.setattr(m, "fit_count_head", mock_fit_count_head)
+
+    try:
+        m.configure_child_semantics(agezero_deterministic=True)
+        w = dict(name="TEST_K2_FAIL_WIN", train=["TB1"], eval="TB2", seed=42)
+        res = m.run_single_window(w, p)
+
+        # 1. K2 status and failure reason
+        assert res["k2_status"] == "SUPPORT_CORRECT_LAG1_MODEL_SUPPORT_GATE_FAILED"
+        assert "STOP_DYNAMIC_PGM1A1_ZTP_POSITIVE_ETA_CLIPPED" in res["k2_fail_reason"]
+
+        # 2. model_metrics: K0 and K1 intact, K2 has None
+        assert len(res["model_metrics"]) == 3
+        m_k0 = next(mm for mm in res["model_metrics"] if mm["model"] == "K0_UNCONDITIONAL")
+        m_k1 = next(mm for mm in res["model_metrics"] if mm["model"] == "K1_STATE")
+        m_k2 = next(mm for mm in res["model_metrics"] if mm["model"] == "K2_STATE_LAG1")
+        assert np.isfinite(m_k0["mean_joint_nll"])
+        assert np.isfinite(m_k1["mean_joint_nll"])
+        assert m_k2["mean_joint_nll"] is None
+
+        # 3. boots: K1-K0 has normal CI, K2-K1 marked as gate failed
+        assert len(res["boots"]) == 2
+        b_k1k0 = next(b for b in res["boots"] if b["comparison"] == "K1-K0")
+        b_k2k1 = next(b for b in res["boots"] if b["comparison"] == "K2-K1")
+        assert np.isfinite(b_k1k0["delta_sample_mean"])
+        assert b_k2k1["verdict"] == "SUPPORT_CORRECT_LAG1_MODEL_SUPPORT_GATE_FAILED"
+        assert b_k2k1["delta_sample_mean"] is None
+
+        # 4. opt_rows: K2 recorded as success=False with fail_reason
+        opt_k2 = next(r for r in res["opt_rows"] if r["model"] == "K2_STATE_LAG1")
+        assert opt_k2["success"] is False
+        assert "STOP_DYNAMIC_PGM1A1_ZTP_POSITIVE_ETA_CLIPPED" in opt_k2["fail_reason"]
+
+        # 5. block_rows: delta_k1_minus_k0 finite, delta_k2_minus_k1 is None
+        for br in res["block_rows"]:
+            assert np.isfinite(br["mean_joint_k0"])
+            assert np.isfinite(br["mean_joint_k1"])
+            assert br["mean_joint_k2"] is None
+            assert np.isfinite(br["delta_k1_minus_k0"])
+            assert br["delta_k2_minus_k1"] is None
+
+        # 6. target_rows: delta_k1_minus_k0 finite, delta_k2_minus_k1 is None
+        for tr in res["target_rows"]:
+            assert np.isfinite(tr["mean_nll_k0"])
+            assert np.isfinite(tr["mean_nll_k1"])
+            assert tr["mean_nll_k2"] is None
+            assert np.isfinite(tr["delta_k1_minus_k0"])
+            assert tr["delta_k2_minus_k1"] is None
+
+        # 7. json-serializable
+        s = json.dumps(res, default=str)
+        assert len(s) > 0
+    finally:
+        m.configure_child_semantics(agezero_deterministic=False)
+        monkeypatch.setattr(m, "fit_count_head", orig_fit_count)
+        Path(p).unlink(missing_ok=True)
+
+
 if __name__ == "__main__":
     class _MonkeyPatch:
         def setattr(self, target, name, value):
@@ -746,6 +867,7 @@ if __name__ == "__main__":
         ("test_run_single_window_smoke", lambda: test_run_single_window_smoke()),
         ("test_ztp_tail_clipping_semantics", lambda: test_ztp_tail_clipping_semantics(mp)),
         ("test_ztp_small_lambda_limit", lambda: test_ztp_small_lambda_limit()),
+        ("test_k2_support_failure_graceful_handling", lambda: test_k2_support_failure_graceful_handling(mp)),
     ]
 
     for name, fn in tests:
