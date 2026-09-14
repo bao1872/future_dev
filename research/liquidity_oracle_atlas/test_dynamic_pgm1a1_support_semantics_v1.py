@@ -405,6 +405,40 @@ def test_fit_nodes_has_parameter_count():
     m.configure_child_semantics(agezero_deterministic=False)
 
 
+def test_output_namespace_isolation():
+    import re
+    script_path = REPO / "research" / "liquidity_oracle_atlas" / "experiment_dynamic_pgm1a1_support_semantics_v1.py"
+    script_text = script_path.read_text()
+
+    # 1. Output files written to OUT / "..."
+    written_files = re.findall(r'OUT\s*/\s*"([^"]+)"', script_text)
+    assert len(written_files) >= 8, f"Expected at least 8 outputs written to OUT, found: {written_files}"
+    for fname in written_files:
+        assert fname.startswith("dynamic_pgm1a1_"), (
+            f"Output file {fname} does not start with dynamic_pgm1a1_ namespace prefix"
+        )
+        assert not fname.startswith("dynamic_pgm1a_"), (
+            f"Output file {fname} collides with legacy frozen dynamic_pgm1a_ namespace"
+        )
+
+    # 2. Cache files written to CACHE / "..."
+    cache_parquets = re.findall(r'CACHE\s*/\s*"([^"]+\.parquet)"', script_text)
+    assert len(cache_parquets) > 0
+    for pf in cache_parquets:
+        if "transitions" in pf:
+            assert pf == "dynamic_pgm1a1_transitions.parquet", (
+                f"Cache parquet {pf} must use dynamic_pgm1a1_transitions.parquet"
+            )
+
+    # 3. Subprocess window json cache written to CACHE
+    window_json = re.findall(r'CACHE\s*/\s*f?"([^"]*window[^"]*\.json)"', script_text)
+    assert len(window_json) > 0
+    for wj in window_json:
+        assert "_dynamic_pgm1a1_window_" in wj, (
+            f"Window result cache {wj} does not use _dynamic_pgm1a1_window_ prefix"
+        )
+
+
 if __name__ == "__main__":
     class _MonkeyPatch:
         def setattr(self, target, name, value):
@@ -422,4 +456,5 @@ if __name__ == "__main__":
     test_child_agezero_configuration()
     test_gaussian_head_n_params()
     test_fit_nodes_has_parameter_count()
+    test_output_namespace_isolation()
     print("ALL tests in test_dynamic_pgm1a1_support_semantics_v1 PASSED successfully.")

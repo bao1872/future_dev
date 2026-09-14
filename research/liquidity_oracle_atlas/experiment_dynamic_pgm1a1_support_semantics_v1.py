@@ -1599,7 +1599,7 @@ def main():
         if str(cur[c].dtype).startswith("float64"):
             cur[c] = cur[c].astype(np.float32)
     cur = cur[needed_cols].copy()
-    cur.to_parquet(CACHE / "dynamic_pgm1a_transitions.parquet", index=False)
+    cur.to_parquet(CACHE / "dynamic_pgm1a1_transitions.parquet", index=False)
     _peak("after slim cur")
 
     # ---------------- Z matrices
@@ -1619,7 +1619,7 @@ def main():
     # reliably return RSS to macOS even after del + gc). With BLAS pinned to 1
     # thread, per-window peak stays in the low hundreds of MB; the parent only
     # orchestrates and assembles the final summary.
-    data_path = CACHE / "dynamic_pgm1a_transitions.parquet"
+    data_path = CACHE / "dynamic_pgm1a1_transitions.parquet"
     win_env = dict(os.environ)
     for _bt in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
                 "VECLIB_MAXIMUM_THREADS", "NUMEXPR_NUM_THREADS"):
@@ -1629,7 +1629,7 @@ def main():
     block_rows, target_rows = [], []
     cov_audit = {}
     for w in WINDOWS:
-        result_path = CACHE / f"_window_{w['name']}.json"
+        result_path = CACHE / f"_dynamic_pgm1a1_window_{w['name']}.json"
         cmd = [sys.executable, str(Path(__file__)),
                "--window-json", json.dumps(w),
                "--data", str(data_path), "--result", str(result_path)]
@@ -1695,20 +1695,20 @@ def main():
     # ---------------- outputs
     print("[STAGE] writing outputs", flush=True)
     pd.DataFrame(model_metrics).to_csv(
-        OUT / "dynamic_pgm1a_model_metrics.csv", index=False)
-    pd.DataFrame(boots).to_csv(OUT / "dynamic_pgm1a_bootstrap.csv", index=False)
-    pd.DataFrame(bysym).to_csv(OUT / "dynamic_pgm1a_by_symbol.csv", index=False)
+        OUT / "dynamic_pgm1a1_model_metrics.csv", index=False)
+    pd.DataFrame(boots).to_csv(OUT / "dynamic_pgm1a1_bootstrap.csv", index=False)
+    pd.DataFrame(bysym).to_csv(OUT / "dynamic_pgm1a1_by_symbol.csv", index=False)
     pd.DataFrame(target_rows).to_csv(
-        OUT / "dynamic_pgm1a_target_metrics.csv", index=False)
+        OUT / "dynamic_pgm1a1_target_metrics.csv", index=False)
     pd.DataFrame(opt_rows).to_csv(
-        OUT / "dynamic_pgm1a_optimizer_audit.csv", index=False)
-    (OUT / "dynamic_pgm1a_sample_audit.json").write_text(
+        OUT / "dynamic_pgm1a1_optimizer_audit.csv", index=False)
+    (OUT / "dynamic_pgm1a1_sample_audit.json").write_text(
         json.dumps(sample_audit, indent=2))
-    (OUT / "dynamic_pgm1a_transition_invariants.json").write_text(
+    (OUT / "dynamic_pgm1a1_transition_invariants.json").write_text(
         json.dumps(invariants, indent=2))
 
     summary = dict(
-        experiment="DYNAMIC-PGM-1A Within-Episode One-Step Transition Kernel",
+        experiment="DYNAMIC-PGM-1A.1 Support-Correct Within-Episode Transition Kernel",
         parent_commit=BASE_SHA,
         design=dict(
             scope="within-episode 5m state transition, terminal reset excluded",
@@ -1762,13 +1762,13 @@ def main():
         verdict=verdict,
         bootstrap_reps=BOOTSTRAP_REPS,
     )
-    (OUT / "dynamic_pgm1a_summary.json").write_text(
+    (OUT / "dynamic_pgm1a1_summary.json").write_text(
         json.dumps(summary, indent=2, default=str))
 
     timing["total_seconds"] = round(time.perf_counter() - t_total, 2)
-    s2 = json.loads((OUT / "dynamic_pgm1a_summary.json").read_text())
+    s2 = json.loads((OUT / "dynamic_pgm1a1_summary.json").read_text())
     s2["timing"] = timing
-    (OUT / "dynamic_pgm1a_summary.json").write_text(
+    (OUT / "dynamic_pgm1a1_summary.json").write_text(
         json.dumps(s2, indent=2, default=str))
 
     print(f"[MODEL METRICS]\n{pd.DataFrame(model_metrics).to_string(index=False)}")
