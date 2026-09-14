@@ -1,0 +1,15 @@
+{
+  "exact_episode_identity": {
+    "checked": 37987,
+    "mism_end": 0,
+    "mism_blk": 0,
+    "mism_ev": 0,
+    "missing": 0
+  },
+  "provenance_group_id_closure": {
+    "checked": 500,
+    "max_err": 0.0
+  },
+  "note": "end_bar==bar_t+1, start_block==block, event_mask==target_mask for all 37987 terminals; provenance residuals recomputed from frozen start_upper/lower_group reproduce stored columns exactly",
+  "base_commit": "099fbb87b0fa5db5cce6e03342decb4838cb7c07"
+}

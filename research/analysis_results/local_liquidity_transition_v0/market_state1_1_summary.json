@@ -1,0 +1,659 @@
+{
+  "experiment": "MARKET-STATE-1.1 State Representation Closure",
+  "parent_commit": "31e651c36d65d0b395f4c29a7addfbd239d4f7fb",
+  "corrections_from_audit": [
+    "tempo is a derived nonlinear representation of B0 Location+Path, NOT new market-state information",
+    "oldest_log_age_residual (x2) are always 0 -> dropped",
+    "current_oldest_age_zero (x2) are highly determined by start+elapsed -> dropped; compact provenance = 6 truly-dynamic features",
+    "exact episode identity closure now covers end_bar/start_block/event_mask + provenance group-id, not only event_mask",
+    "'minimal sufficient state' is NOT claimed; this is closure only"
+  ],
+  "baseline": "PGM-BAR-0 M2 (reproduced by B0)",
+  "models": {
+    "B0_VALIDATED_STATE": {
+      "n_numeric": 25,
+      "n_categorical": 1,
+      "numeric": [
+        "start_up_distance_R",
+        "start_down_distance_R",
+        "start_width_R",
+        "start_log_ratio",
+        "upper_oldest_log_age",
+        "upper_newest_log_age",
+        "upper_newest_age_zero",
+        "upper_oldest_age_zero",
+        "upper_n_active_identities",
+        "lower_oldest_log_age",
+        "lower_newest_log_age",
+        "lower_newest_age_zero",
+        "lower_oldest_age_zero",
+        "lower_n_active_identities",
+        "elapsed_log",
+        "cur_up_distance_R",
+        "cur_down_distance_R",
+        "cur_width_R",
+        "cur_log_ratio",
+        "path_total_variation_R",
+        "path_max_up_excursion_R",
+        "path_max_down_excursion_R",
+        "path_direction_change_rate",
+        "path_last_return_R",
+        "path_current_bar_range_R"
+      ],
+      "categorical": [
+        "prev_event_mask"
+      ],
+      "role": "baseline"
+    },
+    "Pc_COMPACT_PROVENANCE": {
+      "n_numeric": 31,
+      "n_categorical": 1,
+      "numeric": [
+        "start_up_distance_R",
+        "start_down_distance_R",
+        "start_width_R",
+        "start_log_ratio",
+        "upper_oldest_log_age",
+        "upper_newest_log_age",
+        "upper_newest_age_zero",
+        "upper_oldest_age_zero",
+        "upper_n_active_identities",
+        "lower_oldest_log_age",
+        "lower_newest_log_age",
+        "lower_newest_age_zero",
+        "lower_oldest_age_zero",
+        "lower_n_active_identities",
+        "elapsed_log",
+        "cur_up_distance_R",
+        "cur_down_distance_R",
+        "cur_width_R",
+        "cur_log_ratio",
+        "path_total_variation_R",
+        "path_max_up_excursion_R",
+        "path_max_down_excursion_R",
+        "path_direction_change_rate",
+        "path_last_return_R",
+        "path_current_bar_range_R",
+        "upper_newest_log_age_residual",
+        "upper_current_newest_age_zero",
+        "upper_active_identity_count_delta",
+        "lower_newest_log_age_residual",
+        "lower_current_newest_age_zero",
+        "lower_active_identity_count_delta"
+      ],
+      "categorical": [
+        "prev_event_mask"
+      ],
+      "role": "new_state_information"
+    },
+    "PF_FULL_PROVENANCE": {
+      "n_numeric": 35,
+      "n_categorical": 1,
+      "numeric": [
+        "start_up_distance_R",
+        "start_down_distance_R",
+        "start_width_R",
+        "start_log_ratio",
+        "upper_oldest_log_age",
+        "upper_newest_log_age",
+        "upper_newest_age_zero",
+        "upper_oldest_age_zero",
+        "upper_n_active_identities",
+        "lower_oldest_log_age",
+        "lower_newest_log_age",
+        "lower_newest_age_zero",
+        "lower_oldest_age_zero",
+        "lower_n_active_identities",
+        "elapsed_log",
+        "cur_up_distance_R",
+        "cur_down_distance_R",
+        "cur_width_R",
+        "cur_log_ratio",
+        "path_total_variation_R",
+        "path_max_up_excursion_R",
+        "path_max_down_excursion_R",
+        "path_direction_change_rate",
+        "path_last_return_R",
+        "path_current_bar_range_R",
+        "upper_oldest_log_age_residual",
+        "upper_newest_log_age_residual",
+        "upper_current_newest_age_zero",
+        "upper_current_oldest_age_zero",
+        "upper_active_identity_count_delta",
+        "lower_oldest_log_age_residual",
+        "lower_newest_log_age_residual",
+        "lower_current_newest_age_zero",
+        "lower_current_oldest_age_zero",
+        "lower_active_identity_count_delta"
+      ],
+      "categorical": [
+        "prev_event_mask"
+      ],
+      "role": "new_state_information"
+    },
+    "T_DERIVED_TEMPO": {
+      "n_numeric": 29,
+      "n_categorical": 1,
+      "numeric": [
+        "start_up_distance_R",
+        "start_down_distance_R",
+        "start_width_R",
+        "start_log_ratio",
+        "upper_oldest_log_age",
+        "upper_newest_log_age",
+        "upper_newest_age_zero",
+        "upper_oldest_age_zero",
+        "upper_n_active_identities",
+        "lower_oldest_log_age",
+        "lower_newest_log_age",
+        "lower_newest_age_zero",
+        "lower_oldest_age_zero",
+        "lower_n_active_identities",
+        "elapsed_log",
+        "cur_up_distance_R",
+        "cur_down_distance_R",
+        "cur_width_R",
+        "cur_log_ratio",
+        "path_total_variation_R",
+        "path_max_up_excursion_R",
+        "path_max_down_excursion_R",
+        "path_direction_change_rate",
+        "path_last_return_R",
+        "path_current_bar_range_R",
+        "tempo_signed_speed",
+        "tempo_abs_speed",
+        "tempo_signed_efficiency",
+        "tempo_abs_efficiency"
+      ],
+      "categorical": [
+        "prev_event_mask"
+      ],
+      "role": "derived_representation"
+    },
+    "PTc_COMPACT_PROV_TEMPO": {
+      "n_numeric": 35,
+      "n_categorical": 1,
+      "numeric": [
+        "start_up_distance_R",
+        "start_down_distance_R",
+        "start_width_R",
+        "start_log_ratio",
+        "upper_oldest_log_age",
+        "upper_newest_log_age",
+        "upper_newest_age_zero",
+        "upper_oldest_age_zero",
+        "upper_n_active_identities",
+        "lower_oldest_log_age",
+        "lower_newest_log_age",
+        "lower_newest_age_zero",
+        "lower_oldest_age_zero",
+        "lower_n_active_identities",
+        "elapsed_log",
+        "cur_up_distance_R",
+        "cur_down_distance_R",
+        "cur_width_R",
+        "cur_log_ratio",
+        "path_total_variation_R",
+        "path_max_up_excursion_R",
+        "path_max_down_excursion_R",
+        "path_direction_change_rate",
+        "path_last_return_R",
+        "path_current_bar_range_R",
+        "upper_newest_log_age_residual",
+        "upper_current_newest_age_zero",
+        "upper_active_identity_count_delta",
+        "lower_newest_log_age_residual",
+        "lower_current_newest_age_zero",
+        "lower_active_identity_count_delta",
+        "tempo_signed_speed",
+        "tempo_abs_speed",
+        "tempo_signed_efficiency",
+        "tempo_abs_efficiency"
+      ],
+      "categorical": [
+        "prev_event_mask"
+      ],
+      "role": "derived_representation"
+    }
+  },
+  "compact_provenance": [
+    "upper_newest_log_age_residual",
+    "upper_current_newest_age_zero",
+    "upper_active_identity_count_delta",
+    "lower_newest_log_age_residual",
+    "lower_current_newest_age_zero",
+    "lower_active_identity_count_delta"
+  ],
+  "dropped_provenance": [
+    "upper_oldest_log_age_residual",
+    "upper_current_oldest_age_zero",
+    "lower_oldest_log_age_residual",
+    "lower_current_oldest_age_zero"
+  ],
+  "tempo_features": [
+    "tempo_signed_speed",
+    "tempo_abs_speed",
+    "tempo_signed_efficiency",
+    "tempo_abs_efficiency"
+  ],
+  "tempo_classification": "DERIVED_REPRESENTATION: speed=net_move/elapsed, efficiency=net_move/TV; net_move/Location, elapsed/Path, TV/Path are all in B0 M2_NUM",
+  "windows": [
+    {
+      "name": "A_TB1_to_TB2",
+      "train": [
+        "TB1"
+      ],
+      "eval": "TB2",
+      "seed": 20260920
+    },
+    {
+      "name": "B_TB1TB2_to_TB3",
+      "train": [
+        "TB1",
+        "TB2"
+      ],
+      "eval": "TB3",
+      "seed": 20260921
+    }
+  ],
+  "primary_metric": "mean episode NLL",
+  "model_metrics": {
+    "A_TB1_to_TB2": {
+      "B0_VALIDATED_STATE": {
+        "hazard_nll": 0.32685943187249134,
+        "hazard_brier": 0.09195203211758984,
+        "endpoint_joint_nll": 1.157716106882962,
+        "marginal_bit_ece": 0.04134012836443055,
+        "mean_episode_nll": 4.289672672488781,
+        "n_episodes": 12999,
+        "n_obs": 124556,
+        "mean_pred_duration": 5.056042547066644,
+        "mean_actual_duration": 9.581967843680284
+      },
+      "Pc_COMPACT_PROVENANCE": {
+        "hazard_nll": 0.32678889619877055,
+        "hazard_brier": 0.09192553539004385,
+        "endpoint_joint_nll": 1.1520827073456215,
+        "marginal_bit_ece": 0.04125636838172858,
+        "mean_episode_nll": 4.283363402394015,
+        "n_episodes": 12999,
+        "n_obs": 124556,
+        "mean_pred_duration": 5.0631062005254766,
+        "mean_actual_duration": 9.581967843680284
+      },
+      "PF_FULL_PROVENANCE": {
+        "hazard_nll": 0.32676334689829994,
+        "hazard_brier": 0.09192104465373442,
+        "endpoint_joint_nll": 1.1518694682481498,
+        "marginal_bit_ece": 0.04115011936356524,
+        "mean_episode_nll": 4.282905350721005,
+        "n_episodes": 12999,
+        "n_obs": 124556,
+        "mean_pred_duration": 5.066874163390908,
+        "mean_actual_duration": 9.581967843680284
+      },
+      "T_DERIVED_TEMPO": {
+        "hazard_nll": 0.3268538520952031,
+        "hazard_brier": 0.09194740645465317,
+        "endpoint_joint_nll": 1.1553545927312658,
+        "marginal_bit_ece": 0.04086381779898012,
+        "mean_episode_nll": 4.287257693090534,
+        "n_episodes": 12999,
+        "n_obs": 124556,
+        "mean_pred_duration": 5.061235776806807,
+        "mean_actual_duration": 9.581967843680284
+      },
+      "PTc_COMPACT_PROV_TEMPO": {
+        "hazard_nll": 0.32684498811981755,
+        "hazard_brier": 0.09194089073353771,
+        "endpoint_joint_nll": 1.1485103775491436,
+        "marginal_bit_ece": 0.03958679698888647,
+        "mean_episode_nll": 4.2803285435813,
+        "n_episodes": 12999,
+        "n_obs": 124556,
+        "mean_pred_duration": 5.062424865360536,
+        "mean_actual_duration": 9.581967843680284
+      }
+    },
+    "B_TB1TB2_to_TB3": {
+      "B0_VALIDATED_STATE": {
+        "hazard_nll": 0.3320504750304253,
+        "hazard_brier": 0.09361768484431493,
+        "endpoint_joint_nll": 1.177383965457132,
+        "marginal_bit_ece": 0.04029749028103336,
+        "mean_episode_nll": 4.309463558044567,
+        "n_episodes": 12741,
+        "n_obs": 120180,
+        "mean_pred_duration": 5.05981255954653,
+        "mean_actual_duration": 9.432540616906051
+      },
+      "Pc_COMPACT_PROVENANCE": {
+        "hazard_nll": 0.33178766010740335,
+        "hazard_brier": 0.09354917630067028,
+        "endpoint_joint_nll": 1.1741893215238504,
+        "marginal_bit_ece": 0.040422447094189684,
+        "mean_episode_nll": 4.303789901675152,
+        "n_episodes": 12741,
+        "n_obs": 120180,
+        "mean_pred_duration": 5.063423126445986,
+        "mean_actual_duration": 9.432540616906051
+      },
+      "PF_FULL_PROVENANCE": {
+        "hazard_nll": 0.3318154085815902,
+        "hazard_brier": 0.09355876793790345,
+        "endpoint_joint_nll": 1.1740868350884128,
+        "marginal_bit_ece": 0.040283866129072386,
+        "mean_episode_nll": 4.303949153849539,
+        "n_episodes": 12741,
+        "n_obs": 120180,
+        "mean_pred_duration": 5.0638558811121825,
+        "mean_actual_duration": 9.432540616906051
+      },
+      "T_DERIVED_TEMPO": {
+        "hazard_nll": 0.33200302453501473,
+        "hazard_brier": 0.09360263524656977,
+        "endpoint_joint_nll": 1.1741149184627004,
+        "marginal_bit_ece": 0.04035814545870778,
+        "mean_episode_nll": 4.305746932324882,
+        "n_episodes": 12741,
+        "n_obs": 120180,
+        "mean_pred_duration": 5.063340460715823,
+        "mean_actual_duration": 9.432540616906051
+      },
+      "PTc_COMPACT_PROV_TEMPO": {
+        "hazard_nll": 0.33178405258140786,
+        "hazard_brier": 0.0935481031883898,
+        "endpoint_joint_nll": 1.1698024167403347,
+        "marginal_bit_ece": 0.04014104493201437,
+        "mean_episode_nll": 4.299368968756157,
+        "n_episodes": 12741,
+        "n_obs": 120180,
+        "mean_pred_duration": 5.063259138365079,
+        "mean_actual_duration": 9.432540616906051
+      }
+    }
+  },
+  "bootstrap": [
+    {
+      "window": "A_TB1_to_TB2",
+      "comparison": "Pc-B0",
+      "gate": "PROVENANCE_COMPACT_STANDALONE",
+      "model_hi": "Pc_COMPACT_PROVENANCE",
+      "model_lo": "B0_VALIDATED_STATE",
+      "delta_sample_mean": -0.00630927009476587,
+      "ci_lo": -0.008826096347493869,
+      "ci_hi": -0.004555140083439532,
+      "verdict": "CI_below_zero"
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "comparison": "PF-B0",
+      "gate": "PROVENANCE_FULL_REFERENCE",
+      "model_hi": "PF_FULL_PROVENANCE",
+      "model_lo": "B0_VALIDATED_STATE",
+      "delta_sample_mean": -0.006767321767775148,
+      "ci_lo": -0.009178253837404497,
+      "ci_hi": -0.004928681607999148,
+      "verdict": "CI_below_zero"
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "comparison": "T-B0",
+      "gate": "TEMPO_DERIVED_REPRESENTATION",
+      "model_hi": "T_DERIVED_TEMPO",
+      "model_lo": "B0_VALIDATED_STATE",
+      "delta_sample_mean": -0.00241497939824674,
+      "ci_lo": -0.003806470998481682,
+      "ci_hi": -0.001132951158442221,
+      "verdict": "CI_below_zero"
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "comparison": "PTc-Pc",
+      "gate": "PROVENANCE_UNIQUE_COMPACT",
+      "model_hi": "PTc_COMPACT_PROV_TEMPO",
+      "model_lo": "Pc_COMPACT_PROVENANCE",
+      "delta_sample_mean": -0.0030348588127147376,
+      "ci_lo": -0.004474915372247423,
+      "ci_hi": -0.0018718445221052435,
+      "verdict": "CI_below_zero"
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "comparison": "PTc-T",
+      "gate": "TEMPO_UNIQUE_COMPACT",
+      "model_hi": "PTc_COMPACT_PROV_TEMPO",
+      "model_lo": "T_DERIVED_TEMPO",
+      "delta_sample_mean": -0.006929149509233867,
+      "ci_lo": -0.009133321539102587,
+      "ci_hi": -0.00497788512223992,
+      "verdict": "CI_below_zero"
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "comparison": "Pc-B0",
+      "gate": "PROVENANCE_COMPACT_STANDALONE",
+      "model_hi": "Pc_COMPACT_PROVENANCE",
+      "model_lo": "B0_VALIDATED_STATE",
+      "delta_sample_mean": -0.0056736563694147054,
+      "ci_lo": -0.00823360409692065,
+      "ci_hi": -0.0037255114054618285,
+      "verdict": "CI_below_zero"
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "comparison": "PF-B0",
+      "gate": "PROVENANCE_FULL_REFERENCE",
+      "model_hi": "PF_FULL_PROVENANCE",
+      "model_lo": "B0_VALIDATED_STATE",
+      "delta_sample_mean": -0.005514404195027937,
+      "ci_lo": -0.008133395712733646,
+      "ci_hi": -0.0035793096413587375,
+      "verdict": "CI_below_zero"
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "comparison": "T-B0",
+      "gate": "TEMPO_DERIVED_REPRESENTATION",
+      "model_hi": "T_DERIVED_TEMPO",
+      "model_lo": "B0_VALIDATED_STATE",
+      "delta_sample_mean": -0.0037166257196836966,
+      "ci_lo": -0.005398330104240136,
+      "ci_hi": -0.002458973624189526,
+      "verdict": "CI_below_zero"
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "comparison": "PTc-Pc",
+      "gate": "PROVENANCE_UNIQUE_COMPACT",
+      "model_hi": "PTc_COMPACT_PROV_TEMPO",
+      "model_lo": "Pc_COMPACT_PROVENANCE",
+      "delta_sample_mean": -0.004420932918994663,
+      "ci_lo": -0.006142733712648023,
+      "ci_hi": -0.003141366346395972,
+      "verdict": "CI_below_zero"
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "comparison": "PTc-T",
+      "gate": "TEMPO_UNIQUE_COMPACT",
+      "model_hi": "PTc_COMPACT_PROV_TEMPO",
+      "model_lo": "T_DERIVED_TEMPO",
+      "delta_sample_mean": -0.006377963568725672,
+      "ci_lo": -0.008850439459294578,
+      "ci_hi": -0.004308801570373349,
+      "verdict": "CI_below_zero"
+    }
+  ],
+  "by_symbol": {
+    "A_TB1_to_TB2": {
+      "Pc-B0": {
+        "n_negative": 15,
+        "n_positive": 15,
+        "n_symbols_mean_delta_neg": 13
+      },
+      "PF-B0": {
+        "n_negative": 15,
+        "n_positive": 15,
+        "n_symbols_mean_delta_neg": 13
+      },
+      "T-B0": {
+        "n_negative": 15,
+        "n_positive": 15,
+        "n_symbols_mean_delta_neg": 11
+      },
+      "PTc-Pc": {
+        "n_negative": 15,
+        "n_positive": 15,
+        "n_symbols_mean_delta_neg": 12
+      },
+      "PTc-T": {
+        "n_negative": 15,
+        "n_positive": 15,
+        "n_symbols_mean_delta_neg": 13
+      }
+    },
+    "B_TB1TB2_to_TB3": {
+      "Pc-B0": {
+        "n_negative": 15,
+        "n_positive": 15,
+        "n_symbols_mean_delta_neg": 12
+      },
+      "PF-B0": {
+        "n_negative": 15,
+        "n_positive": 15,
+        "n_symbols_mean_delta_neg": 12
+      },
+      "T-B0": {
+        "n_negative": 15,
+        "n_positive": 15,
+        "n_symbols_mean_delta_neg": 15
+      },
+      "PTc-Pc": {
+        "n_negative": 15,
+        "n_positive": 15,
+        "n_symbols_mean_delta_neg": 14
+      },
+      "PTc-T": {
+        "n_negative": 15,
+        "n_positive": 15,
+        "n_symbols_mean_delta_neg": 13
+      }
+    }
+  },
+  "gain_retention": {
+    "full_provenance_delta": {
+      "A_TB1_to_TB2": -0.006767321767775148,
+      "B_TB1TB2_to_TB3": -0.005514404195027937
+    },
+    "compact_provenance_delta": {
+      "A_TB1_to_TB2": -0.00630927009476587,
+      "B_TB1TB2_to_TB3": -0.0056736563694147054
+    },
+    "retained_fraction": {
+      "A_TB1_to_TB2": 0.9323141873953086,
+      "B_TB1TB2_to_TB3": 1.0288793074926132
+    }
+  },
+  "verdict": {
+    "PROVENANCE_COMPACT_STANDALONE": {
+      "supported": true,
+      "windows": {
+        "A_TB1_to_TB2": {
+          "ci_hi": -0.004555140083439532
+        },
+        "B_TB1TB2_to_TB3": {
+          "ci_hi": -0.0037255114054618285
+        }
+      },
+      "n_symbols_delta_neg": {
+        "A_TB1_to_TB2": 13,
+        "B_TB1TB2_to_TB3": 12
+      }
+    },
+    "PROVENANCE_FULL_REFERENCE": {
+      "supported": true,
+      "windows": {
+        "A_TB1_to_TB2": {
+          "ci_hi": -0.004928681607999148
+        },
+        "B_TB1TB2_to_TB3": {
+          "ci_hi": -0.0035793096413587375
+        }
+      },
+      "n_symbols_delta_neg": {
+        "A_TB1_to_TB2": 13,
+        "B_TB1TB2_to_TB3": 12
+      }
+    },
+    "TEMPO_DERIVED_REPRESENTATION": {
+      "supported": true,
+      "windows": {
+        "A_TB1_to_TB2": {
+          "ci_hi": -0.001132951158442221
+        },
+        "B_TB1TB2_to_TB3": {
+          "ci_hi": -0.002458973624189526
+        }
+      },
+      "n_symbols_delta_neg": {
+        "A_TB1_to_TB2": 11,
+        "B_TB1TB2_to_TB3": 15
+      }
+    },
+    "PROVENANCE_UNIQUE_COMPACT": {
+      "supported": true,
+      "windows": {
+        "A_TB1_to_TB2": {
+          "ci_hi": -0.0018718445221052435
+        },
+        "B_TB1TB2_to_TB3": {
+          "ci_hi": -0.003141366346395972
+        }
+      },
+      "n_symbols_delta_neg": {
+        "A_TB1_to_TB2": 12,
+        "B_TB1TB2_to_TB3": 14
+      }
+    },
+    "TEMPO_UNIQUE_COMPACT": {
+      "supported": true,
+      "windows": {
+        "A_TB1_to_TB2": {
+          "ci_hi": -0.00497788512223992
+        },
+        "B_TB1TB2_to_TB3": {
+          "ci_hi": -0.004308801570373349
+        }
+      },
+      "n_symbols_delta_neg": {
+        "A_TB1_to_TB2": 13,
+        "B_TB1TB2_to_TB3": 13
+      }
+    }
+  },
+  "identity_audit": {
+    "exact_episode_identity": {
+      "checked": 37987,
+      "mism_end": 0,
+      "mism_blk": 0,
+      "mism_ev": 0,
+      "missing": 0
+    },
+    "provenance_group_id_closure": {
+      "checked": 500,
+      "max_err": 0.0
+    },
+    "note": "end_bar==bar_t+1, start_block==block, event_mask==target_mask for all 37987 terminals; provenance residuals recomputed from frozen start_upper/lower_group reproduce stored columns exactly",
+    "base_commit": "099fbb87b0fa5db5cce6e03342decb4838cb7c07"
+  },
+  "b0_parity_vs_pgm_bar0_m2": "PASS",
+  "tempo_derived_representation": true,
+  "bootstrap_reps": 1000,
+  "timing": {
+    "cache_load_seconds": 1.1,
+    "identity_closure_seconds": 1.65,
+    "provenance_parity_seconds": 0.07,
+    "total_seconds": 63.78
+  }
+}
