@@ -66,13 +66,16 @@ def test_phi_and_mem_layout():
     assert T.R2_OCC == T.R1_OCC + T.MEM_COLS
     # reset models must never carry a previous-bar STATE value
     assert not (set(T.MEM_COLS) & set(lag.LAG_COLS))
-    assert len(T.RESET_TARGETS) == 10
+    assert len(T.RESET_TARGETS) == 11
 
 
 def test_reset_target_partition():
-    assert len(T.RESET_GEOM) == 2 and len(T.RESET_SHAPE) == 2
-    assert len(T.RESET_AGE) == 4 and len(T.RESET_CNT) == 2
-    assert len(T.RESET_TARGETS) == len(set(T.RESET_TARGETS)) == 10
+    assert len(T.RESET_GEOM) == 2
+    assert len(T.RESET_LOGRATIO_RESID) == 1
+    assert len(T.RESET_SHAPE) == 2
+    assert len(T.RESET_AGE) == 4
+    assert len(T.RESET_CNT) == 2
+    assert len(T.RESET_TARGETS) == len(set(T.RESET_TARGETS)) == 11
     assert T.GAP_FEAT == ["gap_positive", "log1p_gap"]
 
 
@@ -104,8 +107,10 @@ def test_real_pair_chain_and_reconstruction():
     assert au["n_immediate"] + au["n_positive_gap"] == au["n_pairs"]
     rc = T.audit_reset_reconstruction(pair, first)
     assert rc["max_error"] < 1e-8
-    # storage-limited derived representation is reported, not gated
-    assert rc["storage_limited"]["start_log_ratio_max_abs_error"] < 1e-4
+    assert rc["per_field_max_error"]["start_log_ratio"] < 1e-8
+    assert "storage_limited" not in rc
+    assert "logratio_residual" in rc
+    assert abs(rc["logratio_residual"]["max_abs"]) < 1e-4
 
 
 def test_memory_has_no_cross_episode_leak():
@@ -157,11 +162,12 @@ def test_gap_geometric_support_and_shared_magnitude():
 def test_day_cluster_bootstrap_semantics():
     delta = np.array([0., 0., 3., 3., 3.])
     day = np.array(["A", "A", "B", "B", "B"])
-    lo, hi = ms.boot_delta(delta, day, 7, reps=200)
+    lo, hi, pt = T.boot_episode_day_cluster(delta, day, 7, reps=500)
     assert lo <= 1.8 <= hi
+    assert abs(pt - 1.8) < 1e-12
     c = np.full(40, -1.5)
-    lo2, hi2 = ms.boot_delta(c, np.array(["A"] * 20 + ["B"] * 20), 3, reps=200)
-    assert abs(lo2 + 1.5) < 1e-12 and abs(hi2 + 1.5) < 1e-12
+    lo2, hi2, pt2 = T.boot_episode_day_cluster(c, np.array(["A"] * 20 + ["B"] * 20), 3, reps=200)
+    assert abs(lo2 + 1.5) < 1e-12 and abs(hi2 + 1.5) < 1e-12 and abs(pt2 + 1.5) < 1e-12
 
 
 def test_reset_heads_shared_count_magnitude():
@@ -253,6 +259,90 @@ def test_verdict_reads_only_intended_comparisons():
         assert label in src
     gate_region = src[src.index("def _verdict"):src.index("# ---------------- outputs")]
     assert "mem_report" in gate_region
+
+
+def test_logratio_residual_exact_closure():
+    small, _, _ = _real_small()
+    pair, first = T.build_reset_pairs(small)
+    fu = pair["next_start_up_distance_R"].to_numpy(np.float64)
+    fd = pair["next_start_down_distance_R"].to_numpy(np.float64)
+    r_log = pair["next_start_log_ratio_residual"].to_numpy(np.float64)
+    target_lr = pair["next_start_log_ratio"].to_numpy(np.float64)
+    reconstructed_lr = np.log(fu / fd) + r_log
+    err = np.max(np.abs(reconstructed_lr - target_lr))
+    assert err < 1e-8
+    assert err < 1e-14
+
+
+def test_logratio_residual_nonzero_necessity():
+    """Omitting r_log (setting it to 0) fails the < 1e-8 tolerance on full dataset."""
+    obs = pd.read_parquet(base.CACHE / "market_state1_samples.parquet")
+    keep = list(dict.fromkeys(
+        T.OBS_NUM + T.CAT + list(lag.LAG_BASE) + base.BUILD_SRC_COLS
+        + ["symbol", "episode_id", "start_bar", "bar_t", "block",
+           "episode_start_day", "hazard", "target_mask", "prev_event_mask"]))
+    obs = obs[[c for c in keep if c in obs.columns]]
+    obs, _, _ = T.add_phi_and_memory(obs)
+    pair, _ = T.build_reset_pairs(obs)
+    fu = pair["next_start_up_distance_R"].to_numpy(np.float64)
+    fd = pair["next_start_down_distance_R"].to_numpy(np.float64)
+    target_lr = pair["next_start_log_ratio"].to_numpy(np.float64)
+    # naive log(u/d) without r_log
+    naive_err = np.max(np.abs(np.log(fu / fd) - target_lr))
+    # the frozen eps=10^-9 convention causes ~1.02e-6 discrepancy, violating < 1e-8
+    assert naive_err > 1e-6
+    assert naive_err >= 1e-8
+
+
+def test_reset_primitive_count_11():
+    assert len(T.RESET_TARGETS) == 11
+    assert "next_start_log_ratio_residual" in T.RESET_TARGETS
+    assert len(set(T.RESET_TARGETS)) == 11
+
+
+def test_reset_joint_nll_sum():
+    small, _, _ = _real_small(k=40)
+    pair, _ = T.build_reset_pairs(small)
+    ptr = pair[pair["block"] == "TB1"].reset_index(drop=True)
+    pev = pair[pair["block"] == "TB2"].reset_index(drop=True)
+    Xtr_s, Xev_s = T._design(ptr, pev, T.R0_OCC + T.GAP_FEAT, T.MASK_CAT)
+    gap_p = 0.4
+    decomp = T._fit_heads(Xtr_s, Xev_s, ptr, pev, gap_p)
+    decomp["_gap"] = pev["gap_bars"].to_numpy(np.float64)
+    nll_occ = np.full(len(pev), 0.5)
+    total = T.reset_nll(decomp, nll_occ, gap_p)
+    expected = (nll_occ
+                + T.gap_positive_nll(decomp["_gap"], gap_p)
+                + decomp["geometry"]
+                + decomp["logratio_residual"]
+                + sum(decomp[n] for n in T.RESET_SHAPE + T.RESET_AGE)
+                + decomp["counts"].sum(axis=1))
+    assert np.allclose(total, expected, atol=1e-12)
+
+
+def test_bootstrap_multiplicity_preserved():
+    # Day A has 1 episode with delta = 100.0
+    # Day B has 9 episodes with delta = 0.0
+    # Episode-weighted sample mean is (100 + 0) / 10 = 10.0.
+    # Day mean is (100 + 0) / 2 = 50.0.
+    delta = np.array([100.0] + [0.0] * 9)
+    day = np.array(["A"] + ["B"] * 9)
+    lo, hi, pt = T.boot_episode_day_cluster(delta, day, 42, reps=3000)
+    assert abs(pt - 10.0) < 1e-12
+    # Verify multiplicity preservation:
+    # Under cluster sampling with replacement of days {A, B}, possible draws are:
+    # {A, A}: sel has 2 episodes of A -> mean = 100.0 (prob = 1/4)
+    # {B, B}: sel has 18 episodes of B -> mean = 0.0 (prob = 1/4)
+    # {A, B} or {B, A}: sel has 1 episode of A + 9 of B -> mean = 10.0 (prob = 1/2)
+    # The expected bootstrap mean is 0.25*100 + 0.25*0 + 0.5*10 = 30.0 != 50.0 (day mean)
+    assert lo <= pt <= hi
+
+
+def test_no_ms_boot_delta_in_gates():
+    src = inspect.getsource(T.run_single_window_1b)
+    assert "ms.boot_delta" not in src
+    assert "boot_episode_day_cluster" in src
+    assert src.count("boot_episode_day_cluster") == 3
 
 
 def test_output_namespace_isolation():

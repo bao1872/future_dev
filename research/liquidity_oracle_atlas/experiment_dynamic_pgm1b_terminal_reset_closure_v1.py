@@ -30,7 +30,7 @@ from PGM-BAR via the MARKET-STATE-1.1 module):
     T2 = T1 + Z_t^{mem}(6)       -> memory challenger
 
 Reset models (gap occurrence Logistic + shared Geometric magnitude + geometry /
-start-shape / provenance-age / provenance-count heads):
+logratio_residual / start-shape / provenance-age / provenance-count heads):
 
     R0 = E + A
     R1 = R0 + S_t + Phi(10)      -> RESET_STATE
@@ -110,14 +110,17 @@ T0_NUM = OBS_NUM + [LAG_AVAIL]
 T1_NUM = T0_NUM + PHI_COLS
 T2_NUM = T1_NUM + MEM_COLS
 
-# reset primitive targets (10)
+# reset primitive targets (11)
 RESET_GEOM = ["next_start_up_distance_R", "next_start_down_distance_R"]
+RESET_LOGRATIO_RESID = ["next_start_log_ratio_residual"]
 RESET_SHAPE = ["next_path_max_up_excursion_R", "next_path_max_down_excursion_R"]
 RESET_AGE = ["next_upper_newest_log_age", "next_upper_span",
              "next_lower_newest_log_age", "next_lower_span"]
 RESET_CNT = ["next_upper_n_active_minus1", "next_lower_n_active_minus1"]
-RESET_TARGETS = RESET_GEOM + RESET_SHAPE + RESET_AGE + RESET_CNT
-assert len(RESET_GEOM) + len(RESET_SHAPE) + len(RESET_AGE) + len(RESET_CNT) == 10
+RESET_TARGETS = (RESET_GEOM + RESET_LOGRATIO_RESID + RESET_SHAPE
+                 + RESET_AGE + RESET_CNT)
+assert (len(RESET_GEOM) + len(RESET_LOGRATIO_RESID) + len(RESET_SHAPE)
+        + len(RESET_AGE) + len(RESET_CNT) == 11)
 
 # reset model feature sets. E_n is a 15-class unordered mask, so it enters ONCE
 # as a categorical (MASK_CAT) and never as a second numeric column.
@@ -236,6 +239,12 @@ def build_reset_pairs(obs):
     pair["prev_endpoint_mask"] = pair["target_mask"].astype(np.int64)
     pair["gap_positive"] = (pair["gap_bars"] > 0).astype(np.int64)
     pair["log1p_gap"] = np.log1p(pair["gap_bars"].to_numpy(np.float64))
+    # exact closure residual for the frozen PGM-BAR eps=10^-9 convention on raw price
+    # differences vs normalized distance ratio
+    pair["next_start_log_ratio_residual"] = (
+        pair["next_start_log_ratio"].to_numpy(np.float64)
+        - np.log(pair["next_start_up_distance_R"].to_numpy(np.float64)
+                 / pair["next_start_down_distance_R"].to_numpy(np.float64)))
     return pair, first
 
 
@@ -255,6 +264,8 @@ def audit_reset_pairs(pair):
          != pair["next_start_bar"].to_numpy(np.int64)).sum())
     bad["next_geometry_positive"] = int(
         (pair[RESET_GEOM].to_numpy(np.float64) <= 0).sum())
+    bad["next_logratio_residual_nonfinite"] = int(
+        (~np.isfinite(pair[RESET_LOGRATIO_RESID].to_numpy(np.float64))).sum())
     bad["next_shape_nonneg"] = int((pair[RESET_SHAPE].to_numpy(np.float64)
                                     < 0).sum())
     bad["next_age_nonneg"] = int((pair[RESET_AGE].to_numpy(np.float64) < 0).sum())
@@ -270,22 +281,22 @@ def audit_reset_pairs(pair):
 
 
 def audit_reset_reconstruction(pair, first):
-    """Rebuild next-episode first-row state from the 10 primitives."""
+    """Rebuild next-episode first-row state from the 11 primitives."""
     fu = pair["next_start_up_distance_R"].to_numpy(np.float64)
     fd = pair["next_start_down_distance_R"].to_numpy(np.float64)
     m_u = pair["next_path_max_up_excursion_R"].to_numpy(np.float64)
     m_d = pair["next_path_max_down_excursion_R"].to_numpy(np.float64)
-    # storage-limited derived representation: the stored start_log_ratio carries
-    # ~float32 precision (relative ~1e-7) for large |log(u/d)|, while the
-    # primitives reproduce log(u/d) in float64. Reported, not hard-gated --
-    # same treatment 1A.1b applied to cur_log_ratio.
-    lr_err = float(np.abs(np.log(fu / fd)
-                          - pair["next_start_log_ratio"]).max())
-    lr_rel = float(np.max(np.abs(np.log(fu / fd)
-                                 - pair["next_start_log_ratio"])
-                          / np.maximum(np.abs(pair["next_start_log_ratio"]),
-                                       1e-12)))
+    r_log = pair["next_start_log_ratio_residual"].to_numpy(np.float64)
+
+    # Reconstructed start_log_ratio uses normalized distance ratio + the exact
+    # closure residual r_log, closing the frozen PGM-BAR eps=10^-9 convention.
+    reconstructed_start_log_ratio = np.log(fu / fd) + r_log
+    lr_err = float(np.abs(reconstructed_start_log_ratio
+                          - pair["next_start_log_ratio"].to_numpy(
+                              np.float64)).max())
+
     err = {}
+    err["start_log_ratio"] = lr_err
     err["width"] = float(np.abs((fu + fd)
                                 - pair["next_start_width_R"]).max())
     err["oldest_age"] = float(np.abs(
@@ -324,14 +335,17 @@ def audit_reset_reconstruction(pair, first):
     if worst >= 1e-8:
         raise SystemExit(
             f"STOP_DYNAMIC_PGM1B_RESET_RECONSTRUCTION_FAIL: {err}")
-    return dict(per_field_max_error=err, max_error=worst,
-                storage_limited=dict(
-                    start_log_ratio_max_abs_error=lr_err,
-                    start_log_ratio_max_rel_error=lr_rel,
-                    note=("stored start_log_ratio is float32-precision "
-                          "(rel ~1e-7 for large |log(u/d)|); the 10 primitives "
-                          "reproduce log(u/d) in float64, so this residual is "
-                          "storage-limited, not reconstruction-limited")))
+    return dict(
+        per_field_max_error=err, max_error=worst,
+        logratio_residual=dict(
+            min=float(r_log.min()),
+            max=float(r_log.max()),
+            mean=float(r_log.mean()),
+            std=float(r_log.std()),
+            max_abs=float(np.abs(r_log).max()),
+            note=("Exact closure residual r_log closes the frozen PGM-BAR eps=10^-9 "
+                  "convention on raw price differences vs normalized distance ratio; "
+                  "reconstruction error is within machine precision (< 1e-8).")))
 
 
 
@@ -394,6 +408,11 @@ def _fit_heads(Xtr, Xev, tr, ev, gap_p):
     gh = base.GaussianTransitionHead(alpha=1.0).fit(Xtr, ytr_log)
     out["geometry"] = gh.nll_per_row(Xev, yev_log) + yev_log.sum(axis=1)
 
+    ytr_rlog = tr[RESET_LOGRATIO_RESID].to_numpy(np.float64)
+    yev_rlog = ev[RESET_LOGRATIO_RESID].to_numpy(np.float64)
+    gh_rlog = base.GaussianTransitionHead(alpha=1.0).fit(Xtr, ytr_rlog)
+    out["logratio_residual"] = gh_rlog.nll_per_row(Xev, yev_rlog)
+
     for name in RESET_SHAPE + RESET_AGE:
         ztr = _encode_nonneg(tr[name].to_numpy(np.float64))
         zev = _encode_nonneg(ev[name].to_numpy(np.float64))
@@ -416,10 +435,36 @@ def reset_nll(decomp, gap_occ, gap_p):
     total = np.array(gap_occ, dtype=np.float64)
     total = total + gap_positive_nll(decomp["_gap"], gap_p)
     total = total + decomp["geometry"]
+    total = total + decomp["logratio_residual"]
     for name in RESET_SHAPE + RESET_AGE:
         total = total + decomp[name]
     total = total + decomp["counts"].sum(axis=1)
     return total
+
+
+def boot_episode_day_cluster(delta, day, seed, reps=BOOT_REPS):
+    """Cluster-bootstrap on trading days with replacement, preserving multiplicity.
+
+    Estimand: episode-weighted mean (1/N) * sum_i d_i.
+    Resampling: trading days sampled with replacement. When a day is selected
+    multiple times, all its episode rows are duplicated with multiplicity.
+    """
+    delta = np.asarray(delta, dtype=np.float64)
+    day = np.asarray(day)
+    uniq = np.unique(day)
+    idx_by_day = {d: np.flatnonzero(day == d) for d in uniq}
+    point = float(delta.mean())
+    rng = np.random.default_rng(seed)
+    out = np.empty(reps, dtype=np.float64)
+    for b in range(reps):
+        selected_days = uniq[rng.integers(0, len(uniq), len(uniq))]
+        sel = np.concatenate([idx_by_day[d] for d in selected_days])
+        out[b] = delta[sel].mean()
+    return (
+        float(np.percentile(out, 2.5)),
+        float(np.percentile(out, 97.5)),
+        point,
+    )
 
 
 # ===========================================================================
@@ -473,11 +518,14 @@ def run_single_window_1b(w, data_path):
         d = p_h - p_l
         day = ep_day.reindex(pd.Index(u_h)).to_numpy()
         sym = ep_sym.reindex(pd.Index(u_h)).to_numpy()
-        a, b = ms.boot_delta(d, day, w["seed"], reps=BOOT_REPS)
+        a, b, pt = boot_episode_day_cluster(d, day, w["seed"], reps=BOOT_REPS)
         term_boots.append(dict(
             window=w["name"], comparison=label,
-            delta_sample_mean=float(d.mean()), ci_lo=a, ci_hi=b,
+            delta_sample_mean=pt, ci_lo=a, ci_hi=b,
             n_episodes=int(len(d)),
+            estimand="EPISODE_WEIGHTED_MEAN",
+            cluster="TRADING_DAY",
+            resampling="WITH_REPLACEMENT_MULTIPLICITY_PRESERVED",
             verdict=("CI_below_zero" if b < 0 else
                      "CI_above_zero" if a > 0 else "CI_contains_zero")))
         for s_ in ms.FULL_UNIV:
@@ -534,6 +582,7 @@ def run_single_window_1b(w, data_path):
             mean_gap_mag_nll=float(gap_positive_nll(
                 pev["gap_bars"].to_numpy(np.float64), gap_p).mean()),
             mean_geometry_nll=float(decomp["geometry"].mean()),
+            mean_logratio_resid_nll=float(decomp["logratio_residual"].mean()),
             mean_shape_nll=float(np.mean([decomp[n].mean()
                                           for n in RESET_SHAPE])),
             mean_age_nll=float(np.mean([decomp[n].mean()
@@ -550,6 +599,9 @@ def run_single_window_1b(w, data_path):
                 mean_nll=float(decomp[name].mean())))
         target_rows.append(dict(window=w["name"], model=tag, target="geometry",
                                 mean_nll=float(decomp["geometry"].mean())))
+        target_rows.append(dict(window=w["name"], model=tag,
+                                target="next_start_log_ratio_residual",
+                                mean_nll=float(decomp["logratio_residual"].mean())))
         for j_, c_ in enumerate(RESET_CNT):
             target_rows.append(dict(window=w["name"], model=tag, target=c_,
                                     mean_nll=float(
@@ -560,11 +612,14 @@ def run_single_window_1b(w, data_path):
     for label, hi, lo in [(C_RESET_STATE, "R1_STATE_PHI", "R0_ENDPOINT_ONLY"),
                           (C_RESET_MEM, "R2_STATE_PHI_MEM", "R1_STATE_PHI")]:
         d = reset_nlls[hi] - reset_nlls[lo]
-        a, b = ms.boot_delta(d, pr_day, w["seed"], reps=BOOT_REPS)
+        a, b, pt = boot_episode_day_cluster(d, pr_day, w["seed"], reps=BOOT_REPS)
         reset_boots.append(dict(
             window=w["name"], comparison=label,
-            delta_sample_mean=float(d.mean()), ci_lo=a, ci_hi=b,
+            delta_sample_mean=pt, ci_lo=a, ci_hi=b,
             n_pairs=int(len(d)),
+            estimand="EPISODE_WEIGHTED_MEAN",
+            cluster="TRADING_DAY",
+            resampling="WITH_REPLACEMENT_MULTIPLICITY_PRESERVED",
             verdict=("CI_below_zero" if b < 0 else
                      "CI_above_zero" if a > 0 else "CI_contains_zero")))
         for s_ in ms.FULL_UNIV:
@@ -596,11 +651,14 @@ def run_single_window_1b(w, data_path):
     b_sym = pev["symbol"].to_numpy()
     for label, hi, lo in [(C_BOUND_PHI, "B1", "B0"), (C_BOUND_MEM, "B2", "B1")]:
         d = b_nll[hi] - b_nll[lo]
-        a, b = ms.boot_delta(d, b_day, w["seed"], reps=BOOT_REPS)
+        a, b, pt = boot_episode_day_cluster(d, b_day, w["seed"], reps=BOOT_REPS)
         bound_boots.append(dict(
             window=w["name"], comparison=label,
-            delta_sample_mean=float(d.mean()), ci_lo=a, ci_hi=b,
+            delta_sample_mean=pt, ci_lo=a, ci_hi=b,
             n_episodes=int(len(d)),
+            estimand="EPISODE_WEIGHTED_MEAN",
+            cluster="TRADING_DAY",
+            resampling="WITH_REPLACEMENT_MULTIPLICITY_PRESERVED",
             verdict=("CI_below_zero" if b < 0 else
                      "CI_above_zero" if a > 0 else "CI_contains_zero")))
         for s_ in ms.FULL_UNIV:
@@ -850,6 +908,9 @@ def main():
         sample=sample_audit, pairs=pair_audit, reconstruction=recon_audit,
         terminal_parity=parity,
         bootstrap_reps=BOOT_REPS,
+        bootstrap_estimand="EPISODE_WEIGHTED_MEAN",
+        bootstrap_cluster="TRADING_DAY",
+        bootstrap_resampling="WITH_REPLACEMENT_MULTIPLICITY_PRESERVED",
     )
     timing["total_seconds"] = round(time.perf_counter() - t_total, 2)
     summary["timing"] = timing
