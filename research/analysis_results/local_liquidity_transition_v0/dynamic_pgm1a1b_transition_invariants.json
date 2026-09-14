@@ -1,0 +1,13 @@
+{
+  "width_exact_constant": true,
+  "tv_update_exact": true,
+  "last_return_exact": true,
+  "mfe_nonnegative": true,
+  "mae_nonnegative": true,
+  "agezero_code_in_0_3": true,
+  "lag1_from_past_only": true,
+  "no_tb4": true,
+  "count_increment_integer": true,
+  "count_increment_nonneg": true,
+  "count_reconstruction_exact": true
+}

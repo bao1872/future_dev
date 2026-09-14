@@ -1,0 +1,5 @@
+window,model,n_params,success,elapsed_seconds
+A_TB1_to_TB2,K0_UNCONDITIONAL,34,True,0.169
+A_TB1_to_TB2,K1_STATE,852,True,2.193
+B_TB1TB2_to_TB3,K0_UNCONDITIONAL,34,True,0.323
+B_TB1TB2_to_TB3,K1_STATE,852,True,4.538

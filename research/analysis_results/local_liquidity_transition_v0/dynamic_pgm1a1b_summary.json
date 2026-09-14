@@ -1,0 +1,493 @@
+{
+  "experiment": "DYNAMIC-PGM-1A.1b Count Magnitude Closure Transition Kernel",
+  "parent_commit": "3fcac2ee0875e90256e6c6b3def4c6b72b768399",
+  "transition_verdict": "SUPPORT_CORRECT_TRANSITION_SIGNAL_SUPPORTED",
+  "k2_status": "POSTPONED_TO_1A2_LAG_CLOSURE",
+  "k2_note": "K2 (lag1) is excluded from 1A.1b; reserved for DYNAMIC-PGM-1A.2 Lag Closure.",
+  "design": {
+    "scope": "within-episode 5m state transition, terminal reset excluded",
+    "target": "P(S_{t+1} | S_t, H_{t+1}=0)",
+    "count_magnitude_closure": "P(A|S) = P(A>0|S) * P(A|A>0); occurrence state-dependent Logistic; magnitude state-independent train-constant exact ZTP",
+    "predicted_innovations": {
+      "nodes": [
+        "z_d_up",
+        "z_dmfe",
+        "z_dmae",
+        "z_dcr",
+        "z_range",
+        "z_uresid",
+        "z_lresid"
+      ],
+      "z_columns": [
+        "z_d_up",
+        "z_dmfe_ispos",
+        "z_dmfe_log",
+        "z_dmae_ispos",
+        "z_dmae_log",
+        "z_dcr_is0",
+        "z_dcr_is1",
+        "z_dcr_logit",
+        "z_range_ispos",
+        "z_range_log",
+        "z_uresid_ispos",
+        "z_uresid_log",
+        "z_lresid_ispos",
+        "z_lresid_log"
+      ],
+      "discrete": "deterministic derived state; stochastic node removed",
+      "count_increments": [
+        "z_delta_upper_count",
+        "z_delta_lower_count"
+      ],
+      "note": "S_{t+1}=F(S_t,Z_{t+1}); count increments use Count Magnitude Closure: occurrence P(A>0|S) is state-dependent Logistic (K1) vs constant (K0); magnitude P(A|A>0) is state-independent train-constant exact ZTP, shared identically across K0 and K1."
+    },
+    "models": {
+      "K0_UNCONDITIONAL": "no state; per-node constant heads + marginal occurrence + constant ZTP",
+      "K1_STATE": "OBSERVED-STATE-v1 (35 numeric + prev_event_mask) + Logistic occurrence + shared constant ZTP"
+    },
+    "kernel": {
+      "z_d_up": "Gaussian delta (any real)",
+      "z_dmfe": "Hurdle-LogNormal delta (P(=0) Logistic + log(\u0394) Gaussian)",
+      "z_dmae": "Hurdle-LogNormal delta (P(=0) Logistic + log(\u0394) Gaussian)",
+      "z_range": "Hurdle-LogNormal value (P(=0) Logistic + log(S) Gaussian)",
+      "z_uresid": "Hurdle-LogNormal on q = -residual >= 0 (point mass at 0 + log(q) Gaussian)",
+      "z_lresid": "Hurdle-LogNormal on q = -residual >= 0 (point mass at 0 + log(q) Gaussian)",
+      "z_dcr": "0/interior/1 (3-class Logistic + logit(S) Gaussian on interior)",
+      "z_delta_upper_count": "Logistic occurrence + constant exact ZTP",
+      "z_delta_lower_count": "Logistic occurrence + constant exact ZTP",
+      "age_zero": "deterministic derived state; stochastic node removed",
+      "discrete": "deterministic derived state; stochastic node removed"
+    },
+    "obs_state_numeric": [
+      "start_up_distance_R",
+      "start_down_distance_R",
+      "start_width_R",
+      "start_log_ratio",
+      "upper_oldest_log_age",
+      "upper_newest_log_age",
+      "upper_newest_age_zero",
+      "upper_oldest_age_zero",
+      "upper_n_active_identities",
+      "lower_oldest_log_age",
+      "lower_newest_log_age",
+      "lower_newest_age_zero",
+      "lower_oldest_age_zero",
+      "lower_n_active_identities",
+      "elapsed_log",
+      "cur_up_distance_R",
+      "cur_down_distance_R",
+      "cur_width_R",
+      "cur_log_ratio",
+      "path_total_variation_R",
+      "path_max_up_excursion_R",
+      "path_max_down_excursion_R",
+      "path_direction_change_rate",
+      "path_last_return_R",
+      "path_current_bar_range_R",
+      "upper_newest_log_age_residual",
+      "upper_current_newest_age_zero",
+      "upper_active_identity_count_delta",
+      "lower_newest_log_age_residual",
+      "lower_current_newest_age_zero",
+      "lower_active_identity_count_delta",
+      "tempo_signed_speed",
+      "tempo_abs_speed",
+      "tempo_signed_efficiency",
+      "tempo_abs_efficiency"
+    ],
+    "obs_state_categorical": [
+      "prev_event_mask"
+    ],
+    "blocks": {
+      "Location": {
+        "nodes": [
+          "z_d_up"
+        ],
+        "disc": [],
+        "count": []
+      },
+      "Path": {
+        "nodes": [
+          "z_dmfe",
+          "z_dmae",
+          "z_dcr",
+          "z_range"
+        ],
+        "disc": [],
+        "count": []
+      },
+      "LiquidityComposition": {
+        "nodes": [
+          "z_uresid",
+          "z_lresid"
+        ],
+        "disc": [],
+        "count": [
+          "z_delta_upper_count",
+          "z_delta_lower_count"
+        ]
+      }
+    },
+    "tempo_classification": "DERIVED_REPRESENTATION (not new state info)"
+  },
+  "windows": [
+    {
+      "name": "A_TB1_to_TB2",
+      "train": [
+        "TB1"
+      ],
+      "eval": "TB2",
+      "seed": 20260920
+    },
+    {
+      "name": "B_TB1TB2_to_TB3",
+      "train": [
+        "TB1",
+        "TB2"
+      ],
+      "eval": "TB3",
+      "seed": 20260921
+    }
+  ],
+  "n_transition_rows": 321727,
+  "primary_metric": "joint transition NLL (continuous + discrete + count)",
+  "model_metrics": [
+    {
+      "window": "A_TB1_to_TB2",
+      "model": "K0_UNCONDITIONAL",
+      "mean_joint_nll": 3.045832444543554,
+      "mean_cont_nll": 2.9733185259930486,
+      "mean_disc_nll": 0.0,
+      "mean_count_nll": 0.0725139185505049,
+      "n_rows": 111557
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "model": "K1_STATE",
+      "mean_joint_nll": 1.3807112331885323,
+      "mean_cont_nll": 1.3098143682364005,
+      "mean_disc_nll": 0.0,
+      "mean_count_nll": 0.07089686495213156,
+      "n_rows": 111557
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "model": "K0_UNCONDITIONAL",
+      "mean_joint_nll": 3.0543425100566743,
+      "mean_cont_nll": 2.993159875312253,
+      "mean_disc_nll": 0.0,
+      "mean_count_nll": 0.061182634744421975,
+      "n_rows": 107439
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "model": "K1_STATE",
+      "mean_joint_nll": 1.412292223427112,
+      "mean_cont_nll": 1.3525274626812842,
+      "mean_disc_nll": 0.0,
+      "mean_count_nll": 0.059764760745828115,
+      "n_rows": 107439
+    }
+  ],
+  "bootstrap": [
+    {
+      "window": "A_TB1_to_TB2",
+      "comparison": "K1-K0",
+      "delta_sample_mean": -1.6403325667095778,
+      "ci_lo": -1.6603521957864047,
+      "ci_hi": -1.6203843893030048,
+      "verdict": "CI_below_zero"
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "comparison": "K1-K0",
+      "delta_sample_mean": -1.6432254873774568,
+      "ci_lo": -1.6642894750278598,
+      "ci_hi": -1.6233646773736932,
+      "verdict": "CI_below_zero"
+    }
+  ],
+  "by_symbol_negative_counts": {
+    "A_TB1_to_TB2": {
+      "K1-K0": 15
+    },
+    "B_TB1TB2_to_TB3": {
+      "K1-K0": 15
+    }
+  },
+  "block_contribution": [
+    {
+      "window": "A_TB1_to_TB2",
+      "block": "Location",
+      "mean_joint_k0": 0.7682556373883138,
+      "mean_joint_k1": 0.7567765340808795,
+      "delta_k1_minus_k0": -0.01147910330743429
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "block": "Path",
+      "mean_joint_k0": 1.6888439596947382,
+      "mean_joint_k1": 0.3848393492572658,
+      "delta_k1_minus_k0": -1.3040046104374725
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "block": "LiquidityComposition",
+      "mean_joint_k0": 0.5887328474605015,
+      "mean_joint_k1": 0.23909534985038686,
+      "delta_k1_minus_k0": -0.34963749761011464
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "block": "Location",
+      "mean_joint_k0": 0.8176606398918018,
+      "mean_joint_k1": 0.8104345496063184,
+      "delta_k1_minus_k0": -0.0072260902854833775
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "block": "Path",
+      "mean_joint_k0": 1.7230513082189056,
+      "mean_joint_k1": 0.41293945350423306,
+      "delta_k1_minus_k0": -1.3101118547146726
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "block": "LiquidityComposition",
+      "mean_joint_k0": 0.5136305619459675,
+      "mean_joint_k1": 0.18891822031656083,
+      "delta_k1_minus_k0": -0.32471234162940665
+    }
+  ],
+  "per_target": [
+    {
+      "window": "A_TB1_to_TB2",
+      "target": "z_d_up",
+      "kind": "node",
+      "mean_nll_k0": 0.7682556373883138,
+      "mean_nll_k1": 0.7567765340808795,
+      "delta_k1_minus_k0": -0.01147910330743429
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "target": "z_dmfe",
+      "kind": "node",
+      "mean_nll_k0": 0.40485935369705467,
+      "mean_nll_k1": 0.2621028276340016,
+      "delta_k1_minus_k0": -0.14275652606305306
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "target": "z_dmae",
+      "kind": "node",
+      "mean_nll_k0": 0.4019152964479682,
+      "mean_nll_k1": 0.26519558770015544,
+      "delta_k1_minus_k0": -0.13671970874781275
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "target": "z_dcr",
+      "kind": "node",
+      "mean_nll_k0": 0.474843396553969,
+      "mean_nll_k1": -0.3237811841994969,
+      "delta_k1_minus_k0": -0.798624580753466
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "target": "z_range",
+      "kind": "node",
+      "mean_nll_k0": 0.40722591299574645,
+      "mean_nll_k1": 0.18132211812260565,
+      "delta_k1_minus_k0": -0.2259037948731408
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "target": "z_uresid",
+      "kind": "node",
+      "mean_nll_k0": 0.26261074839609094,
+      "mean_nll_k1": 0.08946962927616701,
+      "delta_k1_minus_k0": -0.17314111911992391
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "target": "z_lresid",
+      "kind": "node",
+      "mean_nll_k0": 0.25360818051390555,
+      "mean_nll_k1": 0.0787288556220883,
+      "delta_k1_minus_k0": -0.17487932489181723
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "target": "z_delta_upper_count",
+      "kind": "discrete_count",
+      "mean_nll_k0": 0.036794045072572105,
+      "mean_nll_k1": 0.03593553166744913,
+      "delta_k1_minus_k0": -0.0008585134051229751
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "target": "z_delta_lower_count",
+      "kind": "discrete_count",
+      "mean_nll_k0": 0.03571987347793277,
+      "mean_nll_k1": 0.03496133328468242,
+      "delta_k1_minus_k0": -0.0007585401932503483
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "target": "z_d_up",
+      "kind": "node",
+      "mean_nll_k0": 0.8176606398918018,
+      "mean_nll_k1": 0.8104345496063184,
+      "delta_k1_minus_k0": -0.0072260902854833775
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "target": "z_dmfe",
+      "kind": "node",
+      "mean_nll_k0": 0.42808891504483065,
+      "mean_nll_k1": 0.27259829096348354,
+      "delta_k1_minus_k0": -0.15549062408134712
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "target": "z_dmae",
+      "kind": "node",
+      "mean_nll_k0": 0.42601836170663054,
+      "mean_nll_k1": 0.2782651695816678,
+      "delta_k1_minus_k0": -0.14775319212496274
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "target": "z_dcr",
+      "kind": "node",
+      "mean_nll_k0": 0.48106712023751286,
+      "mean_nll_k1": -0.31637748572289875,
+      "delta_k1_minus_k0": -0.7974446059604117
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "target": "z_range",
+      "kind": "node",
+      "mean_nll_k0": 0.3878769112299315,
+      "mean_nll_k1": 0.17845347868198044,
+      "delta_k1_minus_k0": -0.20942343254795107
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "target": "z_uresid",
+      "kind": "node",
+      "mean_nll_k0": 0.22993412822362502,
+      "mean_nll_k1": 0.06561880917249704,
+      "delta_k1_minus_k0": -0.16431531905112798
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "target": "z_lresid",
+      "kind": "node",
+      "mean_nll_k0": 0.22251379897792045,
+      "mean_nll_k1": 0.06353465039823565,
+      "delta_k1_minus_k0": -0.15897914857968481
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "target": "z_delta_upper_count",
+      "kind": "discrete_count",
+      "mean_nll_k0": 0.030620608962057705,
+      "mean_nll_k1": 0.029996953551262,
+      "delta_k1_minus_k0": -0.0006236554107957037
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "target": "z_delta_lower_count",
+      "kind": "discrete_count",
+      "mean_nll_k0": 0.030562025782364242,
+      "mean_nll_k1": 0.02976780719456611,
+      "delta_k1_minus_k0": -0.0007942185877981324
+    }
+  ],
+  "node_diagnostics_file": "dynamic_pgm1a1b_node_diagnostics.csv",
+  "count_closure_diagnostics_file": "dynamic_pgm1a1b_count_closure_diagnostics.csv",
+  "covariance_audit": {
+    "A_TB1_to_TB2": {
+      "z_d_up": {
+        "min_eig": 0.26206577243255336,
+        "pd": true
+      },
+      "z_dmfe": {
+        "min_eig": 0.6148152680951686,
+        "pd": true
+      },
+      "z_dmae": {
+        "min_eig": 0.5846998539970575,
+        "pd": true
+      },
+      "z_dcr": {
+        "min_eig": 0.2272097597126601,
+        "pd": true
+      },
+      "z_range": {
+        "min_eig": 0.1739798507868757,
+        "pd": true
+      },
+      "z_uresid": {
+        "min_eig": 0.23268661276475297,
+        "pd": true
+      },
+      "z_lresid": {
+        "min_eig": 0.23021627884543275,
+        "pd": true
+      }
+    },
+    "B_TB1TB2_to_TB3": {
+      "z_d_up": {
+        "min_eig": 0.2640008286144351,
+        "pd": true
+      },
+      "z_dmfe": {
+        "min_eig": 0.6173514261780598,
+        "pd": true
+      },
+      "z_dmae": {
+        "min_eig": 0.5844013319328715,
+        "pd": true
+      },
+      "z_dcr": {
+        "min_eig": 0.22352678818385882,
+        "pd": true
+      },
+      "z_range": {
+        "min_eig": 0.17655768257078266,
+        "pd": true
+      },
+      "z_uresid": {
+        "min_eig": 0.320247545571616,
+        "pd": true
+      },
+      "z_lresid": {
+        "min_eig": 0.2543077391956154,
+        "pd": true
+      }
+    }
+  },
+  "verdict": {
+    "SUPPORT_CORRECT_TRANSITION_SIGNAL_SUPPORTED": {
+      "supported": true,
+      "verdict": "SUPPORT_CORRECT_TRANSITION_SIGNAL_SUPPORTED",
+      "windows": {
+        "A_TB1_to_TB2": {
+          "ci_hi": -1.6203843893030048,
+          "n_sym_neg": 15
+        },
+        "B_TB1TB2_to_TB3": {
+          "ci_hi": -1.6233646773736932,
+          "n_sym_neg": 15
+        }
+      }
+    }
+  },
+  "bootstrap_reps": 1000,
+  "timing": {
+    "build_transition_seconds": 0.99,
+    "total_seconds": 15.4
+  }
+}
