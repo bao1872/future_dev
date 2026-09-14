@@ -307,6 +307,49 @@ def test_agezero_audit_harness():
     assert res_bad["upper"]["exact"] is False and res_bad["upper"]["n_mismatch"] > 0
 
 
+def test_child_agezero_configuration():
+    # 1. Default initial state has discrete agezero node
+    m.configure_child_semantics(agezero_deterministic=False)
+    assert m.AGEZERO_DETERMINISTIC is False
+    assert m.disc_spec() == ["z_agezero_code"]
+    assert "z_agezero_code" in m.BLOCKS["LiquidityComposition"]["disc"]
+
+    # 2. When agezero_deterministic=True, discrete node is eliminated from BLOCKS and disc_spec()
+    m.configure_child_semantics(agezero_deterministic=True)
+    assert m.AGEZERO_DETERMINISTIC is True
+    assert m.disc_spec() == []
+    assert m.BLOCKS["LiquidityComposition"]["disc"] == []
+
+    # 3. Restoring agezero_deterministic=False restores the discrete node
+    m.configure_child_semantics(agezero_deterministic=False)
+    assert m.AGEZERO_DETERMINISTIC is False
+    assert m.disc_spec() == ["z_agezero_code"]
+
+    # 4. Test subprocess CLI behavior:
+    # 4a. Child with --window-json but WITHOUT --agezero-deterministic exits with hard guard
+    import subprocess
+    cmd_err = [
+        sys.executable,
+        str(REPO / "research" / "liquidity_oracle_atlas" / "experiment_dynamic_pgm1a1_support_semantics_v1.py"),
+        "--window-json", "{}",
+    ]
+    r_err = subprocess.run(cmd_err, capture_output=True, text=True)
+    assert r_err.returncode != 0
+    assert "STOP_DYNAMIC_PGM1A1_CHILD_AGEZERO_STATE_NOT_PROPAGATED" in (r_err.stderr + r_err.stdout)
+
+    # 4b. Child with --window-json AND --agezero-deterministic propagates past the agezero guard
+    # (it may fail later on empty json or missing data, but must NOT fail on the agezero guard)
+    cmd_with_flag = [
+        sys.executable,
+        str(REPO / "research" / "liquidity_oracle_atlas" / "experiment_dynamic_pgm1a1_support_semantics_v1.py"),
+        "--window-json", "{}",
+        "--agezero-deterministic",
+    ]
+    r_flag = subprocess.run(cmd_with_flag, capture_output=True, text=True)
+    assert "STOP_DYNAMIC_PGM1A1_CHILD_AGEZERO_STATE_NOT_PROPAGATED" not in (r_flag.stderr + r_flag.stdout)
+    assert "STOP_DYNAMIC_PGM1A1_CHILD_DISC_SPEC_NONEMPTY" not in (r_flag.stderr + r_flag.stdout)
+
+
 if __name__ == "__main__":
     class _MonkeyPatch:
         def setattr(self, target, name, value):
@@ -321,4 +364,5 @@ if __name__ == "__main__":
     test_full_reconstruction_closure(_MonkeyPatch())
     test_ridge_parity()
     test_agezero_audit_harness()
+    test_child_agezero_configuration()
     print("ALL tests in test_dynamic_pgm1a1_support_semantics_v1 PASSED successfully.")

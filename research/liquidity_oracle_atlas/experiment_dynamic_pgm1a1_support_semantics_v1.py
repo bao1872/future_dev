@@ -321,6 +321,25 @@ def disc_spec():
     return [d for b in BLOCKS.values() for d in b["disc"]]
 
 
+def configure_child_semantics(agezero_deterministic: bool = False):
+    """Configure model semantics for parent or child window processes.
+
+    When agezero_deterministic is True:
+      - Marks AGEZERO_DETERMINISTIC = True
+      - Empties BLOCKS["LiquidityComposition"]["disc"]
+    When False:
+      - Marks AGEZERO_DETERMINISTIC = False
+      - Restores BLOCKS["LiquidityComposition"]["disc"] = [DISC_Z]
+    """
+    global AGEZERO_DETERMINISTIC
+    if agezero_deterministic:
+        AGEZERO_DETERMINISTIC = True
+        BLOCKS["LiquidityComposition"]["disc"] = []
+    else:
+        AGEZERO_DETERMINISTIC = False
+        BLOCKS["LiquidityComposition"]["disc"] = [DISC_Z]
+
+
 # ===========================================================================
 # transition sample construction + deterministic invariants
 # ===========================================================================
@@ -1540,8 +1559,10 @@ def main():
         raise SystemExit(
             f"STOP_DYNAMIC_PGM1A1_AGEZERO_RECON_MISMATCH: {agezero_audit}")
     # age-zero is deterministic -> drop the 4-class stochastic node from the model
-    AGEZERO_DETERMINISTIC = True
-    BLOCKS["LiquidityComposition"]["disc"] = []
+    configure_child_semantics(agezero_deterministic=True)
+    if disc_spec() != []:
+        raise SystemExit(
+            f"STOP_DYNAMIC_PGM1A1_DISC_SPEC_NONEMPTY: {disc_spec()}")
 
     audit_report = dict(
         support=support_audit,
@@ -1613,6 +1634,11 @@ def main():
         cmd = [sys.executable, str(Path(__file__)),
                "--window-json", json.dumps(w),
                "--data", str(data_path), "--result", str(result_path)]
+        if AGEZERO_DETERMINISTIC:
+            cmd.append("--agezero-deterministic")
+        else:
+            raise SystemExit(
+                "STOP_DYNAMIC_PGM1A1_AGEZERO_NOT_DETERMINISTIC_BEFORE_WINDOWS")
         print(f"[STAGE] window {w['name']} subprocess start", flush=True)
         t_w = time.perf_counter()
         r = subprocess.run(cmd, env=win_env, capture_output=True, text=True)
@@ -1761,6 +1787,8 @@ if __name__ == "__main__":
     _ap.add_argument("--window-json")
     _ap.add_argument("--data")
     _ap.add_argument("--result")
+    _ap.add_argument("--agezero-deterministic", action="store_true",
+                     help="Child subprocess mode: age-zero is deterministic derived state, drop 4-class discrete node.")
     _ap.add_argument("--audit-only", action="store_true",
                      help="Run real-data support and reconstruction audits only, then stop.")
     _args = _ap.parse_args()
@@ -1769,6 +1797,15 @@ if __name__ == "__main__":
     if _args.window_json:
         # child mode: fit a single window and emit its metrics JSON, then exit so
         # the OS reclaims all memory before the next window's subprocess starts.
+        if not _args.agezero_deterministic:
+            raise SystemExit(
+                "STOP_DYNAMIC_PGM1A1_CHILD_AGEZERO_STATE_NOT_PROPAGATED"
+            )
+        configure_child_semantics(agezero_deterministic=True)
+        if disc_spec() != []:
+            raise SystemExit(
+                "STOP_DYNAMIC_PGM1A1_CHILD_DISC_SPEC_NONEMPTY"
+            )
         _w = json.loads(_args.window_json)
         _res = run_single_window(_w, _args.data)
         Path(_args.result).write_text(json.dumps(_res, default=str))
