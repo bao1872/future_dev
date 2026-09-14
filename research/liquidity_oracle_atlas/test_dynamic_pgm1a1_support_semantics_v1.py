@@ -614,6 +614,14 @@ def test_run_single_window_smoke():
         for exp_tgt in ["z_dmfe", "z_dmae", "z_range", "z_uresid", "z_lresid",
                         "z_dcr", "z_delta_upper_count", "z_delta_lower_count"]:
             assert exp_tgt in diag_targets
+        for r in res["node_diag_rows"]:
+            if r["kind"] == "hurdle_count":
+                assert "train_positive_eta_low_clipped" in r
+                assert "train_positive_eta_high_clipped" in r
+                assert "train_all_eta_low_clipped" in r
+                assert "train_all_eta_high_clipped" in r
+                assert "train_eta_min" in r
+                assert "train_eta_max" in r
 
         # 8. json-serializable
         s = json.dumps(res, default=str)
@@ -621,6 +629,93 @@ def test_run_single_window_smoke():
     finally:
         m.configure_child_semantics(agezero_deterministic=False)
         Path(p).unlink(missing_ok=True)
+
+
+def test_ztp_tail_clipping_semantics(monkeypatch):
+    """Hard gate synthetic test:
+    * positive subset appears eta < -20 -> must STOP
+    * any all-row appears eta > 20 -> must STOP
+    * only zero-outcome rows appear eta < -20 -> must NOT STOP
+    """
+    Xtr = np.zeros((10, 2))
+    Ytr = np.array([[1, 1], [2, 0], [0, 0], [0, 0], [0, 0],
+                    [0, 0], [0, 0], [0, 0], [0, 0], [0, 0]], dtype=np.int64)
+    Xev = np.zeros((10, 2))
+    Yev = np.array([[1, 0], [0, 1], [0, 0], [0, 0], [0, 0],
+                    [0, 0], [0, 0], [0, 0], [0, 0], [0, 0]], dtype=np.int64)
+
+    orig_clip = m.ZeroTruncatedPoissonRegressor.count_eta_clip_stats
+
+    # Case 1: positive subset has eta < -20 -> must STOP
+    def mock_clip_pos_low(self, X):
+        res = orig_clip(self, X)
+        if len(X) == 2:
+            res["n_low"] = 1
+        return res
+
+    monkeypatch.setattr(m.ZeroTruncatedPoissonRegressor, "count_eta_clip_stats", mock_clip_pos_low)
+    stopped_pos = False
+    try:
+        m.fit_count_head(Xtr, Ytr, Xev, Yev)
+    except SystemExit as e:
+        stopped_pos = True
+        assert "STOP_DYNAMIC_PGM1A1_ZTP_POSITIVE_ETA_CLIPPED" in str(e)
+    assert stopped_pos, "Should have stopped on positive eta < -20"
+
+    # Case 2: any all-row has eta > 20 -> must STOP
+    def mock_clip_all_high(self, X):
+        res = orig_clip(self, X)
+        if len(X) == 10:
+            res["n_high"] = 1
+        return res
+
+    monkeypatch.setattr(m.ZeroTruncatedPoissonRegressor, "count_eta_clip_stats", mock_clip_all_high)
+    stopped_high = False
+    try:
+        m.fit_count_head(Xtr, Ytr, Xev, Yev)
+    except SystemExit as e:
+        stopped_high = True
+        assert "STOP_DYNAMIC_PGM1A1_ZTP_ALL_ETA_HIGH_EXPLOSION" in str(e)
+    assert stopped_high, "Should have stopped on all-row eta > 20"
+
+    # Case 3: only zero-outcome rows have eta < -20 -> must NOT stop
+    def mock_clip_zero_low(self, X):
+        res = orig_clip(self, X)
+        if len(X) == 10:
+            res["n_low"] = 3
+            res["n_high"] = 0
+        elif len(X) == 2:
+            res["n_low"] = 0
+            res["n_high"] = 0
+        return res
+
+    monkeypatch.setattr(m.ZeroTruncatedPoissonRegressor, "count_eta_clip_stats", mock_clip_zero_low)
+    res = m.fit_count_head(Xtr, Ytr, Xev, Yev)
+    assert res is not None
+    assert res["stats_tr_all"][0]["n_low"] == 3
+    assert res["stats_tr_pos"][0]["n_low"] == 0
+
+    monkeypatch.setattr(m.ZeroTruncatedPoissonRegressor, "count_eta_clip_stats", orig_clip)
+
+
+def test_ztp_small_lambda_limit():
+    """Verify that as eta << 0 (lambda -> 0), ZTP conditional mean approaches 1 and NLL is finite."""
+    for eta in [-20.0, -30.0, -40.0]:
+        lam = np.exp(np.clip(eta, -20.0, 20.0))
+        # E[Y | Y>0] = lam / (1 - e^{-lam})
+        denom = -np.expm1(-lam)
+        mu_trunc = lam / denom
+        assert np.isfinite(mu_trunc)
+        assert abs(mu_trunc - 1.0) < 1e-6
+
+        # ZTP NLL for y=1 and y=2
+        y = np.array([1.0, 2.0])
+        nll = m._ztnp_nll(y, np.array([lam, lam]))
+        assert np.all(np.isfinite(nll))
+        # For y=1, as lam -> 0, P(Y=1|Y>0) -> 1, so NLL -> 0
+        assert abs(nll[0]) < 1e-5
+        # For y=2, as lam -> 0, P(Y=2|Y>0) -> 0, so NLL > 0
+        assert nll[1] > 0.0
 
 
 if __name__ == "__main__":
@@ -649,6 +744,8 @@ if __name__ == "__main__":
         ("test_joint_nll_component_sum", lambda: test_joint_nll_component_sum()),
         ("test_block_model_isolation", lambda: test_block_model_isolation()),
         ("test_run_single_window_smoke", lambda: test_run_single_window_smoke()),
+        ("test_ztp_tail_clipping_semantics", lambda: test_ztp_tail_clipping_semantics(mp)),
+        ("test_ztp_small_lambda_limit", lambda: test_ztp_small_lambda_limit()),
     ]
 
     for name, fn in tests:

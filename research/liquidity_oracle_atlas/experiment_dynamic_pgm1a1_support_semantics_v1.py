@@ -903,6 +903,18 @@ class ZeroTruncatedPoissonRegressor:
         self.message = str(res.message)
         return self
 
+    def count_eta_clip_stats(self, X):
+        X = np.asarray(X, np.float64)
+        if len(X) == 0:
+            return {"n_low": 0, "n_high": 0, "eta_min": float("nan"), "eta_max": float("nan")}
+        eta = self.intercept_ + X @ self.coef_
+        return {
+            "n_low": int((eta < -20.0).sum()),
+            "n_high": int((eta > 20.0).sum()),
+            "eta_min": float(eta.min()),
+            "eta_max": float(eta.max()),
+        }
+
     def count_eta_clipped(self, X):
         X = np.asarray(X, np.float64)
         eta = self.intercept_ + X @ self.coef_
@@ -993,7 +1005,8 @@ def fit_count_head(Xtr, Ytr, Xev, Yev):
     nll_ev = np.zeros((n_ev, Yev.shape[1]))
     p0_ev_all = np.zeros((n_ev, Ytr.shape[1]))
     rate_ev_all = np.zeros((n_ev, Ytr.shape[1]))
-    tr_clipped_list, ev_clipped_list = [], []
+    tr_pos_stats_list, ev_pos_stats_list = [], []
+    tr_all_stats_list, ev_all_stats_list = [], []
     ztp_nit_list, ztp_success_list, ztp_msg_list = [], [], []
 
     for j in range(Ytr.shape[1]):
@@ -1005,28 +1018,53 @@ def fit_count_head(Xtr, Ytr, Xev, Yev):
         p0_tr = np.clip(logit.predict_proba(Xtr)[:, 1], 1e-6, 1.0 - 1e-6)
         p0_ev = np.clip(logit.predict_proba(Xev)[:, 1], 1e-6, 1.0 - 1e-6)
         p0_ev_all[:, j] = p0_ev
-        pos = yt > 0
-        if pos.sum() > 0:
-            ztp = ZeroTruncatedPoissonRegressor(alpha=1.0).fit(Xtr[pos], yt[pos])
-            tr_clipped = ztp.count_eta_clipped(Xtr)
-            ev_clipped = ztp.count_eta_clipped(Xev)
-            if tr_clipped > 0 or ev_clipped > 0:
+        pos_tr = yt > 0
+        pos_ev = ye > 0
+        if pos_tr.sum() > 0:
+            ztp = ZeroTruncatedPoissonRegressor(alpha=1.0).fit(Xtr[pos_tr], yt[pos_tr])
+            stats_tr_pos = ztp.count_eta_clip_stats(Xtr[pos_tr])
+            stats_ev_pos = ztp.count_eta_clip_stats(Xev[pos_ev])
+            stats_tr_all = ztp.count_eta_clip_stats(Xtr)
+            stats_ev_all = ztp.count_eta_clip_stats(Xev)
+
+            # Gate 1: Train positive rows: n_low == 0 AND n_high == 0
+            if stats_tr_pos["n_low"] > 0 or stats_tr_pos["n_high"] > 0:
                 raise SystemExit(
-                    f"STOP_DYNAMIC_PGM1A1_ZTP_ETA_CLIPPED: {COUNT_Z[j]} "
-                    f"tr={tr_clipped} ev={ev_clipped}"
+                    f"STOP_DYNAMIC_PGM1A1_ZTP_POSITIVE_ETA_CLIPPED: {COUNT_Z[j]} train positive "
+                    f"low={stats_tr_pos['n_low']} high={stats_tr_pos['n_high']}"
                 )
+
+            # Gate 2: Eval positive rows: n_low == 0 AND n_high == 0
+            if stats_ev_pos["n_low"] > 0 or stats_ev_pos["n_high"] > 0:
+                raise SystemExit(
+                    f"STOP_DYNAMIC_PGM1A1_ZTP_POSITIVE_ETA_CLIPPED: {COUNT_Z[j]} eval positive "
+                    f"low={stats_ev_pos['n_low']} high={stats_ev_pos['n_high']}"
+                )
+
+            # Gate 3: ALL train/eval rows: n_high == 0 (no positive eta explosion)
+            if stats_tr_all["n_high"] > 0 or stats_ev_all["n_high"] > 0:
+                raise SystemExit(
+                    f"STOP_DYNAMIC_PGM1A1_ZTP_ALL_ETA_HIGH_EXPLOSION: {COUNT_Z[j]} "
+                    f"tr_high={stats_tr_all['n_high']} ev_high={stats_ev_all['n_high']}"
+                )
+
             rate_tr = ztp.predict_rate(Xtr)
             rate_ev = ztp.predict_rate(Xev)
-            tr_clipped_list.append(tr_clipped)
-            ev_clipped_list.append(ev_clipped)
+            tr_pos_stats_list.append(stats_tr_pos)
+            ev_pos_stats_list.append(stats_ev_pos)
+            tr_all_stats_list.append(stats_tr_all)
+            ev_all_stats_list.append(stats_ev_all)
             ztp_nit_list.append(ztp.nit)
             ztp_success_list.append(ztp.success)
             ztp_msg_list.append(ztp.message)
         else:
             rate_tr = np.full(n_tr, 1e-6)
             rate_ev = np.full(n_ev, 1e-6)
-            tr_clipped_list.append(0)
-            ev_clipped_list.append(0)
+            dummy = {"n_low": 0, "n_high": 0, "eta_min": float("nan"), "eta_max": float("nan")}
+            tr_pos_stats_list.append(dummy)
+            ev_pos_stats_list.append(dummy)
+            tr_all_stats_list.append(dummy)
+            ev_all_stats_list.append(dummy)
             ztp_nit_list.append(0)
             ztp_success_list.append(True)
             ztp_msg_list.append("no_positives")
@@ -1038,7 +1076,10 @@ def fit_count_head(Xtr, Ytr, Xev, Yev):
     return dict(
         nll_tr=nll_tr, nll_ev=nll_ev,
         p0_ev=p0_ev_all, rate_ev=rate_ev_all,
-        tr_clipped=tr_clipped_list, ev_clipped=ev_clipped_list,
+        stats_tr_pos=tr_pos_stats_list,
+        stats_ev_pos=ev_pos_stats_list,
+        stats_tr_all=tr_all_stats_list,
+        stats_ev_all=ev_all_stats_list,
         ztp_nit=ztp_nit_list, ztp_success=ztp_success_list,
         ztp_message=ztp_msg_list,
         n_params=int((Xtr.shape[1] + 1) * 2 * Ytr.shape[1]),
@@ -1544,7 +1585,12 @@ def run_single_window(w, data_path):
                     prevalence=prev, logloss=ll, brier=brier, pr_auc=prauc,
                     p_zero=None, p_interior=None, p_one=None, cat_nll=None, interior_nll=None,
                     actual_mean_increment=None, predicted_mean_increment=None, mean_ztp_lambda=None,
-                    train_eta_clipped=None, eval_eta_clipped=None,
+                    train_positive_eta_low_clipped=None, train_positive_eta_high_clipped=None,
+                    eval_positive_eta_low_clipped=None, eval_positive_eta_high_clipped=None,
+                    train_all_eta_low_clipped=None, train_all_eta_high_clipped=None,
+                    eval_all_eta_low_clipped=None, eval_all_eta_high_clipped=None,
+                    train_eta_min=None, train_eta_max=None,
+                    eval_eta_min=None, eval_eta_max=None,
                     ztp_nit=None, ztp_success=None, ztp_message=None,
                 ))
 
@@ -1574,7 +1620,12 @@ def run_single_window(w, data_path):
                 p_one=float(np.mean(is1_ev)),
                 cat_nll=cat_nll, interior_nll=int_nll,
                 actual_mean_increment=None, predicted_mean_increment=None, mean_ztp_lambda=None,
-                train_eta_clipped=None, eval_eta_clipped=None,
+                train_positive_eta_low_clipped=None, train_positive_eta_high_clipped=None,
+                eval_positive_eta_low_clipped=None, eval_positive_eta_high_clipped=None,
+                train_all_eta_low_clipped=None, train_all_eta_high_clipped=None,
+                eval_all_eta_low_clipped=None, eval_all_eta_high_clipped=None,
+                train_eta_min=None, train_eta_max=None,
+                eval_eta_min=None, eval_eta_max=None,
                 ztp_nit=None, ztp_success=None, ztp_message=None,
             ))
 
@@ -1591,8 +1642,10 @@ def run_single_window(w, data_path):
         denom = np.maximum(-np.expm1(-rate_ev), 1e-12)
         pred_inc = float(np.mean(p0_ev * (rate_ev / denom)))
         mean_lam = float(np.mean(rate_ev))
-        tr_clip = k1_count["tr_clipped"][j]
-        ev_clip = k1_count["ev_clipped"][j]
+        tr_pos = k1_count["stats_tr_pos"][j]
+        ev_pos = k1_count["stats_ev_pos"][j]
+        tr_all = k1_count["stats_tr_all"][j]
+        ev_all = k1_count["stats_ev_all"][j]
         nit = k1_count["ztp_nit"][j]
         succ = k1_count["ztp_success"][j]
         msg = k1_count["ztp_message"][j]
@@ -1601,7 +1654,18 @@ def run_single_window(w, data_path):
             prevalence=prev, logloss=ll, brier=brier, pr_auc=prauc,
             p_zero=None, p_interior=None, p_one=None, cat_nll=None, interior_nll=None,
             actual_mean_increment=act_inc, predicted_mean_increment=pred_inc, mean_ztp_lambda=mean_lam,
-            train_eta_clipped=tr_clip, eval_eta_clipped=ev_clip,
+            train_positive_eta_low_clipped=tr_pos["n_low"],
+            train_positive_eta_high_clipped=tr_pos["n_high"],
+            eval_positive_eta_low_clipped=ev_pos["n_low"],
+            eval_positive_eta_high_clipped=ev_pos["n_high"],
+            train_all_eta_low_clipped=tr_all["n_low"],
+            train_all_eta_high_clipped=tr_all["n_high"],
+            eval_all_eta_low_clipped=ev_all["n_low"],
+            eval_all_eta_high_clipped=ev_all["n_high"],
+            train_eta_min=tr_all["eta_min"],
+            train_eta_max=tr_all["eta_max"],
+            eval_eta_min=ev_all["eta_min"],
+            eval_eta_max=ev_all["eta_max"],
             ztp_nit=nit, ztp_success=succ, ztp_message=msg,
         ))
 
