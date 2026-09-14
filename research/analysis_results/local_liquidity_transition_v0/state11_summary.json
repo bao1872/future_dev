@@ -1,0 +1,455 @@
+{
+  "experiment": "STATE-1.1 functional provenance encoding",
+  "base": "047c4ed5e8771100332acd444070ebb8a27ebe9c",
+  "question": "does prev_event_mask still add stable information once the current-boundary provenance can explicitly express exact age-zero and age skew (log1p) in a linear model?",
+  "models": {
+    "F0_GEOMETRY": {
+      "numeric": [
+        "cur_up_distance_R",
+        "cur_down_distance_R",
+        "cur_width_R",
+        "cur_log_distance_ratio"
+      ],
+      "categorical": []
+    },
+    "F1_GEOMETRY_FUNCTIONAL_PROVENANCE": {
+      "numeric": [
+        "cur_up_distance_R",
+        "cur_down_distance_R",
+        "cur_width_R",
+        "cur_log_distance_ratio",
+        "upper_oldest_log_age",
+        "upper_newest_log_age",
+        "upper_newest_age_zero",
+        "upper_oldest_age_zero",
+        "upper_n_active_identities",
+        "lower_oldest_log_age",
+        "lower_newest_log_age",
+        "lower_newest_age_zero",
+        "lower_oldest_age_zero",
+        "lower_n_active_identities"
+      ],
+      "categorical": []
+    },
+    "F2_GEOMETRY_PREV_EVENT": {
+      "numeric": [
+        "cur_up_distance_R",
+        "cur_down_distance_R",
+        "cur_width_R",
+        "cur_log_distance_ratio"
+      ],
+      "categorical": [
+        "prev_event_mask"
+      ]
+    },
+    "F3_GEOMETRY_FUNCTIONAL_PROVENANCE_PREV_EVENT": {
+      "numeric": [
+        "cur_up_distance_R",
+        "cur_down_distance_R",
+        "cur_width_R",
+        "cur_log_distance_ratio",
+        "upper_oldest_log_age",
+        "upper_newest_log_age",
+        "upper_newest_age_zero",
+        "upper_oldest_age_zero",
+        "upper_n_active_identities",
+        "lower_oldest_log_age",
+        "lower_newest_log_age",
+        "lower_newest_age_zero",
+        "lower_oldest_age_zero",
+        "lower_n_active_identities"
+      ],
+      "categorical": [
+        "prev_event_mask"
+      ]
+    }
+  },
+  "functional_form": {
+    "log_age": "log1p(age_bars)",
+    "zero_flag": "1 if age_bars == 0 else 0",
+    "counts": "raw active identity count",
+    "n_features": 10,
+    "zero_flag_policy": "zero flags enter the frozen numeric pipeline (median impute + StandardScaler) together with the other numerics; no post-hoc choice",
+    "forbidden": [
+      "age bins",
+      "feature search",
+      "duration",
+      "path",
+      "symbol",
+      "type/scope",
+      "volume"
+    ]
+  },
+  "windows": [
+    {
+      "name": "A_TB1_to_TB2",
+      "train": [
+        "TB1"
+      ],
+      "eval": "TB2",
+      "seed": 20260916
+    },
+    {
+      "name": "B_TB1TB2_to_TB3",
+      "train": [
+        "TB1",
+        "TB2"
+      ],
+      "eval": "TB3",
+      "seed": 20260917
+    }
+  ],
+  "bootstrap_reps": 1000,
+  "sample_parity": {
+    "n_samples": 37224,
+    "sample_key_sha256": "ddf034ed30a90597aa86dbad71d6397b1934d532afb348b8a93b406984787c12",
+    "matches_frozen": true,
+    "n_dev": 24705,
+    "n_repl": 12519
+  },
+  "provenance_recompute_identical": {
+    "note": "the 6 STATE-1 provenance variables were recomputed with the very same function object (group_provenance imported from the STATE-1 module) and validated against STATE-1's stored audit values",
+    "checks": 10,
+    "all_identical": true
+  },
+  "coupling_tables": [
+    {
+      "table": "prev_NEW_UPPER x upper_newest_age_zero",
+      "prev_condition": "prev_NEW_UPPER == 1",
+      "n_prev": 13655,
+      "n_zero_flag_1": 13640,
+      "n_zero_flag_0": 15,
+      "rate_zero_flag_1": 0.9989015012815818
+    },
+    {
+      "table": "prev_NEW_UPPER x upper_newest_age_zero",
+      "prev_condition": "prev_NEW_UPPER == 0",
+      "n_prev": 23569,
+      "n_zero_flag_1": 1688,
+      "n_zero_flag_0": 21881,
+      "rate_zero_flag_1": 0.07161950019092876
+    },
+    {
+      "table": "prev_NEW_LOWER x lower_newest_age_zero",
+      "prev_condition": "prev_NEW_LOWER == 1",
+      "n_prev": 13895,
+      "n_zero_flag_1": 13876,
+      "n_zero_flag_0": 19,
+      "rate_zero_flag_1": 0.9986326016552717
+    },
+    {
+      "table": "prev_NEW_LOWER x lower_newest_age_zero",
+      "prev_condition": "prev_NEW_LOWER == 0",
+      "n_prev": 23329,
+      "n_zero_flag_1": 1592,
+      "n_zero_flag_0": 21737,
+      "rate_zero_flag_1": 0.0682412448026062
+    },
+    {
+      "table": "prev_NEW_UPPER x upper_oldest_age_zero",
+      "prev_condition": "prev_NEW_UPPER == 1",
+      "n_prev": 13655,
+      "n_zero_flag_1": 13640,
+      "n_zero_flag_0": 15,
+      "rate_zero_flag_1": 0.9989015012815818
+    },
+    {
+      "table": "prev_NEW_UPPER x upper_oldest_age_zero",
+      "prev_condition": "prev_NEW_UPPER == 0",
+      "n_prev": 23569,
+      "n_zero_flag_1": 367,
+      "n_zero_flag_0": 23202,
+      "rate_zero_flag_1": 0.015571301285587
+    },
+    {
+      "table": "prev_NEW_LOWER x lower_oldest_age_zero",
+      "prev_condition": "prev_NEW_LOWER == 1",
+      "n_prev": 13895,
+      "n_zero_flag_1": 13876,
+      "n_zero_flag_0": 19,
+      "rate_zero_flag_1": 0.9986326016552717
+    },
+    {
+      "table": "prev_NEW_LOWER x lower_oldest_age_zero",
+      "prev_condition": "prev_NEW_LOWER == 0",
+      "n_prev": 23329,
+      "n_zero_flag_1": 294,
+      "n_zero_flag_0": 23035,
+      "rate_zero_flag_1": 0.01260234043465215
+    }
+  ],
+  "results": [
+    {
+      "window": "A_TB1_to_TB2",
+      "n_train": 11813,
+      "n_eval": 12892,
+      "n_days": 102,
+      "mean_bit_metrics": {
+        "F0_GEOMETRY": {
+          "logloss": 0.5365384129920694,
+          "brier": 0.17880357920606776,
+          "ece": 0.05019043159743121
+        },
+        "F1_GEOMETRY_FUNCTIONAL_PROVENANCE": {
+          "logloss": 0.5294334894939555,
+          "brier": 0.17693792832390345,
+          "ece": 0.02464967249767599
+        },
+        "F2_GEOMETRY_PREV_EVENT": {
+          "logloss": 0.5293842840850347,
+          "brier": 0.17668578672573482,
+          "ece": 0.030165798746937915
+        },
+        "F3_GEOMETRY_FUNCTIONAL_PROVENANCE_PREV_EVENT": {
+          "logloss": 0.5281892101869154,
+          "brier": 0.17653472776753804,
+          "ece": 0.028689018075834394
+        }
+      }
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "n_train": 24705,
+      "n_eval": 12519,
+      "n_days": 102,
+      "mean_bit_metrics": {
+        "F0_GEOMETRY": {
+          "logloss": 0.5387084449824948,
+          "brier": 0.17997502557575845,
+          "ece": 0.04753864031413053
+        },
+        "F1_GEOMETRY_FUNCTIONAL_PROVENANCE": {
+          "logloss": 0.5315202937838338,
+          "brier": 0.17781603885785852,
+          "ece": 0.024203374714947906
+        },
+        "F2_GEOMETRY_PREV_EVENT": {
+          "logloss": 0.5307990955906807,
+          "brier": 0.17749121142975993,
+          "ece": 0.02355932116898437
+        },
+        "F3_GEOMETRY_FUNCTIONAL_PROVENANCE_PREV_EVENT": {
+          "logloss": 0.5293873283191222,
+          "brier": 0.1771533055750134,
+          "ece": 0.022920011632478074
+        }
+      }
+    }
+  ],
+  "bootstrap": [
+    {
+      "window": "A_TB1_to_TB2",
+      "comparison": "F3_GEOMETRY_FUNCTIONAL_PROVENANCE_PREV_EVENT - F1_GEOMETRY_FUNCTIONAL_PROVENANCE",
+      "role": "PRIMARY",
+      "delta_sample_weighted": -0.0012442793070400221,
+      "delta_daily_mean": -0.0012998740978332674,
+      "n_days": 102,
+      "ci_lo": -0.001961362686793513,
+      "ci_hi": -0.0006331925393950335,
+      "verdict": "CI_below_zero"
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "comparison": "F1_GEOMETRY_FUNCTIONAL_PROVENANCE - F0_GEOMETRY",
+      "role": "SECONDARY",
+      "delta_sample_weighted": -0.0071049234981139,
+      "delta_daily_mean": -0.007223275627950003,
+      "n_days": 102,
+      "ci_lo": -0.009317529596443193,
+      "ci_hi": -0.0051074638691985886,
+      "verdict": "CI_below_zero"
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "comparison": "F2_GEOMETRY_PREV_EVENT - F0_GEOMETRY",
+      "role": "SECONDARY",
+      "delta_sample_weighted": -0.00715412890703474,
+      "delta_daily_mean": -0.007165155454171992,
+      "n_days": 102,
+      "ci_lo": -0.00875074999307713,
+      "ci_hi": -0.005625913278412719,
+      "verdict": "CI_below_zero"
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "comparison": "F3_GEOMETRY_FUNCTIONAL_PROVENANCE_PREV_EVENT - F2_GEOMETRY_PREV_EVENT",
+      "role": "SECONDARY",
+      "delta_sample_weighted": -0.0011950738981191828,
+      "delta_daily_mean": -0.0013579942716112792,
+      "n_days": 102,
+      "ci_lo": -0.00228567034246337,
+      "ci_hi": -0.00039541933681110585,
+      "verdict": "CI_below_zero"
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "comparison": "F3_GEOMETRY_FUNCTIONAL_PROVENANCE_PREV_EVENT - F1_GEOMETRY_FUNCTIONAL_PROVENANCE",
+      "role": "PRIMARY",
+      "delta_sample_weighted": -0.002132965464711722,
+      "delta_daily_mean": -0.002155294394343521,
+      "n_days": 102,
+      "ci_lo": -0.0027640931421984653,
+      "ci_hi": -0.0015667285629310456,
+      "verdict": "CI_below_zero"
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "comparison": "F1_GEOMETRY_FUNCTIONAL_PROVENANCE - F0_GEOMETRY",
+      "role": "SECONDARY",
+      "delta_sample_weighted": -0.007188151198661052,
+      "delta_daily_mean": -0.007397977014306813,
+      "n_days": 102,
+      "ci_lo": -0.00896100299203079,
+      "ci_hi": -0.005652457842827269,
+      "verdict": "CI_below_zero"
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "comparison": "F2_GEOMETRY_PREV_EVENT - F0_GEOMETRY",
+      "role": "SECONDARY",
+      "delta_sample_weighted": -0.007909349391814206,
+      "delta_daily_mean": -0.00813512230487083,
+      "n_days": 102,
+      "ci_lo": -0.009999359004420135,
+      "ci_hi": -0.0064979109116405954,
+      "verdict": "CI_below_zero"
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "comparison": "F3_GEOMETRY_FUNCTIONAL_PROVENANCE_PREV_EVENT - F2_GEOMETRY_PREV_EVENT",
+      "role": "SECONDARY",
+      "delta_sample_weighted": -0.0014117672715585686,
+      "delta_daily_mean": -0.001418149103779502,
+      "n_days": 102,
+      "ci_lo": -0.0021753188442594504,
+      "ci_hi": -0.0006779716672531316,
+      "verdict": "CI_below_zero"
+    }
+  ],
+  "per_bit_F3_minus_F1": [
+    {
+      "window": "A_TB1_to_TB2",
+      "bit": "UP_PEN",
+      "n": 12892,
+      "prevalence": 0.29855724480297857,
+      "F3_minus_F1": 0.0004433086399963834,
+      "F3_minus_F1_ci_lo": -0.00038106457996105186,
+      "F3_minus_F1_ci_hi": 0.001099890639003977,
+      "F2_minus_F0": -0.0002045608327180866,
+      "F2_minus_F0_ci_lo": -0.0016591063657004626,
+      "F2_minus_F0_ci_hi": 0.0008952210052050829
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "bit": "DOWN_PEN",
+      "n": 12892,
+      "prevalence": 0.2829661805771021,
+      "F3_minus_F1": -0.00031468619241784777,
+      "F3_minus_F1_ci_lo": -0.0009639166728880008,
+      "F3_minus_F1_ci_hi": 0.00017119473787360418,
+      "F2_minus_F0": -0.001161276194821698,
+      "F2_minus_F0_ci_lo": -0.002600851012738575,
+      "F2_minus_F0_ci_hi": 0.00019534259007547453
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "bit": "NEW_UPPER",
+      "n": 12892,
+      "prevalence": 0.3640242010549178,
+      "F3_minus_F1": -0.002981687198365442,
+      "F3_minus_F1_ci_lo": -0.004487385772939428,
+      "F3_minus_F1_ci_hi": -0.0016065969589987225,
+      "F2_minus_F0": -0.01433703361641202,
+      "F2_minus_F0_ci_lo": -0.01789225453362474,
+      "F2_minus_F0_ci_hi": -0.011084802714343383
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "bit": "NEW_LOWER",
+      "n": 12892,
+      "prevalence": 0.3676698727893267,
+      "F3_minus_F1": -0.0021240524773731865,
+      "F3_minus_F1_ci_lo": -0.0036845591171491905,
+      "F3_minus_F1_ci_hi": -0.0006518134859963121,
+      "F2_minus_F0": -0.012913644984187154,
+      "F2_minus_F0_ci_lo": -0.01601997307478302,
+      "F2_minus_F0_ci_hi": -0.00930643327654327
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "bit": "UP_PEN",
+      "n": 12519,
+      "prevalence": 0.3040178928029395,
+      "F3_minus_F1": -1.1961293325485887e-07,
+      "F3_minus_F1_ci_lo": -0.0006248534325521662,
+      "F3_minus_F1_ci_hi": 0.0004930719402086506,
+      "F2_minus_F0": -0.0019561130925321436,
+      "F2_minus_F0_ci_lo": -0.003419964639633818,
+      "F2_minus_F0_ci_hi": -0.0006026118940975568
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "bit": "DOWN_PEN",
+      "n": 12519,
+      "prevalence": 0.2774982027318476,
+      "F3_minus_F1": -0.0006362198578389285,
+      "F3_minus_F1_ci_lo": -0.0011747023311132834,
+      "F3_minus_F1_ci_hi": -0.00014058543833764386,
+      "F2_minus_F0": -0.001970057850794126,
+      "F2_minus_F0_ci_lo": -0.003939152535793519,
+      "F2_minus_F0_ci_hi": -0.0007093088200007733
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "bit": "NEW_UPPER",
+      "n": 12519,
+      "prevalence": 0.3572170301142264,
+      "F3_minus_F1": -0.004637939803424416,
+      "F3_minus_F1_ci_lo": -0.005883793570645793,
+      "F3_minus_F1_ci_hi": -0.003324518858150844,
+      "F2_minus_F0": -0.01439557179644638,
+      "F2_minus_F0_ci_lo": -0.017877772450920863,
+      "F2_minus_F0_ci_hi": -0.011396228251424619
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "bit": "NEW_LOWER",
+      "n": 12519,
+      "prevalence": 0.3755092259765157,
+      "F3_minus_F1": -0.0032575825846502863,
+      "F3_minus_F1_ci_lo": -0.004534465011206831,
+      "F3_minus_F1_ci_hi": -0.0018888912216883037,
+      "F2_minus_F0": -0.013315654827484164,
+      "F2_minus_F0_ci_lo": -0.016644988639379375,
+      "F2_minus_F0_ci_hi": -0.010046948220876883
+    }
+  ],
+  "by_symbol": {
+    "n_rows": 30,
+    "n_symbol_per_window": 15,
+    "window_A_n_negative": 12,
+    "window_A_n_positive": 3,
+    "window_B_n_negative": 15,
+    "window_B_n_positive": 0
+  },
+  "frozen_crosscheck": {
+    "window_A_F2_minus_F0": -0.007165155454171992,
+    "expected_A": -0.007165155454171992,
+    "window_B_F2_minus_F0": -0.00813512230487083,
+    "expected_B": -0.00813512230487083,
+    "state1_sample_hash_matches": true,
+    "exact": true
+  },
+  "tb4_analytically_used": false,
+  "tb4_note": "block grid uses the frozen LOCAL-0 definition and the loader may read full raw files, but no TB4 value contributes to episode endpoints, sample inclusion, features, labels, fit, preprocessing fit, metrics, bootstrap or decision diagnostics; TB4 remains blind for final evaluation.",
+  "timing": {
+    "cache_load_seconds": 11.65,
+    "provenance_feature_seconds": 1.5,
+    "fit_seconds": 3.12,
+    "bootstrap_seconds": 0.26,
+    "total_seconds": 16.64
+  },
+  "interpretation_limits": "STATE-1.1 is a functional-form closure on already-consumed development evidence (TB1/TB2/TB3). It does NOT establish SEQ-1, Markov order, SMC, latent psychology, tradability or RL.",
+  "STATE11_VERDICT": "PREV_EVENT_MEMORY_BEYOND_FUNCTIONAL_PROVENANCE_SUPPORTED",
+  "STATE11_CONCLUSION": "FIRST_ORDER_EVENT_MEMORY_CANDIDATE_SUPPORTED: previous structural endpoint contains predictive information beyond current geometry and an explicitly nonlinear representation of current boundary activation provenance. SEQ-1 is authorised by this round."
+}

@@ -1,0 +1,9 @@
+table,prev_condition,n_prev,n_zero_flag_1,n_zero_flag_0,rate_zero_flag_1
+prev_NEW_UPPER x upper_newest_age_zero,prev_NEW_UPPER == 1,13655,13640,15,0.9989015012815818
+prev_NEW_UPPER x upper_newest_age_zero,prev_NEW_UPPER == 0,23569,1688,21881,0.07161950019092876
+prev_NEW_LOWER x lower_newest_age_zero,prev_NEW_LOWER == 1,13895,13876,19,0.9986326016552717
+prev_NEW_LOWER x lower_newest_age_zero,prev_NEW_LOWER == 0,23329,1592,21737,0.0682412448026062
+prev_NEW_UPPER x upper_oldest_age_zero,prev_NEW_UPPER == 1,13655,13640,15,0.9989015012815818
+prev_NEW_UPPER x upper_oldest_age_zero,prev_NEW_UPPER == 0,23569,367,23202,0.015571301285587
+prev_NEW_LOWER x lower_oldest_age_zero,prev_NEW_LOWER == 1,13895,13876,19,0.9986326016552717
+prev_NEW_LOWER x lower_oldest_age_zero,prev_NEW_LOWER == 0,23329,294,23035,0.01260234043465215
