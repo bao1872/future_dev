@@ -1,0 +1,450 @@
+{
+  "experiment": "SEQ-1 second-order structural event grammar",
+  "base": "ca8032c289e2fef97ad416f9b2f264c15744b07e",
+  "question": "given current state and the most recent structural endpoint E_n, does the earlier endpoint E_{n-1} - and especially the ordered pair (E_{n-1}, E_n) - improve prediction of the next endpoint E_{n+1}?",
+  "frozen_context": {
+    "state11_verdict": "PREV_EVENT_MEMORY_BEYOND_FUNCTIONAL_PROVENANCE_SUPPORTED",
+    "repl0_sample_hash": "ddf034ed30a90597aa86dbad71d6397b1934d532afb348b8a93b406984787c12",
+    "frozen_geometry_source": "repl0_samples.parquet (cur_* columns)",
+    "frozen_provenance_source": "group_provenance imported from the STATE-1 module; functional forms from STATE-1.1 FUNC_PROV"
+  },
+  "models": {
+    "Q0_CURRENT_STATE": {
+      "numeric": [
+        "cur_up_distance_R",
+        "cur_down_distance_R",
+        "cur_width_R",
+        "cur_log_distance_ratio",
+        "upper_oldest_log_age",
+        "upper_newest_log_age",
+        "upper_newest_age_zero",
+        "upper_oldest_age_zero",
+        "upper_n_active_identities",
+        "lower_oldest_log_age",
+        "lower_newest_log_age",
+        "lower_newest_age_zero",
+        "lower_oldest_age_zero",
+        "lower_n_active_identities"
+      ],
+      "categorical": []
+    },
+    "Q1_FIRST_ORDER": {
+      "numeric": [
+        "cur_up_distance_R",
+        "cur_down_distance_R",
+        "cur_width_R",
+        "cur_log_distance_ratio",
+        "upper_oldest_log_age",
+        "upper_newest_log_age",
+        "upper_newest_age_zero",
+        "upper_oldest_age_zero",
+        "upper_n_active_identities",
+        "lower_oldest_log_age",
+        "lower_newest_log_age",
+        "lower_newest_age_zero",
+        "lower_oldest_age_zero",
+        "lower_n_active_identities"
+      ],
+      "categorical": [
+        "prev_event_mask"
+      ]
+    },
+    "Q2_SECOND_ORDER_ADDITIVE": {
+      "numeric": [
+        "cur_up_distance_R",
+        "cur_down_distance_R",
+        "cur_width_R",
+        "cur_log_distance_ratio",
+        "upper_oldest_log_age",
+        "upper_newest_log_age",
+        "upper_newest_age_zero",
+        "upper_oldest_age_zero",
+        "upper_n_active_identities",
+        "lower_oldest_log_age",
+        "lower_newest_log_age",
+        "lower_newest_age_zero",
+        "lower_oldest_age_zero",
+        "lower_n_active_identities"
+      ],
+      "categorical": [
+        "prev_event_mask",
+        "prevprev_event_mask"
+      ]
+    },
+    "Q3_SECOND_ORDER_SEQUENCE": {
+      "numeric": [
+        "cur_up_distance_R",
+        "cur_down_distance_R",
+        "cur_width_R",
+        "cur_log_distance_ratio",
+        "upper_oldest_log_age",
+        "upper_newest_log_age",
+        "upper_newest_age_zero",
+        "upper_oldest_age_zero",
+        "upper_n_active_identities",
+        "lower_oldest_log_age",
+        "lower_newest_log_age",
+        "lower_newest_age_zero",
+        "lower_oldest_age_zero",
+        "lower_n_active_identities"
+      ],
+      "categorical": [
+        "event_pair_code"
+      ]
+    }
+  },
+  "event_representation": {
+    "code": "raw bitmask category, no bullish/bearish mapping",
+    "pair_code": "{prevprev_event_mask}>{prev_event_mask}",
+    "q3_uses_pair_only": "event_pair already contains E_n, so prev_event_mask is NOT added again to Q3"
+  },
+  "windows": [
+    {
+      "name": "A_TB1_to_TB2",
+      "train": [
+        "TB1"
+      ],
+      "eval": "TB2",
+      "seed": 20260918
+    },
+    {
+      "name": "B_TB1TB2_to_TB3",
+      "train": [
+        "TB1",
+        "TB2"
+      ],
+      "eval": "TB3",
+      "seed": 20260919
+    }
+  ],
+  "bootstrap_reps": 1000,
+  "sample_audit": {
+    "n_episodes_used": 38026,
+    "n_triple_chains_raw": 36754,
+    "n_triple_chains_after_history_check": 36754,
+    "excluded_target_censor": 11,
+    "excluded_cross_block_target": 28,
+    "n_triple_chains": 36715,
+    "n_triple_chains_after_censor": 36715,
+    "triple_sample_key_sha256": "7b28e3aa9a41a0b27e400cf9bb060f1048a8e3ebf95e0e33780855f190989067",
+    "n_unique_event_pairs_overall": 114,
+    "n_unique_prev_event_masks_overall": 15,
+    "n_unique_prevprev_event_masks_overall": 15,
+    "sparsity": {
+      "A_TB1_to_TB2": {
+        "window": "A_TB1_to_TB2",
+        "n_unique_prev_event_masks": 15,
+        "n_unique_prevprev_event_masks": 15,
+        "n_unique_event_pairs_train": 97,
+        "n_unique_event_pairs_eval": 91,
+        "pair_train_count_min": 1,
+        "pair_train_count_p10": 1.0,
+        "pair_train_count_p50": 28.0,
+        "pair_train_count_p90": 326.0,
+        "pair_train_count_max": 869,
+        "eval_pairs_unseen_in_train_samples": 15,
+        "eval_pairs_unseen_in_train_rate": 0.0011696818465377417,
+        "pairs_with_train_n_lt_10_categories": 39,
+        "pairs_with_train_n_lt_10_train_samples": 88
+      },
+      "B_TB1TB2_to_TB3": {
+        "window": "B_TB1TB2_to_TB3",
+        "n_unique_prev_event_masks": 15,
+        "n_unique_prevprev_event_masks": 15,
+        "n_unique_event_pairs_train": 108,
+        "n_unique_event_pairs_eval": 100,
+        "pair_train_count_min": 1,
+        "pair_train_count_p10": 1.0,
+        "pair_train_count_p50": 23.5,
+        "pair_train_count_p90": 663.3,
+        "pair_train_count_max": 1848,
+        "eval_pairs_unseen_in_train_samples": 7,
+        "eval_pairs_unseen_in_train_rate": 0.000566159818828858,
+        "pairs_with_train_n_lt_10_categories": 46,
+        "pairs_with_train_n_lt_10_train_samples": 128
+      }
+    },
+    "window_counts": {
+      "A_TB1_to_TB2": {
+        "n_train": 11527,
+        "n_eval": 12824,
+        "n_days": 102
+      },
+      "B_TB1TB2_to_TB3": {
+        "n_train": 24351,
+        "n_eval": 12364,
+        "n_days": 102
+      }
+    },
+    "q2_vs_q1_all_below_zero": false,
+    "q3_vs_q2_all_contains_zero": true,
+    "tb4_analytically_used": false
+  },
+  "results": [
+    {
+      "window": "A_TB1_to_TB2",
+      "n_train": 11527,
+      "n_eval": 12824,
+      "n_days": 102,
+      "mean_bit_metrics": {
+        "Q0_CURRENT_STATE": {
+          "logloss": 0.5293795639655069,
+          "brier": 0.17695746982391433,
+          "ece": 0.024621211660510206
+        },
+        "Q1_FIRST_ORDER": {
+          "logloss": 0.5282094791739252,
+          "brier": 0.17658348216498343,
+          "ece": 0.02770524927517331
+        },
+        "Q2_SECOND_ORDER_ADDITIVE": {
+          "logloss": 0.5283053868626703,
+          "brier": 0.17663846098751104,
+          "ece": 0.024677808115144813
+        },
+        "Q3_SECOND_ORDER_SEQUENCE": {
+          "logloss": 0.5294978766544245,
+          "brier": 0.17707861634034117,
+          "ece": 0.0169888725342971
+        }
+      }
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "n_train": 24351,
+      "n_eval": 12364,
+      "n_days": 102,
+      "mean_bit_metrics": {
+        "Q0_CURRENT_STATE": {
+          "logloss": 0.5319206701066954,
+          "brier": 0.17794122615337962,
+          "ece": 0.02403754241491382
+        },
+        "Q1_FIRST_ORDER": {
+          "logloss": 0.5296749512752261,
+          "brier": 0.17723973720516467,
+          "ece": 0.023212635252555833
+        },
+        "Q2_SECOND_ORDER_ADDITIVE": {
+          "logloss": 0.5294179463374906,
+          "brier": 0.17714585179727002,
+          "ece": 0.022644607596261926
+        },
+        "Q3_SECOND_ORDER_SEQUENCE": {
+          "logloss": 0.5291646732139725,
+          "brier": 0.17706950054429435,
+          "ece": 0.020341233519126565
+        }
+      }
+    }
+  ],
+  "bootstrap": [
+    {
+      "window": "A_TB1_to_TB2",
+      "comparison": "Q3_SECOND_ORDER_SEQUENCE - Q1_FIRST_ORDER",
+      "role": "PRIMARY",
+      "delta_sample_weighted": 0.0012883974804992373,
+      "delta_daily_mean": 0.0013288456631389395,
+      "n_days": 102,
+      "ci_lo": 0.0006130042541055892,
+      "ci_hi": 0.0020480660118916225,
+      "verdict": "CI_above_zero"
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "comparison": "Q2_SECOND_ORDER_ADDITIVE - Q1_FIRST_ORDER",
+      "role": "SECONDARY",
+      "delta_sample_weighted": 9.590768874490208e-05,
+      "delta_daily_mean": 0.00010692322796242554,
+      "n_days": 102,
+      "ci_lo": -0.000319511589928262,
+      "ci_hi": 0.0006042651683356299,
+      "verdict": "CI_contains_zero"
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "comparison": "Q3_SECOND_ORDER_SEQUENCE - Q2_SECOND_ORDER_ADDITIVE",
+      "role": "SECONDARY",
+      "delta_sample_weighted": 0.0011924897917543352,
+      "delta_daily_mean": 0.0012219224351765143,
+      "n_days": 102,
+      "ci_lo": 0.0005846132941347594,
+      "ci_hi": 0.0018404054500848702,
+      "verdict": "CI_above_zero"
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "comparison": "Q1_FIRST_ORDER - Q0_CURRENT_STATE",
+      "role": "SECONDARY",
+      "delta_sample_weighted": -0.0011700847915816388,
+      "delta_daily_mean": -0.001224671572183827,
+      "n_days": 102,
+      "ci_lo": -0.0019022314209916785,
+      "ci_hi": -0.0005859897083707072,
+      "verdict": "CI_below_zero"
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "comparison": "Q3_SECOND_ORDER_SEQUENCE - Q1_FIRST_ORDER",
+      "role": "PRIMARY",
+      "delta_sample_weighted": -0.0005102780612536473,
+      "delta_daily_mean": -0.0004735380552942145,
+      "n_days": 102,
+      "ci_lo": -0.0011034928897316546,
+      "ci_hi": 0.0002424480616607286,
+      "verdict": "CI_contains_zero"
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "comparison": "Q2_SECOND_ORDER_ADDITIVE - Q1_FIRST_ORDER",
+      "role": "SECONDARY",
+      "delta_sample_weighted": -0.0002570049377355956,
+      "delta_daily_mean": -0.00023514478872465615,
+      "n_days": 102,
+      "ci_lo": -0.0006273660489010601,
+      "ci_hi": 0.00019036465021869523,
+      "verdict": "CI_contains_zero"
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "comparison": "Q3_SECOND_ORDER_SEQUENCE - Q2_SECOND_ORDER_ADDITIVE",
+      "role": "SECONDARY",
+      "delta_sample_weighted": -0.0002532731235180518,
+      "delta_daily_mean": -0.00023839326656955825,
+      "n_days": 102,
+      "ci_lo": -0.000797003093378824,
+      "ci_hi": 0.00030893694470739656,
+      "verdict": "CI_contains_zero"
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "comparison": "Q1_FIRST_ORDER - Q0_CURRENT_STATE",
+      "role": "SECONDARY",
+      "delta_sample_weighted": -0.002245718831469127,
+      "delta_daily_mean": -0.0022653539718950053,
+      "n_days": 102,
+      "ci_lo": -0.0028802212633646626,
+      "ci_hi": -0.0016604600962431635,
+      "verdict": "CI_below_zero"
+    }
+  ],
+  "per_bit_Q3_minus_Q1": [
+    {
+      "window": "A_TB1_to_TB2",
+      "bit": "UP_PEN",
+      "n": 12824,
+      "prevalence": 0.29858078602620086,
+      "Q3_minus_Q1": 0.0016154536937268821,
+      "Q3_minus_Q1_ci_lo": 0.0005991753348551127,
+      "Q3_minus_Q1_ci_hi": 0.0026647714301265405,
+      "Q2_minus_Q1": 0.0002939424703660212,
+      "Q2_minus_Q1_ci_lo": -0.00018220400637948726,
+      "Q2_minus_Q1_ci_hi": 0.0007216274109366237
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "bit": "DOWN_PEN",
+      "n": 12824,
+      "prevalence": 0.28243917654398004,
+      "Q3_minus_Q1": 0.001412015400643497,
+      "Q3_minus_Q1_ci_lo": 0.0002693618058264664,
+      "Q3_minus_Q1_ci_hi": 0.0026084556548153543,
+      "Q2_minus_Q1": 0.0003269533135707376,
+      "Q2_minus_Q1_ci_lo": -0.0005368309605655498,
+      "Q2_minus_Q1_ci_hi": 0.0012077816095091036
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "bit": "NEW_UPPER",
+      "n": 12824,
+      "prevalence": 0.36439488459139113,
+      "Q3_minus_Q1": 0.0022395315549066106,
+      "Q3_minus_Q1_ci_lo": 0.0009281669215205385,
+      "Q3_minus_Q1_ci_hi": 0.003643512974235313,
+      "Q2_minus_Q1": 0.00021041189687432475,
+      "Q2_minus_Q1_ci_lo": -0.00048609474912161523,
+      "Q2_minus_Q1_ci_hi": 0.0009847590213206095
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "bit": "NEW_LOWER",
+      "n": 12824,
+      "prevalence": 0.36790393013100436,
+      "Q3_minus_Q1": -0.00011341072728004336,
+      "Q3_minus_Q1_ci_lo": -0.001369268744498693,
+      "Q3_minus_Q1_ci_hi": 0.0015956157163333085,
+      "Q2_minus_Q1": -0.00044767692583147983,
+      "Q2_minus_Q1_ci_lo": -0.0012070121930429683,
+      "Q2_minus_Q1_ci_hi": 0.00039471193543942905
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "bit": "UP_PEN",
+      "n": 12364,
+      "prevalence": 0.30451310255580716,
+      "Q3_minus_Q1": 0.0005907348276568357,
+      "Q3_minus_Q1_ci_lo": -0.00038568463862167054,
+      "Q3_minus_Q1_ci_hi": 0.0016931070315913716,
+      "Q2_minus_Q1": 5.942705252400532e-06,
+      "Q2_minus_Q1_ci_lo": -0.00034797508852316394,
+      "Q2_minus_Q1_ci_hi": 0.0003537121682624356
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "bit": "DOWN_PEN",
+      "n": 12364,
+      "prevalence": 0.2774183112261404,
+      "Q3_minus_Q1": -8.844852213153478e-05,
+      "Q3_minus_Q1_ci_lo": -0.0010980874738931142,
+      "Q3_minus_Q1_ci_hi": 0.0009230839165136166,
+      "Q2_minus_Q1": 0.0003004576199380075,
+      "Q2_minus_Q1_ci_lo": -0.0003131046713987993,
+      "Q2_minus_Q1_ci_hi": 0.000925594823151408
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "bit": "NEW_UPPER",
+      "n": 12364,
+      "prevalence": 0.35716596570689096,
+      "Q3_minus_Q1": -0.0015327845563308496,
+      "Q3_minus_Q1_ci_lo": -0.002618254082438993,
+      "Q3_minus_Q1_ci_hi": -0.0002772093196683404,
+      "Q2_minus_Q1": -0.0008968094857358863,
+      "Q2_minus_Q1_ci_lo": -0.0014570856723281676,
+      "Q2_minus_Q1_ci_hi": -0.00014020745995404688
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "bit": "NEW_LOWER",
+      "n": 12364,
+      "prevalence": 0.3750404399870592,
+      "Q3_minus_Q1": -0.0010106139942090398,
+      "Q3_minus_Q1_ci_lo": -0.0023457425382791735,
+      "Q3_minus_Q1_ci_hi": 0.00023820853521766108,
+      "Q2_minus_Q1": -0.00043761059039690135,
+      "Q2_minus_Q1_ci_lo": -0.0012226907688498141,
+      "Q2_minus_Q1_ci_hi": 0.0003570167288018117
+    }
+  ],
+  "by_symbol": {
+    "n_rows": 30,
+    "n_symbol_per_window": 15,
+    "window_A_n_negative": 2,
+    "window_A_n_positive": 13,
+    "window_B_n_negative": 11,
+    "window_B_n_positive": 4
+  },
+  "pair_contribution_top": 191,
+  "tb4_analytically_used": false,
+  "timing": {
+    "cache_load_seconds": 10.53,
+    "triple_sample_seconds": 4.17,
+    "feature_seconds": 0.85,
+    "fit_seconds": 2.32,
+    "bootstrap_seconds": 0.19,
+    "total_seconds": 18.23
+  },
+  "interpretation_limits": "SEQ-1 is a Markov-order audit on already-consumed development evidence (TB1/TB2/TB3). It does NOT prove a second-order Markov process, latent state, SMC validity, tradability or RL, and it does NOT authorise third-order sequences.",
+  "SEQ1_VERDICT": "SECOND_ORDER_EVENT_SEQUENCE_NOT_STABLE",
+  "SEQ1_CONCLUSION": "the second-order sequence increment is not stable across windows; stay at the first-order event representation."
+}

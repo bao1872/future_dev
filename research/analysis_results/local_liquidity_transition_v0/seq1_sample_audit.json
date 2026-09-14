@@ -1,0 +1,62 @@
+{
+  "n_episodes_used": 38026,
+  "n_triple_chains_raw": 36754,
+  "n_triple_chains_after_history_check": 36754,
+  "excluded_target_censor": 11,
+  "excluded_cross_block_target": 28,
+  "n_triple_chains": 36715,
+  "n_triple_chains_after_censor": 36715,
+  "triple_sample_key_sha256": "7b28e3aa9a41a0b27e400cf9bb060f1048a8e3ebf95e0e33780855f190989067",
+  "n_unique_event_pairs_overall": 114,
+  "n_unique_prev_event_masks_overall": 15,
+  "n_unique_prevprev_event_masks_overall": 15,
+  "sparsity": {
+    "A_TB1_to_TB2": {
+      "window": "A_TB1_to_TB2",
+      "n_unique_prev_event_masks": 15,
+      "n_unique_prevprev_event_masks": 15,
+      "n_unique_event_pairs_train": 97,
+      "n_unique_event_pairs_eval": 91,
+      "pair_train_count_min": 1,
+      "pair_train_count_p10": 1.0,
+      "pair_train_count_p50": 28.0,
+      "pair_train_count_p90": 326.0,
+      "pair_train_count_max": 869,
+      "eval_pairs_unseen_in_train_samples": 15,
+      "eval_pairs_unseen_in_train_rate": 0.0011696818465377417,
+      "pairs_with_train_n_lt_10_categories": 39,
+      "pairs_with_train_n_lt_10_train_samples": 88
+    },
+    "B_TB1TB2_to_TB3": {
+      "window": "B_TB1TB2_to_TB3",
+      "n_unique_prev_event_masks": 15,
+      "n_unique_prevprev_event_masks": 15,
+      "n_unique_event_pairs_train": 108,
+      "n_unique_event_pairs_eval": 100,
+      "pair_train_count_min": 1,
+      "pair_train_count_p10": 1.0,
+      "pair_train_count_p50": 23.5,
+      "pair_train_count_p90": 663.3,
+      "pair_train_count_max": 1848,
+      "eval_pairs_unseen_in_train_samples": 7,
+      "eval_pairs_unseen_in_train_rate": 0.000566159818828858,
+      "pairs_with_train_n_lt_10_categories": 46,
+      "pairs_with_train_n_lt_10_train_samples": 128
+    }
+  },
+  "window_counts": {
+    "A_TB1_to_TB2": {
+      "n_train": 11527,
+      "n_eval": 12824,
+      "n_days": 102
+    },
+    "B_TB1TB2_to_TB3": {
+      "n_train": 24351,
+      "n_eval": 12364,
+      "n_days": 102
+    }
+  },
+  "q2_vs_q1_all_below_zero": false,
+  "q3_vs_q2_all_contains_zero": true,
+  "tb4_analytically_used": false
+}
