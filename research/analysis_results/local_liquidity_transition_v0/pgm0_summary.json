@@ -1,0 +1,405 @@
+{
+  "experiment": "PGM-0 joint endpoint dependence (pairwise CRF)",
+  "base": "825e3f518a109a91dbc319ca5202d868cf0cad65",
+  "question": "after controlling current geometry, functional boundary provenance and the immediately previous structural endpoint, do the four endpoint bits still show stable same-episode pairwise conditional dependence?",
+  "state": {
+    "features": [
+      "cur_up_distance_R",
+      "cur_down_distance_R",
+      "cur_width_R",
+      "cur_log_distance_ratio",
+      "upper_oldest_log_age",
+      "upper_newest_log_age",
+      "upper_newest_age_zero",
+      "upper_oldest_age_zero",
+      "upper_n_active_identities",
+      "lower_oldest_log_age",
+      "lower_newest_log_age",
+      "lower_newest_age_zero",
+      "lower_oldest_age_zero",
+      "lower_n_active_identities",
+      "prev_event_mask"
+    ],
+    "n_numeric": 14,
+    "n_categorical": 1,
+    "legal_state_space": "15 masks (0000 impossible by episode definition)",
+    "regularization": "lam = 1/(C*N), C=1.0, intercept unpenalized, no tuning"
+  },
+  "models": {
+    "L": "legacy 4 independent logistic heads (= STATE-1.1 F3) + truncated independent joint",
+    "A": "conditional CRF with beta=0 (strict nested baseline)",
+    "B": "15-class multinomial softmax (upper-bound reference only, NOT a gate)",
+    "C": "A + 6 global-constant pairwise couplings beta"
+  },
+  "windows": [
+    {
+      "name": "A_TB1_to_TB2",
+      "train": [
+        "TB1"
+      ],
+      "eval": "TB2",
+      "seed": 20260922
+    },
+    {
+      "name": "B_TB1TB2_to_TB3",
+      "train": [
+        "TB1",
+        "TB2"
+      ],
+      "eval": "TB3",
+      "seed": 20260923
+    }
+  ],
+  "bootstrap_reps": 1000,
+  "sample_audit": {
+    "n_samples": 37224,
+    "sample_key_sha256": "ddf034ed30a90597aa86dbad71d6397b1934d532afb348b8a93b406984787c12",
+    "hash_matches_frozen": true,
+    "target_mask_min": 1,
+    "target_mask_max": 15,
+    "n_mask_zero": 0,
+    "mask_frequency": {
+      "1": 9292,
+      "2": 8896,
+      "3": 7,
+      "4": 3812,
+      "5": 29,
+      "6": 1448,
+      "7": 5,
+      "8": 3875,
+      "9": 1640,
+      "10": 38,
+      "11": 6,
+      "12": 7838,
+      "13": 159,
+      "14": 178,
+      "15": 1
+    },
+    "window_counts": {
+      "A_TB1_to_TB2": {
+        "n_train": 11813,
+        "n_eval": 12892,
+        "n_days": 102
+      },
+      "B_TB1TB2_to_TB3": {
+        "n_train": 24705,
+        "n_eval": 12519,
+        "n_days": 102
+      }
+    },
+    "legacy_parity_vs_state11_F3": {
+      "A_TB1_to_TB2": {
+        "legacy_marginal_logloss": 0.5281892101869154,
+        "state11_F3_logloss": 0.5281892101869154,
+        "exact": true
+      },
+      "B_TB1TB2_to_TB3": {
+        "legacy_marginal_logloss": 0.5293873283191222,
+        "state11_F3_logloss": 0.5293873283191222,
+        "exact": true
+      }
+    },
+    "tb4_analytically_used": false,
+    "tb4_endpoint_check": "all target_start_bar <= per-symbol TB3 last bar"
+  },
+  "results": [
+    {
+      "window": "A_TB1_to_TB2",
+      "n_train": 11813,
+      "n_eval": 12892,
+      "n_days": 102,
+      "metrics": [
+        {
+          "window": "A_TB1_to_TB2",
+          "model": "L_LEGACY_4_HEADS",
+          "n": 12892,
+          "joint_nll": 1.9197763129958365,
+          "multiclass_brier": 0.7681209490690687,
+          "head_bit_logloss": 0.5281892101869154,
+          "marginal_bit_brier": 0.17950655974718177,
+          "marginal_bit_logloss": 0.5363285020070716,
+          "marginal_bit_ece": 0.06865153103098694,
+          "pair_joint_brier": 0.05385778027843302
+        },
+        {
+          "window": "A_TB1_to_TB2",
+          "model": "A_COND_INDEPENDENT_CRF",
+          "n": 12892,
+          "joint_nll": 1.8056625652804432,
+          "multiclass_brier": 0.744451739710079,
+          "head_bit_logloss": NaN,
+          "marginal_bit_brier": 0.1726574378320227,
+          "marginal_bit_logloss": 0.5182817895484715,
+          "marginal_bit_ece": 0.026090905765912324,
+          "pair_joint_brier": 0.04730079971989201
+        },
+        {
+          "window": "A_TB1_to_TB2",
+          "model": "B_MULTINOMIAL_15_MASK",
+          "n": 12892,
+          "joint_nll": 1.5013690434558704,
+          "multiclass_brier": 0.675081590956926,
+          "head_bit_logloss": NaN,
+          "marginal_bit_brier": 0.1691082891071186,
+          "marginal_bit_logloss": 0.5076141721792153,
+          "marginal_bit_ece": 0.02250426240769865,
+          "pair_joint_brier": 0.04113761954807445
+        },
+        {
+          "window": "A_TB1_to_TB2",
+          "model": "C_PAIRWISE_CRF",
+          "n": 12892,
+          "joint_nll": 1.5262656254998812,
+          "multiclass_brier": 0.6826211632535552,
+          "head_bit_logloss": NaN,
+          "marginal_bit_brier": 0.171035498303681,
+          "marginal_bit_logloss": 0.5137861933110696,
+          "marginal_bit_ece": 0.0239329082994826,
+          "pair_joint_brier": 0.041695004287068356
+        }
+      ]
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "n_train": 24705,
+      "n_eval": 12519,
+      "n_days": 102,
+      "metrics": [
+        {
+          "window": "B_TB1TB2_to_TB3",
+          "model": "L_LEGACY_4_HEADS",
+          "n": 12519,
+          "joint_nll": 1.9205729313604043,
+          "multiclass_brier": 0.7718336535694402,
+          "head_bit_logloss": 0.5293873283191222,
+          "marginal_bit_brier": 0.17964543895878804,
+          "marginal_bit_logloss": 0.5365882823932205,
+          "marginal_bit_ece": 0.06810739095480373,
+          "pair_joint_brier": 0.05380751836382519
+        },
+        {
+          "window": "B_TB1TB2_to_TB3",
+          "model": "A_COND_INDEPENDENT_CRF",
+          "n": 12519,
+          "joint_nll": 1.8112646890793984,
+          "multiclass_brier": 0.7496578026573332,
+          "head_bit_logloss": NaN,
+          "marginal_bit_brier": 0.1731928464240701,
+          "marginal_bit_logloss": 0.5197499012753284,
+          "marginal_bit_ece": 0.02515270151527709,
+          "pair_joint_brier": 0.04748391505693306
+        },
+        {
+          "window": "B_TB1TB2_to_TB3",
+          "model": "B_MULTINOMIAL_15_MASK",
+          "n": 12519,
+          "joint_nll": 1.5155175018724927,
+          "multiclass_brier": 0.6774580080246343,
+          "head_bit_logloss": NaN,
+          "marginal_bit_brier": 0.1694441241055559,
+          "marginal_bit_logloss": 0.5093454701218643,
+          "marginal_bit_ece": 0.022841309352561283,
+          "pair_joint_brier": 0.041086696699494905
+        },
+        {
+          "window": "B_TB1TB2_to_TB3",
+          "model": "C_PAIRWISE_CRF",
+          "n": 12519,
+          "joint_nll": 1.5369201214195605,
+          "multiclass_brier": 0.684408458695473,
+          "head_bit_logloss": NaN,
+          "marginal_bit_brier": 0.17122350824897925,
+          "marginal_bit_logloss": 0.5154110246040335,
+          "marginal_bit_ece": 0.025843102007780817,
+          "pair_joint_brier": 0.04166842912804788
+        }
+      ]
+    }
+  ],
+  "bootstrap": [
+    {
+      "window": "A_TB1_to_TB2",
+      "comparison": "C_PAIRWISE_CRF - A_COND_INDEPENDENT_CRF",
+      "role": "PRIMARY",
+      "joint_nll_A": 1.5262656254998812,
+      "joint_nll_B": 1.8056625652804432,
+      "delta_sample_weighted": -0.2793969397805619,
+      "delta_daily_mean": -0.2777601633736697,
+      "n_days": 102,
+      "ci_lo": -0.2907113710516529,
+      "ci_hi": -0.2649289834004673,
+      "verdict": "CI_below_zero"
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "comparison": "C_PAIRWISE_CRF - L_LEGACY_4_HEADS",
+      "role": "SECONDARY_PRACTICAL",
+      "joint_nll_A": 1.5262656254998812,
+      "joint_nll_B": 1.9197763129958365,
+      "delta_sample_weighted": -0.393510687495955,
+      "delta_daily_mean": -0.39122080752302235,
+      "n_days": 102,
+      "ci_lo": -0.4041531062867903,
+      "ci_hi": -0.3796480770330467,
+      "verdict": "CI_below_zero"
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "comparison": "B_MULTINOMIAL_15_MASK - A_COND_INDEPENDENT_CRF",
+      "role": "REFERENCE_ONLY",
+      "joint_nll_A": 1.5013690434558704,
+      "joint_nll_B": 1.8056625652804432,
+      "delta_sample_weighted": -0.3042935218245729,
+      "delta_daily_mean": -0.3023586300421239,
+      "n_days": 102,
+      "ci_lo": -0.3157788373818721,
+      "ci_hi": -0.28915822963477833,
+      "verdict": "CI_below_zero"
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "comparison": "C_PAIRWISE_CRF - A_COND_INDEPENDENT_CRF",
+      "role": "PRIMARY",
+      "joint_nll_A": 1.5369201214195605,
+      "joint_nll_B": 1.8112646890793984,
+      "delta_sample_weighted": -0.2743445676598378,
+      "delta_daily_mean": -0.27507793879333126,
+      "n_days": 102,
+      "ci_lo": -0.28969165367980987,
+      "ci_hi": -0.26055809363117244,
+      "verdict": "CI_below_zero"
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "comparison": "C_PAIRWISE_CRF - L_LEGACY_4_HEADS",
+      "role": "SECONDARY_PRACTICAL",
+      "joint_nll_A": 1.5369201214195605,
+      "joint_nll_B": 1.9205729313604043,
+      "delta_sample_weighted": -0.3836528099408435,
+      "delta_daily_mean": -0.38351879297226654,
+      "n_days": 102,
+      "ci_lo": -0.3980240049624277,
+      "ci_hi": -0.3696944950610178,
+      "verdict": "CI_below_zero"
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "comparison": "B_MULTINOMIAL_15_MASK - A_COND_INDEPENDENT_CRF",
+      "role": "REFERENCE_ONLY",
+      "joint_nll_A": 1.5155175018724927,
+      "joint_nll_B": 1.8112646890793984,
+      "delta_sample_weighted": -0.2957471872069057,
+      "delta_daily_mean": -0.29654144550638606,
+      "n_days": 102,
+      "ci_lo": -0.3118669104479063,
+      "ci_hi": -0.2809269545068218,
+      "verdict": "CI_below_zero"
+    }
+  ],
+  "couplings": [
+    {
+      "window": "A_TB1_to_TB2",
+      "pair": "UP_PEN x DOWN_PEN",
+      "beta": -3.1678021626645836,
+      "sign": -1
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "pair": "UP_PEN x NEW_UPPER",
+      "beta": -2.69352863459755,
+      "sign": -1
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "pair": "UP_PEN x NEW_LOWER",
+      "beta": 1.1500618139239815,
+      "sign": 1
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "pair": "DOWN_PEN x NEW_UPPER",
+      "beta": 1.1340867476978898,
+      "sign": 1
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "pair": "DOWN_PEN x NEW_LOWER",
+      "beta": -2.5903413486103113,
+      "sign": -1
+    },
+    {
+      "window": "A_TB1_to_TB2",
+      "pair": "NEW_UPPER x NEW_LOWER",
+      "beta": 3.4378053964739466,
+      "sign": 1
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "pair": "UP_PEN x DOWN_PEN",
+      "beta": -3.649140416714038,
+      "sign": -1
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "pair": "UP_PEN x NEW_UPPER",
+      "beta": -2.8724468885458974,
+      "sign": -1
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "pair": "UP_PEN x NEW_LOWER",
+      "beta": 1.0926051613229262,
+      "sign": 1
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "pair": "DOWN_PEN x NEW_UPPER",
+      "beta": 1.0542768705394523,
+      "sign": 1
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "pair": "DOWN_PEN x NEW_LOWER",
+      "beta": -2.7001244342365354,
+      "sign": -1
+    },
+    {
+      "window": "B_TB1TB2_to_TB3",
+      "pair": "NEW_UPPER x NEW_LOWER",
+      "beta": 3.40555394125652,
+      "sign": 1
+    }
+  ],
+  "by_symbol": {
+    "n_rows": 30,
+    "n_symbol_per_window": 15,
+    "window_A_n_negative": 15,
+    "window_A_n_positive": 0,
+    "window_B_n_negative": 15,
+    "window_B_n_positive": 0
+  },
+  "coupling_note": "6 global-constant betas reported for sign/magnitude/cross-window direction only; NOT used to delete edges, pick edges or re-fit",
+  "mask_calibration_summary": {
+    "A_TB1_to_TB2": 0.0010331249380376127,
+    "B_TB1TB2_to_TB3": 0.001563007051071785
+  },
+  "pair_calibration_summary": {
+    "A_TB1_to_TB2": 0.00139053798079276,
+    "B_TB1TB2_to_TB3": 0.0016761535596803011
+  },
+  "practical_gain_supported": true,
+  "tb4_analytically_used": false,
+  "timing": {
+    "cache_load_seconds": 12.54,
+    "fit_legacy_seconds": 0.76,
+    "fit_crf_A_seconds": 10.29,
+    "fit_crf_C_seconds": 14.89,
+    "fit_15mask_seconds": 1.34,
+    "bootstrap_seconds": 0.08,
+    "total_seconds": 40.4
+  },
+  "interpretation_limits": "PGM-0 only tests same-episode pairwise conditional dependence of the four endpoint bits. It does NOT authorise third-order interactions, latent state, HMM/HSMM, SMC, next-state models, tradability or RL.",
+  "PGM0_VERDICT": "PGM0_PAIRWISE_DEPENDENCE_SUPPORTED",
+  "PGM0_CONCLUSION": "stable same-episode pairwise endpoint dependence exists beyond the current state; endpoint coupling is worth modelling.",
+  "PGM0_PRACTICAL": "PGM0_PRACTICAL_JOINT_GAIN_SUPPORTED"
+}

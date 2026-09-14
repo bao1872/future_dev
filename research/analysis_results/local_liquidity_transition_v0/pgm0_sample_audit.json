@@ -1,0 +1,51 @@
+{
+  "n_samples": 37224,
+  "sample_key_sha256": "ddf034ed30a90597aa86dbad71d6397b1934d532afb348b8a93b406984787c12",
+  "hash_matches_frozen": true,
+  "target_mask_min": 1,
+  "target_mask_max": 15,
+  "n_mask_zero": 0,
+  "mask_frequency": {
+    "1": 9292,
+    "2": 8896,
+    "3": 7,
+    "4": 3812,
+    "5": 29,
+    "6": 1448,
+    "7": 5,
+    "8": 3875,
+    "9": 1640,
+    "10": 38,
+    "11": 6,
+    "12": 7838,
+    "13": 159,
+    "14": 178,
+    "15": 1
+  },
+  "window_counts": {
+    "A_TB1_to_TB2": {
+      "n_train": 11813,
+      "n_eval": 12892,
+      "n_days": 102
+    },
+    "B_TB1TB2_to_TB3": {
+      "n_train": 24705,
+      "n_eval": 12519,
+      "n_days": 102
+    }
+  },
+  "legacy_parity_vs_state11_F3": {
+    "A_TB1_to_TB2": {
+      "legacy_marginal_logloss": 0.5281892101869154,
+      "state11_F3_logloss": 0.5281892101869154,
+      "exact": true
+    },
+    "B_TB1TB2_to_TB3": {
+      "legacy_marginal_logloss": 0.5293873283191222,
+      "state11_F3_logloss": 0.5293873283191222,
+      "exact": true
+    }
+  },
+  "tb4_analytically_used": false,
+  "tb4_endpoint_check": "all target_start_bar <= per-symbol TB3 last bar"
+}
