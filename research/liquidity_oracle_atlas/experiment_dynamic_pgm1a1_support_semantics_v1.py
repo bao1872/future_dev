@@ -1,8 +1,14 @@
-"""DYNAMIC-PGM-1A — Within-Episode One-Step Transition Kernel（基于 0d3db40）
+"""DYNAMIC-PGM-1A.1 — Support-Correct Within-Episode Transition Kernel（基于 0d3db40）
 
 ===========================================================
 只研究 episode 内部的 5m 状态转移，不碰 terminal reset。
 ===========================================================
+
+NOTE: DYNAMIC-PGM-1A（Gaussian-count，9 维连续）已 FROZEN 于 commit
+20fbd2e487dbe5cc9ce22ec1205cc7a84227b8fb，必须继续复现其既有 dynamic_pgm1a_*
+结果。本 1A.1 是其独立的 support-correct 变体：count 增量改用 Hurdle-Poisson，
+且正数支是为 EXACT zero-truncated Poisson（见 ZeroTruncatedPoissonRegressor 与
+_ztnp_nll），取代 1A 的旧 Gaussian count。禁止把 1A.1 折回 1A。
 已有：
     P(Y_{t+1} | S_t)   —— endpoint / hazard 模型（PGM-BAR-0 / MARKET-STATE-1）
 这一轮研究：
@@ -15,17 +21,23 @@
 不预测 35 个 state feature（很多是确定性关系），只预测真正的
 state innovations Z_{t+1}，然后用确定公式 S_{t+1}=F(S_t, Z_{t+1})：
 
-连续（9）：
+连续（7）：
     z_d_up           = d_U,t+1 - d_U,t            (=> r = -Δd_U)
     z_log1p_dmfe     = log1p(MFE_{t+1}-MFE_t)
     z_log1p_dmae     = log1p(MAE_{t+1}-MAE_t)
     z_delta_dcr      = DCR_{t+1}-DCR_t
     z_log1p_next_range = log1p(Range_{t+1})
-    z_delta_upper_newest_resid / z_delta_upper_count
-    z_delta_lower_newest_resid / z_delta_lower_count
+    z_delta_upper_newest_resid / z_delta_lower_newest_resid   (residual update)
 
 离散（4 类）：
     z_agezero_code = 1[upper newest age=0] + 2[lower newest age=0]
+
+计数增量（2，离散非负整数 -> Hurdle-Poisson）：
+    z_delta_upper_count = next.upper_active_identity_count_delta - cur.upper_active_identity_count_delta
+    z_delta_lower_count = next.lower_active_identity_count_delta - cur.lower_active_identity_count_delta
+    # 注意：stored *_active_identity_count_delta 是 episode 内【累计 activation 计数】
+    # (cumulative activation counter)，NOT 当前 active 数 − 起点。故 count 节点预测单步
+    # activation 增量，重建时 current_counter + increment == next_counter 必须逐行精确。
 
 模型：
     K0 UNCONDITIONAL  不看 state，只学平均 transition 分布
@@ -35,9 +47,10 @@ state innovations Z_{t+1}，然后用确定公式 S_{t+1}=F(S_t, Z_{t+1})：
 主检验：K1-K0 是否有稳定增量（state 能否预测状态演化）
 次检验：K2-K1 是否还有 lag1 增量（当前 state 是否仍遗留一阶历史依赖）
 
-连续：Z^c|S_t ~ N(mu(S_t), Sigma) 多输出 Ridge + LedoitWolf 完整 9x9 协方差
-离散：Softmax(W phi(S_t)+b) 4-class Logistic
-第一版先 conditional independence Z^c ⊥ Z^d | S_t。
+连续（7）：Z^c|S_t ~ N(mu(S_t), Sigma) 多输出 Ridge + LedoitWolf 完整 7x7 协方差
+离散（4 类）：Softmax(W phi(S_t)+b) 4-class Logistic
+计数增量（2，非负整数）：Hurdle-Poisson —— 每侧独立 Logistic P(>0) + zero-truncated Poisson（正数子集）
+第一版先 conditional independence Z^c ⊥ Z^d | S_t；count 增量与连续/离散条件独立。
 
 不进入 terminal reset / recursive rollout / Dynamic PGM-1B / 1C。
 """
@@ -73,6 +86,8 @@ from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from scipy.optimize import minimize, brentq
+from scipy.special import gammaln
 
 REPO = Path(__file__).resolve().parents[2]
 if str(REPO) not in sys.path:
@@ -105,9 +120,12 @@ LAG_BASE = [
 
 CONT_Z = [
     "z_d_up", "z_log1p_dmfe", "z_log1p_dmae", "z_delta_dcr",
-    "z_log1p_next_range", "z_delta_upper_newest_resid", "z_delta_upper_count",
-    "z_delta_lower_newest_resid", "z_delta_lower_count",
+    "z_log1p_next_range", "z_delta_upper_newest_resid",
+    "z_delta_lower_newest_resid",
 ]
+# count 节点：episode 内累计 activation 计数的单步增量（非负整数 -> Hurdle-Poisson）。
+# stored *_active_identity_count_delta 是 cumulative activation counter，不是当前 active 数差。
+COUNT_Z = ["z_delta_upper_count", "z_delta_lower_count"]
 DISC_Z = "z_agezero_code"
 
 # Source columns consumed from the enriched frame by build_transition_sample
@@ -124,13 +142,13 @@ BUILD_SRC_COLS = [
 ]
 
 BLOCKS = {
-    "Location": dict(cont=["z_d_up"], disc=[]),
+    "Location": dict(cont=["z_d_up"], disc=[], count=[]),
     "Path": dict(cont=["z_log1p_dmfe", "z_log1p_dmae", "z_delta_dcr",
-                       "z_log1p_next_range"], disc=[]),
+                       "z_log1p_next_range"], disc=[], count=[]),
     "LiquidityComposition": dict(
-        cont=["z_delta_upper_newest_resid", "z_delta_upper_count",
-              "z_delta_lower_newest_resid", "z_delta_lower_count"],
-        disc=["z_agezero_code"]),
+        cont=["z_delta_upper_newest_resid", "z_delta_lower_newest_resid"],
+        disc=["z_agezero_code"],
+        count=["z_delta_upper_count", "z_delta_lower_count"]),
 }
 
 
@@ -188,6 +206,22 @@ def build_transition_sample(df):
         cur[f"z_delta_{side}_count"] = (
             nxt[f"{side}_active_identity_count_delta"].to_numpy(float)
             - cur[f"{side}_active_identity_count_delta"].to_numpy(float))
+
+    # ---- count-increment hard guards (cumulative activation counter)
+    # stored *_active_identity_count_delta 是 episode 内累计 activation 计数；
+    # 单步增量必须非负整数，且 cur + inc == next 精确（否则累计解释有误）。
+    for side in ("upper", "lower"):
+        inc = cur[f"z_delta_{side}_count"].to_numpy(float)
+        nxtc = nxt[f"{side}_active_identity_count_delta"].to_numpy(float)
+        curc = cur[f"{side}_active_identity_count_delta"].to_numpy(float)
+        if not np.all(np.isfinite(inc)):
+            raise SystemExit("STOP_DYNAMIC_PGM1A_ACTIVATION_INCREMENT_NAN")
+        if not np.all(np.equal(np.mod(inc, 1), 0)):
+            raise SystemExit("STOP_DYNAMIC_PGM1A_ACTIVATION_INCREMENT_NONINTEGER")
+        if inc.min() < 0:
+            raise SystemExit("STOP_DYNAMIC_PGM1A_ACTIVATION_COUNTER_NONMONOTONE")
+        if not np.allclose(curc + inc, nxtc, atol=1e-9):
+            raise SystemExit("STOP_DYNAMIC_PGM1A_ACTIVATION_RECON_FAIL")
 
     up0 = nxt["upper_current_newest_age_zero"].to_numpy(np.int64)
     lo0 = nxt["lower_current_newest_age_zero"].to_numpy(np.int64)
@@ -340,6 +374,164 @@ def fit_constant_heads(Zc_tr, Zc_ev, yd_tr, yd_ev):
 
 
 # ===========================================================================
+# count head: per-side Hurdle-Poisson for the activation increment
+# ===========================================================================
+def _log_factorial(y):
+    y = np.asarray(y, dtype=np.float64)
+    return gammaln(y + 1.0)
+
+
+def _ztnp_nll(y, rate):
+    """Exact zero-truncated Poisson NLL for y >= 1.
+
+    P(Y=y | Y>0, lam) = e^{-lam} lam^y / y!  /  (1 - e^{-lam})
+    => NLL = lam - y*log(lam) + log(y!) + log(1 - e^{-lam})
+
+    Numerically stable: log(1 - e^{-lam}) = log(-expm1(-lam)).
+    """
+    rate = np.maximum(np.asarray(rate, dtype=np.float64), 1e-12)
+    log_trunc = np.log(-np.expm1(-rate))
+    return rate - y * np.log(rate) + _log_factorial(y) + log_trunc
+
+
+def _hurdle_nll(y, p0, rate):
+    """Per-row Hurdle-Poisson NLL.
+
+    P(A|S) = P(A>0|S) * P(A|A>0,S),  A>=0 integer.
+    y    : (n,) int increment (>=0)
+    p0   : (n,) P(increment > 0)   (Logistic)
+    rate : (n,) zero-truncated Poisson rate (positive), only used where y>0
+    """
+    y = np.asarray(y, dtype=np.float64)
+    p0 = np.asarray(p0, dtype=np.float64)
+    rate = np.maximum(np.asarray(rate, dtype=np.float64), 1e-6)
+    pos = y > 0
+    nll_pos = -np.log(np.clip(p0, 1e-12, 1.0)) + _ztnp_nll(y, rate)
+    nll_zero = -np.log1p(-p0)
+    return np.where(pos, nll_pos, nll_zero)
+
+
+class ZeroTruncatedPoissonRegressor:
+    """Exact zero-truncated Poisson GLM: P(Y=y|Y>0, X) via truncated likelihood.
+
+    Fit uses L-BFGS-B on the exact zero-truncated Poisson negative log-likelihood
+    (NOT a plain PoissonRegressor on the positive subset, which would implicitly
+    assume P(Y>0)=1). The gradient is the closed-form truncated-Poisson score:
+        E[Y | Y>0] = lam / (1 - e^{-lam})   with lam = exp(intercept + X@coef)
+    """
+
+    def __init__(self, alpha=1.0):
+        self.alpha = alpha
+
+    def fit(self, X, y):
+        X = np.asarray(X, np.float64)
+        y = np.asarray(y, np.float64)
+        if np.any(y < 1):
+            raise ValueError("ZTP requires y >= 1")
+        n, p = X.shape
+        theta0 = np.zeros(p + 1)
+
+        def objective(theta):
+            b = theta[0]
+            w = theta[1:]
+            eta = np.clip(b + X @ w, -20, 20)
+            lam = np.exp(eta)
+            log_trunc = np.log(-np.expm1(-lam))
+            nll = (lam - y * eta + gammaln(y + 1) + log_trunc).sum()
+            penalty = 0.5 * self.alpha * np.dot(w, w)
+            return nll + penalty
+
+        def gradient(theta):
+            b = theta[0]
+            w = theta[1:]
+            eta = np.clip(b + X @ w, -20, 20)
+            lam = np.exp(eta)
+            mu_trunc = lam / (-np.expm1(-lam))     # E[Y|Y>0] under ZTP
+            g_eta = mu_trunc - y
+            grad_b = g_eta.sum()
+            grad_w = X.T @ g_eta + self.alpha * w
+            return np.r_[grad_b, grad_w]
+
+        res = minimize(objective, theta0, jac=gradient, method="L-BFGS-B")
+        if not res.success:
+            raise RuntimeError(f"STOP_ZTP_OPTIMIZER_FAIL: {res.message}")
+        self.intercept_ = res.x[0]
+        self.coef_ = res.x[1:]
+        return self
+
+    def predict_rate(self, X):
+        eta = np.clip(self.intercept_ + X @ self.coef_, -20, 20)
+        return np.exp(eta)
+
+
+def _fit_constant_ztp_rate(yt):
+    """K0 constant ZTP rate: solve E[Y|Y>0] = mean(Y>0).
+
+    E[Y|Y>0] = lam / (1 - e^{-lam}); for small mean the implied lam is tiny
+    (e.g. mean 1.01 -> lam ~ 0.0226), so a plain positive-mean is wrong.
+    """
+    pos = yt[yt > 0]
+    if len(pos) == 0:
+        return 1e-8
+    m = float(np.mean(pos))
+    if (not np.isfinite(m)) or m <= 1.0 + 1e-12:
+        # only y==1 observed (or pathological) -> implied lam -> 0
+        return 1e-8
+    f = lambda lam: lam / (-np.expm1(-lam)) - m
+    try:
+        return float(brentq(f, 1e-8, 100.0))
+    except (ValueError, RuntimeError):
+        return 1e-8
+
+
+def fit_constant_count_head(Ytr, Yev):
+    """K0 count head: marginal Hurdle-Poisson per column (no state)."""
+    Ytr = np.asarray(Ytr, dtype=np.int64)
+    Yev = np.asarray(Yev, dtype=np.int64)
+    nll_tr = np.zeros((len(Ytr), Ytr.shape[1]))
+    nll_ev = np.zeros((len(Yev), Yev.shape[1]))
+    for j in range(Ytr.shape[1]):
+        yt, ye = Ytr[:, j], Yev[:, j]
+        p0 = float(np.mean(yt > 0))
+        rate = _fit_constant_ztp_rate(yt)
+        nll_tr[:, j] = _hurdle_nll(yt, p0, rate)
+        nll_ev[:, j] = _hurdle_nll(ye, p0, rate)
+    return dict(nll_tr=nll_tr, nll_ev=nll_ev,
+                n_params=int(2 * Ytr.shape[1]))
+
+
+def fit_count_head(Xtr, Ytr, Xev, Yev):
+    """K1/K2 count head: Logistic P(>0) + zero-truncated Poisson on positives,
+    fit independently per column (matches the Z^c perp Z^d conditional independence)."""
+    Xtr = np.asarray(Xtr, dtype=np.float64)
+    Xev = np.asarray(Xev, dtype=np.float64)
+    Ytr = np.asarray(Ytr, dtype=np.int64)
+    Yev = np.asarray(Yev, dtype=np.int64)
+    n_tr, n_ev = len(Ytr), len(Yev)
+    nll_tr = np.zeros((n_tr, Ytr.shape[1]))
+    nll_ev = np.zeros((n_ev, Yev.shape[1]))
+    for j in range(Ytr.shape[1]):
+        yt, ye = Ytr[:, j], Yev[:, j]
+        zt = (yt > 0).astype(np.int64)
+        logit = LogisticRegression(penalty="l2", C=1.0, solver="lbfgs",
+                                   max_iter=3000).fit(Xtr, zt)
+        p0_tr = np.clip(logit.predict_proba(Xtr)[:, 1], 1e-6, 1 - 1e-6)
+        p0_ev = np.clip(logit.predict_proba(Xev)[:, 1], 1e-6, 1 - 1e-6)
+        pos = yt > 0
+        if pos.sum() > 0:
+            ztp = ZeroTruncatedPoissonRegressor(alpha=1.0).fit(Xtr[pos], yt[pos])
+            rate_tr = ztp.predict_rate(Xtr)
+            rate_ev = ztp.predict_rate(Xev)
+        else:
+            rate_tr = np.full(n_tr, 1e-6)
+            rate_ev = np.full(n_ev, 1e-6)
+        nll_tr[:, j] = _hurdle_nll(yt, p0_tr, rate_tr)
+        nll_ev[:, j] = _hurdle_nll(ye, p0_ev, rate_ev)
+    return dict(nll_tr=nll_tr, nll_ev=nll_ev,
+                n_params=int((Xtr.shape[1] + 1) * 2 * Ytr.shape[1]))
+
+
+# ===========================================================================
 # cluster bootstrap (by episode_start_trading_day)
 # ===========================================================================
 def boot_cluster(delta_per_row, day_per_row, eid_per_row, seed):
@@ -386,6 +578,8 @@ def run_single_window(w, data_path):
     Zc_ev = ev[CONT_Z].to_numpy(np.float64)
     yd_tr = tr[DISC_Z].to_numpy(np.int64)
     yd_ev = ev[DISC_Z].to_numpy(np.int64)
+    Yc_tr = tr[COUNT_Z].to_numpy(np.int64)
+    Yc_ev = ev[COUNT_Z].to_numpy(np.int64)
     sym_ev = ev["symbol"].to_numpy()
     day_ev = ev["episode_start_day"].to_numpy()
     eid_ev = ev["episode_id"].to_numpy()
@@ -395,16 +589,18 @@ def run_single_window(w, data_path):
     # ---------------- K0: constant Gaussian + Laplace 4-class
     t_k0 = time.perf_counter()
     k0 = fit_constant_heads(Zc_tr, Zc_ev, yd_tr, yd_ev)
+    k0_count = fit_constant_count_head(Yc_tr, Yc_ev)
     opt_rows.append(dict(window=w["name"], model="K0_UNCONDITIONAL",
-                         n_params=k0["n_params"], success=True,
-                         elapsed_seconds=round(time.perf_counter() - t_k0, 3)))
-    j_k0_tr = k0["cont_tr"] + k0["disc_tr"]
-    j_k0_ev = k0["cont_ev"] + k0["disc_ev"]
+                        n_params=k0["n_params"] + k0_count["n_params"], success=True,
+                        elapsed_seconds=round(time.perf_counter() - t_k0, 3)))
+    j_k0_tr = k0["cont_tr"] + k0["disc_tr"] + k0_count["nll_tr"].sum(axis=1)
+    j_k0_ev = k0["cont_ev"] + k0["disc_ev"] + k0_count["nll_ev"].sum(axis=1)
     model_metrics.append(dict(window=w["name"], model="K0_UNCONDITIONAL",
-                             mean_joint_nll=float(np.mean(j_k0_ev)),
-                             mean_cont_nll=float(np.mean(k0["cont_ev"])),
-                             mean_disc_nll=float(np.mean(k0["disc_ev"])),
-                             n_rows=int(len(ev))))
+                            mean_joint_nll=float(np.mean(j_k0_ev)),
+                            mean_cont_nll=float(np.mean(k0["cont_ev"])),
+                            mean_disc_nll=float(np.mean(k0["disc_ev"])),
+                            mean_count_nll=float(np.mean(k0_count["nll_ev"])),
+                            n_rows=int(len(ev))))
 
     # ---------------- shared preprocessing (K1 + K2 in one pass)
     # Order: [cat | OBS_STATE_NUM | lag1_* + lag1_available]. K1 is then the
@@ -428,17 +624,19 @@ def run_single_window(w, data_path):
 
     # ---------------- K1: OBSERVED-STATE-v1
     k1 = fit_state_heads(Xtr1, Xev1, Zc_tr, Zc_ev, yd_tr, yd_ev)
+    k1_count = fit_count_head(Xtr1, Yc_tr, Xev1, Yc_ev)
     _peak(f"{w['name']} after K1 transform+fit")
     opt_rows.append(dict(window=w["name"], model="K1_STATE",
-                         n_params=k1["n_params"], success=True,
-                         elapsed_seconds=round(time.perf_counter() - t_k1, 3)))
-    j_k1_tr = k1["cont_tr"] + k1["disc_tr"]
-    j_k1_ev = k1["cont_ev"] + k1["disc_ev"]
+                        n_params=k1["n_params"] + k1_count["n_params"], success=True,
+                        elapsed_seconds=round(time.perf_counter() - t_k1, 3)))
+    j_k1_tr = k1["cont_tr"] + k1["disc_tr"] + k1_count["nll_tr"].sum(axis=1)
+    j_k1_ev = k1["cont_ev"] + k1["disc_ev"] + k1_count["nll_ev"].sum(axis=1)
     model_metrics.append(dict(window=w["name"], model="K1_STATE",
-                             mean_joint_nll=float(np.mean(j_k1_ev)),
-                             mean_cont_nll=float(np.mean(k1["cont_ev"])),
-                             mean_disc_nll=float(np.mean(k1["disc_ev"])),
-                             n_rows=int(len(ev))))
+                            mean_joint_nll=float(np.mean(j_k1_ev)),
+                            mean_cont_nll=float(np.mean(k1["cont_ev"])),
+                            mean_disc_nll=float(np.mean(k1["disc_ev"])),
+                            mean_count_nll=float(np.mean(k1_count["nll_ev"])),
+                            n_rows=int(len(ev))))
 
     # ---------------- covariance PD audit (reuse K1 design)
     head_cov = GaussianTransitionHead(alpha=1.0).fit(Xtr1, Zc_tr)
@@ -449,17 +647,19 @@ def run_single_window(w, data_path):
     # ---------------- K2: K1 + lag1
     t_k2 = time.perf_counter()
     k2 = fit_state_heads(Xtr2, Xev2, Zc_tr, Zc_ev, yd_tr, yd_ev)
+    k2_count = fit_count_head(Xtr2, Yc_tr, Xev2, Yc_ev)
     _peak(f"{w['name']} after K2 transform+fit")
     opt_rows.append(dict(window=w["name"], model="K2_STATE_LAG1",
-                         n_params=k2["n_params"], success=True,
-                         elapsed_seconds=round(time.perf_counter() - t_k2, 3)))
-    j_k2_tr = k2["cont_tr"] + k2["disc_tr"]
-    j_k2_ev = k2["cont_ev"] + k2["disc_ev"]
+                        n_params=k2["n_params"] + k2_count["n_params"], success=True,
+                        elapsed_seconds=round(time.perf_counter() - t_k2, 3)))
+    j_k2_tr = k2["cont_tr"] + k2["disc_tr"] + k2_count["nll_tr"].sum(axis=1)
+    j_k2_ev = k2["cont_ev"] + k2["disc_ev"] + k2_count["nll_ev"].sum(axis=1)
     model_metrics.append(dict(window=w["name"], model="K2_STATE_LAG1",
-                             mean_joint_nll=float(np.mean(j_k2_ev)),
-                             mean_cont_nll=float(np.mean(k2["cont_ev"])),
-                             mean_disc_nll=float(np.mean(k2["disc_ev"])),
-                             n_rows=int(len(ev))))
+                            mean_joint_nll=float(np.mean(j_k2_ev)),
+                            mean_cont_nll=float(np.mean(k2["cont_ev"])),
+                            mean_disc_nll=float(np.mean(k2["disc_ev"])),
+                            mean_count_nll=float(np.mean(k2_count["nll_ev"])),
+                            n_rows=int(len(ev))))
     del k2, ct
 
     if not (len(j_k0_ev) == len(j_k1_ev) == len(j_k2_ev)):
@@ -498,16 +698,24 @@ def run_single_window(w, data_path):
     # ---------------- block contribution (eval, reuse K1 design)
     for bname, bdef in BLOCKS.items():
         bc = bdef["cont"]
-        cols = [CONT_Z.index(c) for c in bc]
-        bhead = GaussianTransitionHead(alpha=1.0).fit(Xtr1, Zc_tr[:, cols])
-        bcont_k1_ev = bhead.nll_per_row(Xev1, Zc_ev[:, cols])
-        bhead0 = ConstantGaussianHead().fit(Zc_tr[:, cols])
-        bcont_k0_ev = bhead0.nll_per_row(Zc_ev[:, cols])
+        cols = [CONT_Z.index(c) for c in bc] if bc else []
+        if cols:
+            bhead = GaussianTransitionHead(alpha=1.0).fit(Xtr1, Zc_tr[:, cols])
+            bcont_k1_ev = bhead.nll_per_row(Xev1, Zc_ev[:, cols])
+            bhead0 = ConstantGaussianHead().fit(Zc_tr[:, cols])
+            bcont_k0_ev = bhead0.nll_per_row(Zc_ev[:, cols])
+        else:
+            bcont_k1_ev = np.zeros(len(Xev1))
+            bcont_k0_ev = np.zeros(len(Xev1))
         bjoint_k1 = bcont_k1_ev
         bjoint_k0 = bcont_k0_ev
         if bdef["disc"]:
-            bjoint_k1 = bcont_k1_ev + k1["disc_ev"]
-            bjoint_k0 = bcont_k0_ev + k0["disc_ev"]
+            bjoint_k1 = bjoint_k1 + k1["disc_ev"]
+            bjoint_k0 = bjoint_k0 + k0["disc_ev"]
+        if bdef.get("count"):
+            idx = [COUNT_Z.index(c) for c in bdef["count"]]
+            bjoint_k1 = bjoint_k1 + k1_count["nll_ev"][:, idx].sum(axis=1)
+            bjoint_k0 = bjoint_k0 + k0_count["nll_ev"][:, idx].sum(axis=1)
         block_rows.append(dict(
             window=w["name"], block=bname,
             mean_joint_k0=float(np.mean(bjoint_k0)),
@@ -521,6 +729,13 @@ def run_single_window(w, data_path):
         h0 = ConstantGaussianHead().fit(Zc_tr[:, i:i + 1])
         n0 = h0.nll_per_row(Zc_ev[:, i:i + 1])
         target_rows.append(dict(window=w["name"], target=c, kind="continuous",
+                                mean_nll_k0=float(np.mean(n0)),
+                                mean_nll_k1=float(np.mean(n1)),
+                                delta_k1_minus_k0=float(np.mean(n1) - np.mean(n0))))
+    for j, c in enumerate(COUNT_Z):
+        n1 = k1_count["nll_ev"][:, j]
+        n0 = k0_count["nll_ev"][:, j]
+        target_rows.append(dict(window=w["name"], target=c, kind="discrete_count",
                                 mean_nll_k0=float(np.mean(n0)),
                                 mean_nll_k1=float(np.mean(n1)),
                                 delta_k1_minus_k0=float(np.mean(n1) - np.mean(n0))))
@@ -579,7 +794,7 @@ def main():
     print(f"[STAGE] build done n={len(cur)}", flush=True)
 
     # ---------------- sample audit / hash
-    hash_cols = CONT_Z + [DISC_Z]
+    hash_cols = CONT_Z + [DISC_Z] + COUNT_Z
     h = hashlib.sha256(
         pd.util.hash_pandas_object(cur[hash_cols], index=False)
         .values.tobytes()).hexdigest()
@@ -622,6 +837,18 @@ def main():
                          [f"lag1_{c}" for c in LAG_BASE]].notna().any(axis=1)
                  .all())),
         no_tb4=bool("TB4" not in set(cur["block"].unique())),
+        count_increment_integer=bool(all(
+            np.all(np.equal(np.mod(cur[f"z_delta_{s}_count"].to_numpy(float), 1), 0))
+            for s in ("upper", "lower"))),
+        count_increment_nonneg=bool(all(
+            cur[f"z_delta_{s}_count"].to_numpy(float).min() >= -1e-9
+            for s in ("upper", "lower"))),
+        count_reconstruction_exact=bool(all(
+            np.allclose(
+                cur[f"z_delta_{s}_count"].to_numpy(float)
+                + cur[f"{s}_active_identity_count_delta"].to_numpy(float),
+                nxt[f"{s}_active_identity_count_delta"].to_numpy(float), atol=1e-9)
+            for s in ("upper", "lower"))),
     )
     if not all(invariants.values()):
         raise SystemExit(
@@ -634,7 +861,7 @@ def main():
     # ---------------- write cache (gitignored) + free heavy temporaries
     needed_cols = (list(OBS_STATE_NUM) + list(OBS_STATE_CAT)
                    + [f"lag1_{c}" for c in LAG_BASE] + ["lag1_available"]
-                   + list(CONT_Z) + [DISC_Z]
+                   + list(CONT_Z) + [DISC_Z] + list(COUNT_Z)
                    + ["episode_id", "symbol", "block", "episode_start_day"])
     # halve float memory IN PLACE first (each float64 column buffer is released
     # as it is rewritten), then select the slim subset. This avoids the old
@@ -753,28 +980,35 @@ def main():
             scope="within-episode 5m state transition, terminal reset excluded",
             target="P(S_{t+1} | S_t, H_{t+1}=0)",
             predicted_innovations=dict(
-                continuous=CONT_Z, discrete=DISC_Z,
+                continuous=CONT_Z, discrete=DISC_Z, count_increments=COUNT_Z,
                 note="S_{t+1}=F(S_t,Z_{t+1}); price/location has 1 dof "
-                     "(z_d_up), TV/last_return deterministic from z_d_up"),
+                     "(z_d_up), TV/last_return deterministic from z_d_up. "
+                     "count_increments = 单步 activation 增量 (cumulative "
+                     "activation counter 的差分), 用 Hurdle-Poisson 建模; "
+                     "stored *_active_identity_count_delta 是累计 activation "
+                     "计数, 不是 当前active数-起点."),
             models=dict(
                 K0_UNCONDITIONAL="no state; constant Gaussian + Laplace 4-class",
                 K1_STATE="OBSERVED-STATE-v1 (35 numeric + prev_event_mask)",
                 K2_STATE_LAG1="K1 + 15 lag1_* + lag1_available"),
             kernel=dict(
-                continuous="Ridge mean + LedoitWolf full 9x9 covariance "
+                continuous="Ridge mean + LedoitWolf full 7x7 covariance "
                            "(learns cross-innovation coupling)",
-                discrete="4-class Logistic; Z^c perp Z^d | S_t (v1)"),
+                discrete="4-class Logistic; Z^c perp Z^d | S_t (v1)",
+                count="Hurdle-Poisson per side (Logistic P(>0) + zero-truncated "
+                      "Poisson on positives); count_increments are cumulative "
+                      "activation counter diffs, NOT current-active-count deltas"),
             obs_state_numeric=OBS_STATE_NUM,
             obs_state_categorical=OBS_STATE_CAT,
             lag_base=LAG_BASE,
-            blocks={b: dict(cont=v["cont"], disc=v["disc"])
+            blocks={b: dict(cont=v["cont"], disc=v["disc"], count=v.get("count", []))
                     for b, v in BLOCKS.items()},
             tempo_classification="DERIVED_REPRESENTATION (not new state info)",
         ),
         windows=[dict(name=w["name"], train=w["train"], eval=w["eval"],
                       seed=w["seed"]) for w in WINDOWS],
         n_transition_rows=EXPECTED_TRANSITIONS,
-        primary_metric="joint transition NLL (continuous + discrete)",
+        primary_metric="joint transition NLL (continuous + discrete + count)",
         model_metrics=model_metrics,
         bootstrap=boots,
         by_symbol_negative_counts={w["name"]: {
