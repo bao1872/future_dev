@@ -1,0 +1,18 @@
+{
+  "n_transition_rows": 321727,
+  "expected_transitions": 321727,
+  "count_ok": true,
+  "z_feature_hash": "4db80a2ad784d4ecb49a8b1574406d57ac1e8de886228d71fe70ae6d7282065f",
+  "blocks": {
+    "TB1": 102731,
+    "TB2": 111557,
+    "TB3": 107439
+  },
+  "n_episodes": 32220,
+  "agezero_code_distribution": {
+    "0": 318534,
+    "1": 1541,
+    "2": 1515,
+    "3": 137
+  }
+}
