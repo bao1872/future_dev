@@ -1,0 +1,33 @@
+{
+  "parent_commit": "b12778e1159e322fc9f2de6937a00eb0b1bf6260",
+  "grandparent_commit": "16ab731ac099ffcec7c2089640b95b5555184853",
+  "rows_ok": true,
+  "z_feature_hash_ok": true,
+  "z_feature_hash_expected": "ae9bcf818d9f8528409af1e11692b949fb6710e7f59fac73369a92630608ab30",
+  "z_feature_hash_actual": "ae9bcf818d9f8528409af1e11692b949fb6710e7f59fac73369a92630608ab30",
+  "joint_nll_parity_1a1b": {
+    "A_TB1_to_TB2": {
+      "k0_abs_diff": 0.0,
+      "k1_abs_diff": 0.0,
+      "ok": true
+    },
+    "B_TB1TB2_to_TB3": {
+      "k0_abs_diff": 0.0,
+      "k1_abs_diff": 0.0,
+      "ok": true
+    }
+  },
+  "joint_nll_parity_1a2": {
+    "A_TB1_to_TB2": {
+      "m0_abs_diff": 0.0,
+      "mf_abs_diff": 0.0,
+      "ok": true
+    },
+    "B_TB1TB2_to_TB3": {
+      "m0_abs_diff": 0.0,
+      "mf_abs_diff": 0.0,
+      "ok": true
+    }
+  },
+  "joint_nll_tol": 1e-08
+}
