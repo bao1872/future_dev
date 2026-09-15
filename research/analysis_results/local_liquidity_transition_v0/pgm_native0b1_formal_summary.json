@@ -1,0 +1,220 @@
+{
+  "EXPERIMENT_NAME": "PGM-NATIVE-0B -- Predicted Hazard Reliability Probe",
+  "EXPERIMENT_SCOPE": "EXPLORATORY_MECHANISM_VALIDATION_ON_PREVIOUSLY_INSPECTED_TB3",
+  "base_sha": "dfb2bba5edeccd731b84610754798537ab3ef674",
+  "run_head": "2f2a2feba7cfb6f58faf40be937976abc987497c",
+  "sample_artifact_sha256": "12cb5c109039f068535bd156278897df5e4a3179c73e8f792e9d3ca674e80f55",
+  "transition_artifact_sha256": "efdce8122e355d8f1407ddc3c9be3273fad998e2ecbad4372d159ccfa780c6b4",
+  "max_abs_atr0_owner_error": 0.0,
+  "n_all_obs": 359714,
+  "tb2_row_count": 124556,
+  "tb3_row_count": 120180,
+  "TB2": {
+    "hazard_metrics_T2": {
+      "hazard_prevalence": 0.10436269629724783,
+      "roc_auc": 0.6307159322328165,
+      "pr_auc": 0.1676265133078181,
+      "log_loss": 0.32453465076961363,
+      "brier_score": 0.0913873340662173,
+      "brier_constant": 0.09347112391881625,
+      "brier_skill": 0.02229340747425712
+    },
+    "hazard_metrics_T0_diagnostic": {
+      "hazard_prevalence": 0.10436269629724783,
+      "roc_auc": 0.6202201257560425,
+      "pr_auc": 0.16059253291645986,
+      "log_loss": 0.32656089707129626,
+      "brier_score": 0.09186074747616066,
+      "brier_constant": 0.09347112391881625,
+      "brier_skill": 0.017228598257299943
+    },
+    "EV_0a": 0.0061015680383885,
+    "EV_0b": 0.005310723359652136,
+    "Delta_EV": -0.0007908446787363637,
+    "ENEV_0a": 0.0061015680383885,
+    "ENEV_0b": 0.005944395270358869,
+    "Delta_ENEV": -0.0001571727680296309,
+    "mean_exposure_0b": 0.8934001051601541,
+    "decile_monotonicity": {
+      "spearman_p_h_vs_observed_H1": 0.9999999999999999,
+      "spearman_p_h_vs_0a_EV": 0.5151515151515151
+    },
+    "subgroups": {
+      "H0": {
+        "n": 111557,
+        "mean_p_h": 0.10418749449857696,
+        "EV_0a": 0.04239311163122835,
+        "EV_0b": 0.03687292668927041,
+        "mean_exposure_0b": 0.895812505501423
+      },
+      "H1": {
+        "n": 12999,
+        "mean_p_h": 0.12730303699469886,
+        "EV_0a": -0.3053512920728843,
+        "EV_0b": -0.2655550906908306,
+        "mean_exposure_0b": 0.8726969630053012
+      },
+      "terminal_loss_attenuation": 0.13032923853669087
+    }
+  },
+  "TB3": {
+    "hazard_metrics_T2": {
+      "hazard_prevalence": 0.10601597603594608,
+      "roc_auc": 0.6107210912529906,
+      "pr_auc": 0.15975455027857643,
+      "log_loss": 0.33098955816835507,
+      "brier_score": 0.09323347591630243,
+      "brier_constant": 0.0947765888610918,
+      "brier_skill": 0.016281583493693907
+    },
+    "hazard_metrics_T0_diagnostic": {
+      "hazard_prevalence": 0.10601597603594608,
+      "roc_auc": 0.6067058840767201,
+      "pr_auc": 0.15555455204183835,
+      "log_loss": 0.3313873513680312,
+      "brier_score": 0.0934520740311429,
+      "brier_constant": 0.0947765888610918,
+      "brier_skill": 0.013975126620036527
+    },
+    "EV_0a": 0.0013941236469649282,
+    "EV_0b": 0.001082610548625883,
+    "Delta_EV": -0.00031151309833904526,
+    "ENEV_0a": 0.0013941236469649282,
+    "ENEV_0b": 0.001210299727745094,
+    "Delta_ENEV": -0.0001838239192198342,
+    "mean_exposure_0b": 0.8944978866044129,
+    "decile_monotonicity": {
+      "spearman_p_h_vs_observed_H1": 0.9999999999999999,
+      "spearman_p_h_vs_0a_EV": 0.6
+    },
+    "subgroups": {
+      "H0": {
+        "n": 107439,
+        "mean_p_h": 0.10346741225264688,
+        "EV_0a": 0.03935659347471409,
+        "EV_0b": 0.03429137193754307,
+        "mean_exposure_0b": 0.8965325877473531
+      },
+      "H1": {
+        "n": 12741,
+        "mean_p_h": 0.12265981342669584,
+        "EV_0a": -0.31872594509360036,
+        "EV_0b": -0.2789516187005598,
+        "mean_exposure_0b": 0.8773401865733041
+      },
+      "terminal_loss_attenuation": 0.12479161801954974
+    }
+  },
+  "TB2_bootstrap": {
+    "hazard_auc": {
+      "point": 0.6307159322328165,
+      "ci95_lower": 0.6250941823190758,
+      "ci95_upper": 0.6364760845199607,
+      "p_pos": 1.0
+    },
+    "EV_0A": {
+      "point": 0.0061015680383885,
+      "ci95_lower": 0.002376269221583709,
+      "ci95_upper": 0.009944777069222208,
+      "p_pos": 0.9995
+    },
+    "EV_0B": {
+      "point": 0.005310723359652136,
+      "ci95_lower": 0.001966075524919148,
+      "ci95_upper": 0.00870267227593833,
+      "p_pos": 0.9995
+    },
+    "Delta_EV": {
+      "point": -0.0007908446787363637,
+      "ci95_lower": -0.0012960354256824425,
+      "ci95_upper": -0.0003112702220788581,
+      "p_pos": 0.001
+    },
+    "ENEV_0A": {
+      "point": 0.0061015680383885,
+      "ci95_lower": 0.002376269221583709,
+      "ci95_upper": 0.009944777069222208,
+      "p_pos": 0.9995
+    },
+    "ENEV_0B": {
+      "point": 0.005944395270358869,
+      "ci95_lower": 0.0022011478892451303,
+      "ci95_upper": 0.009747430568009766,
+      "p_pos": 0.9995
+    },
+    "Delta_ENEV": {
+      "point": -0.0001571727680296309,
+      "ci95_lower": -0.000391925328957905,
+      "ci95_upper": 7.187128357639489e-05,
+      "p_pos": 0.088
+    }
+  },
+  "TB3_bootstrap": {
+    "hazard_auc": {
+      "point": 0.6107210912529906,
+      "ci95_lower": 0.6049215182100168,
+      "ci95_upper": 0.6171159322165578,
+      "p_pos": 1.0
+    },
+    "EV_0A": {
+      "point": 0.0013941236469649282,
+      "ci95_lower": -0.0047497753767200826,
+      "ci95_upper": 0.007250365846576547,
+      "p_pos": 0.684
+    },
+    "EV_0B": {
+      "point": 0.001082610548625883,
+      "ci95_lower": -0.004595155825928662,
+      "ci95_upper": 0.006345384435899204,
+      "p_pos": 0.6575
+    },
+    "Delta_EV": {
+      "point": -0.00031151309833904526,
+      "ci95_lower": -0.0009361476140035324,
+      "ci95_upper": 0.00026993731398756516,
+      "p_pos": 0.147
+    },
+    "ENEV_0A": {
+      "point": 0.0013941236469649282,
+      "ci95_lower": -0.0047497753767200826,
+      "ci95_upper": 0.007250365846576547,
+      "p_pos": 0.684
+    },
+    "ENEV_0B": {
+      "point": 0.001210299727745094,
+      "ci95_lower": -0.005135803921631972,
+      "ci95_upper": 0.007096144053010923,
+      "p_pos": 0.6575
+    },
+    "Delta_ENEV": {
+      "point": -0.0001838239192198342,
+      "ci95_lower": -0.0005977124788252623,
+      "ci95_upper": 0.00014442908614650308,
+      "p_pos": 0.166
+    }
+  },
+  "TB2_symbol_breadth": {
+    "n_symbols_total": 15,
+    "n_symbols_Delta_EV_positive": 4,
+    "n_symbols_Delta_ENEV_positive": 6
+  },
+  "TB3_symbol_breadth": {
+    "n_symbols_total": 15,
+    "n_symbols_Delta_EV_positive": 4,
+    "n_symbols_Delta_ENEV_positive": 7
+  },
+  "TB2_T0_hazard_decile_ordering": {
+    "spearman_bin_p_h_vs_observed_H1": 0.9878787878787878
+  },
+  "TB3_T0_hazard_decile_ordering": {
+    "spearman_bin_p_h_vs_observed_H1": 0.9999999999999999
+  },
+  "formal_verdict": "PGM_HAZARD_PREDICTIVE_BUT_TRANSITION_RELIABILITY_VALUE_NOT_SUPPORTED",
+  "known_scope_limitations": [
+    "cross-block episodes excluded from frozen PGM sample",
+    "event_mask==0 censored episodes excluded from frozen PGM sample",
+    "normalized friction stress only; not realistic net PnL",
+    "one-step open-to-close probe; not portfolio replay",
+    "exploratory mechanism validation on previously inspected TB3"
+  ]
+}
