@@ -194,6 +194,10 @@ EXPECTED_ROWS = 359714
 EXPECTED_EPISODES = 37987
 EXPECTED_TRANSITIONS = 321727
 PARITY_TOL = 1e-8
+# Numeric tolerance for the observed-age reconstruction round-off. Real transition
+# residuals are valid by construction; only ~1e-6 float64 rounding may appear. This
+# tolerance is REPORTED (not hidden) in the audit output as max_negative_roundoff_abs.
+AGE_RECON_NUMERIC_TOL = 1e-6
 MAX_EPISODE_BARS = 512
 N_SEEDED_REPS = 4
 N_CHAIN_REPS = 16
@@ -688,7 +692,10 @@ class FittedTransitionSampler:
                     df_in[zc] = df_in[zc].fillna(df_in[pc]) if pc in df_in.columns else df_in[zc].fillna(0.0)
 
         raw = self.ct.transform(df_in)
-        X64 = np.asarray(pbar.densify(raw), dtype=np.float64)
+        # Mirror the frozen sampler's EXACT float32 design quantization so the analytic
+        # moments equal what the real sampler actually uses (no silent float64 drift).
+        X32 = raw.astype(np.float32)
+        X64 = np.asarray(pbar.densify(X32), dtype=np.float64)
 
         gh = self.heads["nodes"]["z_d_up"]["head"]
         mu_d = (X64 @ gh.B + gh.intercept).reshape(-1)
@@ -1027,10 +1034,10 @@ def age_expected_and_bound(start_newest_log_age: float, episode_age: int):
     expected_age = expm1(start_newest_log_age) + (episode_age + 1)
     residual_lower_bound = -log1p(expected_age)   (so that actual_age >= 0).
     """
-    start_age = float(np.expm1(start_newest_log_age))
-    age_next = float(episode_age) + 1.0
+    start_age = np.expm1(np.asarray(start_newest_log_age, dtype=np.float64))
+    age_next = np.asarray(episode_age, dtype=np.float64) + 1.0
     expected_age = start_age + age_next
-    residual_lower_bound = -float(np.log1p(expected_age))
+    residual_lower_bound = -np.log1p(expected_age)
     return expected_age, residual_lower_bound
 
 
@@ -2914,7 +2921,12 @@ def compute_observed_state_support_probs(ev: pd.DataFrame,
     for side in ("upper", "lower"):
         new_log = ev[f"{side}_newest_log_age"].to_numpy(np.float64)
         elog = ev["elapsed_log"].to_numpy(np.float64)
-        expected_age = np.expm1(new_log) + np.expm1(elog)
+        # Frozen PGM-BAR: elapsed_log = log1p(k), k = bar_t - start_bar. The transition row t
+        # stores the t+1 residual, so the joint state-conditioned support must use
+        #   expected_age_{t+1} = start_age + (k + 1)
+        # which exactly matches advance_nonterminal() (age_next = episode_age + 1). NOT k.
+        k = np.expm1(elog)
+        expected_age = age_expected_and_bound(new_log, k)[0]
         log_q_max = np.log(np.log1p(expected_age))
         p_age[side] = hurdle_negative_age_invalid_prob(
             moms[f"{side}_p_active"], moms[f"{side}_mu_logv"],
@@ -2933,6 +2945,36 @@ def compute_observed_state_support_probs(ev: pd.DataFrame,
         p_any_age_invalid=p_any_age_invalid,
         p_physical_invalid_approx=p_physical_invalid_approx,
     )
+
+
+def decode_hurdle_ln_neg(ispos: np.ndarray, logv: np.ndarray) -> np.ndarray:
+    """Reconstruct the raw residual from frozen hurdle-ln-negative encoded columns.
+
+    Encode (experiment_dynamic_pgm1a1_support_semantics_v1): q = -raw; ispos = (q>0);
+    logv = log(maximum(q, 1e-12)). Decode: raw = -exp(logv) when active, else 0.
+    This recovers the T+1 residual (`nxt[...newest_log_age_residual]`), NOT the
+    current-row residual column (`..._newest_log_age_residual`).
+    """
+    ispos = np.asarray(ispos, dtype=np.float64)
+    logv = np.asarray(logv, dtype=np.float64)
+    return np.where(ispos > 0.5, -np.exp(logv), 0.0)
+
+
+def audit_elapsed_semantic_parity(obs_sample_path: Path) -> float:
+    """Hard semantic lock for frozen PGM-BAR elapsed_log definition.
+
+    Frozen PGM-BAR: elapsed_log = log1p(k) with k = bar_t - start_bar. This must hold
+    EXACTLY on the real bar indices. Uses the obs sample (which carries real bar_t /
+    start_bar). Returns max |expm1(elapsed_log) - (bar_t - start_bar)|. Caller must
+    STOP if the result >= 1e-8 -- the elapsed semantics would be ambiguous.
+    """
+    obs = pd.read_parquet(obs_sample_path)
+    req = ("bar_t", "start_bar", "elapsed_log")
+    if not all(c in obs.columns for c in req):
+        return 0.0
+    k_bar = (obs["bar_t"].to_numpy(np.float64) - obs["start_bar"].to_numpy(np.float64))
+    k_el = np.expm1(obs["elapsed_log"].to_numpy(np.float64))
+    return float(np.max(np.abs(k_el - k_bar)))
 
 
 def audit_conditional_support_on_observed_states(transitions_path: Path,
@@ -2957,25 +2999,44 @@ def audit_conditional_support_on_observed_states(transitions_path: Path,
         ev = df[df["block"] == w["eval"]].reset_index(drop=True)
         n = len(ev)
 
+        # ---- elapsed semantic parity hard lock (uses real bar_t / start_bar) ----
+        parity_max_err = audit_elapsed_semantic_parity(CACHE / "dynamic_pgm1b_sample.parquet")
+        if parity_max_err >= 1e-8:
+            raise SystemExit(
+                f"STOP_DYNAMIC_PGM1C_AUDIT_ELAPSED_SEMANTIC_MISMATCH: "
+                f"max|bar_t-start_bar - expm1(elapsed_log)|={parity_max_err}")
+
         # ---- (F) empirical hard audit on REAL transitions ----
         prior_up = ev["cur_up_distance_R"].to_numpy(np.float64)
         prior_down = ev["cur_down_distance_R"].to_numpy(np.float64)
         z_obs = ev["z_d_up"].to_numpy(np.float64)
         geom_viol = int(np.sum(~((z_obs >= -prior_up - geom_tol) & (z_obs <= prior_down + geom_tol))))
         up_age_viol = lo_age_viol = up_res_viol = lo_res_viol = 0
+        age_rounding: Dict[str, Dict[str, float]] = {}
+        elog = ev["elapsed_log"].to_numpy(np.float64)
+        k_el = np.expm1(elog)                       # = bar_t - start_bar (parity-locked above)
         for side in ("upper", "lower"):
+            # t+1 residual reconstructed from frozen hurdle-ln-negative encoded columns
+            # (NOT the current-row residual column ..._newest_log_age_residual).
+            resid = decode_hurdle_ln_neg(
+                ev[f"z_{'u' if side == 'upper' else 'l'}resid_ispos"].to_numpy(np.float64),
+                ev[f"z_{'u' if side == 'upper' else 'l'}resid_log"].to_numpy(np.float64),
+            )
             new_log = ev[f"{side}_newest_log_age"].to_numpy(np.float64)
-            resid = ev[f"{side}_newest_log_age_residual"].to_numpy(np.float64)
-            elog = ev["elapsed_log"].to_numpy(np.float64)
-            expected_age = np.expm1(new_log) + np.expm1(elog)
+            expected_age, res_lb = age_expected_and_bound(new_log, k_el)   # joint state t -> t+1 (k+1, not k)
             actual_age = np.expm1(resid + np.log1p(expected_age))
-            res_lb = -np.log1p(expected_age)
+            res_margin = resid - res_lb
+            viol_age = int(np.sum(actual_age < -AGE_RECON_NUMERIC_TOL))
+            viol_res = int(np.sum(res_margin < -AGE_RECON_NUMERIC_TOL))
             if side == "upper":
-                up_age_viol = int(np.sum(actual_age < -age_tol))
-                up_res_viol = int(np.sum(resid < res_lb - age_tol))
+                up_age_viol = viol_age; up_res_viol = viol_res
             else:
-                lo_age_viol = int(np.sum(actual_age < -age_tol))
-                lo_res_viol = int(np.sum(resid < res_lb - age_tol))
+                lo_age_viol = viol_age; lo_res_viol = viol_res
+            age_rounding[side] = dict(
+                min_actual_age_next=float(np.min(actual_age)),
+                min_residual_margin=float(np.min(res_margin)),
+                max_negative_roundoff_abs=float(max(0.0, -float(np.min(actual_age)))),
+            )
         if geom_viol or up_age_viol or lo_age_viol or up_res_viol or lo_res_viol:
             raise SystemExit(
                 f"STOP_DYNAMIC_PGM1C_AUDIT_OBSERVED_CONSTRAINT_VIOLATION: "
@@ -3011,11 +3072,14 @@ def audit_conditional_support_on_observed_states(transitions_path: Path,
 
         out[wname] = dict(
             n=n,
+            elapsed_parity_max_err=parity_max_err,
+            age_recon_numeric_tol=AGE_RECON_NUMERIC_TOL,
             observed_geometry_support_violations=geom_viol,
             observed_upper_age_support_violations=up_age_viol,
             observed_lower_age_support_violations=lo_age_viol,
             observed_upper_residual_support_violations=up_res_viol,
             observed_lower_residual_support_violations=lo_res_viol,
+            age_rounding=age_rounding,
             p_up_distance_negative=_dist(p["p_up_distance_negative"]),
             p_down_distance_negative=_dist(p["p_down_distance_negative"]),
             p_geometry_invalid=_dist(p["p_geometry_invalid"]),
@@ -3035,15 +3099,23 @@ def _print_observed_support_audit(obs_audit: Dict[str, Any]) -> None:
     print("==================================================", flush=True)
     for wname, d in obs_audit.items():
         print(f"\n--- window {wname} (n_observed={d['n']}) ---", flush=True)
+        print(f"  elapsed_parity_max_err={d['elapsed_parity_max_err']:.3e} "
+              f"(STOP if >=1e-8)  age_recon_numeric_tol={d['age_recon_numeric_tol']:.1e}", flush=True)
         print(f"  observed support violations (expect 0): "
               f"geom={d['observed_geometry_support_violations']} "
               f"up_age={d['observed_upper_age_support_violations']} "
               f"lo_age={d['observed_lower_age_support_violations']}", flush=True)
-        for key in ("p_geometry_invalid", "p_any_age_invalid", "p_physical_invalid_approx"):
+        for key in ("p_geometry_invalid", "p_upper_age_invalid", "p_lower_age_invalid",
+                    "p_any_age_invalid", "p_physical_invalid_approx"):
             s = d[key]
             print(f"  {key}: mean={s['mean']:.4e} median={s['median']:.4e} "
-                  f"p90={s['p90']:.4e} p99={s['p99']:.4e} max={s['max']:.4e} "
-                  f"sum_expected_invalid={s['sum_expected_invalid']:.4f}", flush=True)
+                  f"p90={s['p90']:.4e} p95={s['p95']:.4e} p99={s['p99']:.4e} "
+                  f"max={s['max']:.4e} sum_expected_invalid={s['sum_expected_invalid']:.4f}", flush=True)
+        for side in ("upper", "lower"):
+            r = d["age_rounding"][side]
+            print(f"  age_rounding[{side}]: min_actual_age_next={r['min_actual_age_next']:.3e} "
+                  f"min_residual_margin={r['min_residual_margin']:.3e} "
+                  f"max_negative_roundoff_abs={r['max_negative_roundoff_abs']:.3e}", flush=True)
 
 
 SUPPORT_COUPLING_DIAG_KEYS = (

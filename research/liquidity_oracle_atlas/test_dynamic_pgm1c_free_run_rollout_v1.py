@@ -1608,22 +1608,29 @@ def test_71_observed_geometry_support_audit_zero():
     assert viol == 0
 
 
-# A-11. observed real transition age support audit == 0
+# A-11. observed real transition age support audit == 0 (t+1 residual, k+1 semantics)
 def test_72_observed_age_support_audit_zero():
     if not C.TRANSITION_SAMPLE_PATH.exists():
         return
     df = pd.read_parquet(C.TRANSITION_SAMPLE_PATH)
     w = base.WINDOWS[0]
     ev = df[df["block"] == w["eval"]].reset_index(drop=True)
-    total = 0
+    total_age = total_res = 0
+    elog = ev["elapsed_log"].to_numpy(float)
+    k = np.expm1(elog)                       # = bar_t - start_bar (parity-pinned)
     for side in ("upper", "lower"):
+        # t+1 residual reconstructed from frozen hurdle-ln-negative encoded columns
+        resid = C.decode_hurdle_ln_neg(
+            ev[f"z_{'u' if side == 'upper' else 'l'}resid_ispos"].to_numpy(float),
+            ev[f"z_{'u' if side == 'upper' else 'l'}resid_log"].to_numpy(float),
+        )
         new_log = ev[f"{side}_newest_log_age"].to_numpy(float)
-        resid = ev[f"{side}_newest_log_age_residual"].to_numpy(float)
-        elog = ev["elapsed_log"].to_numpy(float)
-        expected_age = np.expm1(new_log) + np.expm1(elog)
+        expected_age, res_lb = C.age_expected_and_bound(new_log, k)   # uses k+1
         actual_age = np.expm1(resid + np.log1p(expected_age))
-        total += int(np.sum(actual_age < -1e-6))
-    assert total == 0
+        total_age += int(np.sum(actual_age < -C.AGE_RECON_NUMERIC_TOL))
+        total_res += int(np.sum((resid - res_lb) < -C.AGE_RECON_NUMERIC_TOL))
+    assert total_age == 0
+    assert total_res == 0
 
 
 # A-12. support-coupling CLI route does not enter formal 1C
@@ -1675,9 +1682,64 @@ def test_74_diagnostic_helper_no_sampling():
 # A-14. C0 frozen parity tolerance unchanged at 1e-8
 def test_75_c0_frozen_parity_tolerance():
     assert C.PARITY_TOL == 1e-8
+    assert C.AGE_RECON_NUMERIC_TOL == 1e-6
     assert hasattr(C, "FROZEN_TRANSITION")
     assert hasattr(C, "FROZEN_TERMINAL")
     assert hasattr(C, "FROZEN_RESET")
+
+
+# A-15. age off-by-one guard: start_newest_age=0, k=0 -> expected_age_next=1, lb=-log(2)
+def test_76_age_expected_next_off_by_one_guard():
+    exp_age, lb = C.age_expected_and_bound(np.log1p(0.0), 0.0)
+    assert abs(exp_age - 1.0) < 1e-12                 # the CORRECT (k+1) value
+    assert abs(lb - (-np.log(2.0))) < 1e-12           # residual lower bound = -log(1+1)
+    # the buggy off-by-one formula would instead yield expected_age_next == 0 here:
+    buggy = np.expm1(np.log1p(0.0)) + np.expm1(np.log1p(0.0))   # = 0 + 0 = 0
+    assert buggy == 0.0                                # documents the regression we must avoid
+    assert exp_age != buggy
+
+
+# A-16. analytic_conditional_support matches independent recompute on the SAME float32 design
+def test_77_sampler_analytic_parity_float32():
+    obs_p = C.CACHE / "dynamic_pgm1b_sample.parquet"
+    tr_p = C.TRANSITION_SAMPLE_PATH
+    if not (obs_p.exists() and tr_p.exists()):
+        return
+    w = base.WINDOWS[0]
+    fitted = C.fit_samplers_for_window(w, obs_p, tr_p)
+    trans_s = fitted["trans_samplers"]["MC_STATE_CURREENCODING"]
+    df = pd.read_parquet(tr_p)
+    batch = df[df["block"] == w["eval"]].head(128).reset_index(drop=True)
+
+    # replicate the sampler's EXACT zt_* repair (incl. fillna) so the recompute matches
+    needed = [c for c in C.rep.MC_EXTRA if c.startswith("zt_")]
+    df_in = batch.copy()
+    for zc in needed:
+        pc = zc.replace("zt_", "phi_")
+        if zc not in df_in.columns:
+            df_in[zc] = df_in[pc] if pc in df_in.columns else 0.0
+        else:
+            df_in[zc] = df_in[zc].fillna(df_in[pc]) if pc in df_in.columns else df_in[zc].fillna(0.0)
+
+    moms = trans_s.analytic_conditional_support(batch)
+
+    # independent recompute using the SAME float32 design the frozen sampler uses
+    raw = trans_s.ct.transform(df_in)
+    X = np.asarray(C.pbar.densify(raw.astype(np.float32)), dtype=np.float64)
+    gh = trans_s.heads["nodes"]["z_d_up"]["head"]
+    mu_ref = (X @ gh.B + gh.intercept).reshape(-1)
+    assert np.max(np.abs(mu_ref - moms["z_d_up_mu"])) < 1e-12
+
+    for side in ("upper", "lower"):
+        node = "z_uresid" if side == "upper" else "z_lresid"
+        hh = trans_s.heads["nodes"][node]["head"]
+        p_ref = np.clip(hh.logit.predict_proba(X)[:, 1], 0.0, 1.0)
+        gg = hh.g
+        mu_logv_ref = (X @ gg.B + gg.intercept).reshape(-1)
+        p_act = moms[f"{side}_p_active"]
+        mu_logv = moms[f"{side}_mu_logv"]
+        assert np.max(np.abs(p_ref - p_act)) < 1e-12
+        assert np.max(np.abs(mu_logv_ref - mu_logv)) < 1e-12
 
 
 if __name__ == "__main__":
