@@ -1,0 +1,144 @@
+{
+  "EXPERIMENT_NAME": "PGM-NATIVE-0A.3 -- Final Formal Gate",
+  "EXPERIMENT_SCOPE": "PGM_NATIVE_ONE_STEP_ALPHA_ON_FROZEN_PGM_BAR_SAMPLE",
+  "base_sha": "e057776b1b5560088c298033483c2f8328be1b96",
+  "run_head": "dfb2bba5edeccd731b84610754798537ab3ef674",
+  "sample_artifact_sha256": "12cb5c109039f068535bd156278897df5e4a3179c73e8f792e9d3ca674e80f55",
+  "transition_artifact_sha256": "efdce8122e355d8f1407ddc3c9be3273fad998e2ecbad4372d159ccfa780c6b4",
+  "max_abs_atr0_owner_error": 0.0,
+  "n_all_obs": 359714,
+  "n_hazard0": 321727,
+  "n_hazard1": 37987,
+  "hazard1_share": 0.10560334043156508,
+  "tb2_row_count": 124556,
+  "tb3_row_count": 120180,
+  "TB2": {
+    "rho_CC_all": 0.05409264460474137,
+    "rho_trad_all": 0.03738415552678763,
+    "EV_sign_all": 0.0061015680383885,
+    "rho_model_nonterminal": 0.1376107422600478,
+    "win_rate": 0.451668325893574,
+    "profit_factor": 1.0298029288971313,
+    "payoff": 0.9536907212403665,
+    "break_even_cost_ATR0": 0.0061015680383885,
+    "future_filter_EV_bias": 0.03629154359283985,
+    "future_filter_rho_trad_bias": 0.08073102727419143
+  },
+  "TB3": {
+    "rho_CC_all": 0.04309351561699863,
+    "rho_trad_all": 0.029692681886083327,
+    "EV_sign_all": 0.0013941236469649282,
+    "rho_model_nonterminal": 0.12577594268819717,
+    "win_rate": 0.4653186886337161,
+    "profit_factor": 1.0065545830816005,
+    "payoff": 0.9427652078367741,
+    "break_even_cost_ATR0": 0.0013941236469649282,
+    "future_filter_EV_bias": 0.03796246982774916,
+    "future_filter_rho_trad_bias": 0.08104689883335862
+  },
+  "TB2_bootstrap": {
+    "rho_CC_all": {
+      "point": 0.05409264460474137,
+      "ci95_lower": 0.047635344858546404,
+      "ci95_upper": 0.06048403078223117,
+      "p_pos": 1.0
+    },
+    "rho_state": {
+      "point": 0.05409264460474137,
+      "ci95_lower": 0.047635344858546404,
+      "ci95_upper": 0.06048403078223117,
+      "p_pos": 1.0
+    },
+    "rho_trad_all": {
+      "point": 0.03738415552678763,
+      "ci95_lower": 0.031485028638702776,
+      "ci95_upper": 0.0431814785640136,
+      "p_pos": 1.0
+    },
+    "rho_trad": {
+      "point": 0.03738415552678763,
+      "ci95_lower": 0.031485028638702776,
+      "ci95_upper": 0.0431814785640136,
+      "p_pos": 1.0
+    },
+    "EV_sign_all": {
+      "point": 0.0061015680383885,
+      "ci95_lower": 0.002376269221583709,
+      "ci95_upper": 0.009944777069222208,
+      "p_pos": 0.9995
+    },
+    "EV_sign": {
+      "point": 0.0061015680383885,
+      "ci95_lower": 0.002376269221583709,
+      "ci95_upper": 0.009944777069222208,
+      "p_pos": 0.9995
+    },
+    "rho_model_nonterminal": {
+      "point": 0.1376107422600478,
+      "ci95_lower": 0.13179330314794013,
+      "ci95_upper": 0.1435734500395163,
+      "p_pos": 1.0
+    }
+  },
+  "TB3_bootstrap": {
+    "rho_CC_all": {
+      "point": 0.04309351561699863,
+      "ci95_lower": 0.036025114741163176,
+      "ci95_upper": 0.050613885728118146,
+      "p_pos": 1.0
+    },
+    "rho_state": {
+      "point": 0.04309351561699863,
+      "ci95_lower": 0.036025114741163176,
+      "ci95_upper": 0.050613885728118146,
+      "p_pos": 1.0
+    },
+    "rho_trad_all": {
+      "point": 0.029692681886083327,
+      "ci95_lower": 0.023014660359958326,
+      "ci95_upper": 0.036723338472188734,
+      "p_pos": 1.0
+    },
+    "rho_trad": {
+      "point": 0.029692681886083327,
+      "ci95_lower": 0.023014660359958326,
+      "ci95_upper": 0.036723338472188734,
+      "p_pos": 1.0
+    },
+    "EV_sign_all": {
+      "point": 0.0013941236469649282,
+      "ci95_lower": -0.0047497753767200826,
+      "ci95_upper": 0.007250365846576547,
+      "p_pos": 0.684
+    },
+    "EV_sign": {
+      "point": 0.0013941236469649282,
+      "ci95_lower": -0.0047497753767200826,
+      "ci95_upper": 0.007250365846576547,
+      "p_pos": 0.684
+    },
+    "rho_model_nonterminal": {
+      "point": 0.12577594268819717,
+      "ci95_lower": 0.11873621462086628,
+      "ci95_upper": 0.13309316899231607,
+      "p_pos": 1.0
+    }
+  },
+  "TB2_symbol_breadth": {
+    "n_symbols_total": 15,
+    "n_symbols_positive_EV": 11,
+    "n_symbols_positive_rho_trad": 15
+  },
+  "TB3_symbol_breadth": {
+    "n_symbols_total": 15,
+    "n_symbols_positive_EV": 10,
+    "n_symbols_positive_rho_trad": 15
+  },
+  "formal_verdict": "PGM_TRANSITION_PREDICTIVE_BUT_TRADABLE_ALPHA_NOT_SUPPORTED_ON_FROZEN_PGM_BAR_SAMPLE",
+  "known_scope_limitations": [
+    "cross-block episodes excluded from frozen PGM sample",
+    "event_mask==0 censored episodes excluded from frozen PGM sample",
+    "normalized friction stress only; not realistic net PnL",
+    "one-step open-to-close probe; not portfolio replay"
+  ]
+}
