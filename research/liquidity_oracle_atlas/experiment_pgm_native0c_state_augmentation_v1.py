@@ -114,6 +114,21 @@ E_COLS: List[str] = [
 ]
 INCREMENTAL_COLS: List[str] = U_COLS + E_COLS
 
+# Row-level identity parity for the (symbol, episode_id, seq) transition join.
+# These current-state primitives exist on BOTH the H0 observation rows and the frozen
+# transition artifact, so they prove each seq really corresponds to the same bar --
+# not merely that row counts happen to match.
+JOIN_PARITY_CORE_COLS: List[str] = [
+    "cur_up_distance_R", "cur_down_distance_R", "path_total_variation_R",
+    "path_max_up_excursion_R", "path_max_down_excursion_R",
+    "path_direction_change_rate", "path_last_return_R",
+    "path_current_bar_range_R",
+]
+MIN_JOIN_PARITY_COLS = 6
+JOIN_PARITY_RTOL = 1e-6
+JOIN_PARITY_ATOL = 2e-6
+JOIN_PARITY_SUFFIX = "__obs"
+
 # The four pre-registered variants ONLY. PGM_UE is the sole PRIMARY.
 VARIANTS: Dict[str, List[str]] = {
     "PGM0": [],
@@ -227,8 +242,18 @@ def merge_incremental_features_into_transition(
     tr = trans.copy()
     tr["seq"] = tr.groupby(["symbol", "episode_id"], sort=False).cumcount()
 
+    parity_cols = [c for c in JOIN_PARITY_CORE_COLS if c in tr.columns and c in h0.columns]
+    if len(parity_cols) < MIN_JOIN_PARITY_COLS:
+        raise SystemExit(
+            f"STOP_PGM_NATIVE0C_TRANSITION_JOIN_PARITY_COLUMNS_MISSING: "
+            f"found {len(parity_cols)} < {MIN_JOIN_PARITY_COLS}")
+
+    right = h0[["symbol", "episode_id", "seq"] + INCREMENTAL_COLS
+               + ["bar_t", "start_bar"] + parity_cols].copy()
+    right = right.rename(columns={c: c + JOIN_PARITY_SUFFIX for c in parity_cols})
+
     merged = tr.merge(
-        h0[["symbol", "episode_id", "seq"] + INCREMENTAL_COLS + ["bar_t", "start_bar"]],
+        right,
         on=["symbol", "episode_id", "seq"],
         how="left",
         validate="one_to_one",
@@ -242,7 +267,30 @@ def merge_incremental_features_into_transition(
     if len(merged) != EXPECTED_TRANSITION_ROWS:
         raise SystemExit(
             f"STOP_PGM_NATIVE0C_TRANSITION_ROWCOUNT_MISMATCH: {len(merged)} != {EXPECTED_TRANSITION_ROWS}")
-    return merged.drop(columns=["_merge", "seq"])
+
+    # Row-level identity parity: the obs-side payload must equal the transition payload
+    # for every shared current-state primitive. This upgrades the join from
+    # "row counts match" to "each seq is the same current state".
+    per_col = {}
+    ok = True
+    for c in parity_cols:
+        a = merged[c].to_numpy(dtype=np.float64)
+        b = merged[c + JOIN_PARITY_SUFFIX].to_numpy(dtype=np.float64)
+        per_col[c] = float(np.max(np.abs(a - b)))
+        if not np.allclose(a, b, rtol=JOIN_PARITY_RTOL, atol=JOIN_PARITY_ATOL, equal_nan=True):
+            ok = False
+    overall = float(max(per_col.values())) if per_col else 0.0
+    if not ok:
+        raise SystemExit(
+            f"STOP_PGM_NATIVE0C_TRANSITION_JOIN_STATE_PARITY_FAIL: {per_col}")
+
+    out = merged.drop(columns=["_merge", "seq"] + [c + JOIN_PARITY_SUFFIX for c in parity_cols])
+    out.attrs["join_parity"] = dict(
+        parity_columns=parity_cols, per_column_max_abs_diff=per_col,
+        overall_max_abs_diff=overall,
+        rtol=JOIN_PARITY_RTOL, atol=JOIN_PARITY_ATOL, passed=True,
+    )
+    return out
 
 
 # ===========================================================================
@@ -417,39 +465,109 @@ def build_baseline_mechanism_grid(
 
 
 def conditional_hazard_contrast(
-    grid_tb3: List[Dict[str, Any]], df_tb3: pd.DataFrame,
-    n_boot: int = BOOTSTRAP_N, seed: int = BOOTSTRAP_SEED,
+    df_tb3: pd.DataFrame,
+    p_edges: Sequence[float],
+    m_edges: Sequence[float],
+    n_boot: int = BOOTSTRAP_N,
+    seed: int = BOOTSTRAP_SEED,
 ) -> Dict[str, Any]:
-    """Within each conviction quintile, top vs bottom hazard quintile contrast."""
-    rows = [r for r in grid_tb3 if r["block"] == "TB3"]
-    d_h1, d_ev = [], []
-    for cb in range(5):
-        top = next((r for r in rows if r["hazard_bin"] == 4 and r["conviction_bin"] == cb), None)
-        bot = next((r for r in rows if r["hazard_bin"] == 0 and r["conviction_bin"] == cb), None)
-        if top is None or bot is None:
-            continue
-        d_h1.append(top["observed_H1_rate"] - bot["observed_H1_rate"])
-        d_ev.append(top["EV"] - bot["EV"])
-    d_h1 = np.asarray(d_h1, dtype=np.float64)
-    d_ev = np.asarray(d_ev, dtype=np.float64)
+    """Conditional hazard contrast: within each conviction quintile, top vs bottom hazard quintile.
 
-    day = df_tb3["episode_start_day"].to_numpy()
+    Every bootstrap replicate RE-COMPUTES the contrast from day-resampled data
+    (no fixed point estimate is recycled). Cluster owner is `entry_day`, consistent
+    with the 0A/0B day-cluster bootstraps. The five conviction quintiles are equally
+    weighted -- never re-weighted by cell sample size.
+
+    df_tb3 must contain: entry_day, p_h, score_mu, hazard, pi.
+    Bins come from TB2-frozen edges (never TB3 quantiles).
+    """
+    p_h = df_tb3["p_h"].to_numpy(dtype=np.float64)
+    abs_m = np.abs(df_tb3["score_mu"].to_numpy(dtype=np.float64))
+    hz = df_tb3["hazard"].to_numpy(dtype=np.int64)
+    pi = df_tb3["pi"].to_numpy(dtype=np.float64)
+    day = df_tb3["entry_day"].to_numpy()
+
+    p_b = np.digitize(p_h, np.asarray(p_edges, dtype=np.float64)[1:-1])
+    m_b = np.digitize(abs_m, np.asarray(m_edges, dtype=np.float64)[1:-1])
+
+    keep = (p_b == 0) | (p_b == 4)
+    sub = pd.DataFrame(dict(day=day[keep], cb=m_b[keep], hb=p_b[keep],
+                            h1=hz[keep].astype(np.float64), pi=pi[keep]))
+    agg = (sub.groupby(["day", "cb", "hb"], sort=False)
+              .agg(n=("h1", "size"), h1s=("h1", "sum"), pis=("pi", "sum"))
+              .reset_index())
+
+    days = np.unique(day)
+    D = int(len(days))
+    didx = {d: i for i, d in enumerate(days)}
+
+    def mat(hb: int, col: str) -> np.ndarray:
+        M = np.zeros((D, 5), dtype=np.float64)
+        a = agg[agg["hb"] == hb]
+        for d, cb, v in zip(a["day"].to_numpy(), a["cb"].to_numpy(), a[col].to_numpy()):
+            ci = int(cb)
+            if 0 <= ci < 5:
+                M[didx[d], ci] = float(v)
+        return M
+
+    top_n, bot_n = mat(4, "n"), mat(0, "n")
+    top_h1, bot_h1 = mat(4, "h1s"), mat(0, "h1s")
+    top_pi, bot_pi = mat(4, "pis"), mat(0, "pis")
+
+    # ---- point estimate: computed directly from the full TB3 sample ----
+    Nt = top_n.sum(axis=0)
+    Nb = bot_n.sum(axis=0)
+    if np.any(Nt == 0) or np.any(Nb == 0):
+        raise SystemExit("STOP_PGM_NATIVE0C_CONDITIONAL_CONTRAST_EMPTY_CELL")
+    rate_t = top_h1.sum(axis=0) / Nt
+    rate_b = bot_h1.sum(axis=0) / Nb
+    ev_t = top_pi.sum(axis=0) / Nt
+    ev_b = bot_pi.sum(axis=0) / Nb
+    dH1_q = rate_t - rate_b
+    dEV_q = ev_t - ev_b
+    point_h1 = float(np.mean(dH1_q))
+    point_ev = float(np.mean(dEV_q))
+
+    # ---- bootstrap: day multiplicity, recomputed per replicate ----
     rng = np.random.default_rng(seed)
-    uday = np.unique(day)
-    n_days = len(uday)
-    counts = rng.multinomial(n_days, np.full(n_days, 1.0 / n_days), size=n_boot)
-    # equal-weight across conviction quintiles; day multiplicity only resamples row support
-    boot_h1 = counts.mean(axis=1) * 0.0 + float(np.mean(d_h1))
-    boot_ev = counts.mean(axis=1) * 0.0 + float(np.mean(d_ev))
+    counts = rng.multinomial(D, np.full(D, 1.0 / D), size=n_boot)
+    Nt_b = counts @ top_n
+    Nb_b = counts @ bot_n
+    Ht_b = counts @ top_h1
+    Hb_b = counts @ bot_h1
+    Pt_b = counts @ top_pi
+    Pb_b = counts @ bot_pi
 
-    def _sum(v_point: float, boot: np.ndarray) -> Dict[str, float]:
-        return dict(point=float(v_point),
+    valid = np.all(Nt_b > 0, axis=1) & np.all(Nb_b > 0, axis=1)
+    n_invalid = int((~valid).sum())
+    if n_invalid > 0:
+        raise SystemExit(
+            f"STOP_PGM_NATIVE0C_CONDITIONAL_BOOTSTRAP_EMPTY_CELL: {n_invalid}")
+
+    boot_h1 = np.mean((Ht_b / Nt_b) - (Hb_b / Nb_b), axis=1)
+    boot_ev = np.mean((Pt_b / Nt_b) - (Pb_b / Nb_b), axis=1)
+
+    def _s(pt: float, boot: np.ndarray) -> Dict[str, float]:
+        return dict(point=float(pt),
                     ci95_lower=float(np.percentile(boot, 2.5)),
                     ci95_upper=float(np.percentile(boot, 97.5)),
                     p_pos=float(np.mean(boot > 0)))
-    return dict(Delta_H1_cond=_sum(np.mean(d_h1), boot_h1),
-                Delta_EV_cond=_sum(np.mean(d_ev), boot_ev),
-                n_conviction_bins=int(len(d_h1)))
+
+    out_ev = _s(point_ev, boot_ev)
+    out_ev["p_neg"] = float(np.mean(boot_ev < 0))
+
+    per_q = [dict(conviction_bin=q, n_top=float(Nt[q]), n_bottom=float(Nb[q]),
+                  H1_top=float(rate_t[q]), H1_bottom=float(rate_b[q]),
+                  Delta_H1=float(dH1_q[q]),
+                  EV_top=float(ev_t[q]), EV_bottom=float(ev_b[q]),
+                  Delta_EV=float(dEV_q[q])) for q in range(5)]
+
+    return dict(Delta_H1_cond=_s(point_h1, boot_h1),
+                Delta_EV_cond=out_ev,
+                per_conviction=per_q,
+                n_days=D, n_boot=int(n_boot),
+                n_invalid_replicates=n_invalid,
+                cluster_owner="entry_day")
 
 
 def compute_age_hazard_curve(df: pd.DataFrame, block: str) -> List[Dict[str, Any]]:
@@ -463,10 +581,12 @@ def compute_age_hazard_curve(df: pd.DataFrame, block: str) -> List[Dict[str, Any
         n = int(mask.sum())
         if n == 0:
             continue
-        rows.append(dict(block=block, age_bucket=("21+" if b == 21 else str(b)), n=n,
+        rows.append(dict(block=block, age_bucket=("21+" if b == 21 else str(b)),
+                         age_numeric=float(b), n=n,
                          H1_rate=float(hz[mask].mean()), mean_p_h=float(ph[mask].mean())))
     if rows:
-        xs = np.arange(len(rows), dtype=np.float64)
+        # Real numeric bucket values (0..20, 21) -- never a compressed rank index.
+        xs = np.array([r["age_numeric"] for r in rows], dtype=np.float64)
         ys = np.array([r["H1_rate"] for r in rows], dtype=np.float64)
         sp = float(scipy.stats.spearmanr(xs, ys).statistic) if len(rows) > 2 else 0.0
     else:
@@ -476,8 +596,14 @@ def compute_age_hazard_curve(df: pd.DataFrame, block: str) -> List[Dict[str, Any
     return rows
 
 
-def compute_h1_harm_diagnostics(df: pd.DataFrame, block: str) -> Dict[str, Any]:
-    """H1 rows only. harm_flag/harm_magnitude are diagnostic labels; no model is trained."""
+def compute_h1_harm_diagnostics(df: pd.DataFrame, block: str,
+                                p_edges: Sequence[float],
+                                m_edges: Sequence[float]) -> Dict[str, Any]:
+    """H1 rows only. harm_flag/harm_magnitude are diagnostic labels; no model is trained.
+
+    p_edges / m_edges MUST be the TB2-frozen baseline quintile edges, so TB2 and TB3
+    use the SAME risk ruler. No internal re-quantiling is permitted.
+    """
     h1 = df[df["hazard"] == 1].copy()
     pi = h1["pi"].to_numpy(dtype=np.float64)
     harm = np.maximum(-pi, 0.0)
@@ -494,9 +620,9 @@ def compute_h1_harm_diagnostics(df: pd.DataFrame, block: str) -> Dict[str, Any]:
         return out
 
     pb = np.digitize(h1["p_h"].to_numpy(dtype=np.float64),
-                     np.quantile(h1["p_h"].to_numpy(dtype=np.float64), [0.2, 0.4, 0.6, 0.8]))
+                     np.asarray(p_edges, dtype=np.float64)[1:-1])
     mb = np.digitize(np.abs(h1["score_mu"].to_numpy(dtype=np.float64)),
-                     np.quantile(np.abs(h1["score_mu"].to_numpy(dtype=np.float64)), [0.2, 0.4, 0.6, 0.8]))
+                     np.asarray(m_edges, dtype=np.float64)[1:-1])
     age = np.clip(h1["bar_t"].to_numpy(np.int64) - h1["start_bar"].to_numpy(np.int64), 0, 21)
     return dict(by_hazard_quintile=_group(pb, "hazard_quintile"),
                 by_conviction_quintile=_group(mb, "conviction_quintile"),
@@ -648,39 +774,74 @@ def run_audit_only() -> None:
     merged = merge_incremental_features_into_transition(trans, feat)
     print(f"[AUDIT] transition merged rows: {len(merged)} (expected {EXPECTED_TRANSITION_ROWS})")
     print("[AUDIT] transition unmatched: 0")
+    jp = merged.attrs.get("join_parity", {})
+    print(f"[AUDIT] join parity columns ({len(jp.get('parity_columns', []))}): "
+          f"{jp.get('parity_columns', [])}")
+    for c, v in (jp.get("per_column_max_abs_diff") or {}).items():
+        print(f"[AUDIT]   join parity max_abs_diff {c}: {v:.3e}")
+    print(f"[AUDIT] join parity OVERALL max_abs_diff: {jp.get('overall_max_abs_diff')}")
+    print("[AUDIT] join identity parity: PASS")
 
-    # terminal baseline parity (Window A)
-    ev_obs = feat[feat["block"] == pgm.WINDOWS[0]["eval"]].reset_index(drop=True)
-    tr_obs = feat[feat["block"].isin(pgm.WINDOWS[0]["train"])].reset_index(drop=True)
+    # baseline parity: BOTH windows must close before full is authorized
+    par_A = verify_window_baseline_parity(pgm.WINDOWS[0], fit_A, feat, merged, "WindowA")
+    _print_window_parity(par_A)
+
+    print("[AUDIT] Fitting Window B samplers for baseline parity...", flush=True)
+    fit_B = pgm.fit_samplers_for_window(pgm.WINDOWS[1], pgm.SAMPLE_PATH,
+                                        pgm.TRANSITION_SAMPLE_PATH)
+    par_B = verify_window_baseline_parity(pgm.WINDOWS[1], fit_B, feat, merged, "WindowB")
+    _print_window_parity(par_B)
+
+    print("[AUDIT] NO ECONOMIC / SCIENTIFIC VERDICT EMITTED", flush=True)
+
+
+def _print_window_parity(p: Dict[str, Any]) -> None:
+    lab = p["label"]
+    print(f"[AUDIT] {lab} terminal baseline max_abs(p_wrapper - p_production): "
+          f"{p['terminal_p_max_abs_diff']:.3e}")
+    print(f"[AUDIT] {lab} transition max_abs(z_d_up_mu wrapper - production): "
+          f"{p['transition_mu_max_abs_diff']:.3e}")
+    print(f"[AUDIT] {lab} mean_joint_nll production={p['production_mean_joint_nll']:.16f}")
+    print(f"[AUDIT] {lab} mean_joint_nll wrapper ={p['wrapper_mean_joint_nll']:.16f}")
+    print(f"[AUDIT] {lab} mean_joint_nll abs diff ={p['transition_mean_jnll_abs_diff']:.3e}")
+
+
+def verify_window_baseline_parity(w: Dict[str, Any], fit: Dict[str, Any],
+                                  feat: pd.DataFrame, merged: pd.DataFrame,
+                                  label: str) -> Dict[str, Any]:
+    """Research wrapper (extra_cols=[]) must reproduce production exactly for one window."""
+    ev_obs = feat[feat["block"] == w["eval"]].reset_index(drop=True)
+    tr_obs = feat[feat["block"].isin(w["train"])].reset_index(drop=True)
     wrap = fit_terminal_hazard_variant(tr_obs, ev_obs, [])
     prod_p = n0b.predict_hazard_probability(
-        fit_A["term_samplers"][PRIMARY_TERMINAL_HEAD], ev_obs)
-    d = float(np.max(np.abs(wrap["p_eval"] - prod_p)))
-    print(f"[AUDIT] terminal baseline max_abs(p_wrapper - p_production): {d:.3e}")
-    if d > 1e-12:
-        raise SystemExit(f"STOP_PGM_NATIVE0C_TERMINAL_BASELINE_PARITY_FAIL: {d}")
+        fit["term_samplers"][PRIMARY_TERMINAL_HEAD], ev_obs)
+    d_p = float(np.max(np.abs(wrap["p_eval"] - prod_p)))
+    if d_p > 1e-12:
+        raise SystemExit(f"STOP_PGM_NATIVE0C_TERMINAL_BASELINE_PARITY_FAIL: {label} {d_p}")
 
-    # transition baseline parity (Window A) -- analytic z_d_up_mu
-    tr_t = merged[merged["block"].isin(pgm.WINDOWS[0]["train"])].reset_index(drop=True)
-    ev_t = merged[merged["block"] == pgm.WINDOWS[0]["eval"]].reset_index(drop=True)
-    var = fit_transition_variant(tr_t, ev_t, [], mc_cols, tag="A_PARITY")
-    mu_prod = np.asarray(fit_A["trans_samplers"][PRIMARY_TRANSITION_HEAD]
+    tr_t = merged[merged["block"].isin(w["train"])].reset_index(drop=True)
+    ev_t = merged[merged["block"] == w["eval"]].reset_index(drop=True)
+    mc_cols = fit["trans_samplers"][PRIMARY_TRANSITION_HEAD].design_cols
+    var = fit_transition_variant(tr_t, ev_t, [], mc_cols, tag=f"{label}_PARITY")
+    mu_prod = np.asarray(fit["trans_samplers"][PRIMARY_TRANSITION_HEAD]
                          .analytic_conditional_support(ev_t)["z_d_up_mu"], dtype=np.float64)
     mu_wrap = np.asarray(var["sampler"].analytic_conditional_support(ev_t)["z_d_up_mu"],
                          dtype=np.float64)
-    dmu = float(np.max(np.abs(mu_wrap - mu_prod)))
-    print(f"[AUDIT] transition baseline max_abs(z_d_up_mu wrapper - production): {dmu:.3e}")
-    if dmu > 1e-12:
-        raise SystemExit(f"STOP_PGM_NATIVE0C_TRANSITION_BASELINE_PARITY_FAIL: {dmu}")
-    prod_jnll = fit_A["trans_parity"][PRIMARY_TRANSITION_HEAD]["mean_joint_nll"]
-    djnll = abs(var["mean_joint_nll"] - prod_jnll)
-    print(f"[AUDIT] Window A mean_joint_nll production={prod_jnll:.16f}")
-    print(f"[AUDIT] Window A mean_joint_nll wrapper ={var['mean_joint_nll']:.16f}")
-    print(f"[AUDIT] Window A mean_joint_nll abs diff ={djnll:.3e}")
-    if djnll > 1e-12:
-        raise SystemExit(f"STOP_PGM_NATIVE0C_TRANSITION_BASELINE_PARITY_FAIL: {djnll}")
+    d_mu = float(np.max(np.abs(mu_wrap - mu_prod)))
+    if d_mu > 1e-12:
+        raise SystemExit(f"STOP_PGM_NATIVE0C_TRANSITION_BASELINE_PARITY_FAIL: {label} {d_mu}")
 
-    print("[AUDIT] NO ECONOMIC / SCIENTIFIC VERDICT EMITTED", flush=True)
+    prod_jnll = float(fit["trans_parity"][PRIMARY_TRANSITION_HEAD]["mean_joint_nll"])
+    d_jnll = abs(float(var["mean_joint_nll"]) - prod_jnll)
+    if d_jnll > 1e-12:
+        raise SystemExit(f"STOP_PGM_NATIVE0C_TRANSITION_BASELINE_PARITY_FAIL: {label} {d_jnll}")
+
+    return dict(label=label,
+                terminal_p_max_abs_diff=d_p,
+                transition_mu_max_abs_diff=d_mu,
+                transition_mean_jnll_abs_diff=d_jnll,
+                production_mean_joint_nll=prod_jnll,
+                wrapper_mean_joint_nll=float(var["mean_joint_nll"]))
 
 
 def _prefix_invariance_check() -> bool:
@@ -765,26 +926,39 @@ def run_smoke_test() -> None:
     fit_B = pgm.fit_samplers_for_window(wB, pgm.SAMPLE_PATH, pgm.TRANSITION_SAMPLE_PATH)
     aligned = load_aligned_with_features()
     scored = build_baseline_scored_frame(aligned, fit_A, fit_B)
-    g2 = scored[scored["block"] == TB2_BLOCK].head(2048).reset_index(drop=True)
-    g3 = scored[scored["block"] == TB3_BLOCK].head(512).reset_index(drop=True)
+    # Mechanism/contrast diagnostics use a wider subsample than the 512-row model eval
+    # so that every 5x5 cell (and thus every top/bottom contrast denominator) is populated.
+    g2 = scored[scored["block"] == TB2_BLOCK].head(8192).reset_index(drop=True)
+    g3 = scored[scored["block"] == TB3_BLOCK].head(4096).reset_index(drop=True)
     grid, meta = build_baseline_mechanism_grid(g2, g3)
     print(f"  grid cells={len(grid)} (TB2 frozen edges -> TB3) p_star diagnostic only")
 
+    p_edges = np.asarray(meta["p_edges"], dtype=np.float64)
+    m_edges = np.asarray(meta["m_edges"], dtype=np.float64)
+
     print("[SMOKE] --- conditional hazard contrast wiring ---")
-    cc = conditional_hazard_contrast(grid, g3, n_boot=50)
-    print(f"  Delta_H1_cond={cc['Delta_H1_cond']['point']:.6f} "
-          f"Delta_EV_cond={cc['Delta_EV_cond']['point']:.6f}")
+    cc = conditional_hazard_contrast(g3, p_edges, m_edges, n_boot=200)
+    for k in ["Delta_H1_cond", "Delta_EV_cond"]:
+        s = cc[k]
+        extra = f" p_neg={s['p_neg']:.4f}" if "p_neg" in s else ""
+        print(f"  {k}: point={s['point']:.6f} "
+              f"CI95=[{s['ci95_lower']:.6f}, {s['ci95_upper']:.6f}] "
+              f"p_pos={s['p_pos']:.4f}{extra}")
+    print(f"  n_days={cc['n_days']} n_boot={cc['n_boot']} "
+          f"n_invalid_replicates={cc['n_invalid_replicates']} "
+          f"cluster_owner={cc['cluster_owner']}")
 
     print("[SMOKE] --- age hazard wiring ---")
     age_rows = compute_age_hazard_curve(g3, TB3_BLOCK)
     print(f"  age buckets={len(age_rows)}")
 
-    print("[SMOKE] --- H1 harm wiring ---")
-    harm = compute_h1_harm_diagnostics(g3, TB3_BLOCK)
+    print("[SMOKE] --- H1 harm wiring (frozen TB2 edges) ---")
+    harm = compute_h1_harm_diagnostics(g3, TB3_BLOCK, p_edges, m_edges)
     print(f"  by_hazard={len(harm['by_hazard_quintile'])} "
           f"by_conviction={len(harm['by_conviction_quintile'])} "
           f"by_age={len(harm['by_age_bucket'])}")
 
+    print("[SMOKE] SMOKE ONLY / NO SCIENTIFIC VERDICT", flush=True)
     print(f"[SMOKE COMPLETE] {time.perf_counter() - t0:.2f}s -- NO SCIENTIFIC VERDICT", flush=True)
 
 

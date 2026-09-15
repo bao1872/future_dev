@@ -54,6 +54,7 @@ import research.liquidity_oracle_atlas.experiment_dynamic_pgm1c_free_run_rollout
 # Cached heavy fixtures
 # ---------------------------------------------------------------------------
 _FIT_A = None
+_FIT_B = None
 _OBS_AUG = None
 _MERGED = None
 
@@ -449,6 +450,253 @@ def test_35_full_blocked_first_round():
         os.environ.pop("AUTHORIZE_PGM_NATIVE0C_FULL_EXPLORATORY", None)
         if old is not None:
             os.environ["AUTHORIZE_PGM_NATIVE0C_FULL_EXPLORATORY"] = old
+
+
+# ---------------------------------------------------------------------------
+# 36. Conditional bootstrap CI must be non-degenerate
+# ---------------------------------------------------------------------------
+_PE = np.array([-np.inf, 0.08, 0.12, 0.18, 0.25, np.inf])
+_ME = np.array([-np.inf, 0.2, 0.4, 0.6, 0.8, np.inf])
+
+
+def _synth_contrast_frame(n_days=30, per_day=200, seed=3):
+    rng = np.random.default_rng(seed)
+    rows = []
+    for d in range(n_days):
+        p_h = rng.uniform(0.02, 0.35, per_day)
+        m = rng.uniform(0.0, 1.0, per_day)
+        hz = (rng.random(per_day) < (0.05 + 0.5 * p_h)).astype(np.int64)
+        pi = np.where(hz == 1,
+                      rng.normal(-0.30, 0.20, per_day),
+                      rng.normal(0.05, 0.20, per_day))
+        rows.append(pd.DataFrame(dict(entry_day=np.int64(d), p_h=p_h,
+                                      score_mu=m, hazard=hz, pi=pi)))
+    return pd.concat(rows, ignore_index=True)
+
+
+def test_36_conditional_bootstrap_ci_non_degenerate():
+    df = _synth_contrast_frame()
+    r = exp.conditional_hazard_contrast(df, _PE, _ME, n_boot=400, seed=20260915)
+    for k in ["Delta_H1_cond", "Delta_EV_cond"]:
+        s = r[k]
+        assert s["ci95_upper"] > s["ci95_lower"], f"{k} CI degenerate: {s}"
+        assert s["ci95_upper"] != s["ci95_lower"]
+
+
+# ---------------------------------------------------------------------------
+# 37. Conditional bootstrap matches an INDEPENDENT brute-force reference
+# ---------------------------------------------------------------------------
+def _ref_conditional_bruteforce(df, p_edges, m_edges, n_boot, seed):
+    """Independent slow reference: explicit day-resampled row reconstruction.
+
+    Deliberately does NOT use the production matrix algebra -- it rebuilds the
+    resampled rows and recomputes every rate with pandas grouping.
+    """
+    p_b = np.digitize(df["p_h"].to_numpy(np.float64), np.asarray(p_edges)[1:-1])
+    m_b = np.digitize(np.abs(df["score_mu"].to_numpy(np.float64)), np.asarray(m_edges)[1:-1])
+    keep = (p_b == 0) | (p_b == 4)
+    d = df.loc[keep].copy()
+    d["hb"] = p_b[keep]
+    d["cb"] = m_b[keep]
+
+    day_arr = d["entry_day"].to_numpy()
+    days = np.unique(day_arr)
+    D = len(days)
+    didx = {dd: i for i, dd in enumerate(days)}
+    dpos = np.array([didx[x] for x in day_arr])
+    order = np.argsort(dpos, kind="stable")
+    dpos_s = dpos[order]
+    starts = np.searchsorted(dpos_s, np.arange(D), side="left")
+    ends = np.searchsorted(dpos_s, np.arange(D), side="right")
+
+    rng = np.random.default_rng(seed)
+    counts = rng.multinomial(D, np.full(D, 1.0 / D), size=n_boot)
+
+    bh, be = [], []
+    for b in range(n_boot):
+        parts = []
+        for j in range(D):
+            cj = int(counts[b, j])
+            if cj:
+                seg = order[starts[j]:ends[j]]
+                parts.append(np.tile(seg, cj))
+        idx = np.concatenate(parts)
+        sub = d.iloc[idx]
+        dh, de = [], []
+        for q in range(5):
+            top = sub[(sub["cb"] == q) & (sub["hb"] == 4)]
+            bot = sub[(sub["cb"] == q) & (sub["hb"] == 0)]
+            dh.append(float(top["hazard"].mean()) - float(bot["hazard"].mean()))
+            de.append(float(top["pi"].mean()) - float(bot["pi"].mean()))
+        bh.append(float(np.mean(dh)))
+        be.append(float(np.mean(de)))
+    bh = np.asarray(bh)
+    be = np.asarray(be)
+    return dict(
+        h1=dict(ci_lo=float(np.percentile(bh, 2.5)), ci_hi=float(np.percentile(bh, 97.5)),
+                p_pos=float(np.mean(bh > 0))),
+        ev=dict(ci_lo=float(np.percentile(be, 2.5)), ci_hi=float(np.percentile(be, 97.5)),
+                p_pos=float(np.mean(be > 0)), p_neg=float(np.mean(be < 0))),
+    )
+
+
+def test_37_conditional_bootstrap_matches_independent_reference():
+    df = _synth_contrast_frame(n_days=8, per_day=60, seed=11)
+    nb, sd = 60, 20260915
+    got = exp.conditional_hazard_contrast(df, _PE, _ME, n_boot=nb, seed=sd)
+    ref = _ref_conditional_bruteforce(df, _PE, _ME, n_boot=nb, seed=sd)
+    assert np.isclose(got["Delta_H1_cond"]["ci95_lower"], ref["h1"]["ci_lo"], atol=1e-12, rtol=0)
+    assert np.isclose(got["Delta_H1_cond"]["ci95_upper"], ref["h1"]["ci_hi"], atol=1e-12, rtol=0)
+    assert np.isclose(got["Delta_H1_cond"]["p_pos"], ref["h1"]["p_pos"], atol=1e-12, rtol=0)
+    assert np.isclose(got["Delta_EV_cond"]["ci95_lower"], ref["ev"]["ci_lo"], atol=1e-12, rtol=0)
+    assert np.isclose(got["Delta_EV_cond"]["ci95_upper"], ref["ev"]["ci_hi"], atol=1e-12, rtol=0)
+    assert np.isclose(got["Delta_EV_cond"]["p_neg"], ref["ev"]["p_neg"], atol=1e-12, rtol=0)
+
+
+# ---------------------------------------------------------------------------
+# 38. Cluster owner is entry_day
+# ---------------------------------------------------------------------------
+def test_38_conditional_bootstrap_uses_entry_day():
+    src = inspect.getsource(exp.conditional_hazard_contrast)
+    assert 'df_tb3["entry_day"]' in src
+    assert "episode_start_day" not in src
+
+
+# ---------------------------------------------------------------------------
+# 39. Same sampled days drive H1 / EV and top / bottom
+# ---------------------------------------------------------------------------
+def test_39_same_sampled_days_for_h1_ev_top_bottom():
+    src = inspect.getsource(exp.conditional_hazard_contrast)
+    assert "Nt_b = counts @ top_n" in src
+    assert "Nb_b = counts @ bot_n" in src
+    assert "Ht_b = counts @ top_h1" in src
+    assert "Pt_b = counts @ top_pi" in src
+
+
+# ---------------------------------------------------------------------------
+# 40. Real transition seq join passes state parity
+# ---------------------------------------------------------------------------
+def test_40_transition_seq_join_real_state_parity():
+    m = merged()
+    jp = m.attrs.get("join_parity")
+    assert jp is not None and jp.get("passed") is True
+    assert len(jp["parity_columns"]) >= exp.MIN_JOIN_PARITY_COLS
+    assert jp["overall_max_abs_diff"] < 1e-3
+
+
+# ---------------------------------------------------------------------------
+# 41. Adversarial within-episode permutation must trip the parity STOP
+# ---------------------------------------------------------------------------
+def test_41_adversarial_within_episode_permutation_trips_stop():
+    trans = pd.read_parquet(pgm.TRANSITION_SAMPLE_PATH)
+    feat = obs_aug()
+    cols = [c for c in exp.JOIN_PARITY_CORE_COLS if c in trans.columns and c in feat.columns]
+    cnt = trans.groupby(["symbol", "episode_id"], sort=False).size()
+    sym, ep = cnt[cnt >= 3].index[0]
+    idx = trans.index[(trans["symbol"] == sym) & (trans["episode_id"] == ep)].to_numpy()
+
+    bad = trans.copy()
+    v0 = bad.loc[idx, cols[0]].to_numpy(dtype=np.float64)
+    i0 = int(idx[0])
+    i1 = int(idx[int(np.argmax(np.abs(v0 - v0[0])))])  # pair with the most different payload
+    for c in cols:
+        a, b = bad.at[i0, c], bad.at[i1, c]
+        bad.at[i0, c] = b
+        bad.at[i1, c] = a
+
+    raised = None
+    try:
+        exp.merge_incremental_features_into_transition(bad, feat)
+    except SystemExit as e:
+        raised = str(e)
+    assert raised is not None, "adversarial permutation was NOT caught"
+    assert "STOP_PGM_NATIVE0C_TRANSITION_JOIN_STATE_PARITY_FAIL" in raised
+
+
+# ---------------------------------------------------------------------------
+# 42. H1 harm diagnostic no longer re-quantiles internally
+# ---------------------------------------------------------------------------
+def test_42_h1_harm_has_no_internal_quantile():
+    src = inspect.getsource(exp.compute_h1_harm_diagnostics)
+    assert "np.quantile" not in src
+    sig = inspect.signature(exp.compute_h1_harm_diagnostics)
+    assert "p_edges" in sig.parameters and "m_edges" in sig.parameters
+
+
+# ---------------------------------------------------------------------------
+# 43. TB2 / TB3 H1 harm share the same frozen edges
+# ---------------------------------------------------------------------------
+def test_43_h1_harm_uses_same_frozen_edges_for_both_blocks():
+    df = _synth_contrast_frame(n_days=6, per_day=80, seed=5)
+    df["bar_t"] = np.arange(len(df))
+    df["start_bar"] = 0
+    a = exp.compute_h1_harm_diagnostics(df, "TB2", _PE, _ME)
+    b = exp.compute_h1_harm_diagnostics(df, "TB3", _PE, _ME)
+    # identical edges -> identical bin membership, only the block label differs
+    assert [r["bin"] for r in a["by_hazard_quintile"]] == \
+           [r["bin"] for r in b["by_hazard_quintile"]]
+    src = inspect.getsource(exp.run_smoke_test)
+    assert "compute_h1_harm_diagnostics(g3, TB3_BLOCK, p_edges, m_edges)" in src
+
+
+# ---------------------------------------------------------------------------
+# 44. Age Spearman uses real numeric bucket values
+# ---------------------------------------------------------------------------
+def test_44_age_spearman_uses_real_bucket_values():
+    src = inspect.getsource(exp.compute_age_hazard_curve)
+    assert "age_numeric" in src
+    assert "np.arange(len(rows))" not in src
+
+
+# ---------------------------------------------------------------------------
+# 45-47. Window B baseline parity
+# ---------------------------------------------------------------------------
+def fit_B():
+    global _FIT_B
+    if _FIT_B is None:
+        _FIT_B = pgm.fit_samplers_for_window(pgm.WINDOWS[1], pgm.SAMPLE_PATH,
+                                             pgm.TRANSITION_SAMPLE_PATH)
+    return _FIT_B
+
+
+def test_45_window_b_terminal_baseline_parity():
+    x = obs_aug()
+    wB = pgm.WINDOWS[1]
+    tr = x[x["block"].isin(wB["train"])].reset_index(drop=True)
+    ev = x[x["block"] == wB["eval"]].reset_index(drop=True)
+    wrap = exp.fit_terminal_hazard_variant(tr, ev, [])
+    prod = n0b.predict_hazard_probability(
+        fit_B()["term_samplers"][exp.PRIMARY_TERMINAL_HEAD], ev)
+    d = float(np.max(np.abs(wrap["p_eval"] - prod)))
+    assert d <= 1e-12, f"Window B terminal parity fail diff={d}"
+
+
+def test_46_window_b_transition_mean_jnll_parity():
+    m = merged()
+    wB = pgm.WINDOWS[1]
+    fb = fit_B()
+    mc_cols = fb["trans_samplers"][exp.PRIMARY_TRANSITION_HEAD].design_cols
+    tr = m[m["block"].isin(wB["train"])].reset_index(drop=True)
+    ev = m[m["block"] == wB["eval"]].reset_index(drop=True)
+    var = exp.fit_transition_variant(tr, ev, [], mc_cols, tag="T46")
+    prod = fb["trans_parity"][exp.PRIMARY_TRANSITION_HEAD]["mean_joint_nll"]
+    d = abs(var["mean_joint_nll"] - prod)
+    assert d <= 1e-12, f"Window B mean-JNLL parity fail diff={d}"
+
+
+def test_47_window_b_zdup_parity():
+    m = merged()
+    wB = pgm.WINDOWS[1]
+    fb = fit_B()
+    mc_cols = fb["trans_samplers"][exp.PRIMARY_TRANSITION_HEAD].design_cols
+    tr = m[m["block"].isin(wB["train"])].reset_index(drop=True)
+    ev = m[m["block"] == wB["eval"]].reset_index(drop=True)
+    var = exp.fit_transition_variant(tr, ev, [], mc_cols, tag="T47")
+    mu_p = np.asarray(fb["trans_samplers"][exp.PRIMARY_TRANSITION_HEAD]
+                      .analytic_conditional_support(ev)["z_d_up_mu"], np.float64)
+    mu_w = np.asarray(var["sampler"].analytic_conditional_support(ev)["z_d_up_mu"], np.float64)
+    d = float(np.max(np.abs(mu_p - mu_w)))
+    assert d <= 1e-12, f"Window B z_d_up_mu parity fail diff={d}"
 
 
 # ---------------------------------------------------------------------------
