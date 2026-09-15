@@ -34,6 +34,7 @@ Four Stages:
 from __future__ import annotations
 
 import argparse
+from collections import defaultdict
 import hashlib
 import json
 import os
@@ -1749,7 +1750,8 @@ def run_single_episode_rollout(init_state: Dict[str, Any],
                                trans_sampler: FittedTransitionSampler,
                                term_sampler: FittedTerminalSampler,
                                rng: np.random.Generator,
-                               max_bars: int = MAX_EPISODE_BARS) -> Dict[str, Any]:
+                               max_bars: int = MAX_EPISODE_BARS,
+                               collect_support_diagnostics: bool = False) -> Dict[str, Any]:
     """Execute one recursive episode rollout from init_state until terminal or violation.
 
     A RolloutSupportError raised by any sampler is caught and turned into a structured
@@ -1762,6 +1764,7 @@ def run_single_episode_rollout(init_state: Dict[str, Any],
     max_extr = 0.0
     first_outside_step = None
     max_abs_design = 0.0
+    support_traj: List[Dict[str, float]] = []
     worst: Dict[str, Any] = dict(
         worst_feature_name=None, worst_feature_value=0.0,
         train_feature_min=None, train_feature_max=None,
@@ -1801,6 +1804,7 @@ def run_single_episode_rollout(init_state: Dict[str, Any],
             worst_feature_value=worst["worst_feature_value"],
             train_feature_min=worst["train_feature_min"],
             train_feature_max=worst["train_feature_max"],
+            support_trajectory=(support_traj if collect_support_diagnostics else None),
         )
 
     try:
@@ -1813,6 +1817,22 @@ def run_single_episode_rollout(init_state: Dict[str, Any],
             if is_term:
                 endpoint = int(term_sampler.sample_endpoint(df_row, rng)[0])
                 return _result("TERMINAL", None, dur, endpoint)
+
+            # 1b. (Diagnostic, read-only) analytic conditional-support risk of the state we
+            #     are ABOUT to transition out of. Only counted on nonterminal hazard draws, so
+            #     terminal states never enter the transition-attempt denominator. No RNG use,
+            #     so identical seed -> identical stochastic rollout whether this is on or off.
+            if collect_support_diagnostics:
+                sup = compute_state_conditional_support_probs(df_row, trans_sampler)
+                support_traj.append({
+                    "p_up_distance_negative": float(sup["p_up_distance_negative"][0]),
+                    "p_down_distance_negative": float(sup["p_down_distance_negative"][0]),
+                    "p_geometry_invalid": float(sup["p_geometry_invalid"][0]),
+                    "p_upper_age_invalid": float(sup["p_upper_age_invalid"][0]),
+                    "p_lower_age_invalid": float(sup["p_lower_age_invalid"][0]),
+                    "p_any_age_invalid": float(sup["p_any_age_invalid"][0]),
+                    "p_physical_invalid_approx": float(sup["p_physical_invalid_approx"][0]),
+                })
 
             # 2. Sample transition
             z_dict = trans_sampler.sample_batch(df_row, rng)
@@ -1841,6 +1861,7 @@ def run_single_episode_rollout(init_state: Dict[str, Any],
             worst_feature_value=worst["worst_feature_value"],
             train_feature_min=worst["train_feature_min"],
             train_feature_max=worst["train_feature_max"],
+            support_trajectory=(support_traj if collect_support_diagnostics else None),
         )
 
     return _result("TIMEOUT", "EPISODE_TIMEOUT", max_bars)
@@ -2896,36 +2917,46 @@ def run_stability_probe(obs_sample_path: Path, transitions_path: Path, ep_meta_p
 # ===========================================================================
 # DYNAMIC-PGM-1C.1A -- Conditional Support / Prefailure Audit
 # ===========================================================================
-def compute_observed_state_support_probs(ev: pd.DataFrame,
-                                         trans_sampler: "FittedTransitionSampler") -> Dict[str, np.ndarray]:
-    """Analytic model-implied illegal probability on observed nonterminal states.
+def compute_state_conditional_support_probs(state_df: pd.DataFrame,
+                                            trans_sampler: "FittedTransitionSampler",
+                                            episode_age: Optional[Any] = None) -> Dict[str, np.ndarray]:
+    """Analytic model-implied illegal probability on ARBITRARY states (observed OR recursive).
 
-    Combines the fitted transition heads with the state-conditioned legal intervals:
-      - p_geometry_invalid = P(z_d_up < -d_U) + P(z_d_up > d_D)
-      - p_{side}_age_invalid = p_active * P(logv > log(log1p(expected_age)))
-      - p_any_age_invalid = 1 - prod(1 - p_side)   [current conditional-independence factorization]
-      - p_physical_invalid_approx = 1 - (1 - p_geom) * (1 - p_any_age)
-            [approx_under_current_conditional_independence -- NOT a new model]
-    All probabilities analytic (Gaussian CDF); no Monte Carlo.
+    Uses the EXACT same pipeline as the observed-state audit:
+      - float32 sampler design (via analytic_conditional_support)
+      - geometry Gaussian-tail formulas
+      - age k+1 semantics (expected_age_{t+1} = start_age + (k + 1), k = bar_t - start_bar)
+      - current conditional-independence union factorization
+    `state_df` must carry the transition-sampler design columns plus
+    cur_up_distance_R, cur_down_distance_R, elapsed_log, upper_newest_log_age,
+    lower_newest_log_age. This is the SAME row schema produced by
+    run_single_episode_rollout's `df_row = pd.DataFrame([state])`, so the recursive
+    per-step risk and the observed-state risk are computed with one identical code path.
+
+    `episode_age` optionally overrides k = bar_t - start_bar (defaults to
+    np.expm1(elapsed_log), which is the frozen PGM-BAR definition). No sampling, no RNG.
     """
-    moms = trans_sampler.analytic_conditional_support(ev)
-    prior_up = ev["cur_up_distance_R"].to_numpy(np.float64)
-    prior_down = ev["cur_down_distance_R"].to_numpy(np.float64)
+    moms = trans_sampler.analytic_conditional_support(state_df)
+    prior_up = state_df["cur_up_distance_R"].to_numpy(np.float64)
+    prior_down = state_df["cur_down_distance_R"].to_numpy(np.float64)
     p_low, p_high, p_geom = gaussian_geometry_invalid_prob(
         moms["z_d_up_mu"], float(moms["z_d_up_sigma"][0]), prior_up, prior_down)
     p_up_distance_negative = p_low
     p_down_distance_negative = p_high
     p_geometry_invalid = p_geom
 
+    if episode_age is None:
+        k = np.expm1(state_df["elapsed_log"].to_numpy(np.float64))
+    else:
+        k = np.asarray(episode_age, dtype=np.float64)
+
     p_age: Dict[str, np.ndarray] = {}
     for side in ("upper", "lower"):
-        new_log = ev[f"{side}_newest_log_age"].to_numpy(np.float64)
-        elog = ev["elapsed_log"].to_numpy(np.float64)
+        new_log = state_df[f"{side}_newest_log_age"].to_numpy(np.float64)
         # Frozen PGM-BAR: elapsed_log = log1p(k), k = bar_t - start_bar. The transition row t
         # stores the t+1 residual, so the joint state-conditioned support must use
         #   expected_age_{t+1} = start_age + (k + 1)
         # which exactly matches advance_nonterminal() (age_next = episode_age + 1). NOT k.
-        k = np.expm1(elog)
         expected_age = age_expected_and_bound(new_log, k)[0]
         log_q_max = np.log(np.log1p(expected_age))
         p_age[side] = hurdle_negative_age_invalid_prob(
@@ -2945,6 +2976,12 @@ def compute_observed_state_support_probs(ev: pd.DataFrame,
         p_any_age_invalid=p_any_age_invalid,
         p_physical_invalid_approx=p_physical_invalid_approx,
     )
+
+
+def compute_observed_state_support_probs(ev: pd.DataFrame,
+                                         trans_sampler: "FittedTransitionSampler") -> Dict[str, np.ndarray]:
+    """Observed-state alias of compute_state_conditional_support_probs (same code path)."""
+    return compute_state_conditional_support_probs(ev, trans_sampler)
 
 
 def decode_hurdle_ln_neg(ispos: np.ndarray, logv: np.ndarray) -> np.ndarray:
@@ -2970,11 +3007,43 @@ def audit_elapsed_semantic_parity(obs_sample_path: Path) -> float:
     """
     obs = pd.read_parquet(obs_sample_path)
     req = ("bar_t", "start_bar", "elapsed_log")
-    if not all(c in obs.columns for c in req):
-        return 0.0
+    missing = [c for c in req if c not in obs.columns]
+    if missing:
+        # A missing column means we CANNOT verify the frozen PGM-BAR elapsed definition;
+        # returning 0.0 would silently fake a passed parity lock. Fail closed instead.
+        raise SystemExit(
+            f"STOP_DYNAMIC_PGM1C_AUDIT_ELAPSED_COLUMNS_MISSING: missing={missing}")
     k_bar = (obs["bar_t"].to_numpy(np.float64) - obs["start_bar"].to_numpy(np.float64))
     k_el = np.expm1(obs["elapsed_log"].to_numpy(np.float64))
     return float(np.max(np.abs(k_el - k_bar)))
+
+
+def cumulative_physical_risk(p_list: "Sequence[float]") -> float:
+    """Model-implied cumulative physical-failure probability over a transition-exposure path.
+
+    Numerically stable form: 1 - exp(sum(log1p(-p_t))). Requires each p_t in [0, 1]
+    (asserted, never clipped -- clipping would hide a computation error). Empty path -> 0.
+    """
+    arr = np.asarray(list(p_list), dtype=np.float64)
+    if arr.size == 0:
+        return 0.0
+    if not np.all((arr >= 0.0) & (arr <= 1.0)):
+        raise ValueError(f"cumulative_physical_risk: probabilities outside [0,1]: {arr}")
+    return float(1.0 - np.exp(np.sum(np.log1p(-arr))))
+
+
+def assign_step_bin(idx: int) -> str:
+    """Map a 1-based transition-attempt index to a coarse step-position bucket.
+
+    Buckets: '1','2','3','4','5','6_10','11_20','gt20'.
+    """
+    if idx <= 5:
+        return str(idx)
+    if idx <= 10:
+        return "6_10"
+    if idx <= 20:
+        return "11_20"
+    return "gt20"
 
 
 def audit_conditional_support_on_observed_states(transitions_path: Path,
@@ -3134,16 +3203,50 @@ def run_support_coupling_probe(obs_sample_path: Path, transitions_path: Path, ep
 
     Fixed scale (mirrors stability probe): W1 only, both windows, 15 symbols,
     <=64 observed starts per symbol, 1 rep, MAX_EPISODE_BARS=512, fixed seed.
-    Fully isolated from the formal 1C verdict. Outputs:
+    Fully isolated from the formal 1C verdict.
+
+    This run measures the SAME quantities on OBSERVED and RECURSIVE states so the
+    recursive-amplification question becomes apples-to-apples:
+      * observed-state analytic per-step risk  (real nonterminal transitions)
+      * recursive-state analytic per-step risk (every transition we ACTUALLY attempt)
+      * recursive realized per-transition violation rate (not just per-episode)
+      * model-implied cumulative failure per rollout vs realized episode failure
+      * step-position profile (does risk rise with recursion depth?)
+    Outputs:
       dynamic_pgm1c_support_coupling_observed.csv  (per observed-state analytic risk)
-      dynamic_pgm1c_support_coupling_rollout.csv   (per-rollout realized failure + prefailure diagnostics)
-      dynamic_pgm1c_support_coupling_summary.json  (OBSERVED-STATE vs RECURSIVE distinction)
-    NOTE: not executed in the 1C.1A implementation round (per task scope).
+      dynamic_pgm1c_support_coupling_rollout.csv   (per-rollout trajectory summary + prefailure diagnostics)
+      dynamic_pgm1c_support_coupling_summary.json  (observed vs recursive analytic vs realized)
     """
     PROBE_REPS = 1
     PROBE_STARTS_PER_SYMBOL = 64
+
+    def _dist(arr):
+        a = np.asarray(arr, dtype=np.float64)
+        if a.size == 0:
+            return dict(mean=None, median=None, p90=None, p95=None, p99=None, max=None,
+                        sum_expected_invalid=None)
+        return dict(
+            mean=float(a.mean()), median=float(np.median(a)),
+            p90=float(np.percentile(a, 90)), p95=float(np.percentile(a, 95)),
+            p99=float(np.percentile(a, 99)), max=float(a.max()),
+            sum_expected_invalid=float(a.sum()),
+        )
+
     observed_rows: List[Dict[str, Any]] = []
     rollout_rows: List[Dict[str, Any]] = []
+    # recursive per-transition exposure accumulators (all rollouts, per window)
+    rec_expo: Dict[str, Dict[str, list]] = {
+        w["name"]: {"p_geom": [], "p_age": [], "p_phys": []} for w in WINDOWS}
+    # step-position buckets: bin -> {n, realized_sum, p_geom[], p_age[], p_phys[]}
+    step_bins: Dict[str, Dict[str, Any]] = {
+        w["name"]: defaultdict(lambda: {"n": 0, "realized": 0.0,
+                                       "p_geom": [], "p_age": [], "p_phys": []})
+        for w in WINDOWS}
+    # cumulative calibration rows: (window, p_cumulative_physical, realized_invalid)
+    cum_rows: List[Dict[str, Any]] = []
+    # cumulative-risk fixed bins
+    cum_bin_edges = [(0.0, 0.05), (0.05, 0.10), (0.10, 0.20), (0.20, 0.40), (0.40, 1.01)]
+    cum_bin_labels = ["[0,0.05)", "[0.05,0.10)", "[0.10,0.20)", "[0.20,0.40)", "[0.40,1]"]
 
     for w in WINDOWS:
         wname = w["name"]
@@ -3169,7 +3272,7 @@ def run_support_coupling_probe(obs_sample_path: Path, transitions_path: Path, ep
                 p_physical_invalid_approx=float(p["p_physical_invalid_approx"][i]),
             ))
 
-        # ---- recursive rollout with prefailure diagnostics ----
+        # ---- recursive rollout WITH per-transition analytic risk (read-only diagnostic) ----
         obs = pd.read_parquet(obs_sample_path)
         ep_meta = pd.read_parquet(ep_meta_path)
         meta_slim = ep_meta[["symbol", "start_bar", "start_upper_price", "start_lower_price"]].drop_duplicates()
@@ -3187,17 +3290,50 @@ def run_support_coupling_probe(obs_sample_path: Path, transitions_path: Path, ep
             for fr_idx in range(len(sym_firsts)):
                 fr = sym_firsts.iloc[fr_idx]
                 st = build_observed_start_state(fr, fr["eps_R"])
-                ep_res = run_single_episode_rollout(st, trans_s, term_s, rng, MAX_EPISODE_BARS)
+                ep_res = run_single_episode_rollout(st, trans_s, term_s, rng, MAX_EPISODE_BARS,
+                                                    collect_support_diagnostics=True)
+                traj = ep_res.get("support_trajectory") or []
+                n_att = len(traj)
+                p_geom = [t["p_geometry_invalid"] for t in traj]
+                p_age = [t["p_any_age_invalid"] for t in traj]
+                p_phys = [t["p_physical_invalid_approx"] for t in traj]
+                p_cum = cumulative_physical_risk(p_phys) if p_phys else 0.0
+                realized = 1 if ep_res["status"] == "INVALID" else 0
                 row = dict(
                     window=wname, symbol=sym,
                     episode_id=str(fr["episode_id"]),
                     status=ep_res["status"], duration=ep_res["duration"],
                     failure_step=ep_res.get("failure_step"), violation=ep_res["violation"],
+                    n_transition_attempts=n_att,
+                    mean_p_geometry_recursive=float(np.mean(p_geom)) if p_geom else 0.0,
+                    max_p_geometry_recursive=float(np.max(p_geom)) if p_geom else 0.0,
+                    mean_p_age_recursive=float(np.mean(p_age)) if p_age else 0.0,
+                    max_p_age_recursive=float(np.max(p_age)) if p_age else 0.0,
+                    mean_p_physical_recursive=float(np.mean(p_phys)) if p_phys else 0.0,
+                    max_p_physical_recursive=float(np.max(p_phys)) if p_phys else 0.0,
+                    first_transition_p_physical=(p_phys[0] if p_phys else None),
+                    last_transition_p_physical=(p_phys[-1] if p_phys else None),
+                    p_cumulative_physical=p_cum,
+                    realized_invalid=int(realized),
                 )
                 diag = ep_res.get("failure_diagnostics") or {}
                 for k in SUPPORT_COUPLING_DIAG_KEYS:
                     row[k] = diag.get(k)
                 rollout_rows.append(row)
+
+                # ---- accumulate recursive exposures + step bins + cumulative calibration ----
+                rec_expo[wname]["p_geom"].extend(p_geom)
+                rec_expo[wname]["p_age"].extend(p_age)
+                rec_expo[wname]["p_phys"].extend(p_phys)
+                for idx, t in enumerate(traj, start=1):
+                    b = assign_step_bin(idx)
+                    bucket = step_bins[wname][b]
+                    bucket["n"] += 1
+                    bucket["realized"] += (1.0 if (realized and idx == n_att) else 0.0)
+                    bucket["p_geom"].append(t["p_geometry_invalid"])
+                    bucket["p_age"].append(t["p_any_age_invalid"])
+                    bucket["p_phys"].append(t["p_physical_invalid_approx"])
+                cum_rows.append(dict(window=wname, p_cumulative_physical=p_cum, realized_invalid=realized))
 
     OUT.mkdir(parents=True, exist_ok=True)
     obs_df = pd.DataFrame(observed_rows)
@@ -3205,26 +3341,98 @@ def run_support_coupling_probe(obs_sample_path: Path, transitions_path: Path, ep
     rol_df = pd.DataFrame(rollout_rows)
     rol_df.to_csv(OUT / f"{PREFIX}_support_coupling_rollout.csv", index=False)
 
-    summ: Dict[str, Any] = {"observed_state_model_implied": {}, "recursive_realized": {}}
+    summ: Dict[str, Any] = {
+        "observed_state_model_implied": {}, "recursive_state_model_implied": {},
+        "recursive_realized": {}, "per_transition_denominator": {},
+        "cumulative_calibration": {}, "step_profile": {},
+    }
     for w in WINDOWS:
         wname = w["name"]
         sub_obs = obs_df[obs_df["window"] == wname]
+        obs_g = float(sub_obs["p_geometry_invalid"].mean())
+        obs_a = float(sub_obs["p_any_age_invalid"].mean())
+        obs_p = float(sub_obs["p_physical_invalid_approx"].mean())
         summ["observed_state_model_implied"][wname] = dict(
             n_observed_states=int(len(sub_obs)),
-            mean_p_geometry_invalid=float(sub_obs["p_geometry_invalid"].mean()),
-            mean_p_any_age_invalid=float(sub_obs["p_any_age_invalid"].mean()),
-            mean_p_physical_invalid_approx=float(sub_obs["p_physical_invalid_approx"].mean()),
+            mean_p_geometry_invalid=obs_g,
+            mean_p_any_age_invalid=obs_a,
+            mean_p_physical_invalid_approx=obs_p,
             sum_expected_invalid=float(sub_obs["p_physical_invalid_approx"].sum()),
         )
+
+        rg = rec_expo[wname]["p_geom"]; ra = rec_expo[wname]["p_age"]; rp = rec_expo[wname]["p_phys"]
+        rg_m = float(np.mean(rg)) if rg else float("nan")
+        ra_m = float(np.mean(ra)) if ra else float("nan")
+        rp_m = float(np.mean(rp)) if rp else float("nan")
+        summ["recursive_state_model_implied"][wname] = dict(
+            n_exposures=len(rg),
+            recursive_p_geometry=_dist(rg),
+            recursive_p_any_age=_dist(ra),
+            recursive_p_physical=_dist(rp),
+            observed_p_geometry=obs_g,
+            observed_p_any_age=obs_a,
+            observed_p_physical=obs_p,
+            recursive_over_observed_geometry=(rg_m / obs_g if obs_g else None),
+            recursive_over_observed_any_age=(ra_m / obs_a if obs_a else None),
+            recursive_over_observed_physical=(rp_m / obs_p if obs_p else None),
+        )
+
         sub_rol = rol_df[rol_df["window"] == wname]
         invalid = sub_rol[sub_rol["status"] == "INVALID"]
         viol_breakdown = {k: int(v) for k, v in invalid["violation"].value_counts().to_dict().items()} if len(invalid) else {}
+        total_att = int(sub_rol["n_transition_attempts"].sum())
+        phys_invalid = int(len(invalid))
         summ["recursive_realized"][wname] = dict(
             n_rollouts=int(len(sub_rol)),
-            invalid=int(len(invalid)),
-            invalid_rate=(float(len(invalid) / len(sub_rol)) if len(sub_rol) else 0.0),
+            n_terminal=int((sub_rol["status"] == "TERMINAL").sum()),
+            n_invalid=phys_invalid,
+            episode_invalid_rate=(float(phys_invalid / len(sub_rol)) if len(sub_rol) else 0.0),
             violation_breakdown=viol_breakdown,
         )
+        summ["per_transition_denominator"][wname] = dict(
+            total_transition_attempts=total_att,
+            physical_invalid_transitions=phys_invalid,
+            realized_invalid_per_transition=(float(phys_invalid / total_att) if total_att else None),
+        )
+
+        # cumulative calibration: predicted cumulative vs realized episode failure
+        cw = [r for r in cum_rows if r["window"] == wname]
+        preds = np.array([r["p_cumulative_physical"] for r in cw], dtype=np.float64)
+        realized_arr = np.array([r["realized_invalid"] for r in cw], dtype=np.float64)
+        cum_bin_summary = []
+        for (lo, hi), lbl in zip(cum_bin_edges, cum_bin_labels):
+            mask = (preds >= lo) & (preds < hi)
+            n_b = int(mask.sum())
+            cum_bin_summary.append(dict(
+                bin=lbl, n=n_b,
+                mean_predicted=(float(preds[mask].mean()) if n_b else None),
+                realized_invalid_rate=(float(realized_arr[mask].mean()) if n_b else None),
+            ))
+        summ["cumulative_calibration"][wname] = dict(
+            mean_predicted_cumulative_invalid=float(preds.mean()),
+            realized_episode_invalid_rate=float(realized_arr.mean()),
+            difference=float(preds.mean() - realized_arr.mean()),
+            bins=cum_bin_summary,
+        )
+
+        # step-position profile
+        step_summary: Dict[str, Any] = {}
+        for b in ("1", "2", "3", "4", "5", "6_10", "11_20", "gt20"):
+            bucket = step_bins[wname].get(b)
+            if not bucket or bucket["n"] == 0:
+                step_summary[b] = dict(n_exposures=0, mean_p_geometry=None,
+                                       mean_p_age=None, mean_p_physical=None,
+                                       realized_invalid_rate=None)
+                continue
+            step_summary[b] = dict(
+                n_exposures=bucket["n"],
+                mean_p_geometry=float(np.mean(bucket["p_geom"])),
+                mean_p_age=float(np.mean(bucket["p_age"])),
+                mean_p_physical=float(np.mean(bucket["p_phys"])),
+                realized_invalid_rate=(bucket["realized"] / bucket["n"]),
+            )
+        summ["step_profile"][wname] = step_summary
+
     (OUT / f"{PREFIX}_support_coupling_summary.json").write_text(json.dumps(summ, indent=2, default=str))
     print(f"[SUPPORT-COUPLING PROBE COMPLETE] observed={len(obs_df)} rollout={len(rol_df)}", flush=True)
     return summ

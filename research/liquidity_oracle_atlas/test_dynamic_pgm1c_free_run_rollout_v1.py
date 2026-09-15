@@ -1742,6 +1742,214 @@ def test_77_sampler_analytic_parity_float32():
         assert np.max(np.abs(mu_logv_ref - mu_logv)) < 1e-12
 
 
+# ===========================================================================
+# A-17..A-19. Recursive support-risk instrumentation (diagnostic-only round)
+# ===========================================================================
+class _FakeTrans:
+    """Minimal transition sampler stand-in (no fitting) for rollout-counting tests."""
+    def __init__(self, z_dict: Dict[str, np.ndarray]):
+        self._z = z_dict
+        self.last_design_diag = None
+
+    def sample_batch(self, df, rng):
+        return self._z
+
+    def analytic_conditional_support(self, df):
+        n = len(df)
+        return {
+            "z_d_up_mu": np.zeros(n), "z_d_up_sigma": np.ones(n),
+            "upper_p_active": np.zeros(n), "upper_mu_logv": np.zeros(n),
+            "upper_sigma_logv": np.ones(n),
+            "lower_p_active": np.zeros(n), "lower_mu_logv": np.zeros(n),
+            "lower_sigma_logv": np.ones(n),
+        }
+
+
+class _FakeTerm:
+    """Minimal terminal sampler stand-in; plays a fixed hazard sequence (True=terminal)."""
+    def __init__(self, hazard_seq):
+        self._seq = list(hazard_seq)
+        self._i = 0
+
+    def sample_hazard(self, df, rng):
+        v = self._seq[self._i] if self._i < len(self._seq) else self._seq[-1]
+        self._i += 1
+        return np.array([1.0 if v else 0.0])
+
+    def sample_endpoint(self, df, rng):
+        return np.array([0.0])
+
+
+def _fake_init_state():
+    s = dict(
+        cur_up_distance_R=10.0, cur_down_distance_R=10.0, cur_width_R=20.0,
+        elapsed_log=0.0, episode_age=0,
+        upper_newest_log_age=0.0, lower_newest_log_age=0.0,
+        upper_newest_age_zero=0.0, lower_newest_age_zero=0.0,
+        upper_oldest_log_age=0.0, lower_oldest_log_age=0.0,
+        upper_n_active_identities=1.0, lower_n_active_identities=1.0,
+        path_max_up_excursion_R=0.0, path_max_down_excursion_R=0.0,
+        upper_active_identity_count_delta=0.0, lower_active_identity_count_delta=0.0,
+        start_up_distance_R=10.0, start_down_distance_R=10.0, start_width_R=20.0,
+        path_total_variation_R=0.0, path_last_return_R=0.0, path_current_bar_range_R=1.0,
+        eps_R=1e-9, cur_log_ratio=0.0,
+        prev_event_mask=0, tempo_signed_speed=0.0, tempo_abs_speed=0.0,
+        tempo_signed_efficiency=0.0, tempo_abs_efficiency=0.0,
+    )
+    s[C.LAG_AVAIL] = 0.0
+    return s
+
+
+def _valid_z():
+    return {"z_d_up": np.array([0.0]), "dmfe": np.array([0.0]), "dmae": np.array([0.0]),
+            "dcr": np.array([0.5]), "range": np.array([1.0]),
+            "uresid": np.array([0.0]), "lresid": np.array([0.0]),
+            "delta_upper_count": np.array([0]), "delta_lower_count": np.array([0])}
+
+
+# A-17. recursive-state support helper == observed-state helper on equivalent single-row input
+def test_78_recursive_helper_equals_observed_helper():
+    obs_p = C.CACHE / "dynamic_pgm1b_sample.parquet"
+    tr_p = C.TRANSITION_SAMPLE_PATH
+    if not (obs_p.exists() and tr_p.exists()):
+        return
+    w = base.WINDOWS[0]
+    fitted = C.fit_samplers_for_window(w, obs_p, tr_p)
+    trans_s = fitted["trans_samplers"]["MC_STATE_CURREENCODING"]
+    df = pd.read_parquet(tr_p)
+    row = df[df["block"] == w["eval"]].head(1).reset_index(drop=True)
+    obs_out = C.compute_observed_state_support_probs(row, trans_s)
+    rec_out = C.compute_state_conditional_support_probs(row, trans_s)
+    for k in obs_out:
+        assert np.max(np.abs(obs_out[k] - rec_out[k])) < 1e-15
+
+
+# A-18. diagnostic on/off, same seed -> identical stochastic rollout (RNG contract preserved)
+def test_79_diagnostic_on_off_same_seed_identical_rollout():
+    obs_p = C.CACHE / "dynamic_pgm1b_sample.parquet"
+    tr_p = C.TRANSITION_SAMPLE_PATH
+    if not (obs_p.exists() and tr_p.exists()):
+        return
+    w = base.WINDOWS[0]
+    fitted = C.fit_samplers_for_window(w, obs_p, tr_p)
+    term_s = fitted["term_samplers"]["T0_STATE_AVAIL"]
+    trans_s = fitted["trans_samplers"]["MC_STATE_CURREENCODING"]
+    obs = pd.read_parquet(obs_p)
+    ep_meta = pd.read_parquet(C.CACHE / "episode_repl0_through_tb3.parquet")
+    meta_slim = ep_meta[["symbol", "start_bar", "start_upper_price", "start_lower_price"]].drop_duplicates()
+    obs = obs.merge(meta_slim, on=["symbol", "start_bar"], how="left")
+    span = obs["start_upper_price"].to_numpy(float) - obs["start_lower_price"].to_numpy(float)
+    obs["eps_R"] = 1e-9 / (span / obs["start_width_R"].to_numpy(float))
+    ev_obs = obs[obs["block"] == w["eval"]].reset_index(drop=True)
+    ev_firsts = ev_obs[ev_obs["bar_t"] == ev_obs["start_bar"]].reset_index(drop=True)
+    fr = ev_firsts.iloc[0]
+    st = C.build_observed_start_state(fr, fr["eps_R"])
+    r1 = C.run_single_episode_rollout(st, trans_s, term_s, np.random.default_rng(7), C.MAX_EPISODE_BARS)
+    r2 = C.run_single_episode_rollout(st, trans_s, term_s, np.random.default_rng(7),
+                                      C.MAX_EPISODE_BARS, collect_support_diagnostics=True)
+    assert r1["status"] == r2["status"]
+    assert r1["duration"] == r2["duration"]
+    assert r1["violation"] == r2["violation"]
+    assert r2["support_trajectory"] is not None
+
+
+# A-19. transition attempts counted ONLY after a nonterminal hazard draw (K.3 + K.4 + K.5)
+def test_80_terminal_first_step_zero_attempts():
+    st = _fake_init_state()
+    term = _FakeTerm([True])                      # terminal on first step -> no transition
+    trans = _FakeTrans(_valid_z())
+    res = C.run_single_episode_rollout(st, trans, term, np.random.default_rng(0), 10,
+                                        collect_support_diagnostics=True)
+    assert res["status"] == "TERMINAL"
+    assert len(res["support_trajectory"]) == 0    # K.4: terminal first step -> 0 attempts
+
+
+def test_81_nonterminal_then_terminal_one_attempt():
+    st = _fake_init_state()
+    term = _FakeTerm([False, True])               # nonterminal, then terminal
+    trans = _FakeTrans(_valid_z())
+    res = C.run_single_episode_rollout(st, trans, term, np.random.default_rng(0), 10,
+                                        collect_support_diagnostics=True)
+    assert res["status"] == "TERMINAL"
+    # K.3: only the nonterminal step is counted; the terminal step is NOT a transition attempt
+    assert len(res["support_trajectory"]) == 1
+    assert len(res["support_trajectory"]) == res["duration"] - 1
+
+
+def test_82_invalid_first_transition_one_attempt_realized():
+    st = _fake_init_state()
+    term = _FakeTerm([False])                     # nonterminal, then a violating draw
+    bad = _valid_z()
+    bad["z_d_up"] = np.array([-1e9])              # drives next up-distance negative
+    trans = _FakeTrans(bad)
+    res = C.run_single_episode_rollout(st, trans, term, np.random.default_rng(0), 10,
+                                        collect_support_diagnostics=True)
+    assert res["status"] == "INVALID"
+    assert len(res["support_trajectory"]) == 1    # K.6: first transition is the failing attempt
+    assert res["support_trajectory"][0]["p_geometry_invalid"] >= 0.0
+
+
+# A-20. cumulative_physical_risk: stable form and known value
+def test_83_cumulative_physical_risk_known_value():
+    import math
+    p = C.cumulative_physical_risk([0.1, 0.2])
+    assert math.isclose(p, 1.0 - 0.9 * 0.8, rel_tol=1e-12)  # 0.28
+
+
+def test_84_cumulative_physical_risk_empty_and_zero():
+    assert C.cumulative_physical_risk([]) == 0.0
+    assert C.cumulative_physical_risk([0.0, 0.0]) == 0.0
+    # out-of-range probabilities must be asserted, not silently clipped
+    try:
+        C.cumulative_physical_risk([1.5])
+        raised = False
+    except ValueError:
+        raised = True
+    assert raised
+
+
+# A-21. step-bin assignment is exact
+def test_85_assign_step_bin_exact():
+    assert C.assign_step_bin(1) == "1"
+    assert C.assign_step_bin(5) == "5"
+    assert C.assign_step_bin(6) == "6_10"
+    assert C.assign_step_bin(10) == "6_10"
+    assert C.assign_step_bin(11) == "11_20"
+    assert C.assign_step_bin(20) == "11_20"
+    assert C.assign_step_bin(21) == "gt20"
+    assert C.assign_step_bin(500) == "gt20"
+
+
+# A-22. elapsed-semantic parity must HARD-STOP (not fake 0.0) when required columns are missing
+def test_86_elapsed_missing_columns_hard_stop():
+    import tempfile
+    d = tempfile.mkdtemp()
+    p = Path(d) / "missing_cols.parquet"
+    pd.DataFrame({"foo": [1, 2, 3]}).to_parquet(p)
+    raised = False
+    try:
+        C.audit_elapsed_semantic_parity(p)
+    except SystemExit:
+        raised = True
+    assert raised, "expected STOP_DYNAMIC_PGM1C_AUDIT_ELAPSED_COLUMNS_MISSING"
+
+
+# A-23. C0 parity + numeric-tol constants unchanged
+def test_87_c0_parity_constants_unchanged():
+    assert C.PARITY_TOL == 1e-8
+    assert C.AGE_RECON_NUMERIC_TOL == 1e-6
+
+
+# A-24. support-coupling probe is isolated from the formal 1C audit path (K.12)
+def test_88_support_coupling_isolated_from_formal_1c():
+    import inspect
+    probe_src = inspect.getsource(C.run_support_coupling_probe)
+    audit_src = inspect.getsource(C.run_dynamic_pgm1c_audit)
+    # the two paths must not call into each other
+    assert "run_dynamic_pgm1c_audit" not in probe_src
+    assert "run_support_coupling_probe" not in audit_src
+
+
 if __name__ == "__main__":
     import traceback
 
