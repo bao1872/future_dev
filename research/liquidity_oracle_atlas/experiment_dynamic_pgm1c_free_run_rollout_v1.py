@@ -665,6 +665,55 @@ class FittedTransitionSampler:
             delta_lower_count=c_l,
         )
 
+    def analytic_conditional_support(self, df: pd.DataFrame) -> Dict[str, np.ndarray]:
+        """Analytic conditional moments of the transition heads on observed states.
+
+        Pure / no sampling. Replicates the zt_* repair from sample_batch, then transforms
+        via the frozen ct and reads the fitted Gaussian / Hurdle-LogNormal head parameters:
+          - z_d_up Gaussian: mu = X @ B + intercept, sigma = chol[0, 0]
+          - z_uresid / z_lresid Hurdle-LogNormal-negative:
+                p_active = logistic occurrence
+                logv ~ Normal(mu_logv = X @ g.B + g.intercept, sigma_logv = g.chol[0,0])
+        Raises SystemExit on non-positive / nonfinite scale (a real head defect).
+        """
+        df_in = df
+        needed_zt = [c for c in rep.MC_EXTRA if c.startswith("zt_")]
+        if needed_zt:
+            df_in = df.copy()
+            for zc in needed_zt:
+                pc = zc.replace("zt_", "phi_")
+                if zc not in df_in.columns:
+                    df_in[zc] = df_in[pc] if pc in df_in.columns else 0.0
+                else:
+                    df_in[zc] = df_in[zc].fillna(df_in[pc]) if pc in df_in.columns else df_in[zc].fillna(0.0)
+
+        raw = self.ct.transform(df_in)
+        X64 = np.asarray(pbar.densify(raw), dtype=np.float64)
+
+        gh = self.heads["nodes"]["z_d_up"]["head"]
+        mu_d = (X64 @ gh.B + gh.intercept).reshape(-1)
+        sig_d = float(gh.chol[0, 0])
+        if not (np.isfinite(sig_d) and sig_d > 0.0):
+            raise SystemExit(f"STOP_DYNAMIC_PGM1C_AUDIT_ZDUP_SIGMA_INVALID: sig_d={sig_d}")
+
+        out: Dict[str, np.ndarray] = {
+            "z_d_up_mu": mu_d,
+            "z_d_up_sigma": np.full(X64.shape[0], sig_d, dtype=np.float64),
+        }
+        for side in ("upper", "lower"):
+            node = "z_uresid" if side == "upper" else "z_lresid"
+            hh = self.heads["nodes"][node]["head"]
+            p_active = np.clip(hh.logit.predict_proba(X64)[:, 1], 0.0, 1.0)
+            gg = hh.g
+            mu_logv = (X64 @ gg.B + gg.intercept).reshape(-1)
+            sig_logv = float(gg.chol[0, 0])
+            if not (np.isfinite(sig_logv) and sig_logv > 0.0):
+                raise SystemExit(f"STOP_DYNAMIC_PGM1C_AUDIT_AGE_SIGMA_INVALID: side={side} sig={sig_logv}")
+            out[f"{side}_p_active"] = p_active
+            out[f"{side}_mu_logv"] = mu_logv
+            out[f"{side}_sigma_logv"] = np.full(X64.shape[0], sig_logv, dtype=np.float64)
+        return out
+
 
 class FittedTerminalSampler:
     """Fitted terminal sampler for T0 or T2."""
@@ -916,6 +965,126 @@ def advance_nonterminal(state: Dict[str, Any], z: Dict[str, Any]) -> Tuple[Dict[
             return nxt, "TRANSITION_NONFINITE"
 
     return nxt, None
+
+
+# ===========================================================================
+# Conditional-Support / Prefailure Diagnostic Helpers (DYNAMIC-PGM-1C.1A)
+# ===========================================================================
+def geometry_legal_interval(prior_up_distance_R: float, prior_down_distance_R: float):
+    """State-conditioned legal interval for the z_d_up innovation.
+
+    Recursion demands:
+        d_U,t+1 = d_U,t + z_d_up >= 0   ->   z_d_up >= -d_U,t
+        d_D,t+1 = d_D,t - z_d_up >= 0   ->   z_d_up <=  d_D,t
+    So the TRUE conditional support of z_d_up is [-d_U, d_D], NOT (-inf, +inf).
+    """
+    legal_lower = -float(prior_up_distance_R)
+    legal_upper = float(prior_down_distance_R)
+    return legal_lower, legal_upper
+
+
+def gaussian_geometry_invalid_prob(mu: np.ndarray, sigma: float,
+                                   prior_up_distance_R: np.ndarray,
+                                   prior_down_distance_R: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Analytic P(z_d_up < -d_U) + P(z_d_up > d_D) for a fitted Gaussian head.
+
+    Uses the standard-normal CDF only (no Monte Carlo). sigma must be > 0 and finite.
+    Returns (p_low, p_high, p_geom_invalid).
+    """
+    sigma = float(sigma)
+    if not (np.isfinite(sigma) and sigma > 0.0):
+        raise SystemExit(f"STOP_DYNAMIC_PGM1C_AUDIT_ZDUP_SIGMA_INVALID: sigma={sigma}")
+    mu = np.asarray(mu, dtype=np.float64)
+    dU = np.asarray(prior_up_distance_R, dtype=np.float64)
+    dD = np.asarray(prior_down_distance_R, dtype=np.float64)
+    p_low = scipy.stats.norm.cdf((-dU - mu) / sigma)
+    p_high = 1.0 - scipy.stats.norm.cdf((dD - mu) / sigma)
+    return p_low, p_high, p_low + p_high
+
+
+def hurdle_negative_age_invalid_prob(p_active: np.ndarray, mu_logv: np.ndarray,
+                                     sigma_logv: float, log_q_max: np.ndarray) -> np.ndarray:
+    """Analytic P(age residual pushes newest age negative) for a frozen hurdle-ln-negative head.
+
+    For an active draw: residual = -exp(logv). Valid requires residual >= -log1p(expected_age),
+    i.e. logv <= log_q_max = log(log1p(expected_age)). Invalid requires logv > log_q_max.
+    p_invalid_side = p_active * P(logv > log_q_max) under Normal(mu_logv, sigma_logv).
+    sigma_logv must be > 0 and finite.
+    """
+    sigma_logv = float(sigma_logv)
+    if not (np.isfinite(sigma_logv) and sigma_logv > 0.0):
+        raise SystemExit(f"STOP_DYNAMIC_PGM1C_AUDIT_AGE_SIGMA_INVALID: sigma_logv={sigma_logv}")
+    p_active = np.asarray(p_active, dtype=np.float64)
+    mu_logv = np.asarray(mu_logv, dtype=np.float64)
+    log_q_max = np.asarray(log_q_max, dtype=np.float64)
+    p_bad_logv = 1.0 - scipy.stats.norm.cdf((log_q_max - mu_logv) / sigma_logv)
+    return p_active * p_bad_logv
+
+
+def age_expected_and_bound(start_newest_log_age: float, episode_age: int):
+    """Reconstruct expected newest age and the state-conditioned residual lower bound.
+
+    expected_age = expm1(start_newest_log_age) + (episode_age + 1)
+    residual_lower_bound = -log1p(expected_age)   (so that actual_age >= 0).
+    """
+    start_age = float(np.expm1(start_newest_log_age))
+    age_next = float(episode_age) + 1.0
+    expected_age = start_age + age_next
+    residual_lower_bound = -float(np.log1p(expected_age))
+    return expected_age, residual_lower_bound
+
+
+def build_transition_failure_diagnostics(state: Dict[str, Any], z: Dict[str, Any],
+                                         violation: str,
+                                         trans_sampler: Optional[Any] = None) -> Dict[str, Any]:
+    """Pure prefailure diagnostic. Reads state/z only -- never samples, never mutates.
+
+    Records the prior-state geometry/age components, the realized innovation, the
+    state-conditioned legal interval, and the overshoot beyond that interval that
+    produced the physical-support violation. `trans_sampler` is accepted for future
+    analytic enrichment but is NEVER required and is NEVER sampled. A diagnostic
+    failure must never crash rollout bookkeeping, so exceptions are captured.
+    """
+    diag: Dict[str, Any] = {"violation": violation}
+    try:
+        prior_up = float(state["cur_up_distance_R"])
+        prior_down = float(state["cur_down_distance_R"])
+        diag["prior_up_distance_R"] = prior_up
+        diag["prior_down_distance_R"] = prior_down
+        diag["corridor_width_R"] = prior_up + prior_down
+        sampled_z = float(z["z_d_up"])
+        diag["sampled_z_d_up"] = sampled_z
+        legal_lower, legal_upper = geometry_legal_interval(prior_up, prior_down)
+        diag["legal_z_lower"] = legal_lower
+        diag["legal_z_upper"] = legal_upper
+        diag["next_up_distance_R"] = prior_up + sampled_z
+        diag["next_down_distance_R"] = prior_down - sampled_z
+        if violation == "TRANSITION_UP_DISTANCE_NEGATIVE":
+            diag["overshoot_R"] = legal_lower - sampled_z
+            diag["overshoot_fraction_of_width"] = (legal_lower - sampled_z) / max(prior_up + prior_down, 1e-12)
+        elif violation == "TRANSITION_DOWN_DISTANCE_NEGATIVE":
+            diag["overshoot_R"] = sampled_z - legal_upper
+            diag["overshoot_fraction_of_width"] = (sampled_z - legal_upper) / max(prior_up + prior_down, 1e-12)
+
+        age_next = float(state["episode_age"]) + 1.0
+        for side in ("upper", "lower"):
+            res_key = "uresid" if side == "upper" else "lresid"
+            start_newest_age = float(np.expm1(state[f"{side}_newest_log_age"]))
+            expected_age = start_newest_age + age_next
+            residual_lower_bound = -float(np.log1p(expected_age))
+            sampled_residual = float(z[res_key])
+            actual_age = float(np.expm1(sampled_residual + np.log1p(expected_age)))
+            diag[f"{side}_start_newest_age"] = start_newest_age
+            diag[f"{side}_age_next_index"] = age_next
+            diag[f"{side}_expected_age"] = expected_age
+            diag[f"{side}_residual_lower_bound"] = residual_lower_bound
+            diag[f"{side}_sampled_residual"] = sampled_residual
+            diag[f"{side}_actual_age"] = actual_age
+            if violation == "TRANSITION_NEGATIVE_NEWEST_AGE":
+                diag[f"{side}_residual_overshoot"] = residual_lower_bound - sampled_residual
+    except Exception as e:  # never let diagnostics crash the rollout bookkeeping
+        diag["diagnostic_error"] = str(e)
+    return diag
 
 
 def reset_to_start(r: Dict[str, Any], endpoint_mask: int) -> Tuple[Dict[str, Any], Optional[str]]:
@@ -1606,7 +1775,8 @@ def run_single_episode_rollout(init_state: Dict[str, Any],
             worst["train_feature_min"] = dg.get("train_feature_min")
             worst["train_feature_max"] = dg.get("train_feature_max")
 
-    def _result(status, violation, duration, endpoint_mask=None):
+    def _result(status, violation, duration, endpoint_mask=None,
+                failure_step=None, failure_diagnostics=None):
         return dict(
             status=status,
             duration=duration,
@@ -1615,8 +1785,8 @@ def run_single_episode_rollout(init_state: Dict[str, Any],
                             if status == "TERMINAL" else None),
             terminal_full_state=(dict(state) if status == "TERMINAL" else None),
             violation=violation,
-            failure_step=None,
-            failure_diagnostics=None,
+            failure_step=failure_step,
+            failure_diagnostics=failure_diagnostics,
             max_extrapolation_ratio_seen=max_extr,
             first_outside_train_step=first_outside_step,
             max_abs_design_seen=max_abs_design,
@@ -1644,7 +1814,8 @@ def run_single_episode_rollout(init_state: Dict[str, Any],
 
             nxt_state, violation = advance_nonterminal(state, z_single)
             if violation is not None:
-                return _result("INVALID", violation, dur)
+                _diag = build_transition_failure_diagnostics(state, z_single, violation, trans_sampler)
+                return _result("INVALID", violation, dur, failure_step=dur, failure_diagnostics=_diag)
             state = nxt_state
     except RolloutSupportError as exc:
         return dict(
@@ -2715,12 +2886,286 @@ def run_stability_probe(obs_sample_path: Path, transitions_path: Path, ep_meta_p
     return summ
 
 
+# ===========================================================================
+# DYNAMIC-PGM-1C.1A -- Conditional Support / Prefailure Audit
+# ===========================================================================
+def compute_observed_state_support_probs(ev: pd.DataFrame,
+                                         trans_sampler: "FittedTransitionSampler") -> Dict[str, np.ndarray]:
+    """Analytic model-implied illegal probability on observed nonterminal states.
+
+    Combines the fitted transition heads with the state-conditioned legal intervals:
+      - p_geometry_invalid = P(z_d_up < -d_U) + P(z_d_up > d_D)
+      - p_{side}_age_invalid = p_active * P(logv > log(log1p(expected_age)))
+      - p_any_age_invalid = 1 - prod(1 - p_side)   [current conditional-independence factorization]
+      - p_physical_invalid_approx = 1 - (1 - p_geom) * (1 - p_any_age)
+            [approx_under_current_conditional_independence -- NOT a new model]
+    All probabilities analytic (Gaussian CDF); no Monte Carlo.
+    """
+    moms = trans_sampler.analytic_conditional_support(ev)
+    prior_up = ev["cur_up_distance_R"].to_numpy(np.float64)
+    prior_down = ev["cur_down_distance_R"].to_numpy(np.float64)
+    p_low, p_high, p_geom = gaussian_geometry_invalid_prob(
+        moms["z_d_up_mu"], float(moms["z_d_up_sigma"][0]), prior_up, prior_down)
+    p_up_distance_negative = p_low
+    p_down_distance_negative = p_high
+    p_geometry_invalid = p_geom
+
+    p_age: Dict[str, np.ndarray] = {}
+    for side in ("upper", "lower"):
+        new_log = ev[f"{side}_newest_log_age"].to_numpy(np.float64)
+        elog = ev["elapsed_log"].to_numpy(np.float64)
+        expected_age = np.expm1(new_log) + np.expm1(elog)
+        log_q_max = np.log(np.log1p(expected_age))
+        p_age[side] = hurdle_negative_age_invalid_prob(
+            moms[f"{side}_p_active"], moms[f"{side}_mu_logv"],
+            float(moms[f"{side}_sigma_logv"][0]), log_q_max)
+
+    p_upper_age_invalid = p_age["upper"]
+    p_lower_age_invalid = p_age["lower"]
+    p_any_age_invalid = 1.0 - (1.0 - p_upper_age_invalid) * (1.0 - p_lower_age_invalid)
+    p_physical_invalid_approx = 1.0 - (1.0 - p_geometry_invalid) * (1.0 - p_any_age_invalid)
+    return dict(
+        p_up_distance_negative=p_up_distance_negative,
+        p_down_distance_negative=p_down_distance_negative,
+        p_geometry_invalid=p_geometry_invalid,
+        p_upper_age_invalid=p_upper_age_invalid,
+        p_lower_age_invalid=p_lower_age_invalid,
+        p_any_age_invalid=p_any_age_invalid,
+        p_physical_invalid_approx=p_physical_invalid_approx,
+    )
+
+
+def audit_conditional_support_on_observed_states(transitions_path: Path,
+                                                 windows: Optional[List[Dict[str, Any]]] = None,
+                                                 geom_tol: float = 1e-10,
+                                                 age_tol: float = 1e-6) -> Dict[str, Any]:
+    """DYNAMIC-PGM-1C.1A observed-state conditional-support audit (no recursive rollout).
+
+    Uses the frozen eval transition dataset (all rows are real hazard==0 nonterminal
+    transitions). Two checks:
+      (F) Empirical hard audit -- every real transition MUST satisfy the joint
+          state-conditioned constraints; otherwise our reconstruction formula is wrong
+          and we STOP (do not proceed to the model audit).
+      (G) Analytic model-implied illegal probability on each observed state.
+    Returns per-window OBSERVED-STATE MODEL-IMPLIED SUPPORT RISK.
+    """
+    windows = windows or WINDOWS
+    df = pd.read_parquet(transitions_path)
+    out: Dict[str, Any] = {}
+    for w in windows:
+        wname = w["name"]
+        ev = df[df["block"] == w["eval"]].reset_index(drop=True)
+        n = len(ev)
+
+        # ---- (F) empirical hard audit on REAL transitions ----
+        prior_up = ev["cur_up_distance_R"].to_numpy(np.float64)
+        prior_down = ev["cur_down_distance_R"].to_numpy(np.float64)
+        z_obs = ev["z_d_up"].to_numpy(np.float64)
+        geom_viol = int(np.sum(~((z_obs >= -prior_up - geom_tol) & (z_obs <= prior_down + geom_tol))))
+        up_age_viol = lo_age_viol = up_res_viol = lo_res_viol = 0
+        for side in ("upper", "lower"):
+            new_log = ev[f"{side}_newest_log_age"].to_numpy(np.float64)
+            resid = ev[f"{side}_newest_log_age_residual"].to_numpy(np.float64)
+            elog = ev["elapsed_log"].to_numpy(np.float64)
+            expected_age = np.expm1(new_log) + np.expm1(elog)
+            actual_age = np.expm1(resid + np.log1p(expected_age))
+            res_lb = -np.log1p(expected_age)
+            if side == "upper":
+                up_age_viol = int(np.sum(actual_age < -age_tol))
+                up_res_viol = int(np.sum(resid < res_lb - age_tol))
+            else:
+                lo_age_viol = int(np.sum(actual_age < -age_tol))
+                lo_res_viol = int(np.sum(resid < res_lb - age_tol))
+        if geom_viol or up_age_viol or lo_age_viol or up_res_viol or lo_res_viol:
+            raise SystemExit(
+                f"STOP_DYNAMIC_PGM1C_AUDIT_OBSERVED_CONSTRAINT_VIOLATION: "
+                f"window={wname} geom={geom_viol} up_age={up_age_viol} lo_age={lo_age_viol} "
+                f"up_res={up_res_viol} lo_res={lo_res_viol}")
+
+        # ---- (G) analytic model-implied illegal probability ----
+        fitted = fit_samplers_for_window(w, CACHE / "dynamic_pgm1b_sample.parquet", transitions_path)
+        trans_s = fitted["trans_samplers"]["MC_STATE_CURREENCODING"]
+        p = compute_observed_state_support_probs(ev, trans_s)
+
+        def _dist(a: np.ndarray) -> Dict[str, float]:
+            a = np.asarray(a, dtype=np.float64)
+            return dict(mean=float(np.mean(a)), median=float(np.median(a)),
+                        p90=float(np.percentile(a, 90)), p95=float(np.percentile(a, 95)),
+                        p99=float(np.percentile(a, 99)), max=float(np.max(a)),
+                        sum_expected_invalid=float(np.sum(a)))
+
+        per_symbol: Dict[str, Any] = {}
+        for sym in sorted(ev["symbol"].unique()):
+            m = (ev["symbol"].to_numpy() == sym)
+            per_symbol[sym] = dict(
+                n=int(np.sum(m)),
+                mean_geometry=float(np.mean(p["p_geometry_invalid"][m])),
+                p90_geometry=float(np.percentile(p["p_geometry_invalid"][m], 90)),
+                expected_geometry=float(np.sum(p["p_geometry_invalid"][m])),
+                mean_any_age=float(np.mean(p["p_any_age_invalid"][m])),
+                p90_any_age=float(np.percentile(p["p_any_age_invalid"][m], 90)),
+                expected_any_age=float(np.sum(p["p_any_age_invalid"][m])),
+                mean_physical=float(np.mean(p["p_physical_invalid_approx"][m])),
+                expected_physical=float(np.sum(p["p_physical_invalid_approx"][m])),
+            )
+
+        out[wname] = dict(
+            n=n,
+            observed_geometry_support_violations=geom_viol,
+            observed_upper_age_support_violations=up_age_viol,
+            observed_lower_age_support_violations=lo_age_viol,
+            observed_upper_residual_support_violations=up_res_viol,
+            observed_lower_residual_support_violations=lo_res_viol,
+            p_up_distance_negative=_dist(p["p_up_distance_negative"]),
+            p_down_distance_negative=_dist(p["p_down_distance_negative"]),
+            p_geometry_invalid=_dist(p["p_geometry_invalid"]),
+            p_upper_age_invalid=_dist(p["p_upper_age_invalid"]),
+            p_lower_age_invalid=_dist(p["p_lower_age_invalid"]),
+            p_any_age_invalid=_dist(p["p_any_age_invalid"]),
+            p_physical_invalid_approx=_dist(p["p_physical_invalid_approx"]),
+            per_symbol=per_symbol,
+        )
+    return out
+
+
+def _print_observed_support_audit(obs_audit: Dict[str, Any]) -> None:
+    print("\n==================================================", flush=True)
+    print("DYNAMIC-PGM-1C.1A OBSERVED-STATE MODEL-IMPLIED SUPPORT RISK", flush=True)
+    print("(analytic illegal probability assigned by one-step heads on real nonterminal states)", flush=True)
+    print("==================================================", flush=True)
+    for wname, d in obs_audit.items():
+        print(f"\n--- window {wname} (n_observed={d['n']}) ---", flush=True)
+        print(f"  observed support violations (expect 0): "
+              f"geom={d['observed_geometry_support_violations']} "
+              f"up_age={d['observed_upper_age_support_violations']} "
+              f"lo_age={d['observed_lower_age_support_violations']}", flush=True)
+        for key in ("p_geometry_invalid", "p_any_age_invalid", "p_physical_invalid_approx"):
+            s = d[key]
+            print(f"  {key}: mean={s['mean']:.4e} median={s['median']:.4e} "
+                  f"p90={s['p90']:.4e} p99={s['p99']:.4e} max={s['max']:.4e} "
+                  f"sum_expected_invalid={s['sum_expected_invalid']:.4f}", flush=True)
+
+
+SUPPORT_COUPLING_DIAG_KEYS = (
+    "prior_up_distance_R", "prior_down_distance_R", "corridor_width_R", "sampled_z_d_up",
+    "legal_z_lower", "legal_z_upper", "next_up_distance_R", "next_down_distance_R",
+    "overshoot_R", "overshoot_fraction_of_width",
+    "upper_start_newest_age", "upper_age_next_index", "upper_expected_age",
+    "upper_residual_lower_bound", "upper_sampled_residual", "upper_actual_age", "upper_residual_overshoot",
+    "lower_start_newest_age", "lower_age_next_index", "lower_expected_age",
+    "lower_residual_lower_bound", "lower_sampled_residual", "lower_actual_age", "lower_residual_overshoot",
+)
+
+
+def run_support_coupling_probe(obs_sample_path: Path, transitions_path: Path, ep_meta_path: Path) -> Dict[str, Any]:
+    """DYNAMIC-PGM-1C.1A conditional-support / prefailure audit (isolated diagnostic mode).
+
+    Fixed scale (mirrors stability probe): W1 only, both windows, 15 symbols,
+    <=64 observed starts per symbol, 1 rep, MAX_EPISODE_BARS=512, fixed seed.
+    Fully isolated from the formal 1C verdict. Outputs:
+      dynamic_pgm1c_support_coupling_observed.csv  (per observed-state analytic risk)
+      dynamic_pgm1c_support_coupling_rollout.csv   (per-rollout realized failure + prefailure diagnostics)
+      dynamic_pgm1c_support_coupling_summary.json  (OBSERVED-STATE vs RECURSIVE distinction)
+    NOTE: not executed in the 1C.1A implementation round (per task scope).
+    """
+    PROBE_REPS = 1
+    PROBE_STARTS_PER_SYMBOL = 64
+    observed_rows: List[Dict[str, Any]] = []
+    rollout_rows: List[Dict[str, Any]] = []
+
+    for w in WINDOWS:
+        wname = w["name"]
+        fitted = fit_samplers_for_window(w, obs_sample_path, transitions_path)
+        term_s = fitted["term_samplers"]["T0_STATE_AVAIL"]
+        trans_s = fitted["trans_samplers"]["MC_STATE_CURREENCODING"]
+
+        # ---- observed-state analytic audit ----
+        df_trans = pd.read_parquet(transitions_path)
+        ev = df_trans[df_trans["block"] == w["eval"]].reset_index(drop=True)
+        p = compute_observed_state_support_probs(ev, trans_s)
+        for i in range(len(ev)):
+            observed_rows.append(dict(
+                window=wname,
+                symbol=ev["symbol"].iloc[i],
+                episode_id=str(ev["episode_id"].iloc[i]) if "episode_id" in ev.columns else "",
+                p_geometry_invalid=float(p["p_geometry_invalid"][i]),
+                p_up_distance_negative=float(p["p_up_distance_negative"][i]),
+                p_down_distance_negative=float(p["p_down_distance_negative"][i]),
+                p_upper_age_invalid=float(p["p_upper_age_invalid"][i]),
+                p_lower_age_invalid=float(p["p_lower_age_invalid"][i]),
+                p_any_age_invalid=float(p["p_any_age_invalid"][i]),
+                p_physical_invalid_approx=float(p["p_physical_invalid_approx"][i]),
+            ))
+
+        # ---- recursive rollout with prefailure diagnostics ----
+        obs = pd.read_parquet(obs_sample_path)
+        ep_meta = pd.read_parquet(ep_meta_path)
+        meta_slim = ep_meta[["symbol", "start_bar", "start_upper_price", "start_lower_price"]].drop_duplicates()
+        obs = obs.merge(meta_slim, on=["symbol", "start_bar"], how="left")
+        span = obs["start_upper_price"].to_numpy(np.float64) - obs["start_lower_price"].to_numpy(np.float64)
+        atr0 = span / obs["start_width_R"].to_numpy(np.float64)
+        obs["eps_R"] = 1e-9 / atr0
+        pair, first = exp1b.build_reset_pairs(obs)
+        ev_obs = obs[obs["block"] == w["eval"]].reset_index(drop=True)
+        ev_firsts = ev_obs[ev_obs["bar_t"] == ev_obs["start_bar"]].reset_index(drop=True)
+        syms = sorted(ev_firsts["symbol"].unique())
+        rng = np.random.default_rng(20260915)
+        for sym in syms:
+            sym_firsts = ev_firsts[ev_firsts["symbol"] == sym].reset_index(drop=True).head(PROBE_STARTS_PER_SYMBOL)
+            for fr_idx in range(len(sym_firsts)):
+                fr = sym_firsts.iloc[fr_idx]
+                st = build_observed_start_state(fr, fr["eps_R"])
+                ep_res = run_single_episode_rollout(st, trans_s, term_s, rng, MAX_EPISODE_BARS)
+                row = dict(
+                    window=wname, symbol=sym,
+                    episode_id=str(fr["episode_id"]),
+                    status=ep_res["status"], duration=ep_res["duration"],
+                    failure_step=ep_res.get("failure_step"), violation=ep_res["violation"],
+                )
+                diag = ep_res.get("failure_diagnostics") or {}
+                for k in SUPPORT_COUPLING_DIAG_KEYS:
+                    row[k] = diag.get(k)
+                rollout_rows.append(row)
+
+    OUT.mkdir(parents=True, exist_ok=True)
+    obs_df = pd.DataFrame(observed_rows)
+    obs_df.to_csv(OUT / f"{PREFIX}_support_coupling_observed.csv", index=False)
+    rol_df = pd.DataFrame(rollout_rows)
+    rol_df.to_csv(OUT / f"{PREFIX}_support_coupling_rollout.csv", index=False)
+
+    summ: Dict[str, Any] = {"observed_state_model_implied": {}, "recursive_realized": {}}
+    for w in WINDOWS:
+        wname = w["name"]
+        sub_obs = obs_df[obs_df["window"] == wname]
+        summ["observed_state_model_implied"][wname] = dict(
+            n_observed_states=int(len(sub_obs)),
+            mean_p_geometry_invalid=float(sub_obs["p_geometry_invalid"].mean()),
+            mean_p_any_age_invalid=float(sub_obs["p_any_age_invalid"].mean()),
+            mean_p_physical_invalid_approx=float(sub_obs["p_physical_invalid_approx"].mean()),
+            sum_expected_invalid=float(sub_obs["p_physical_invalid_approx"].sum()),
+        )
+        sub_rol = rol_df[rol_df["window"] == wname]
+        invalid = sub_rol[sub_rol["status"] == "INVALID"]
+        viol_breakdown = {k: int(v) for k, v in invalid["violation"].value_counts().to_dict().items()} if len(invalid) else {}
+        summ["recursive_realized"][wname] = dict(
+            n_rollouts=int(len(sub_rol)),
+            invalid=int(len(invalid)),
+            invalid_rate=(float(len(invalid) / len(sub_rol)) if len(sub_rol) else 0.0),
+            violation_breakdown=viol_breakdown,
+        )
+    (OUT / f"{PREFIX}_support_coupling_summary.json").write_text(json.dumps(summ, indent=2, default=str))
+    print(f"[SUPPORT-COUPLING PROBE COMPLETE] observed={len(obs_df)} rollout={len(rol_df)}", flush=True)
+    return summ
+
+
 def main():
     parser = argparse.ArgumentParser(description="DYNAMIC-PGM-1C Free-Run Rollout Closure")
     parser.add_argument("--audit-only", action="store_true", help="Run Stage C0 parity and closure audits only.")
     parser.add_argument("--smoke-test", action="store_true", help="Run tiny end-to-end stochastic smoke test through full pipeline.")
     parser.add_argument("--stability-probe", action="store_true",
                         help="Run closed-loop stability probe (diagnostic only, no formal gate).")
+    parser.add_argument("--support-coupling-probe", action="store_true",
+                        help="Run DYNAMIC-PGM-1C.1A conditional-support / prefailure audit (diagnostic only, isolated from formal 1C).")
     args = parser.parse_args()
 
     obs_sample_path = CACHE / "dynamic_pgm1b_sample.parquet"
@@ -2731,7 +3176,19 @@ def main():
     audit_res = run_dynamic_pgm1c_audit(obs_sample_path, transitions_path, ep_meta_path)
 
     if args.audit_only or os.environ.get("DYNAMIC_PGM1C_AUDIT_ONLY") == "1":
+        # DYNAMIC-PGM-1C.1A observed-state conditional-support audit (no recursive rollout)
+        try:
+            obs_audit = audit_conditional_support_on_observed_states(transitions_path)
+            _print_observed_support_audit(obs_audit)
+        except SystemExit as e:
+            print(f"[AUDIT] OBSERVED-CONSTRAINT VIOLATION -- aborting audit: {e}", flush=True)
+            raise
         print("[AUDIT-ONLY] Complete. Stopping before any stochastic rollout simulation.", flush=True)
+        return
+
+    if args.support_coupling_probe or os.environ.get("DYNAMIC_PGM1C_SUPPORT_COUPLING") == "1":
+        run_support_coupling_probe(obs_sample_path, transitions_path, ep_meta_path)
+        print("[SUPPORT-COUPLING-PROBE] Complete. Diagnostic only -- isolated from formal 1C; no formal verdict.", flush=True)
         return
 
     if args.stability_probe or os.environ.get("DYNAMIC_PGM1C_STABILITY_PROBE") == "1":

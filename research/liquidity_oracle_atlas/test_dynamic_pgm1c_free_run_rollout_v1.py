@@ -1472,6 +1472,214 @@ def test_61_c0_parity_and_missing_metadata():
     assert fitted["reset_samplers"]["R1_STATE_PHI"].allowed_nan_state == []
 
 
+# ===========================================================================
+# DYNAMIC-PGM-1C.1A -- Conditional Support / Prefailure Audit tests
+# ===========================================================================
+# A-1. geometry legal interval exact
+def test_62_geometry_legal_interval_exact():
+    lo, hi = C.geometry_legal_interval(0.2, 0.5)
+    assert lo == -0.2 and hi == 0.5
+    assert lo <= 0.1 <= hi
+
+
+# A-2. Gaussian geometry theoretical probability (mu=0, sigma=1, dU=dD=1 -> 2*(1-Phi(1)))
+def test_63_gaussian_geometry_theoretical_probability():
+    from scipy.stats import norm
+    mu = np.zeros(5); prior_up = np.ones(5); prior_down = np.ones(5)
+    p_low, p_high, p_geom = C.gaussian_geometry_invalid_prob(mu, 1.0, prior_up, prior_down)
+    expected = 2.0 * (1.0 - norm.cdf(1.0))
+    assert np.allclose(p_geom, expected, atol=1e-12)
+    assert np.allclose(p_low, 1.0 - norm.cdf(1.0), atol=1e-12)
+    assert np.allclose(p_high, 1.0 - norm.cdf(1.0), atol=1e-12)
+
+
+# A-3. UP negative prefailure diagnostics overshoot exact
+def test_64_up_negative_prefailure_overshoot_exact():
+    st = {"cur_up_distance_R": 0.5, "cur_down_distance_R": 2.0, "episode_age": 1,
+          "upper_newest_log_age": 1.0, "lower_newest_log_age": 1.0}
+    z = {"z_d_up": -0.8, "uresid": 0.0, "lresid": 0.0}
+    diag = C.build_transition_failure_diagnostics(st, z, "TRANSITION_UP_DISTANCE_NEGATIVE")
+    # next_up = 0.5 + (-0.8) = -0.3 < 0 -> overshoot = legal_lower - sampled = -0.5 - (-0.8) = 0.3
+    assert abs(diag["overshoot_R"] - 0.3) < 1e-12
+    assert np.isclose(diag["next_up_distance_R"], -0.3, atol=1e-12)
+    assert abs(diag["overshoot_fraction_of_width"] - 0.3 / 2.5) < 1e-12
+
+
+# A-4. DOWN negative prefailure diagnostics overshoot exact
+def test_65_down_negative_prefailure_overshoot_exact():
+    st = {"cur_up_distance_R": 2.0, "cur_down_distance_R": 0.5, "episode_age": 1,
+          "upper_newest_log_age": 1.0, "lower_newest_log_age": 1.0}
+    z = {"z_d_up": 0.8, "uresid": 0.0, "lresid": 0.0}
+    diag = C.build_transition_failure_diagnostics(st, z, "TRANSITION_DOWN_DISTANCE_NEGATIVE")
+    # next_down = 0.5 - 0.8 = -0.3 -> overshoot = sampled - legal_upper = 0.8 - 0.5 = 0.3
+    assert abs(diag["overshoot_R"] - 0.3) < 1e-12
+    assert np.isclose(diag["next_down_distance_R"], -0.3, atol=1e-12)
+
+
+# A-5. physical violation failure_step == dur
+def test_66_physical_violation_failure_step_equals_dur():
+    st = {
+        "start_up_distance_R": 1.0, "start_down_distance_R": 1.0,
+        "cur_up_distance_R": 0.05, "cur_down_distance_R": 1.95,
+        "path_max_up_excursion_R": 0.1, "path_max_down_excursion_R": 0.1,
+        "path_direction_change_rate": 0.5, "path_current_bar_range_R": 0.1,
+        "upper_newest_log_age": 1.0, "lower_newest_log_age": 1.0,
+        "upper_active_identity_count_delta": 0, "lower_active_identity_count_delta": 0,
+        "path_total_variation_R": 0.1, "episode_age": 1, "eps_R": 1e-4,
+        C.LAG_AVAIL: 0.0,
+    }
+
+    class FakeTerm:
+        def sample_hazard(self, df, rng): return np.array([False])
+        def sample_endpoint(self, df, rng): return np.array([1])
+
+    class FakeTransNegUp:
+        def sample_batch(self, df, rng):
+            return {"z_d_up": np.array([-0.2]), "dmfe": np.array([0.0]), "dmae": np.array([0.0]),
+                    "dcr": np.array([0.5]), "range": np.array([0.1]), "uresid": np.array([0.0]),
+                    "lresid": np.array([0.0]), "delta_upper_count": np.array([0]),
+                    "delta_lower_count": np.array([0])}
+
+    res = C.run_single_episode_rollout(st, FakeTransNegUp(), FakeTerm(), np.random.default_rng(1), max_bars=512)
+    assert res["status"] == "INVALID"
+    assert res["violation"] == "TRANSITION_UP_DISTANCE_NEGATIVE"
+    assert res["failure_step"] == 1
+    assert res["failure_diagnostics"]["violation"] == "TRANSITION_UP_DISTANCE_NEGATIVE"
+    assert res["failure_diagnostics"]["overshoot_R"] > 0
+
+
+# A-6. TERMINAL failure_step is None
+def test_67_terminal_failure_step_none():
+    st = {
+        "start_up_distance_R": 1.0, "start_down_distance_R": 1.0,
+        "cur_up_distance_R": 1.0, "cur_down_distance_R": 1.0,
+        "path_max_up_excursion_R": 0.1, "path_max_down_excursion_R": 0.1,
+        "path_direction_change_rate": 0.5, "path_current_bar_range_R": 0.1,
+        "upper_newest_log_age": 1.0, "lower_newest_log_age": 1.0,
+        "upper_active_identity_count_delta": 0, "lower_active_identity_count_delta": 0,
+        "path_total_variation_R": 0.1, "episode_age": 0, "eps_R": 1e-4,
+        C.LAG_AVAIL: 0.0,
+    }
+
+    class FakeTermFirst:
+        def sample_hazard(self, df, rng): return np.array([True])
+        def sample_endpoint(self, df, rng): return np.array([4])
+
+    res = C.run_single_episode_rollout(st, None, FakeTermFirst(), np.random.default_rng(1))
+    assert res["status"] == "TERMINAL"
+    assert res["failure_step"] is None
+
+
+# A-7. age residual lower bound reconstruction exact
+def test_68_age_residual_lower_bound_reconstruction():
+    exp_age, lb = C.age_expected_and_bound(1.0, 3)
+    actual = float(np.expm1(lb + np.log1p(exp_age)))
+    assert abs(actual) < 1e-12
+    assert np.expm1(lb - 0.5 + np.log1p(exp_age)) < 0
+
+
+# A-8. upper age theoretical invalid probability synthetic
+def test_69_upper_age_theoretical_invalid_probability():
+    p_active = np.array([0.5]); mu_logv = np.array([0.0]); log_q_max = np.array([0.0])
+    p = C.hurdle_negative_age_invalid_prob(p_active, mu_logv, 1.0, log_q_max)
+    assert abs(p[0] - 0.25) < 1e-12
+
+
+# A-9. lower age theoretical invalid probability synthetic
+def test_70_lower_age_theoretical_invalid_probability():
+    from scipy.stats import norm
+    p_active = np.array([1.0]); mu_logv = np.array([2.0]); log_q_max = np.array([0.0])
+    p = C.hurdle_negative_age_invalid_prob(p_active, mu_logv, 1.0, log_q_max)
+    expected = 1.0 - norm.cdf((0.0 - 2.0) / 1.0)
+    assert abs(p[0] - expected) < 1e-12
+
+
+# A-10. observed real transition geometry support audit == 0
+def test_71_observed_geometry_support_audit_zero():
+    if not C.TRANSITION_SAMPLE_PATH.exists():
+        return
+    df = pd.read_parquet(C.TRANSITION_SAMPLE_PATH)
+    w = base.WINDOWS[0]
+    ev = df[df["block"] == w["eval"]].reset_index(drop=True)
+    prior_up = ev["cur_up_distance_R"].to_numpy(float)
+    prior_down = ev["cur_down_distance_R"].to_numpy(float)
+    z = ev["z_d_up"].to_numpy(float)
+    viol = int(np.sum(~((z >= -prior_up - 1e-10) & (z <= prior_down + 1e-10))))
+    assert viol == 0
+
+
+# A-11. observed real transition age support audit == 0
+def test_72_observed_age_support_audit_zero():
+    if not C.TRANSITION_SAMPLE_PATH.exists():
+        return
+    df = pd.read_parquet(C.TRANSITION_SAMPLE_PATH)
+    w = base.WINDOWS[0]
+    ev = df[df["block"] == w["eval"]].reset_index(drop=True)
+    total = 0
+    for side in ("upper", "lower"):
+        new_log = ev[f"{side}_newest_log_age"].to_numpy(float)
+        resid = ev[f"{side}_newest_log_age_residual"].to_numpy(float)
+        elog = ev["elapsed_log"].to_numpy(float)
+        expected_age = np.expm1(new_log) + np.expm1(elog)
+        actual_age = np.expm1(resid + np.log1p(expected_age))
+        total += int(np.sum(actual_age < -1e-6))
+    assert total == 0
+
+
+# A-12. support-coupling CLI route does not enter formal 1C
+def test_73_support_coupling_cli_isolated_from_formal_1c():
+    calls = {"audit": False, "support": False, "full": False, "stability": False}
+
+    def fake_audit(*a, **k): calls["audit"] = True; return {}
+    def fake_support(*a, **k): calls["support"] = True; return {}
+    def fake_full(*a, **k): calls["full"] = True; return {}
+    def fake_stability(*a, **k): calls["stability"] = True; return {}
+
+    saved = {
+        "audit": C.run_dynamic_pgm1c_audit,
+        "support": C.run_support_coupling_probe,
+        "full": C.run_dynamic_pgm1c_full,
+        "stability": C.run_stability_probe,
+        "argv": sys.argv,
+    }
+    try:
+        C.run_dynamic_pgm1c_audit = fake_audit
+        C.run_support_coupling_probe = fake_support
+        C.run_dynamic_pgm1c_full = fake_full
+        C.run_stability_probe = fake_stability
+        sys.argv = ["exp", "--support-coupling-probe"]
+        C.main()
+    finally:
+        C.run_dynamic_pgm1c_audit = saved["audit"]
+        C.run_support_coupling_probe = saved["support"]
+        C.run_dynamic_pgm1c_full = saved["full"]
+        C.run_stability_probe = saved["stability"]
+        sys.argv = saved["argv"]
+    assert calls["support"] is True
+    assert calls["full"] is False
+    assert calls["stability"] is False
+
+
+# A-13. diagnostic helper does not sample / change RNG
+def test_74_diagnostic_helper_no_sampling():
+    st = {"cur_up_distance_R": 0.5, "cur_down_distance_R": 2.0, "episode_age": 1,
+          "upper_newest_log_age": 1.0, "lower_newest_log_age": 1.0}
+    z = {"z_d_up": -0.8, "uresid": 0.0, "lresid": 0.0}
+    diag = C.build_transition_failure_diagnostics(st, z, "TRANSITION_UP_DISTANCE_NEGATIVE")
+    diag2 = C.build_transition_failure_diagnostics(st, z, "TRANSITION_UP_DISTANCE_NEGATIVE")
+    assert diag == diag2  # deterministic, pure
+    assert "sampled_z_d_up" in diag
+    assert "overshoot_R" in diag
+
+
+# A-14. C0 frozen parity tolerance unchanged at 1e-8
+def test_75_c0_frozen_parity_tolerance():
+    assert C.PARITY_TOL == 1e-8
+    assert hasattr(C, "FROZEN_TRANSITION")
+    assert hasattr(C, "FROZEN_TERMINAL")
+    assert hasattr(C, "FROZEN_RESET")
+
+
 if __name__ == "__main__":
     import traceback
 
