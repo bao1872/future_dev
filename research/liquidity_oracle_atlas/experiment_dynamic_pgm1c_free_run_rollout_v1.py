@@ -109,17 +109,62 @@ def transition_design_check(X64: np.ndarray) -> Tuple[np.ndarray, Dict[str, Any]
     return X32, {}
 
 
-def safe_transform(pre: Any, df: pd.DataFrame, input_tag: str, design_tag: str) -> np.ndarray:
-    """Fail-closed preprocessing for terminal / reset samplers.
+def _derive_allowed_nan_cols(train_df: pd.DataFrame, num_cols: List[str]) -> List[str]:
+    """Auto-derive legitimate-missing (NaN) columns from the frozen training sample.
 
-    - raw numeric conditioning columns must be finite (else `input_tag`)
-    - preprocessor output must be finite (else `design_tag`)
-    Returns the dense float64 design matrix (unchanged semantics for predict_proba).
+    A numeric design column is a "legal missing" IFF it actually contains NaN in the
+    frozen training data -- i.e. the frozen imputer was fit to impute it. Purely
+    data-driven; no hand-picked columns.
     """
-    num = df.select_dtypes(include=[np.number])
-    arr = num.to_numpy(dtype=np.float64)
-    if arr.size and not np.all(np.isfinite(arr)):
-        raise RolloutSupportError(input_tag, {"n_nonfinite": int(np.sum(~np.isfinite(arr)))})
+    out: List[str] = []
+    for c in num_cols:
+        if c in train_df.columns and train_df[c].isna().any():
+            out.append(c)
+    return out
+
+
+def safe_transform(pre: Any, df: pd.DataFrame, input_tag: str, design_tag: str,
+                  numeric_cols: Optional[List[str]] = None,
+                  allowed_nan_cols: Optional[List[str]] = None) -> np.ndarray:
+    """Fail-closed preprocessing for terminal / reset samplers (frozen missing-value aware).
+
+    Only the model's numeric *design* columns are scanned (never the full state frame).
+      - +/-inf in any numeric design column is ALWAYS a support failure.
+      - NaN is a support failure UNLESS the column is in `allowed_nan_cols`
+        (legitimate missingness handled by the frozen imputer).
+      - preprocessor output must be fully finite (else `design_tag`).
+    No fillna / nan_to_num / clamp is applied here.
+    """
+    legacy = numeric_cols is None
+    allowed_nan_cols = set(allowed_nan_cols or [])
+    # None => legacy behaviour: scan ALL numeric columns of the frame, and any nonfinite
+    # value is a support failure (no allowed set). An explicit list enables the
+    # missing-value contract (inf always fails; NaN fails unless in allowed_nan_cols).
+    if legacy:
+        num = df.select_dtypes(include=[np.number])
+        if num.size:
+            arr = num.to_numpy(dtype=np.float64)
+            if not np.all(np.isfinite(arr)):
+                raise RolloutSupportError(input_tag, {
+                    "n_nonfinite": int(np.sum(~np.isfinite(arr)))})
+    elif numeric_cols:
+        sub = df[[c for c in numeric_cols if c in df.columns]]
+        num = sub.select_dtypes(include=[np.number])
+        if num.size:
+            arr = num.to_numpy(dtype=np.float64)
+            inf_mask = np.isinf(arr)
+            if np.any(inf_mask):
+                cols = list(num.columns)
+                bad = sorted({cols[j] for j in range(num.shape[1]) if inf_mask[:, j].any()})
+                raise RolloutSupportError(input_tag, {"n_inf": int(np.sum(inf_mask)),
+                                                      "bad_columns": bad})
+            nan_mask = np.isnan(arr)
+            if np.any(nan_mask):
+                cols = list(num.columns)
+                bad = sorted({cols[j] for j in range(num.shape[1])
+                              if nan_mask[:, j].any() and cols[j] not in allowed_nan_cols})
+                if bad:
+                    raise RolloutSupportError(input_tag, {"bad_nan_columns": bad})
     X = np.asarray(pbar.densify(pre.transform(df)), dtype=np.float64)
     if not np.all(np.isfinite(X)):
         raise RolloutSupportError(design_tag, {"n_nonfinite": int(np.sum(~np.isfinite(X)))})
@@ -624,20 +669,43 @@ class FittedTransitionSampler:
 class FittedTerminalSampler:
     """Fitted terminal sampler for T0 or T2."""
 
-    def __init__(self, tag: str, pipe: Any, theta: np.ndarray):
+    def __init__(self, tag: str, pipe: Any, theta: np.ndarray,
+                 num_cols: Optional[List[str]] = None,
+                 cat_cols: Optional[List[str]] = None,
+                 allowed_nan_cols: Optional[List[str]] = None):
         self.tag = tag
         self.pipe = pipe
         self.pre = pipe.named_steps["pre"]
         self.clf = pipe.named_steps["clf"]
         self.theta = theta
+        self.num_cols = list(num_cols) if num_cols is not None else None
+        self.cat_cols = list(cat_cols) if cat_cols is not None else None
+        self.design_cols = (self.num_cols or []) + (self.cat_cols or [])
+        self.allowed_nan_cols = list(allowed_nan_cols) if allowed_nan_cols is not None else []
+
+    def _design_df(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Restrict to the model's design columns; a missing numeric design column is
+        treated as legitimate 'no prior' missingness (NaN -> frozen imputer)."""
+        if not self.design_cols:
+            return df
+        present = [c for c in self.design_cols if c in df.columns]
+        out = df[present].copy()
+        for c in (self.num_cols or []):
+            if c not in df.columns:
+                out[c] = np.nan
+        return out
 
     def sample_hazard(self, df: pd.DataFrame, rng: np.random.Generator) -> np.ndarray:
-        X = safe_transform(self.pre, df, "TERMINAL_INPUT_NONFINITE", "TERMINAL_DESIGN_NONFINITE")
+        X = safe_transform(self.pre, self._design_df(df),
+                           "TERMINAL_INPUT_NONFINITE", "TERMINAL_DESIGN_NONFINITE",
+                           self.num_cols, self.allowed_nan_cols)
         p_h = self.clf.predict_proba(X)[:, 1]
         return rng.random(len(df)) < p_h
 
     def sample_endpoint(self, df: pd.DataFrame, rng: np.random.Generator) -> np.ndarray:
-        X = safe_transform(self.pre, df, "TERMINAL_INPUT_NONFINITE", "TERMINAL_DESIGN_NONFINITE")
+        X = safe_transform(self.pre, self._design_df(df),
+                           "TERMINAL_INPUT_NONFINITE", "TERMINAL_DESIGN_NONFINITE",
+                           self.num_cols, self.allowed_nan_cols)
         return sample_crf_endpoint(self.theta, X, rng)
 
 
@@ -646,7 +714,11 @@ class FittedResetSampler:
 
     def __init__(self, tag: str, occ_cols: List[str], state_cols: List[str],
                  pre_occ: Any, pre_state: Any, gap_occ_clf: Any,
-                 gap_p: float, heads: Dict[str, Any], count_occ_models: List[Any]):
+                 gap_p: float, heads: Dict[str, Any], count_occ_models: List[Any],
+                 occ_numeric_cols: Optional[List[str]] = None,
+                 state_numeric_cols: Optional[List[str]] = None,
+                 allowed_nan_occ: Optional[List[str]] = None,
+                 allowed_nan_state: Optional[List[str]] = None):
         self.tag = tag
         self.occ_cols = occ_cols
         self.state_cols = state_cols
@@ -657,13 +729,18 @@ class FittedResetSampler:
         self.heads = heads
         self.constant_rates = heads["count_rates"]
         self.count_occ_models = count_occ_models
+        self.occ_numeric_cols = list(occ_numeric_cols) if occ_numeric_cols else None
+        self.state_numeric_cols = list(state_numeric_cols) if state_numeric_cols else None
+        self.allowed_nan_occ = list(allowed_nan_occ) if allowed_nan_occ else []
+        self.allowed_nan_state = list(allowed_nan_state) if allowed_nan_state else []
 
     def sample_gap(self, df: pd.DataFrame, rng: np.random.Generator) -> np.ndarray:
         for c in self.occ_cols + MASK_CAT:
             if c not in df.columns:
                 raise SystemExit(f"STOP_DYNAMIC_PGM1C_RESET_INPUT_MISSING_COL: {c}")
         cols = self.occ_cols + MASK_CAT
-        X_occ = safe_transform(self.pre_occ, df[cols], "RESET_INPUT_NONFINITE", "RESET_DESIGN_NONFINITE")
+        X_occ = safe_transform(self.pre_occ, df[cols], "RESET_INPUT_NONFINITE", "RESET_DESIGN_NONFINITE",
+                               self.occ_numeric_cols, self.allowed_nan_occ)
         p_gap = self.gap_occ_clf.predict_proba(X_occ)[:, 1]
         has_gap = rng.random(len(df)) < p_gap
         gap_bars = np.zeros(len(df), dtype=np.int64)
@@ -684,12 +761,17 @@ class FittedResetSampler:
             if c not in df_state.columns:
                 raise SystemExit(f"STOP_DYNAMIC_PGM1C_RESET_INPUT_MISSING_COL: {c}")
         cols = self.state_cols + MASK_CAT
-        X_s = safe_transform(self.pre_state, df_state[cols], "RESET_INPUT_NONFINITE", "RESET_DESIGN_NONFINITE")
+        X_s = safe_transform(self.pre_state, df_state[cols], "RESET_INPUT_NONFINITE", "RESET_DESIGN_NONFINITE",
+                             self.state_numeric_cols, self.allowed_nan_state)
 
         # 1. Geometry 2D Gaussian
         log_geom = sample_gaussian(self.heads["geometry"], X_s, rng)
         d_u = np.exp(log_geom[:, 0])
         d_d = np.exp(log_geom[:, 1])
+        if not (np.all(np.isfinite(d_u)) and np.all(np.isfinite(d_d))):
+            raise RolloutSupportError("RESET_GEOMETRY_EXP_OVERFLOW", {
+                "n_nonfinite": int(np.sum(~np.isfinite(d_u)) + np.sum(~np.isfinite(d_d))),
+            })
 
         # 2. Logratio residual 1D Gaussian
         r_log = sample_gaussian(self.heads["logratio_residual"], X_s, rng)[:, 0]
@@ -1142,6 +1224,19 @@ def fit_samplers_for_window(w: Dict[str, Any], obs_sample_path: Path,
         pre = pipe.named_steps["pre"]
         p_h = pipe.predict_proba(ev[cols])[:, 1]
 
+        # Legitimate-missing contract: derive from the frozen training sample only.
+        allowed = _derive_allowed_nan_cols(tr, num_cols)
+        if tag == "T2_STATE_PHI_MEM":
+            # Hard assert: the two memory-count columns that build_observed_start_state
+            # sets to NaN on every first row MUST be in the training-derived legal-missing
+            # set (their frozen SimpleImputer handles them). If they are missing here, the
+            # rollout's first bar would be wrongly rejected as a support failure.
+            mem_must = [c for c in ("mem_z_delta_upper_count", "mem_z_delta_lower_count")
+                        if c in num_cols]
+            missing_legal = [c for c in mem_must if c not in allowed]
+            if missing_legal:
+                raise SystemExit(f"STOP_DYNAMIC_PGM1C_T2_LEGAL_MISSING_CONTRACT: {missing_legal}")
+
         Xtr = pbar.densify(pre.transform(tr[cols]))
         Xev = pbar.densify(pre.transform(ev[cols]))
         tt = tr["hazard"].to_numpy(np.int64) == 1
@@ -1151,11 +1246,14 @@ def fit_samplers_for_window(w: Dict[str, Any], obs_sample_path: Path,
         te = ev["hazard"].to_numpy(np.int64) == 1
         p_mask = pbar.predict_mask_prob(theta, Xev[te], with_pairs=True)
         met = ms.model_metrics(ev, p_h, p_mask, te)
+        met["allowed_nan_cols"] = allowed
         term_parity_eval[tag] = met
-        term_samplers[tag] = FittedTerminalSampler(tag, pipe, theta)
+        term_samplers[tag] = FittedTerminalSampler(
+            tag, pipe, theta, num_cols=num_cols, cat_cols=CAT, allowed_nan_cols=allowed
+        )
         print(f"  [TERMINAL {tag}] took {time.perf_counter() - t0:.2f}s "
               f"haz_nll={met['hazard_nll']:.6f} ep_joint={met['endpoint_joint_nll']:.6f} "
-              f"mean_ep={met['mean_episode_nll']:.6f}", flush=True)
+              f"mean_ep={met['mean_episode_nll']:.6f} allowed_nan={allowed}", flush=True)
 
     # 2. Reset Samplers
     pair, first = exp1b.build_reset_pairs(obs)
@@ -1236,9 +1334,16 @@ def fit_samplers_for_window(w: Dict[str, Any], obs_sample_path: Path,
                      + nll_geom + nll_rlog + nll_shape_age + nll_cnt)
 
         mean_res_nll = float(total_nll.mean())
-        reset_parity_eval[tag] = dict(mean_reset_nll=mean_res_nll)
+        # Reset has no pre-registered legal-missing predictor: allowed set is whatever
+        # the frozen training sample actually contains (empty when none do).
+        occ_allowed = _derive_allowed_nan_cols(ptr, occ_cols)
+        state_allowed = _derive_allowed_nan_cols(ptr, state_cols)
+        reset_parity_eval[tag] = dict(mean_reset_nll=mean_res_nll,
+                                      allowed_nan_cols={"occ": occ_allowed, "state": state_allowed})
         reset_samplers[tag] = FittedResetSampler(
-            tag, occ_cols, state_cols, pre_o, pre_s, clf_gap, gap_p, heads, reset_count_occ_models
+            tag, occ_cols, state_cols, pre_o, pre_s, clf_gap, gap_p, heads, reset_count_occ_models,
+            occ_numeric_cols=occ_cols, state_numeric_cols=state_cols,
+            allowed_nan_occ=occ_allowed, allowed_nan_state=state_allowed,
         )
         print(f"  [RESET {tag}] took {time.perf_counter() - t0:.2f}s "
               f"mean_reset_nll={mean_res_nll:.6f}", flush=True)
@@ -2586,6 +2691,8 @@ def run_stability_probe(obs_sample_path: Path, transitions_path: Path, ep_meta_p
         fs = invalid["failure_step"].dropna().astype(float)
         mer = sub["max_extrapolation_ratio_seen"].dropna().astype(float)
         fos = sub["first_outside_train_step"].dropna().astype(float)
+        wf = sub["worst_feature_name"].dropna().astype(str)
+        worst_feature_counts = {k: int(v) for k, v in wf.value_counts().to_dict().items()} if len(wf) else {}
         summ[wname] = dict(
             n_rollouts=n,
             terminal=int(len(terminal)),
@@ -2601,6 +2708,7 @@ def run_stability_probe(obs_sample_path: Path, transitions_path: Path, ep_meta_p
             first_outside_train_step_distribution=dict(
                 median=_p(fos, 50), p10=_p(fos, 10), p90=_p(fos, 90),
             ),
+            worst_feature_counts=worst_feature_counts,
         )
     (OUT / f"{PREFIX}_stability_probe_summary.json").write_text(json.dumps(summ, indent=2, default=str))
     print(f"[STABILITY PROBE COMPLETE] wrote {len(probe_df)} rows to {OUT}", flush=True)

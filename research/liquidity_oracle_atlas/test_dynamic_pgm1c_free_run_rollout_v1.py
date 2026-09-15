@@ -1267,6 +1267,211 @@ def test_51_c0_frozen_parity_preserved():
     assert audit["parity"]["all_passed"] is True
 
 
+# ---------------------------------------------------------------------------
+# Missing-value contract tests (narrow fix: frozen legitimate-missing vs real
+# generation-state nonfinite). Added this round.
+# ---------------------------------------------------------------------------
+def _load_one_start_state() -> Dict[str, Any]:
+    """Real observed first-row start state (mirrors the stability probe)."""
+    obs = pd.read_parquet(C.SAMPLE_PATH)
+    row = obs.iloc[0].to_dict()
+    return C.build_observed_start_state(row, 1e-3)
+
+
+def _reset_first_row() -> Dict[str, Any]:
+    """Use a real reset primitive from the observed data so reset_to_start yields a valid
+    (non-violating) first row."""
+    obs = pd.read_parquet(C.SAMPLE_PATH)
+    pair, _ = exp1b.build_reset_pairs(obs)
+    for _, rrow in pair.iterrows():
+        d = rrow.to_dict()
+        # build_reset_pairs does not emit start_log_ratio_residual; it is only stored in
+        # the state (does not affect eps_R validity), so default it.
+        if "start_log_ratio_residual" not in d:
+            d["start_log_ratio_residual"] = 0.0
+        st, viol = C.reset_to_start(d, int(rrow.get("prev_endpoint_mask", 1)))
+        if viol is None:
+            return st
+    raise AssertionError("no valid reset primitive found in sample")
+
+
+def test_52_t0_first_row_ignores_non_design_mem_nan():
+    """T0 does not consume the memory-count NaN columns; sample_hazard must succeed
+    even though the full state frame carries them as NaN."""
+    if not C.SAMPLE_PATH.exists():
+        return
+    df = pd.DataFrame([_load_one_start_state()])
+    t0 = get_window_a_fitted()["term_samplers"]["T0_STATE_AVAIL"]
+    ph = t0.sample_hazard(df, np.random.default_rng(0))
+    assert len(ph) == 1
+
+
+def test_53_t2_first_row_allows_frozen_mem_nan():
+    """T2 first row carries legitimate NaN memory counts; the frozen imputer must
+    absorb them and produce finite design, so sample_hazard succeeds."""
+    if not C.SAMPLE_PATH.exists():
+        return
+    df = pd.DataFrame([_load_one_start_state()])
+    t2 = get_window_a_fitted()["term_samplers"]["T2_STATE_PHI_MEM"]
+    assert "mem_z_delta_upper_count" in t2.allowed_nan_cols
+    assert "mem_z_delta_lower_count" in t2.allowed_nan_cols
+    ph = t2.sample_hazard(df, np.random.default_rng(0))
+    assert len(ph) == 1
+
+
+def test_54_reset_first_row_enters_terminal_samplers():
+    """A generated reset_to_start() first row (no memory columns at all) must be
+    usable by both T0 and T2 terminal samplers (missing design col -> 'no prior' NaN)."""
+    if not C.SAMPLE_PATH.exists():
+        return
+    df = pd.DataFrame([_reset_first_row()])
+    fitted = get_window_a_fitted()
+    t0 = fitted["term_samplers"]["T0_STATE_AVAIL"].sample_hazard(df, np.random.default_rng(1))
+    t2 = fitted["term_samplers"]["T2_STATE_PHI_MEM"].sample_hazard(df, np.random.default_rng(1))
+    assert len(t0) == 1 and len(t2) == 1
+
+
+def test_55_t2_core_nan_is_support_failure():
+    """A NaN in a genuine (non-allowed) T2 design column must still fail."""
+    if not C.SAMPLE_PATH.exists():
+        return
+    st = _load_one_start_state()
+    st["cur_up_distance_R"] = np.nan
+    df = pd.DataFrame([st])
+    t2 = get_window_a_fitted()["term_samplers"]["T2_STATE_PHI_MEM"]
+    raised = False
+    try:
+        t2.sample_hazard(df, np.random.default_rng(0))
+    except C.RolloutSupportError as e:
+        raised = True
+        assert e.reason == "TERMINAL_INPUT_NONFINITE"
+    assert raised, "expected TERMINAL_INPUT_NONFINITE on core-column NaN"
+
+
+def test_56_t2_mem_inf_is_support_failure():
+    """Inf in an allowed-missing column is NEVER tolerated (inf != legitimate missing)."""
+    if not C.SAMPLE_PATH.exists():
+        return
+    st = _load_one_start_state()
+    st["mem_z_delta_upper_count"] = np.inf
+    df = pd.DataFrame([st])
+    t2 = get_window_a_fitted()["term_samplers"]["T2_STATE_PHI_MEM"]
+    raised = False
+    try:
+        t2.sample_hazard(df, np.random.default_rng(0))
+    except C.RolloutSupportError as e:
+        raised = True
+        assert e.reason == "TERMINAL_INPUT_NONFINITE"
+    assert raised, "expected TERMINAL_INPUT_NONFINITE on inf in allowed-missing column"
+
+
+def test_57_transformed_design_nan_is_design_nonfinite():
+    """After imputation, a still-nonfinite transformed design must raise DESIGN_NONFINITE
+    (not be silently propagated)."""
+    class FakePreNaN:
+        def transform(self, df):
+            return np.array([[np.nan, 0.0]])
+
+    # finite input, but preprocessor output nonfinite -> DESIGN_NONFINITE
+    raised = False
+    try:
+        C.safe_transform(FakePreNaN(), pd.DataFrame({"a": [1.0]}),
+                         "TERMINAL_INPUT_NONFINITE", "TERMINAL_DESIGN_NONFINITE",
+                         numeric_cols=["a"], allowed_nan_cols=[])
+    except C.RolloutSupportError as e:
+        raised = True
+        assert e.reason == "TERMINAL_DESIGN_NONFINITE"
+    assert raised
+
+    # allowed-nan column with NaN input -> input check passes, but output still NaN -> DESIGN_NONFINITE
+    raised2 = False
+    try:
+        C.safe_transform(FakePreNaN(), pd.DataFrame({"a": [np.nan]}),
+                         "TERMINAL_INPUT_NONFINITE", "TERMINAL_DESIGN_NONFINITE",
+                         numeric_cols=["a"], allowed_nan_cols=["a"])
+    except C.RolloutSupportError as e:
+        raised2 = True
+        assert e.reason == "TERMINAL_DESIGN_NONFINITE"
+    assert raised2
+
+
+def test_58_reset_non_design_nan_ignored():
+    """NaN in a column outside the reset design set must not be mistaken for failure."""
+    class FakePreOk:
+        def transform(self, df):
+            return np.zeros((len(df), 1))
+
+    df = pd.DataFrame({"a": [1.0], "b": [np.nan]})  # 'b' is non-design
+    X = C.safe_transform(FakePreOk(), df, "RESET_INPUT_NONFINITE", "RESET_DESIGN_NONFINITE",
+                         numeric_cols=["a"], allowed_nan_cols=[])
+    assert X.shape == (1, 1)
+
+
+def test_59_reset_design_nan_is_support_failure():
+    """A NaN in a real reset design column (not in allowed set) must fail."""
+    class FakePreOk:
+        def transform(self, df):
+            return np.zeros((len(df), 1))
+
+    df = pd.DataFrame({"a": [np.nan]})
+    raised = False
+    try:
+        C.safe_transform(FakePreOk(), df, "RESET_INPUT_NONFINITE", "RESET_DESIGN_NONFINITE",
+                         numeric_cols=["a"], allowed_nan_cols=[])
+    except C.RolloutSupportError as e:
+        raised = True
+        assert e.reason == "RESET_INPUT_NONFINITE"
+    assert raised
+
+
+def test_60_reset_geometry_exp_overflow():
+    """exp() of an overflowing Gaussian geometry mean must raise RESET_GEOMETRY_EXP_OVERFLOW
+    (not leak to solve_eps_R as RESET_EPSR_INCOMPATIBLE)."""
+    class FakePreZero:
+        def transform(self, df):
+            return np.zeros((len(df), 3))
+
+    class FakeGeom:
+        B = np.zeros((3, 2))
+        intercept = np.array([1000.0, 1000.0])
+        k = 2
+        chol = np.zeros((2, 2))
+
+    s = C.FittedResetSampler(
+        "R1", [], [], FakePreZero(), FakePreZero(), None, 0.5,
+        {"geometry": FakeGeom(), "count_rates": np.array([0.5, 0.5])}, [],
+        occ_numeric_cols=[], state_numeric_cols=[],
+        allowed_nan_occ=[], allowed_nan_state=[],
+    )
+    cols = list(C.MASK_CAT) + ["gap_positive", "log1p_gap"]
+    df = pd.DataFrame({c: [0.0] for c in cols})
+    raised = False
+    try:
+        s.sample_reset_primitives(df, np.array([1]), np.random.default_rng(0))
+    except C.RolloutSupportError as e:
+        raised = True
+        assert e.reason == "RESET_GEOMETRY_EXP_OVERFLOW"
+    assert raised
+
+
+def test_61_c0_parity_and_missing_metadata():
+    """C0 frozen sampler parity stays <1e-8 AND the legitimate-missing contract is
+    recorded in sampler metadata / parity eval."""
+    if not (C.SAMPLE_PATH.exists() and C.TRANSITION_SAMPLE_PATH.exists() and C.EP_META_PATH.exists()):
+        return
+    audit = C.run_dynamic_pgm1c_audit(C.SAMPLE_PATH, C.TRANSITION_SAMPLE_PATH, C.EP_META_PATH)
+    assert audit["parity"]["all_passed"] is True
+    fitted = get_window_a_fitted()
+    t2_allowed = fitted["term_samplers"]["T2_STATE_PHI_MEM"].allowed_nan_cols
+    assert "mem_z_delta_upper_count" in t2_allowed
+    assert "mem_z_delta_lower_count" in t2_allowed
+    assert fitted["term_samplers"]["T0_STATE_AVAIL"].allowed_nan_cols == []
+    # recorded in parity eval metadata
+    assert "mem_z_delta_upper_count" in fitted["term_parity"]["T2_STATE_PHI_MEM"]["allowed_nan_cols"]
+    # reset has no pre-registered legal-missing set
+    assert fitted["reset_samplers"]["R1_STATE_PHI"].allowed_nan_state == []
+
+
 if __name__ == "__main__":
     import traceback
 
