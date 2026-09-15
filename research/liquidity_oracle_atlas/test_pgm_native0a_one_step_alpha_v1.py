@@ -2,9 +2,9 @@
 test_pgm_native0a_one_step_alpha_v1.py
 ======================================
 
-Unit tests for PGM-NATIVE-0A.2 Formal Runner + Fail-Closed Data Ownership.
+Unit tests for PGM-NATIVE-0A.3 Final Formal Gate.
 
-Covers 41 required tests per Section XI:
+Covers 43 required tests:
   1. BASE_SHA is ancestor of HEAD
   2. strategy universe sourced from pgm.SAMPLE_PATH
   3. strategy universe includes hazard==0 AND hazard==1
@@ -46,11 +46,14 @@ Covers 41 required tests per Section XI:
   39. formal verdict only consumes TB3 bootstrap
   40. formal output scope contains all required limitations
   41. formal wiring testable via pipeline helper; run_formal without authorization raises SystemExit
+  42. formal calls atr0 owner parity before model fit
+  43. formal summary contains both artifact hashes and atr0 owner error
 """
 
 from __future__ import annotations
 
 import inspect
+import json
 import os
 import shutil
 import subprocess
@@ -79,7 +82,7 @@ import research.liquidity_oracle_atlas.experiment_dynamic_pgm1a1b_count_magnitud
 # 1. BASE_SHA is Ancestor of HEAD
 # ===========================================================================
 def test_1_base_sha_is_ancestor_of_head():
-    assert exp.BASE_SHA == "3b68cf988796992ba47eb018ac8db52e81289756"
+    assert exp.BASE_SHA == "e057776b1b5560088c298033483c2f8328be1b96"
     res = subprocess.run(
         ["git", "merge-base", "--is-ancestor", exp.BASE_SHA, "HEAD"],
         cwd=str(_REPO_ROOT),
@@ -805,6 +808,164 @@ def test_41_formal_wiring_testable_via_pipeline_helper():
 
 
 # ===========================================================================
+# 42. Formal Calls ATR0 Owner Parity Before Model Fit
+# ===========================================================================
+def test_42_formal_calls_atr0_owner_parity_before_model_fit():
+    class ParitySentinel(SystemExit):
+        pass
+
+    fit_call_count = 0
+
+    def mock_fit(*args, **kwargs):
+        nonlocal fit_call_count
+        fit_call_count += 1
+        raise RuntimeError("fit_samplers_for_window should NOT be called before parity check!")
+
+    def mock_load_obs():
+        return pd.DataFrame({"symbol": ["AG"], "bar_t": [1], "hazard": [0], "atr0": [1.0]})
+
+    def mock_audit_universe(df):
+        pass
+
+    def mock_load_trans():
+        return {"cur": pd.DataFrame({"symbol": ["AG"], "episode_id": [0], "bar_t": [1], "atr0": [1.0]})}
+
+    def mock_audit_parity(obs, cur):
+        raise ParitySentinel("STOP_PGM_NATIVE_ATR0_OWNER_PARITY_SENTINEL_TRIGGERED")
+
+    orig_load_obs = exp.load_observed_decision_universe
+    orig_audit_universe = exp.audit_decision_universe
+    orig_load_trans = exp.load_transition_truth_audit
+    orig_audit_parity = exp.audit_atr0_owner_parity
+    orig_fit = pgm.fit_samplers_for_window
+
+    old_env = os.environ.get("AUTHORIZE_PGM_NATIVE_FORMAL")
+    os.environ["AUTHORIZE_PGM_NATIVE_FORMAL"] = "1"
+
+    caught_sentinel = False
+    try:
+        exp.load_observed_decision_universe = mock_load_obs
+        exp.audit_decision_universe = mock_audit_universe
+        exp.load_transition_truth_audit = mock_load_trans
+        exp.audit_atr0_owner_parity = mock_audit_parity
+        pgm.fit_samplers_for_window = mock_fit
+
+        exp.run_formal()
+    except ParitySentinel:
+        caught_sentinel = True
+    finally:
+        exp.load_observed_decision_universe = orig_load_obs
+        exp.audit_decision_universe = orig_audit_universe
+        exp.load_transition_truth_audit = orig_load_trans
+        exp.audit_atr0_owner_parity = orig_audit_parity
+        pgm.fit_samplers_for_window = orig_fit
+        if old_env is not None:
+            os.environ["AUTHORIZE_PGM_NATIVE_FORMAL"] = old_env
+        else:
+            os.environ.pop("AUTHORIZE_PGM_NATIVE_FORMAL", None)
+
+    assert caught_sentinel, "Expected ParitySentinel from audit_atr0_owner_parity in run_formal"
+    assert fit_call_count == 0, f"fit_samplers_for_window called {fit_call_count} times, expected 0"
+
+
+# ===========================================================================
+# 43. Formal Summary Contains Both Artifact Hashes and ATR0 Owner Error
+# ===========================================================================
+def test_43_formal_summary_contains_both_artifact_hashes_and_atr0_owner_error():
+    class DummySampler:
+        def analytic_conditional_support(self, df):
+            return {"z_d_up_mu": np.linspace(-1.0, 1.0, len(df))}
+
+    rows = []
+    for blk in ["TB2", "TB3"]:
+        for sym in exp.EXPECTED_SYMBOLS:
+            rows.append({"block": blk, "symbol": sym, "hazard": 0, "bar_t": 10, "atr0": 1.0})
+            rows.append({"block": blk, "symbol": sym, "hazard": 1, "bar_t": 20, "atr0": 1.0})
+    obs_mock = pd.DataFrame(rows)
+    mock_bars = {
+        sym: {
+            "n": 100, "disc": np.zeros(100, dtype=bool),
+            "day": np.array(["2026-01-01"] * 100, dtype="datetime64[us]"),
+            "c": np.ones(100) * 10.0, "o": np.ones(100) * 10.0,
+        }
+        for sym in exp.EXPECTED_SYMBOLS
+    }
+
+    test_atr0_err = 1.23e-14
+    with tempfile.TemporaryDirectory() as tmpdir:
+        res = exp.execute_formal_pipeline(
+            obs=obs_mock,
+            bars_by_sym=mock_bars,
+            cur_truth=pd.DataFrame(),
+            mc_A=DummySampler(),
+            mc_B=DummySampler(),
+            n_boot=10,
+            output_dir=Path(tmpdir),
+            max_abs_atr0_owner_error=test_atr0_err,
+        )
+
+        assert "sample_artifact_sha256" in res
+        assert "transition_artifact_sha256" in res
+        assert "max_abs_atr0_owner_error" in res
+
+        assert len(res["sample_artifact_sha256"]) == 64
+        assert res["sample_artifact_sha256"] != "N/A"
+        assert len(res["transition_artifact_sha256"]) == 64
+        assert res["transition_artifact_sha256"] != "N/A"
+        assert res["max_abs_atr0_owner_error"] == test_atr0_err
+
+        # Check saved JSON file
+        summary_file = Path(tmpdir) / "pgm_native0a1_formal_summary.json"
+        assert summary_file.exists()
+        saved = json.loads(summary_file.read_text())
+        assert saved["sample_artifact_sha256"] == res["sample_artifact_sha256"]
+        assert saved["transition_artifact_sha256"] == res["transition_artifact_sha256"]
+        assert saved["max_abs_atr0_owner_error"] == test_atr0_err
+
+    # Test missing sample artifact -> STOP_PGM_NATIVE_SAMPLE_ARTIFACT_MISSING
+    orig_sample_path = pgm.SAMPLE_PATH
+    try:
+        pgm.SAMPLE_PATH = Path("/nonexistent/sample.parquet")
+        failed_sample = False
+        try:
+            exp.execute_formal_pipeline(
+                obs=obs_mock,
+                bars_by_sym=mock_bars,
+                cur_truth=pd.DataFrame(),
+                mc_A=DummySampler(),
+                mc_B=DummySampler(),
+                n_boot=10,
+            )
+        except SystemExit as e:
+            failed_sample = True
+            assert "STOP_PGM_NATIVE_SAMPLE_ARTIFACT_MISSING" in str(e)
+        assert failed_sample, "Expected STOP_PGM_NATIVE_SAMPLE_ARTIFACT_MISSING"
+    finally:
+        pgm.SAMPLE_PATH = orig_sample_path
+
+    # Test missing transition artifact -> STOP_PGM_NATIVE_TRANSITION_ARTIFACT_MISSING
+    orig_trans_path = pgm.TRANSITION_SAMPLE_PATH
+    try:
+        pgm.TRANSITION_SAMPLE_PATH = Path("/nonexistent/trans.parquet")
+        failed_trans = False
+        try:
+            exp.execute_formal_pipeline(
+                obs=obs_mock,
+                bars_by_sym=mock_bars,
+                cur_truth=pd.DataFrame(),
+                mc_A=DummySampler(),
+                mc_B=DummySampler(),
+                n_boot=10,
+            )
+        except SystemExit as e:
+            failed_trans = True
+            assert "STOP_PGM_NATIVE_TRANSITION_ARTIFACT_MISSING" in str(e)
+        assert failed_trans, "Expected STOP_PGM_NATIVE_TRANSITION_ARTIFACT_MISSING"
+    finally:
+        pgm.TRANSITION_SAMPLE_PATH = orig_trans_path
+
+
+# ===========================================================================
 # Test Runner
 # ===========================================================================
 if __name__ == "__main__":
@@ -815,7 +976,7 @@ if __name__ == "__main__":
     tests.sort(key=lambda fn: int(fn.__name__.split("_")[1]))
 
     ok = fail = 0
-    print(f"Running {len(tests)} unit tests for PGM-NATIVE-0A.2...\n")
+    print(f"Running {len(tests)} unit tests for PGM-NATIVE-0A.3...\n")
     for t in tests:
         try:
             t()

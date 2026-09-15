@@ -2,7 +2,7 @@
 experiment_pgm_native0a_one_step_alpha_v1.py
 ===========================================
 
-PGM-NATIVE-0A.2: Formal Runner + Fail-Closed Data Ownership
+PGM-NATIVE-0A.3: Final Formal Gate
 One-Step Tradable Alpha Probe on Frozen PGM Bar Sample
 
 PURPOSE & CAUSAL REPAIR
@@ -16,7 +16,7 @@ used as the decision universe. Because row t's hazard label in the frozen sample
 is H_{t+1} (an observation of whether the NEXT bar terminates the episode), filtering
 on hazard == 0 constituted future-label selection, discarding 37,987 hazard==1 rows (10.56%).
 
-In PGM-NATIVE-0A.1 and 0A.2, the trading decision universe is repaired to include ALL observation
+In PGM-NATIVE-0A.1, 0A.2, and 0A.3, the trading decision universe is repaired to include ALL observation
 rows from pgm.SAMPLE_PATH (both H_{t+1} == 0 and H_{t+1} == 1). The transition sample is
 degraded strictly to a MODEL TRAINING and TARGET AUDIT artifact.
 
@@ -87,8 +87,8 @@ import research.liquidity_oracle_atlas.experiment_dynamic_pgm1a1b_count_magnitud
 # ===========================================================================
 # Governance Constants
 # ===========================================================================
-BASE_SHA = "3b68cf988796992ba47eb018ac8db52e81289756"
-EXPERIMENT_NAME = "PGM-NATIVE-0A.2 -- Formal Runner + Fail-Closed Data Ownership"
+BASE_SHA = "e057776b1b5560088c298033483c2f8328be1b96"
+EXPERIMENT_NAME = "PGM-NATIVE-0A.3 -- Final Formal Gate"
 EXPERIMENT_SCOPE = "PGM_NATIVE_ONE_STEP_ALPHA_ON_FROZEN_PGM_BAR_SAMPLE"
 PREFIX = "pgm_native0a1"
 
@@ -861,8 +861,17 @@ def execute_formal_pipeline(
     n_boot: int = BOOTSTRAP_N,
     seed: int = BOOTSTRAP_SEED,
     output_dir: Optional[Path] = None,
+    max_abs_atr0_owner_error: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Execute formal pipeline from aligned observations to formal summary & CSVs."""
+    if not pgm.SAMPLE_PATH.exists():
+        raise SystemExit("STOP_PGM_NATIVE_SAMPLE_ARTIFACT_MISSING")
+    if not pgm.TRANSITION_SAMPLE_PATH.exists():
+        raise SystemExit("STOP_PGM_NATIVE_TRANSITION_ARTIFACT_MISSING")
+
+    sample_artifact_sha256 = hashlib.sha256(pgm.SAMPLE_PATH.read_bytes()).hexdigest()
+    transition_artifact_sha256 = hashlib.sha256(pgm.TRANSITION_SAMPLE_PATH.read_bytes()).hexdigest()
+
     aligned, align_aud = align_raw_bars_and_returns(obs, bars_by_sym, cur_truth=cur_truth)
     df_valid = aligned[aligned["is_entry_valid"]].copy()
 
@@ -904,7 +913,9 @@ def execute_formal_pipeline(
         "EXPERIMENT_SCOPE": EXPERIMENT_SCOPE,
         "base_sha": BASE_SHA,
         "run_head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=str(_REPO_ROOT), text=True).strip(),
-        "sample_artifact_sha256": hashlib.sha256(pgm.SAMPLE_PATH.read_bytes()).hexdigest() if pgm.SAMPLE_PATH.exists() else "N/A",
+        "sample_artifact_sha256": sample_artifact_sha256,
+        "transition_artifact_sha256": transition_artifact_sha256,
+        "max_abs_atr0_owner_error": float(max_abs_atr0_owner_error) if max_abs_atr0_owner_error is not None else 0.0,
         "n_all_obs": len(obs),
         "n_hazard0": int((obs["hazard"] == 0).sum()),
         "n_hazard1": int((obs["hazard"] == 1).sum()),
@@ -990,17 +1001,29 @@ def run_formal(output_dir: Optional[Path] = None) -> Dict[str, Any]:
     if res.returncode != 0:
         raise SystemExit(f"STOP_PGM_NATIVE_BASE_SHA_NOT_ANCESTOR: BASE_SHA {BASE_SHA} is not an ancestor of HEAD")
 
-    # 2. Decision universe & audit
+    # 2. Artifact existence checks
+    if not pgm.SAMPLE_PATH.exists():
+        raise SystemExit("STOP_PGM_NATIVE_SAMPLE_ARTIFACT_MISSING")
+    if not pgm.TRANSITION_SAMPLE_PATH.exists():
+        raise SystemExit("STOP_PGM_NATIVE_TRANSITION_ARTIFACT_MISSING")
+
+    # 3. Decision universe & audit
     obs = load_observed_decision_universe()
     audit_decision_universe(obs)
 
-    # 3. Transition truth
+    # 4. Transition truth
     trans_aud = load_transition_truth_audit()
 
-    # 4. Raw bars
+    # 5. ATR0 Owner Parity Gate (MUST OCCUR BEFORE ANY PGM MODEL FIT)
+    max_abs_atr0_owner_error = audit_atr0_owner_parity(
+        obs,
+        trans_aud["cur"],
+    )
+
+    # 6. Raw bars
     _, _, bars_by_sym = ex0.load_env()
 
-    # 5. Window A and Window B samplers
+    # 7. Window A and Window B samplers
     print("[FORMAL] Fitting Window A transition sampler...", flush=True)
     fit_A = pgm.fit_samplers_for_window(pgm.WINDOWS[0], pgm.SAMPLE_PATH, pgm.TRANSITION_SAMPLE_PATH)
     mc_A = fit_A["trans_samplers"]["MC_STATE_CURREENCODING"]
@@ -1021,6 +1044,7 @@ def run_formal(output_dir: Optional[Path] = None) -> Dict[str, Any]:
         n_boot=BOOTSTRAP_N,
         seed=BOOTSTRAP_SEED,
         output_dir=output_dir,
+        max_abs_atr0_owner_error=max_abs_atr0_owner_error,
     )
 
 
@@ -1030,7 +1054,7 @@ def run_formal(output_dir: Optional[Path] = None) -> Dict[str, Any]:
 def run_audit_only() -> None:
     """Execute static & data audit without fitting PGM models."""
     print("==================================================", flush=True)
-    print("PGM-NATIVE-0A.2: AUDIT-ONLY EXECUTION", flush=True)
+    print("PGM-NATIVE-0A.3: AUDIT-ONLY EXECUTION", flush=True)
     print("==================================================", flush=True)
 
     # 1. Base HEAD ancestor verification
@@ -1144,7 +1168,7 @@ def run_audit_only() -> None:
 def run_smoke_test() -> None:
     """Execute lightweight end-to-end smoke test on <= 512 rows per block sampled from ALL rows."""
     print("==================================================", flush=True)
-    print("PGM-NATIVE-0A.2: SMOKE TEST EXECUTION (<=512 rows/block on ALL rows)", flush=True)
+    print("PGM-NATIVE-0A.3: SMOKE TEST EXECUTION (<=512 rows/block on ALL rows)", flush=True)
     print("==================================================", flush=True)
     t0 = time.perf_counter()
 
