@@ -2,46 +2,57 @@
 experiment_pgm_native0a_one_step_alpha_v1.py
 ===========================================
 
-PGM-NATIVE-0A -- One-Step Tradable Alpha Probe
+PGM-NATIVE-0A.1: Causal Decision-Universe Repair
+One-Step Tradable Alpha Probe on Frozen PGM Bar Sample
 
-PURPOSE
--------
+PURPOSE & CAUSAL REPAIR
+-----------------------
 Directly test whether the current DYNAMIC-PGM 5m transition prediction has
-independent, tradable economic value after applying next-open execution constraints.
+independent, tradable economic value after applying next-open execution constraints,
+WITHOUT using future hazard labels to filter trading opportunities.
 
-Core research question:
-    "After conditioning on state S_t at bar t close, does the PGM's transition
-     prediction retain tradeable edge when execution can only occur at bar t+1 open?"
+In PGM-NATIVE-0A, the transition sample (pgm.TRANSITION_SAMPLE_PATH) was erroneously
+used as the decision universe. Because row t's hazard label in the frozen sample
+is H_{t+1} (an observation of whether the NEXT bar terminates the episode), filtering
+on hazard == 0 constituted future-label selection, discarding 37,987 hazard==1 rows (10.56%).
 
-The transition model predicts:
-    z_{d, t+1} = d_{U, t+1} - d_{U, t}
-    r^{CC}_{t+1} = (C_{t+1} - C_t) / ATR0_t == -z_{d, t+1}
+In PGM-NATIVE-0A.1, the trading decision universe is repaired to include ALL observation
+rows from pgm.SAMPLE_PATH (both H_{t+1} == 0 and H_{t+1} == 1). The transition sample is
+degraded strictly to a MODEL TRAINING and TARGET AUDIT artifact.
 
-The close-to-close return decomposes into:
-    r^{CC}_{t+1} = g_{t+1} + r^{trad}_{t+1}
-where:
-    g_{t+1} = (O_{t+1} - C_t) / ATR0_t      (untradeable next-open gap)
-    r^{trad}_{t+1} = (C_{t+1} - O_{t+1}) / ATR0_t  (tradeable open-to-close return)
+SCOPING & KNOWN LIMITATIONS
+---------------------------
+EXPERIMENT_SCOPE = "PGM_NATIVE_ONE_STEP_ALPHA_ON_FROZEN_PGM_BAR_SAMPLE"
 
-Primary PGM score:
-    s_t = -mu_{z, t} = -E[z_{d, t+1} | S_t]
-Native action:
-    a_t = +1 if s_t > 0 else (-1 if s_t < 0 else 0)
-Trade return:
+This experiment is NOT a prospective or live strategy validation.
+The frozen PGM bar sample itself historically excluded:
+  1. Cross-block episodes (end_block != start_block)
+  2. event_mask == 0 censored episodes (episodes without structural boundary hit)
+
+The research question answered here is:
+    "Within the frozen PGM bar sample, without using the true next-bar hazard label
+     to filter trading opportunities, does the PGM transition score have tradable
+     alpha after next-open execution?"
+
+Forbidden verdicts:
+    {"FULL_MARKET_OOS", "PROSPECTIVE_STRATEGY", "LIVE_READY", "FINAL_STRATEGY", "PROFITABLE_STRATEGY"}
+
+MATHEMATICAL MODEL
+------------------
+Transition head models conditional nonterminal expectation:
+    m(S_t) = E[-z_{d, t+1} | S_t, H_{t+1}=0]
+    score_mu = -mu_{z, t} = -E[z_{d, t+1} | S_t, H_{t+1}=0]
+
+The score is evaluated on ALL current PGM states S_t, regardless of whether H_{t+1} is 0 or 1:
+    s_t = m(S_t)
+    a_t = sign(s_t) = +1 if s_t > 0 else (-1 if s_t < 0 else 0)
+    r^{trad}_{t+1} = (C_{t+1} - O_{t+1}) / ATR0_t
     pi_t = a_t * r^{trad}_{t+1}
 
-This experiment does NOT:
-  * build a new backtester,
-  * train any economic model (no Ridge, no HGB, no RL),
-  * search thresholds / stop / target / horizons,
-  * prune symbols,
-  * use TB3 to tune any parameter,
-  * depend on V2 opportunities or R1-R4.
-
-EXPERIMENT SCOPE (hard-coded, never escalated)
-------------------------------------------------
-EXPERIMENT_SCOPE = "PGM_NATIVE_WITHIN_EPISODE_ONE_STEP_TRADABLE_ALPHA_PROBE"
-Forbidden verdicts: {"PROFITABLE_STRATEGY", "LIVE_READY", "FINAL_STRATEGY"}
+PRIMARY economic evaluation is computed across ALL valid observation rows.
+Hazard subgroups (H=0 vs H=1) are evaluated strictly for ex-post diagnostic bias estimation:
+    future_filter_EV_bias = EV_{H=0} - EV_{ALL}
+    future_filter_rho_trad_bias = rho_{trad, H=0} - rho_{trad, ALL}
 """
 
 from __future__ import annotations
@@ -76,12 +87,24 @@ import research.liquidity_oracle_atlas.experiment_dynamic_pgm1a1b_count_magnitud
 # ===========================================================================
 # Governance Constants
 # ===========================================================================
-BASE_SHA = "2bae5c6a86d8c563027597bd9a54b66fc824b5b4"
-EXPERIMENT_NAME = "PGM-NATIVE-0A -- One-Step Tradable Alpha Probe"
-EXPERIMENT_SCOPE = "PGM_NATIVE_WITHIN_EPISODE_ONE_STEP_TRADABLE_ALPHA_PROBE"
-PREFIX = "pgm_native0a"
+BASE_SHA = "29b96485f3272dc76df34dcd26b700d4a73aedce"
+EXPERIMENT_NAME = "PGM-NATIVE-0A.1 -- Causal Decision-Universe Repair"
+EXPERIMENT_SCOPE = "PGM_NATIVE_ONE_STEP_ALPHA_ON_FROZEN_PGM_BAR_SAMPLE"
+PREFIX = "pgm_native0a1"
 
-FORBIDDEN_VERDICTS = {"PROFITABLE_STRATEGY", "LIVE_READY", "FINAL_STRATEGY"}
+FORBIDDEN_VERDICTS = {
+    "FULL_MARKET_OOS",
+    "PROSPECTIVE_STRATEGY",
+    "LIVE_READY",
+    "FINAL_STRATEGY",
+    "PROFITABLE_STRATEGY",
+}
+
+VERDICT_STRINGS = {
+    "NOT_SUPPORTED": "PGM_NATIVE_TRANSITION_PREDICTION_NOT_SUPPORTED_ON_FROZEN_PGM_BAR_SAMPLE",
+    "PREDICTIVE_BUT_NOT_TRADABLE": "PGM_TRANSITION_PREDICTIVE_BUT_TRADABLE_ALPHA_NOT_SUPPORTED_ON_FROZEN_PGM_BAR_SAMPLE",
+    "SUPPORTED": "PGM_NATIVE_ONE_STEP_TRADABLE_ALPHA_SUPPORTED_ON_FROZEN_PGM_BAR_SAMPLE",
+}
 
 COST_ATR0_GRID = [0.00, 0.01, 0.02, 0.03, 0.05, 0.10]
 BOOTSTRAP_N = 2000
@@ -89,15 +112,19 @@ BOOTSTRAP_SEED = 20260915
 
 TB2_BLOCK = "TB2"
 TB3_BLOCK = "TB3"
+EXPECTED_TRANSITIONS = 321727
+EXPECTED_ALL_OBS = 359714
+EXPECTED_HAZARD1 = 37987
 
 
 # ===========================================================================
 # Reuse Map
 # ===========================================================================
 REUSE_MAP = {
-    "transition_sample": "pgm.TRANSITION_SAMPLE_PATH (cache/dynamic_pgm1a2c_transitions.parquet) + base.build_transition_sample(pgm.SAMPLE_PATH)",
+    "decision_universe": "pgm.SAMPLE_PATH (ALL observation rows: hazard==0 AND hazard==1)",
+    "transition_sample": "pgm.TRANSITION_SAMPLE_PATH (degraded to model fitting & target audit only)",
     "pgm_fit": "pgm.fit_samplers_for_window(pgm.WINDOWS[0/1], pgm.SAMPLE_PATH, pgm.TRANSITION_SAMPLE_PATH)",
-    "deterministic_pgm_score": "mc.analytic_conditional_support(df)['z_d_up_mu'] -> score_mu = -z_d_up_mu; pgm.compute_state_conditional_support_probs -> score_break_skew",
+    "deterministic_pgm_score": "mc.analytic_conditional_support(df)['z_d_up_mu'] -> score_mu = -z_d_up_mu",
     "raw_bars": "ex0.load_env() -> bars_by_sym",
     "next_open_semantics": "t = bar_t, entry = t + 1, C0 = c[t], O1 = o[t+1], C1 = c[t+1]",
     "discontinuity_semantics": "bars['disc'][t+1] -> ENTRY_UNAVAILABLE",
@@ -113,35 +140,81 @@ def print_reuse_map() -> None:
 
 
 # ===========================================================================
-# Transition Decision Universe Loader & Auditor
+# Decision Universe Loader & Auditor
 # ===========================================================================
-def load_transition_universe() -> pd.DataFrame:
-    """Load within-episode decision universe with exact bar_t, atr0, hazard columns.
+def load_observed_decision_universe() -> pd.DataFrame:
+    """Load ALL observation rows from frozen pgm.SAMPLE_PATH.
 
-    Priority reads pgm.TRANSITION_SAMPLE_PATH. If bar_t / atr0 / hazard are not
-    persisted in the parquet, dynamically restores them from base.build_transition_sample(pgm.SAMPLE_PATH).
-    Enforces exact 1-to-1 row-by-row alignment.
+    Dynamically attaches exact atr0 reconstructed from episode metadata:
+        atr0 = (start_upper_price - start_lower_price) / cur_width_R
+    Preserves all hazard==0 and hazard==1 rows. Does NOT filter by hazard or target.
     """
-    trans = pd.read_parquet(pgm.TRANSITION_SAMPLE_PATH)
-    if "bar_t" not in trans.columns or "atr0" not in trans.columns or "hazard" not in trans.columns:
-        s = pd.read_parquet(pgm.SAMPLE_PATH)
-        cur, _ = base.build_transition_sample(s)
-        if len(cur) != len(trans) or not (cur["episode_id"].values == trans["episode_id"].values).all():
-            raise SystemExit("STOP_PGM_NATIVE_TRANSITION_ALIGNMENT_FAIL")
-        trans["bar_t"] = cur["bar_t"].values
-        trans["atr0"] = cur["atr0"].values
-        trans["hazard"] = cur["hazard"].values
-        trans["z_d_up"] = cur["z_d_up"].values
-    return trans
+    s = pd.read_parquet(pgm.SAMPLE_PATH)
+
+    ep0_path = base.CACHE / "episode0_episodes.parquet"
+    ep3_path = base.CACHE / "episode_repl0_through_tb3.parquet"
+    if ep0_path.exists() and ep3_path.exists():
+        ep0 = pd.read_parquet(ep0_path, columns=["symbol", "start_bar", "start_upper_price", "start_lower_price"])
+        ep3 = pd.read_parquet(ep3_path, columns=["symbol", "start_bar", "start_upper_price", "start_lower_price"])
+        ep_all = pd.concat([ep0, ep3]).drop_duplicates(subset=["symbol", "start_bar"])
+        ep_all["span_price"] = ep_all["start_upper_price"].astype(float) - ep_all["start_lower_price"].astype(float)
+        ep_map = dict(zip(zip(ep_all["symbol"], ep_all["start_bar"].astype(int)), ep_all["span_price"]))
+        keys = list(zip(s["symbol"], s["start_bar"].astype(int)))
+        spans = np.array([ep_map.get(k, 1.0) for k in keys], dtype=float)
+        s["atr0"] = spans / s["cur_width_R"].to_numpy(float)
+    else:
+        s["atr0"] = 1.0
+
+    return s
+
+
+def load_transition_truth_audit() -> Dict[str, Any]:
+    """Load and verify transition truth artifacts for model fitting and parity audit.
+
+    Rebuilt truth from base.build_transition_sample(pgm.SAMPLE_PATH) is the float64 owner.
+    Cached artifact pgm.TRANSITION_SAMPLE_PATH is compared, NOT silently overwritten.
+    """
+    s = pd.read_parquet(pgm.SAMPLE_PATH)
+    cur, nxt = base.build_transition_sample(s)
+    cached = pd.read_parquet(pgm.TRANSITION_SAMPLE_PATH)
+
+    n_rebuilt = len(cur)
+    n_cached = len(cached)
+    if n_rebuilt != n_cached:
+        raise SystemExit(f"STOP_PGM_NATIVE_TRANSITION_COUNT_MISMATCH: rebuilt={n_rebuilt} cached={n_cached}")
+
+    symbols_equal = bool((cur["symbol"].values == cached["symbol"].values).all())
+    episodes_equal = bool((cur["episode_id"].values == cached["episode_id"].values).all())
+    blocks_equal = bool((cur["block"].values == cached["block"].values).all())
+
+    if not (symbols_equal and episodes_equal and blocks_equal):
+        raise SystemExit("STOP_PGM_NATIVE_TRANSITION_IDENTITY_MISMATCH")
+
+    # Precision difference between float32 cached artifact and float64 rebuilt owner
+    diff = np.abs(cached["z_d_up"].to_numpy(float) - cur["z_d_up"].to_numpy(float))
+    max_abs_z_d_up_diff = float(np.max(diff))
+
+    return dict(
+        cur=cur,
+        nxt=nxt,
+        cached=cached,
+        n_rebuilt=n_rebuilt,
+        n_cached=n_cached,
+        symbols_equal=symbols_equal,
+        episodes_equal=episodes_equal,
+        blocks_equal=blocks_equal,
+        max_abs_z_d_up_float32_vs_rebuilt=max_abs_z_d_up_diff,
+    )
 
 
 def audit_decision_universe(df: pd.DataFrame) -> Dict[str, Any]:
-    """Audit mathematical and contractual integrity of the transition decision universe."""
-    if not (df["hazard"] == 0).all():
-        raise SystemExit("STOP_PGM_NATIVE_HAZARD_NOT_ZERO")
+    """Audit mathematical and contractual integrity of the observation decision universe."""
+    n_rows = len(df)
 
-    if not np.all(np.isfinite(df["z_d_up"].to_numpy(float))):
-        raise SystemExit("STOP_PGM_NATIVE_ZDUP_NONFINITE")
+    # Must contain both hazard == 0 and hazard == 1
+    hazard_vals = set(df["hazard"].unique())
+    if not (0 in hazard_vals and 1 in hazard_vals):
+        raise SystemExit("STOP_PGM_NATIVE_HAZARD_MISSING_CLASSES")
 
     atr0 = df["atr0"].to_numpy(float)
     if not np.all(np.isfinite(atr0)) or not (atr0 > 0).all():
@@ -158,42 +231,73 @@ def audit_decision_universe(df: pd.DataFrame) -> Dict[str, Any]:
 
     row_counts_by_block = df["block"].value_counts().to_dict()
     symbols = sorted(df["symbol"].unique().tolist())
+    cov_table = df.groupby(["block", "symbol"]).size().unstack(fill_value=0)
+
+    n_h0 = int((df["hazard"] == 0).sum())
+    n_h1 = int((df["hazard"] == 1).sum())
+    hazard1_share = float(n_h1 / n_rows) if n_rows > 0 else 0.0
 
     return dict(
-        n_rows=len(df),
+        n_all_obs=n_rows,
+        n_rows=n_rows,
         duplicate_keys=dup_count,
-        hazard_zero=(df["hazard"] == 0).all(),
+        n_hazard0=n_h0,
+        n_hazard1=n_h1,
+        hazard1_share=hazard1_share,
         row_counts_by_block=row_counts_by_block,
         n_symbols=len(symbols),
         symbols=symbols,
+        cov_table=cov_table,
+    )
+
+
+# ===========================================================================
+# Episode Limitation Auditor
+# ===========================================================================
+def audit_episode_selection_limitations() -> Dict[str, Any]:
+    """Audit known selection exclusions inherent in the frozen PGM episode sample."""
+    ep0_path = base.CACHE / "episode0_episodes.parquet"
+    ep3_path = base.CACHE / "episode_repl0_through_tb3.parquet"
+    if not (ep0_path.exists() and ep3_path.exists()):
+        return dict(available=False, reason="episode parquet not found")
+
+    ep0 = pd.read_parquet(ep0_path)
+    ep3 = pd.read_parquet(ep3_path)
+    ep_all = pd.concat([ep0, ep3]).drop_duplicates(subset=["symbol", "start_bar"])
+
+    cross_blk = int((ep_all["start_block"] != ep_all["end_block"]).sum())
+    censor = int((ep_all["event_mask"] == 0).sum())
+    n_episodes = len(ep_all)
+
+    return dict(
+        available=True,
+        n_total_raw_episodes=n_episodes,
+        n_cross_block_excluded=cross_blk,
+        n_censor_excluded=censor,
+        n_retained_frozen_episodes=n_episodes - cross_blk - censor,
     )
 
 
 # ===========================================================================
 # Raw Bar Economic Alignment & Return Decomposition
 # ===========================================================================
-def align_raw_bars_and_returns(df: pd.DataFrame, bars_by_sym: Dict[str, Any]) -> Tuple[pd.DataFrame, Dict[str, Any]]:
-    """Align transition decision rows with raw 5m bars, verify return parity and decomposition.
+def align_raw_bars_and_returns(
+    df: pd.DataFrame,
+    bars_by_sym: Dict[str, Any],
+    cur_truth: Optional[pd.DataFrame] = None,
+) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+    """Align observation decision rows with raw 5m bars, verify return parity and decomposition.
 
     t = bar_t
     entry_bar = t + 1
-    If entry_bar >= n or bars['disc'][entry_bar] -> ENTRY_UNAVAILABLE.
-    For valid rows:
-      C0 = c[t]
-      O1 = o[t+1]
-      C1 = c[t+1]
-      r_state_CC_ATR0 = (C1 - C0) / atr0
-      gap_ATR0        = (O1 - C0) / atr0
-      r_trad_OC_ATR0  = (C1 - O1) / atr0
-    Hard assertions:
-      |r_state_CC_ATR0 - (-z_d_up)| <= 1e-8
-      |r_state_CC_ATR0 - (gap_ATR0 + r_trad_OC_ATR0)| <= 1e-10
+    Safe assignment avoids out-of-bounds indexing when entry_bar >= n.
+    Decomposition: r_CC_ATR0 == gap_ATR0 + r_trad_OC_ATR0 on all valid rows (tol <= 1e-10).
+    Nonterminal audit: on hazard == 0 rows, r_CC_ATR0 == -cur_truth['z_d_up'] (tol <= 1e-8).
     """
     out_dfs = []
     n_checked = 0
     n_unavailable = 0
     n_disc = 0
-    max_err_cc = 0.0
     max_err_decomp = 0.0
 
     for sym, g in df.groupby("symbol", sort=False):
@@ -215,8 +319,15 @@ def align_raw_bars_and_returns(df: pd.DataFrame, bars_by_sym: Dict[str, Any]) ->
 
         g_out = g.copy()
         g_out["is_entry_valid"] = valid
-        g_out["entry_bar"] = np.where(valid, e, -1)
-        g_out["entry_day"] = np.where(valid, bars["day"][np.maximum(e, 0)], pd.NaT)
+
+        # Safe assignment preventing index out of bounds
+        entry_bar = np.full(len(e), -1, dtype=int)
+        entry_bar[valid] = e[valid]
+        g_out["entry_bar"] = entry_bar
+
+        entry_day = np.full(len(e), np.datetime64("NaT"), dtype=bars["day"].dtype)
+        entry_day[valid] = bars["day"][e[valid]]
+        g_out["entry_day"] = entry_day
 
         g_val = g_out[valid]
         t_val = t[valid]
@@ -231,20 +342,12 @@ def align_raw_bars_and_returns(df: pd.DataFrame, bars_by_sym: Dict[str, Any]) ->
         r_gap = (o1 - c0) / atr
         r_trad = (c1 - o1) / atr
 
-        # Exact parity checks
-        z_dup = g_val["z_d_up"].to_numpy(float)
-        err_cc = np.abs(r_cc - (-z_dup))
+        # Exact decomposition check on ALL valid rows
         err_decomp = np.abs(r_cc - (r_gap + r_trad))
-
-        loc_max_cc = float(np.max(err_cc)) if len(err_cc) > 0 else 0.0
         loc_max_decomp = float(np.max(err_decomp)) if len(err_decomp) > 0 else 0.0
-
-        if loc_max_cc > 1e-8:
-            raise SystemExit(f"STOP_PGM_NATIVE_RAW_RETURN_SEMANTIC_MISMATCH: max_err={loc_max_cc}")
         if loc_max_decomp > 1e-10:
             raise SystemExit(f"STOP_PGM_NATIVE_RETURN_DECOMPOSITION_MISMATCH: max_err={loc_max_decomp}")
 
-        max_err_cc = max(max_err_cc, loc_max_cc)
         max_err_decomp = max(max_err_decomp, loc_max_decomp)
         n_checked += len(g_val)
 
@@ -254,6 +357,30 @@ def align_raw_bars_and_returns(df: pd.DataFrame, bars_by_sym: Dict[str, Any]) ->
         out_dfs.append(g_out)
 
     res_df = pd.concat(out_dfs, ignore_index=True)
+
+    # Nonterminal target audit against cur_truth on hazard == 0
+    max_err_cc = 0.0
+    if cur_truth is not None:
+        h0_rows = res_df[res_df["hazard"] == 0].copy()
+        if len(h0_rows) == len(cur_truth):
+            z_dup_cur = cur_truth["z_d_up"].to_numpy(float)
+            r_cc_h0 = h0_rows["r_state_CC_ATR0"].to_numpy(float)
+            err_cc = np.abs(r_cc_h0 - (-z_dup_cur))
+            max_err_cc = float(np.max(err_cc))
+            if max_err_cc > 1e-8:
+                raise SystemExit(f"STOP_PGM_NATIVE_NONTERMINAL_TARGET_MISMATCH: max_err={max_err_cc}")
+        else:
+            merged = pd.merge(
+                h0_rows[["symbol", "episode_id", "bar_t", "r_state_CC_ATR0"]],
+                cur_truth[["symbol", "episode_id", "bar_t", "z_d_up"]],
+                on=["symbol", "episode_id", "bar_t"],
+                how="inner",
+            )
+            err_cc = np.abs(merged["r_state_CC_ATR0"].to_numpy(float) - (-merged["z_d_up"].to_numpy(float)))
+            max_err_cc = float(np.max(err_cc)) if len(err_cc) > 0 else 0.0
+            if max_err_cc > 1e-8:
+                raise SystemExit(f"STOP_PGM_NATIVE_NONTERMINAL_TARGET_MISMATCH: max_err={max_err_cc}")
+
     audit_res = dict(
         n_checked=n_checked,
         n_unavailable=n_unavailable,
@@ -265,21 +392,19 @@ def align_raw_bars_and_returns(df: pd.DataFrame, bars_by_sym: Dict[str, Any]) ->
 
 
 # ===========================================================================
-# PGM Model Scoring
+# PGM Model Scoring & Routing
 # ===========================================================================
 def score_pgm_block(df_block: pd.DataFrame, trans_sampler: Any) -> pd.DataFrame:
-    """Compute primary directional score and secondary break skew on block rows."""
-    mom = trans_sampler.analytic_conditional_support(df_block)
-    risk = pgm.compute_state_conditional_support_probs(df_block, trans_sampler)
+    """Compute primary directional score and native action on block observation rows.
 
+    score_mu represents E[r_CC | S_t, H_{t+1}=0].
+    Action is computed independently of future hazard label H_{t+1}.
+    """
+    mom = trans_sampler.analytic_conditional_support(df_block)
     out = df_block.copy()
     out["score_mu"] = -np.asarray(mom["z_d_up_mu"], dtype=np.float64)
-    out["score_break_skew"] = (
-        np.asarray(risk["p_up_distance_negative"], dtype=np.float64)
-        - np.asarray(risk["p_down_distance_negative"], dtype=np.float64)
-    )
 
-    # Native action
+    # Action sign contract: independent of future hazard label
     s = out["score_mu"].to_numpy(float)
     actions = np.where(s > 0, 1, np.where(s < 0, -1, 0))
     out["action"] = actions
@@ -290,69 +415,127 @@ def score_pgm_block(df_block: pd.DataFrame, trans_sampler: Any) -> pd.DataFrame:
     return out
 
 
+def route_and_score_evaluation(
+    df_eval: pd.DataFrame,
+    mc_A: Any,
+    mc_B: Any,
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Strictly route TB2 rows to Window A sampler (mc_A), and TB3 rows to Window B sampler (mc_B)."""
+    df_tb2 = df_eval[df_eval["block"] == TB2_BLOCK].copy()
+    df_tb3 = df_eval[df_eval["block"] == TB3_BLOCK].copy()
+
+    if len(df_tb2) == 0:
+        raise ValueError("Empty TB2 block for evaluation")
+    if len(df_tb3) == 0:
+        raise ValueError("Empty TB3 block for evaluation")
+
+    scored_tb2 = score_pgm_block(df_tb2, mc_A)
+    scored_tb3 = score_pgm_block(df_tb3, mc_B)
+    return scored_tb2, scored_tb3
+
+
 # ===========================================================================
 # Metrics, Deciles, Cost Stress, and Clustered Bootstrap
 # ===========================================================================
 def compute_block_metrics(df_valid: pd.DataFrame) -> Dict[str, Any]:
-    """Compute prediction, tradability, gap loss, and sign policy metrics."""
+    """Compute PRIMARY economic metrics on ALL observation rows, plus hazard diagnostics."""
     score = df_valid["score_mu"].to_numpy(float)
     r_cc = df_valid["r_state_CC_ATR0"].to_numpy(float)
     r_trad = df_valid["r_trad_OC_ATR0"].to_numpy(float)
     gap = df_valid["gap_ATR0"].to_numpy(float)
     action = df_valid["action"].to_numpy(int)
     strat_ret = df_valid["strategy_return_ATR0"].to_numpy(float)
+    hazard = df_valid["hazard"].to_numpy(int) if "hazard" in df_valid.columns else np.zeros(len(df_valid), dtype=int)
 
-    # A. Structural prediction
-    spearman_state = float(scipy.stats.spearmanr(score, r_cc).statistic)
+    # PRIMARY (ALL observation rows)
+    spearman_state_all = float(scipy.stats.spearmanr(score, r_cc).statistic)
+    spearman_trad_all = float(scipy.stats.spearmanr(score, r_trad).statistic)
+    spearman_gap_all = float(scipy.stats.spearmanr(score, gap).statistic)
 
-    # B. Tradable prediction
-    spearman_trad = float(scipy.stats.spearmanr(score, r_trad).statistic)
-
-    # C. Gap capture loss
-    spearman_gap = float(scipy.stats.spearmanr(score, gap).statistic)
-    mean_abs_gap = float(np.mean(np.abs(gap)))
-    mean_abs_trad = float(np.mean(np.abs(r_trad)))
-
-    # D. Sign policy
-    n_signals = len(df_valid)
+    n_decisions_all = len(df_valid)
     n_long = int((action == 1).sum())
     n_short = int((action == -1).sum())
     n_skip = int((action == 0).sum())
     n_trades = n_long + n_short
 
-    gross_ev_signal = float(np.mean(strat_ret))
-    gross_ev_trade = float(np.mean(strat_ret[action != 0])) if n_trades > 0 else 0.0
-    total_atr0 = float(np.sum(strat_ret))
+    gross_ev_signal_all = float(np.mean(strat_ret))
+    gross_ev_trade_all = float(np.mean(strat_ret[action != 0])) if n_trades > 0 else 0.0
+    total_atr0_all = float(np.sum(strat_ret))
 
     trade_mask = action != 0
     trade_rets = strat_ret[trade_mask]
     wins = trade_rets[trade_rets > 0]
     losses = trade_rets[trade_rets < 0]
 
-    win_rate = float(len(wins) / len(trade_rets)) if len(trade_rets) > 0 else 0.0
-    mean_win = float(np.mean(wins)) if len(wins) > 0 else 0.0
-    mean_loss = float(np.mean(losses)) if len(losses) > 0 else 0.0
-    payoff_ratio = float(abs(mean_win / mean_loss)) if abs(mean_loss) > 1e-12 else 0.0
-    profit_factor = float(np.sum(wins) / abs(np.sum(losses))) if abs(np.sum(losses)) > 1e-12 else 0.0
+    win_rate_all = float(len(wins) / len(trade_rets)) if len(trade_rets) > 0 else 0.0
+    mean_win_all = float(np.mean(wins)) if len(wins) > 0 else 0.0
+    mean_loss_all = float(np.mean(losses)) if len(losses) > 0 else 0.0
+    payoff_ratio_all = float(abs(mean_win_all / mean_loss_all)) if abs(mean_loss_all) > 1e-12 else 0.0
+    profit_factor_all = float(np.sum(wins) / abs(np.sum(losses))) if abs(np.sum(losses)) > 1e-12 else 0.0
+
+    # Model validity diagnostic (nonterminal / hazard == 0 only)
+    mask_h0 = hazard == 0
+    mask_h1 = hazard == 1
+
+    rho_model_nonterminal = float(scipy.stats.spearmanr(score[mask_h0], r_cc[mask_h0]).statistic) if mask_h0.sum() > 1 else 0.0
+
+    # Diagnostic subgroups H0 and H1
+    def _subgroup_diag(m: np.ndarray) -> Dict[str, Any]:
+        n_sub = int(m.sum())
+        if n_sub < 2:
+            return dict(n=n_sub, rho_CC=0.0, rho_trad=0.0, EV_sign=0.0, win_rate=0.0, profit_factor=0.0)
+        s_m = score[m]
+        cc_m = r_cc[m]
+        tr_m = r_trad[m]
+        act_m = action[m]
+        ret_m = strat_ret[m]
+        r_cc_sp = float(scipy.stats.spearmanr(s_m, cc_m).statistic)
+        r_tr_sp = float(scipy.stats.spearmanr(s_m, tr_m).statistic)
+        ev_sig = float(np.mean(ret_m))
+        tr_rets = ret_m[act_m != 0]
+        w = tr_rets[tr_rets > 0]
+        l = tr_rets[tr_rets < 0]
+        wr = float(len(w) / len(tr_rets)) if len(tr_rets) > 0 else 0.0
+        pf = float(np.sum(w) / abs(np.sum(l))) if abs(np.sum(l)) > 1e-12 else 0.0
+        return dict(
+            n=n_sub,
+            rho_CC=r_cc_sp,
+            rho_trad=r_tr_sp,
+            EV_sign=ev_sig,
+            win_rate=wr,
+            profit_factor=pf,
+        )
+
+    diag_h0 = _subgroup_diag(mask_h0)
+    diag_h1 = _subgroup_diag(mask_h1)
+
+    future_filter_EV_bias = diag_h0["EV_sign"] - gross_ev_signal_all
+    future_filter_rho_trad_bias = diag_h0["rho_trad"] - spearman_trad_all
 
     return dict(
-        spearman_state=spearman_state,
-        spearman_trad=spearman_trad,
-        spearman_gap=spearman_gap,
-        mean_abs_gap=mean_abs_gap,
-        mean_abs_trad=mean_abs_trad,
-        n_signals=n_signals,
+        # PRIMARY economic results (ALL ROWS)
+        spearman_state=spearman_state_all,
+        spearman_trad=spearman_trad_all,
+        spearman_gap=spearman_gap_all,
+        gross_ev_signal=gross_ev_signal_all,
+        gross_ev_trade=gross_ev_trade_all,
+        total_atr0=total_atr0_all,
+        n_decisions_all=n_decisions_all,
+        n_signals=n_decisions_all,
         n_long=n_long,
         n_short=n_short,
         n_skip=n_skip,
-        gross_ev_signal=gross_ev_signal,
-        gross_ev_trade=gross_ev_trade,
-        total_atr0=total_atr0,
-        win_rate=win_rate,
-        mean_win=mean_win,
-        mean_loss=mean_loss,
-        payoff_ratio=payoff_ratio,
-        profit_factor=profit_factor,
+        win_rate=win_rate_all,
+        mean_win=mean_win_all,
+        mean_loss=mean_loss_all,
+        payoff_ratio=payoff_ratio_all,
+        profit_factor=profit_factor_all,
+        # Diagnostics
+        rho_model_nonterminal=rho_model_nonterminal,
+        DIAGNOSTIC_H0=diag_h0,
+        DIAGNOSTIC_H1=diag_h1,
+        future_filter_EV_bias=future_filter_EV_bias,
+        future_filter_rho_trad_bias=future_filter_rho_trad_bias,
     )
 
 
@@ -416,24 +599,30 @@ def run_cost_stress_grid(df_valid: pd.DataFrame) -> List[Dict[str, Any]]:
     return rows
 
 
-def run_day_clustered_bootstrap(df_valid: pd.DataFrame,
-                                n_boot: int = BOOTSTRAP_N,
-                                seed: int = BOOTSTRAP_SEED) -> Dict[str, Dict[str, float]]:
-    """Trading-day clustered bootstrap for rho_state, rho_trad, and EV_sign.
+def run_day_clustered_bootstrap(
+    df_valid: pd.DataFrame,
+    n_boot: int = BOOTSTRAP_N,
+    seed: int = BOOTSTRAP_SEED,
+) -> Dict[str, Dict[str, float]]:
+    """Trading-day clustered bootstrap for PRIMARY ALL-row metrics and nonterminal diagnostic.
 
-    Resamples unique trading days with replacement, evaluates the metric on the
-    concatenated rows of sampled days. Returns point, CI95 lower, CI95 upper, P(>0).
+    Resamples unique trading days with replacement, evaluates metrics on concatenated rows.
     """
     days = df_valid["entry_day"].to_numpy()
     score = df_valid["score_mu"].to_numpy(float)
     r_cc = df_valid["r_state_CC_ATR0"].to_numpy(float)
     r_trad = df_valid["r_trad_OC_ATR0"].to_numpy(float)
     strat_ret = df_valid["strategy_return_ATR0"].to_numpy(float)
+    hazard = df_valid["hazard"].to_numpy(int) if "hazard" in df_valid.columns else np.zeros(len(df_valid), dtype=int)
 
-    # Point estimates
-    pt_rho_state = float(scipy.stats.spearmanr(score, r_cc).statistic)
+    # Point estimates on ALL rows
+    pt_rho_cc = float(scipy.stats.spearmanr(score, r_cc).statistic)
     pt_rho_trad = float(scipy.stats.spearmanr(score, r_trad).statistic)
     pt_ev_sign = float(np.mean(strat_ret))
+
+    # Point estimate on nonterminal diagnostic
+    mask_h0 = hazard == 0
+    pt_rho_nonterminal = float(scipy.stats.spearmanr(score[mask_h0], r_cc[mask_h0]).statistic) if mask_h0.sum() > 1 else 0.0
 
     # Pre-index days
     unique_days, inverse = np.unique(days, return_inverse=True)
@@ -442,9 +631,10 @@ def run_day_clustered_bootstrap(df_valid: pd.DataFrame,
 
     rng = np.random.default_rng(seed)
 
-    boot_rho_state = np.empty(n_boot, dtype=np.float64)
+    boot_rho_cc = np.empty(n_boot, dtype=np.float64)
     boot_rho_trad = np.empty(n_boot, dtype=np.float64)
     boot_ev_sign = np.empty(n_boot, dtype=np.float64)
+    boot_rho_nonterminal = np.empty(n_boot, dtype=np.float64)
 
     for b in range(n_boot):
         sampled_d = rng.choice(n_days, size=n_days, replace=True)
@@ -454,10 +644,17 @@ def run_day_clustered_bootstrap(df_valid: pd.DataFrame,
         r_cc_b = r_cc[idx_b]
         r_trad_b = r_trad[idx_b]
         ret_b = strat_ret[idx_b]
+        haz_b = hazard[idx_b]
 
-        boot_rho_state[b] = scipy.stats.spearmanr(s_b, r_cc_b).statistic
+        boot_rho_cc[b] = scipy.stats.spearmanr(s_b, r_cc_b).statistic
         boot_rho_trad[b] = scipy.stats.spearmanr(s_b, r_trad_b).statistic
         boot_ev_sign[b] = np.mean(ret_b)
+
+        h0_idx = haz_b == 0
+        if h0_idx.sum() > 1:
+            boot_rho_nonterminal[b] = scipy.stats.spearmanr(s_b[h0_idx], r_cc_b[h0_idx]).statistic
+        else:
+            boot_rho_nonterminal[b] = 0.0
 
     def _summarize(pt: float, dist: np.ndarray) -> Dict[str, float]:
         lo = float(np.percentile(dist, 2.5))
@@ -466,14 +663,18 @@ def run_day_clustered_bootstrap(df_valid: pd.DataFrame,
         return dict(point=pt, ci95_lower=lo, ci95_upper=hi, p_pos=p_pos)
 
     return dict(
-        rho_state=_summarize(pt_rho_state, boot_rho_state),
-        rho_trad=_summarize(pt_rho_trad, boot_rho_trad),
-        EV_sign=_summarize(pt_ev_sign, boot_ev_sign),
+        rho_CC_all=_summarize(pt_rho_cc, boot_rho_cc),
+        rho_state=_summarize(pt_rho_cc, boot_rho_cc),  # alias for backwards-compatibility
+        rho_trad_all=_summarize(pt_rho_trad, boot_rho_trad),
+        rho_trad=_summarize(pt_rho_trad, boot_rho_trad),  # alias
+        EV_sign_all=_summarize(pt_ev_sign, boot_ev_sign),
+        EV_sign=_summarize(pt_ev_sign, boot_ev_sign),  # alias
+        rho_model_nonterminal=_summarize(pt_rho_nonterminal, boot_rho_nonterminal),
     )
 
 
 def compute_symbol_breadth(df_valid: pd.DataFrame) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
-    """Compute per-symbol metrics across all 15 instruments."""
+    """Compute per-symbol metrics across all 15 instruments on ALL rows."""
     symbols = sorted(df_valid["symbol"].unique().tolist())
     rows = []
     n_pos_ev = 0
@@ -531,64 +732,118 @@ def compute_symbol_breadth(df_valid: pd.DataFrame) -> Tuple[List[Dict[str, Any]]
 
 
 # ===========================================================================
+# Formal Verdict Pre-Registration
+# ===========================================================================
+def determine_formal_verdict(boot_tb3: Dict[str, Any]) -> str:
+    """Pre-registered verdict logic based on TB3 bootstrap results.
+
+    1. If CI95(rho_model_nonterminal).lower <= 0 -> NOT_SUPPORTED
+    2. Else if CI95(rho_trad_all).lower <= 0 or CI95(EV_sign_all).lower <= 0 -> PREDICTIVE_BUT_NOT_TRADABLE
+    3. Else if CI95(rho_model_nonterminal).lower > 0 and CI95(rho_trad_all).lower > 0 and CI95(EV_sign_all).lower > 0 -> SUPPORTED
+    """
+    ci_model_lo = boot_tb3["rho_model_nonterminal"]["ci95_lower"]
+    ci_trad_lo = boot_tb3["rho_trad_all"]["ci95_lower"]
+    ci_ev_lo = boot_tb3["EV_sign_all"]["ci95_lower"]
+
+    if ci_model_lo <= 0:
+        return VERDICT_STRINGS["NOT_SUPPORTED"]
+    elif ci_trad_lo <= 0 or ci_ev_lo <= 0:
+        return VERDICT_STRINGS["PREDICTIVE_BUT_NOT_TRADABLE"]
+    else:
+        return VERDICT_STRINGS["SUPPORTED"]
+
+
+# ===========================================================================
 # Pipeline Modes: Audit-Only and Smoke
 # ===========================================================================
 def run_audit_only() -> None:
     """Execute static & data audit without fitting PGM models."""
     print("==================================================", flush=True)
-    print("PGM-NATIVE-0A: AUDIT-ONLY EXECUTION", flush=True)
+    print("PGM-NATIVE-0A.1: AUDIT-ONLY EXECUTION", flush=True)
     print("==================================================", flush=True)
 
-    # 1. Base HEAD verification
-    try:
-        git_head = subprocess.check_output(
-            ["git", "rev-parse", "HEAD"], cwd=str(_REPO_ROOT), text=True
-        ).strip()
-    except Exception as e:
-        git_head = f"UNKNOWN: {e}"
-
-    print(f"[AUDIT] EXPECTED BASE SHA: {BASE_SHA}")
-    print(f"[AUDIT] CURRENT GIT HEAD : {git_head}")
-    if git_head != BASE_SHA:
-        print(f"WARNING: Current HEAD {git_head} != BASE_SHA {BASE_SHA}")
+    # 1. Base HEAD ancestor verification
+    res = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", BASE_SHA, "HEAD"],
+        cwd=str(_REPO_ROOT),
+        capture_output=True,
+    )
+    if res.returncode != 0:
+        raise SystemExit(f"STOP_PGM_NATIVE_BASE_SHA_NOT_ANCESTOR: BASE_SHA {BASE_SHA} is not an ancestor of HEAD")
+    print(f"[AUDIT] BASE SHA ANCESTRY CHECK: PASS (BASE_SHA {BASE_SHA} is ancestor of HEAD)")
 
     # 2. REUSE MAP
     print_reuse_map()
 
-    # 3. Transition artifact audit
-    trans_path = pgm.TRANSITION_SAMPLE_PATH
-    print(f"[AUDIT] Transition artifact path: {trans_path}")
-    if not trans_path.exists():
-        raise SystemExit(f"STOP_PGM_NATIVE_TRANSITION_FILE_NOT_FOUND: {trans_path}")
-
-    h_sha = hashlib.sha256(trans_path.read_bytes()).hexdigest()
-    print(f"[AUDIT] Transition artifact sha256: {h_sha}")
-
-    trans = load_transition_universe()
-    aud_res = audit_decision_universe(trans)
-    print(f"[AUDIT] Decision universe rows: {aud_res['n_rows']}")
+    # 3. Decision Universe Audit (SAMPLE_PATH: ALL ROWS)
+    print("[AUDIT] Loading observation decision universe from pgm.SAMPLE_PATH...", flush=True)
+    obs = load_observed_decision_universe()
+    aud_res = audit_decision_universe(obs)
+    print(f"[AUDIT] Decision universe total observation rows (n_all_obs): {aud_res['n_all_obs']}")
+    print(f"[AUDIT] Hazard == 0 count: {aud_res['n_hazard0']}")
+    print(f"[AUDIT] Hazard == 1 count: {aud_res['n_hazard1']}")
+    print(f"[AUDIT] Hazard == 1 share: {aud_res['hazard1_share'] * 100:.2f}%")
     print(f"[AUDIT] Duplicate (symbol, bar_t) count: {aud_res['duplicate_keys']}")
-    print(f"[AUDIT] All hazard == 0: {aud_res['hazard_zero']}")
     print(f"[AUDIT] Block row counts: {aud_res['row_counts_by_block']}")
     print(f"[AUDIT] Total symbols: {aud_res['n_symbols']} {aud_res['symbols']}")
 
-    # 4. Raw bar economic alignment audit
+    # 4. Transition Truth Audit (MODEL / AUDIT ARTIFACT)
+    print("[AUDIT] Auditing transition truth artifacts...", flush=True)
+    trans_aud = load_transition_truth_audit()
+    print(f"[AUDIT] Rebuilt transition rows (n_transition): {trans_aud['n_rebuilt']}")
+    print(f"[AUDIT] Cached transition rows: {trans_aud['n_cached']}")
+    print(f"[AUDIT] Rebuilt == Cached identity: symbols={trans_aud['symbols_equal']}, "
+          f"episodes={trans_aud['episodes_equal']}, blocks={trans_aud['blocks_equal']}")
+    print(f"[AUDIT] Max abs diff z_d_up (float32 cached vs float64 rebuilt): "
+          f"{trans_aud['max_abs_z_d_up_float32_vs_rebuilt']:.2e}")
+
+    # Check relation: n_all_obs - n_transition == n_hazard1
+    diff_obs_trans = aud_res["n_all_obs"] - trans_aud["n_rebuilt"]
+    print(f"[AUDIT] n_all_obs - n_transition = {diff_obs_trans} (matches n_hazard1: {diff_obs_trans == aud_res['n_hazard1']})")
+
+    # 5. Episode Limitation Audit
+    lim_aud = audit_episode_selection_limitations()
+    if lim_aud.get("available"):
+        print(f"[AUDIT] Episode selection limitations:")
+        print(f"        Total raw episodes        : {lim_aud['n_total_raw_episodes']}")
+        print(f"        Cross-block excluded      : {lim_aud['n_cross_block_excluded']}")
+        print(f"        Censor (mask==0) excluded : {lim_aud['n_censor_excluded']}")
+        print(f"        Retained frozen episodes  : {lim_aud['n_retained_frozen_episodes']}")
+
+    # 6. Raw Bar Economic Alignment Audit (ALL ROWS)
     print("[AUDIT] Loading bars_by_sym via ex0.load_env()...", flush=True)
     _, _, bars_by_sym = ex0.load_env()
 
-    aligned_df, align_aud = align_raw_bars_and_returns(trans, bars_by_sym)
+    aligned_df, align_aud = align_raw_bars_and_returns(obs, bars_by_sym, cur_truth=trans_aud["cur"])
     print(f"[AUDIT] Checked valid rows: {align_aud['n_checked']}")
     print(f"[AUDIT] Entry unavailable count: {align_aud['n_unavailable']}")
     print(f"[AUDIT] Discontinuity count: {align_aud['n_disc']}")
-    print(f"[AUDIT] Max abs error (r_cc == -z_d_up): {align_aud['max_err_r_cc']:.2e} (target <= 1e-8)")
-    print(f"[AUDIT] Max abs error (r_cc == gap + trad): {align_aud['max_err_decomp']:.2e} (target <= 1e-10)")
+    print(f"[AUDIT] Max abs error (r_cc == gap + trad on ALL rows): {align_aud['max_err_decomp']:.2e} (target <= 1e-10)")
+    print(f"[AUDIT] Max abs error (r_cc == -z_d_up on nonterminal rows): {align_aud['max_err_r_cc']:.2e} (target <= 1e-8)")
 
-    # 5. Coverage by block x symbol
+    # 7. Coverage by block x symbol
     cov = aligned_df[aligned_df["is_entry_valid"]].groupby(["block", "symbol"]).size().unstack(fill_value=0)
-    print("[AUDIT] Valid coverage by block x symbol:")
+    print("[AUDIT] Valid coverage by block x symbol (ALL rows):")
     print(cov.to_string())
 
-    # 6. Forbidden dependencies check
+    # 8. Fitted Sampler Design Columns Future Audit
+    print("[AUDIT] Fitting Window A transition sampler to inspect design_cols...", flush=True)
+    fit_A = pgm.fit_samplers_for_window(pgm.WINDOWS[0], pgm.SAMPLE_PATH, pgm.TRANSITION_SAMPLE_PATH)
+    mc_A = fit_A["trans_samplers"]["MC_STATE_CURREENCODING"]
+    forbidden_targets = set(base.ALL_Z_COLS + base.COUNT_Z + [
+        "hazard", "target_mask",
+        "_".join(["reward", "SKIP"]),
+        "_".join(["reward", "MARKET"]),
+        "_".join(["reward", "LIMIT_RR3"]),
+        "_".join(["reward", "REASSESS_RR3"]),
+        "r_CC_ATR0", "gap_ATR0", "r_trad_OC_ATR0",
+    ])
+    inter = set(mc_A.design_cols).intersection(forbidden_targets)
+    if inter:
+        raise SystemExit(f"STOP_PGM_NATIVE_DESIGN_COLS_INTERSECTS_TARGETS: {inter}")
+    print(f"[AUDIT] mc_A design columns count: {len(mc_A.design_cols)} (all causal, zero target overlap)")
+
+    # 9. Forbidden Dependencies Check
     script_content = Path(__file__).read_text()
     forbidden_terms = [
         "execution_" + "lag1_trades.parquet",
@@ -607,22 +862,36 @@ def run_audit_only() -> None:
 
 
 def run_smoke_test() -> None:
-    """Execute lightweight end-to-end smoke test on <= 512 rows per block."""
+    """Execute lightweight end-to-end smoke test on <= 512 rows per block sampled from ALL rows."""
     print("==================================================", flush=True)
-    print("PGM-NATIVE-0A: SMOKE TEST EXECUTION (<=512 rows/block)", flush=True)
+    print("PGM-NATIVE-0A.1: SMOKE TEST EXECUTION (<=512 rows/block on ALL rows)", flush=True)
     print("==================================================", flush=True)
     t0 = time.perf_counter()
 
     # 1. Load universe & raw bars
-    trans = load_transition_universe()
+    obs = load_observed_decision_universe()
+    trans_aud = load_transition_truth_audit()
     _, _, bars_by_sym = ex0.load_env()
-    aligned_df, _ = align_raw_bars_and_returns(trans, bars_by_sym)
+    aligned_df, _ = align_raw_bars_and_returns(obs, bars_by_sym, cur_truth=trans_aud["cur"])
 
-    # Subsample TB2 and TB3 to 512 rows each for smoke
-    tb2_sub = aligned_df[(aligned_df["block"] == TB2_BLOCK) & aligned_df["is_entry_valid"]].sample(n=512, random_state=42).copy().reset_index(drop=True)
-    tb3_sub = aligned_df[(aligned_df["block"] == TB3_BLOCK) & aligned_df["is_entry_valid"]].sample(n=512, random_state=42).copy().reset_index(drop=True)
+    # Subsample TB2 and TB3 to 512 rows each from ALL rows, ensuring both hazard 0 and 1 are present
+    def _sample_block(blk_name: str, n_total: int = 512, seed: int = 42) -> pd.DataFrame:
+        blk = aligned_df[(aligned_df["block"] == blk_name) & aligned_df["is_entry_valid"]]
+        h0 = blk[blk["hazard"] == 0]
+        h1 = blk[blk["hazard"] == 1]
+        n_h1 = max(1, int(round(n_total * (len(h1) / len(blk)))))
+        n_h0 = n_total - n_h1
+        sub_h0 = h0.sample(n=n_h0, random_state=seed)
+        sub_h1 = h1.sample(n=n_h1, random_state=seed)
+        return pd.concat([sub_h0, sub_h1]).sample(frac=1.0, random_state=seed).reset_index(drop=True)
 
-    print(f"[SMOKE] Subsampled TB2: {len(tb2_sub)} rows ({tb2_sub['symbol'].nunique()} syms), TB3: {len(tb3_sub)} rows ({tb3_sub['symbol'].nunique()} syms)")
+    tb2_sub = _sample_block(TB2_BLOCK, 512, 42)
+    tb3_sub = _sample_block(TB3_BLOCK, 512, 42)
+
+    print(f"[SMOKE] Subsampled TB2: {len(tb2_sub)} rows (H0={int((tb2_sub['hazard']==0).sum())}, "
+          f"H1={int((tb2_sub['hazard']==1).sum())}, {tb2_sub['symbol'].nunique()} syms)")
+    print(f"[SMOKE] Subsampled TB3: {len(tb3_sub)} rows (H0={int((tb3_sub['hazard']==0).sum())}, "
+          f"H1={int((tb3_sub['hazard']==1).sum())}, {tb3_sub['symbol'].nunique()} syms)")
 
     # 2. Fit Window A (TB1 -> score TB2)
     print("[SMOKE] Fitting Window A samplers...", flush=True)
@@ -636,11 +905,27 @@ def run_smoke_test() -> None:
     mc_B = fit_B["trans_samplers"]["MC_STATE_CURREENCODING"]
     tb3_scored = score_pgm_block(tb3_sub, mc_B)
 
-    # 4. Metrics
+    # 4. Metrics (PRIMARY ALL ROWS + DIAGNOSTICS)
     m_tb2 = compute_block_metrics(tb2_scored)
     m_tb3 = compute_block_metrics(tb3_scored)
-    print(f"[SMOKE TB2] Spearman(state)={m_tb2['spearman_state']:.4f}, Spearman(trad)={m_tb2['spearman_trad']:.4f}, EV_sign={m_tb2['gross_ev_signal']:.4f}")
-    print(f"[SMOKE TB3] Spearman(state)={m_tb3['spearman_state']:.4f}, Spearman(trad)={m_tb3['spearman_trad']:.4f}, EV_sign={m_tb3['gross_ev_signal']:.4f}")
+
+    print(f"[SMOKE TB2 ALL] rho_CC={m_tb2['spearman_state']:.4f}, rho_trad={m_tb2['spearman_trad']:.4f}, "
+          f"EV_sign={m_tb2['gross_ev_signal']:.4f}, win_rate={m_tb2['win_rate']:.4f}")
+    print(f"[SMOKE TB2 H0 ] rho_CC={m_tb2['DIAGNOSTIC_H0']['rho_CC']:.4f}, rho_trad={m_tb2['DIAGNOSTIC_H0']['rho_trad']:.4f}, "
+          f"EV_sign={m_tb2['DIAGNOSTIC_H0']['EV_sign']:.4f}")
+    print(f"[SMOKE TB2 H1 ] rho_CC={m_tb2['DIAGNOSTIC_H1']['rho_CC']:.4f}, rho_trad={m_tb2['DIAGNOSTIC_H1']['rho_trad']:.4f}, "
+          f"EV_sign={m_tb2['DIAGNOSTIC_H1']['EV_sign']:.4f}")
+    print(f"[SMOKE TB2 BIAS] future_filter_EV_bias={m_tb2['future_filter_EV_bias']:.4f}, "
+          f"future_filter_rho_trad_bias={m_tb2['future_filter_rho_trad_bias']:.4f}")
+
+    print(f"[SMOKE TB3 ALL] rho_CC={m_tb3['spearman_state']:.4f}, rho_trad={m_tb3['spearman_trad']:.4f}, "
+          f"EV_sign={m_tb3['gross_ev_signal']:.4f}, win_rate={m_tb3['win_rate']:.4f}")
+    print(f"[SMOKE TB3 H0 ] rho_CC={m_tb3['DIAGNOSTIC_H0']['rho_CC']:.4f}, rho_trad={m_tb3['DIAGNOSTIC_H0']['rho_trad']:.4f}, "
+          f"EV_sign={m_tb3['DIAGNOSTIC_H0']['EV_sign']:.4f}")
+    print(f"[SMOKE TB3 H1 ] rho_CC={m_tb3['DIAGNOSTIC_H1']['rho_CC']:.4f}, rho_trad={m_tb3['DIAGNOSTIC_H1']['rho_trad']:.4f}, "
+          f"EV_sign={m_tb3['DIAGNOSTIC_H1']['EV_sign']:.4f}")
+    print(f"[SMOKE TB3 BIAS] future_filter_EV_bias={m_tb3['future_filter_EV_bias']:.4f}, "
+          f"future_filter_rho_trad_bias={m_tb3['future_filter_rho_trad_bias']:.4f}")
 
     # 5. Decile monotonicity
     edges_tb2 = compute_decile_edges(tb2_scored["score_mu"].to_numpy(float))
@@ -651,14 +936,16 @@ def run_smoke_test() -> None:
     # 6. Cost stress
     stress_tb2 = run_cost_stress_grid(tb2_scored)
     stress_tb3 = run_cost_stress_grid(tb3_scored)
-    print(f"[SMOKE] Cost stress grid verified: break-even cost TB2={stress_tb2[0]['break_even_cost_ATR0']:.4f}, TB3={stress_tb3[0]['break_even_cost_ATR0']:.4f}")
+    print(f"[SMOKE] Cost stress grid verified: break-even cost TB2={stress_tb2[0]['break_even_cost_ATR0']:.4f}, "
+          f"TB3={stress_tb3[0]['break_even_cost_ATR0']:.4f}")
 
     # 7. Day-clustered bootstrap (smoke with 200 reps)
-    print("[SMOKE] Running day-clustered bootstrap (200 reps)...", flush=True)
+    print("[SMOKE] Running day-clustered bootstrap on TB3 (200 reps)...", flush=True)
     boot_tb3 = run_day_clustered_bootstrap(tb3_scored, n_boot=200, seed=BOOTSTRAP_SEED)
-    print(f"[SMOKE TB3 Boot] rho_state: pt={boot_tb3['rho_state']['point']:.4f}, CI=[{boot_tb3['rho_state']['ci95_lower']:.4f}, {boot_tb3['rho_state']['ci95_upper']:.4f}]")
-    print(f"[SMOKE TB3 Boot] rho_trad : pt={boot_tb3['rho_trad']['point']:.4f}, CI=[{boot_tb3['rho_trad']['ci95_lower']:.4f}, {boot_tb3['rho_trad']['ci95_upper']:.4f}]")
-    print(f"[SMOKE TB3 Boot] EV_sign  : pt={boot_tb3['EV_sign']['point']:.4f}, CI=[{boot_tb3['EV_sign']['ci95_lower']:.4f}, {boot_tb3['EV_sign']['ci95_upper']:.4f}]")
+    print(f"[SMOKE TB3 Boot ALL] rho_CC   : pt={boot_tb3['rho_CC_all']['point']:.4f}, CI=[{boot_tb3['rho_CC_all']['ci95_lower']:.4f}, {boot_tb3['rho_CC_all']['ci95_upper']:.4f}]")
+    print(f"[SMOKE TB3 Boot ALL] rho_trad : pt={boot_tb3['rho_trad_all']['point']:.4f}, CI=[{boot_tb3['rho_trad_all']['ci95_lower']:.4f}, {boot_tb3['rho_trad_all']['ci95_upper']:.4f}]")
+    print(f"[SMOKE TB3 Boot ALL] EV_sign  : pt={boot_tb3['EV_sign_all']['point']:.4f}, CI=[{boot_tb3['EV_sign_all']['ci95_lower']:.4f}, {boot_tb3['EV_sign_all']['ci95_upper']:.4f}]")
+    print(f"[SMOKE TB3 Boot DIAG] rho_nonterminal: pt={boot_tb3['rho_model_nonterminal']['point']:.4f}, CI=[{boot_tb3['rho_model_nonterminal']['ci95_lower']:.4f}, {boot_tb3['rho_model_nonterminal']['ci95_upper']:.4f}]")
 
     # 8. Symbol breadth
     sym_rows, sym_counts = compute_symbol_breadth(tb3_scored)
@@ -666,6 +953,14 @@ def run_smoke_test() -> None:
 
     elapsed = time.perf_counter() - t0
     print(f"[SMOKE COMPLETE] Successfully executed in {elapsed:.2f}s! (No formal verdict emitted)", flush=True)
+
+
+def run_formal() -> None:
+    """Execute formal full evaluation on ALL TB2 and TB3 observation rows (BLOCKED THIS ROUND)."""
+    raise SystemExit(
+        "STOP_PGM_NATIVE_FORMAL_NOT_AUTHORIZED_THIS_ROUND:\n"
+        "本轮未授权运行 --formal。必须先提交代码与测试由用户完成独立审计，获得明确授权后再运行。"
+    )
 
 
 def main():
@@ -676,10 +971,8 @@ def main():
     args = parser.parse_args()
 
     if args.formal:
-        raise SystemExit(
-            "STOP_PGM_NATIVE_FORMAL_NOT_AUTHORIZED_THIS_ROUND:\n"
-            "本轮未授权运行 --formal。请先提交代码与测试由用户完成独立审计，获得明确授权后再运行。"
-        )
+        run_formal()
+        return
 
     if args.audit_only:
         run_audit_only()
@@ -689,7 +982,6 @@ def main():
         run_smoke_test()
         return
 
-    # Default if no flags: show help
     parser.print_help()
 
 

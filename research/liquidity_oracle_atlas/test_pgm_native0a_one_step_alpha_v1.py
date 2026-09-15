@@ -2,29 +2,36 @@
 test_pgm_native0a_one_step_alpha_v1.py
 ======================================
 
-Unit tests for PGM-NATIVE-0A One-Step Tradable Alpha Probe.
+Unit tests for PGM-NATIVE-0A.1 Causal Decision-Universe Repair.
 
-Covers 20 required tests per Section XVIII:
-  1. expected base HEAD contract
-  2. transition current hazard == 0
-  3. next bar semantics from frozen transition sample
-  4. duplicate (symbol, bar_t) hard fail
-  5. atr0 finite positive
-  6. vectorized entry=t+1 vs ex0.entry_bar_for parity
-  7. discontinuity entry unavailable
-  8. raw close-close / ATR0 == -z_d_up
-  9. close-close == gap + open-close
-  10. score_mu == -z_d_up_mu
-  11. TB2 uses fit_A only
-  12. TB3 uses fit_B only
-  13. PGM scoring wrapper exact parity with direct analytic_conditional_support
-  14. no future/reward columns enter PGM design
-  15. action sign contract
-  16. cost only debited on non-SKIP
-  17. TB3 bins use TB2 edges
-  18. day-cluster bootstrap deterministic
-  19. no V2 opportunity/R1-R4 dependency
-  20. smoke cannot emit formal verdict
+Covers 27 required tests per Section XVII:
+  1. BASE_SHA is ancestor of HEAD
+  2. strategy universe sourced from pgm.SAMPLE_PATH
+  3. strategy universe includes hazard==0 AND hazard==1
+  4. no hazard filtering in strategy universe
+  5. overall row count > transition row count
+  6. transition truth row count == frozen EXPECTED_TRANSITIONS
+  7. duplicate (symbol, bar_t) hard fail
+  8. atr0 finite positive
+  9. safe entry at data end returns unavailable, no OOB
+  10. ex0.entry_bar_for parity
+  11. raw CC == gap + trad on ALL rows
+  12. hazard==0 raw CC == -rebuilt z_d_up
+  13. cached/rebuilt transition key parity
+  14. cached/rebuilt z_d_up precision difference reported, not overwritten
+  15. score_mu == -analytic z_d_up_mu
+  16. actual mc.design_cols contains no future/target cols
+  17. TB2 experiment route really uses mc_A
+  18. TB3 experiment route really uses mc_B
+  19. action independent of hazard label
+  20. ALL metrics use hazard0+hazard1 rows
+  21. H0/H1 subgroup metrics diagnostic only
+  22. cost only on non-SKIP
+  23. TB3 deciles still use TB2 edges
+  24. day-cluster bootstrap deterministic
+  25. no V2 / R1-R4 dependency
+  26. smoke cannot emit formal verdict
+  27. formal verdict strings contain ON_FROZEN_PGM_BAR_SAMPLE
 """
 
 from __future__ import annotations
@@ -53,47 +60,74 @@ import research.liquidity_oracle_atlas.experiment_dynamic_pgm1a1b_count_magnitud
 
 
 # ===========================================================================
-# 1. Expected Base HEAD Contract
+# 1. BASE_SHA is Ancestor of HEAD
 # ===========================================================================
-def test_1_expected_base_head_contract():
-    assert exp.BASE_SHA == "2bae5c6a86d8c563027597bd9a54b66fc824b5b4"
-    try:
-        git_head = subprocess.check_output(
-            ["git", "rev-parse", "HEAD"], cwd=str(_REPO_ROOT), text=True
-        ).strip()
-        assert git_head == exp.BASE_SHA, f"Current git head {git_head} != BASE_SHA {exp.BASE_SHA}"
-    except subprocess.CalledProcessError:
-        pass
+def test_1_base_sha_is_ancestor_of_head():
+    assert exp.BASE_SHA == "29b96485f3272dc76df34dcd26b700d4a73aedce"
+    res = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", exp.BASE_SHA, "HEAD"],
+        cwd=str(_REPO_ROOT),
+        capture_output=True,
+    )
+    assert res.returncode == 0, f"BASE_SHA {exp.BASE_SHA} is not ancestor of HEAD"
 
 
 # ===========================================================================
-# 2. Transition Current Hazard == 0
+# 2. Strategy Universe Sourced from pgm.SAMPLE_PATH
 # ===========================================================================
-def test_2_transition_current_hazard_zero():
-    trans = exp.load_transition_universe()
-    assert (trans["hazard"] == 0).all(), "Found non-zero hazard in transition sample"
+def test_2_strategy_universe_sourced_from_sample_path():
+    obs = exp.load_observed_decision_universe()
+    assert len(obs) == exp.EXPECTED_ALL_OBS, f"Expected {exp.EXPECTED_ALL_OBS} rows, got {len(obs)}"
+    assert "hazard" in obs.columns
+    assert "bar_t" in obs.columns
+    assert "symbol" in obs.columns
 
 
 # ===========================================================================
-# 3. Next Bar Semantics from Frozen Transition Sample
+# 3. Strategy Universe Includes hazard==0 AND hazard==1
 # ===========================================================================
-def test_3_next_bar_semantics_frozen_transition():
-    s = pd.read_parquet(pgm.SAMPLE_PATH)
-    cur, nxt = base.build_transition_sample(s)
-    # cur and nxt must be consecutive within episode: next_bar == bar_t + 1
-    assert (nxt["bar_t"].to_numpy() == cur["bar_t"].to_numpy() + 1).all()
+def test_3_strategy_universe_includes_hazard0_and_hazard1():
+    obs = exp.load_observed_decision_universe()
+    h_set = set(obs["hazard"].unique())
+    assert 0 in h_set and 1 in h_set, f"Expected both 0 and 1 in hazard set, got {h_set}"
 
 
 # ===========================================================================
-# 4. Duplicate (symbol, bar_t) Hard Fail
+# 4. No Hazard Filtering in Strategy Universe
 # ===========================================================================
-def test_4_duplicate_symbol_bart_hard_fail():
-    # Construct a synthetic frame with a duplicate (symbol, bar_t)
+def test_4_no_hazard_filtering_in_strategy_universe():
+    obs = exp.load_observed_decision_universe()
+    n_h1 = int((obs["hazard"] == 1).sum())
+    assert n_h1 == exp.EXPECTED_HAZARD1, f"Expected {exp.EXPECTED_HAZARD1} hazard==1 rows, got {n_h1}"
+
+
+# ===========================================================================
+# 5. Overall Row Count > Transition Row Count
+# ===========================================================================
+def test_5_overall_row_count_greater_than_transition_row_count():
+    obs = exp.load_observed_decision_universe()
+    trans_aud = exp.load_transition_truth_audit()
+    assert len(obs) > trans_aud["n_rebuilt"]
+    assert len(obs) - trans_aud["n_rebuilt"] == exp.EXPECTED_HAZARD1
+
+
+# ===========================================================================
+# 6. Transition Truth Row Count == Frozen EXPECTED_TRANSITIONS
+# ===========================================================================
+def test_6_transition_truth_row_count_equals_frozen_expected():
+    trans_aud = exp.load_transition_truth_audit()
+    assert trans_aud["n_rebuilt"] == exp.EXPECTED_TRANSITIONS
+    assert trans_aud["n_cached"] == exp.EXPECTED_TRANSITIONS
+
+
+# ===========================================================================
+# 7. Duplicate (symbol, bar_t) Hard Fail
+# ===========================================================================
+def test_7_duplicate_symbol_bart_hard_fail():
     df_mock = pd.DataFrame({
         "symbol": ["AG", "AG"],
         "bar_t": [100, 100],
-        "hazard": [0, 0],
-        "z_d_up": [0.1, -0.1],
+        "hazard": [0, 1],
         "atr0": [1.0, 1.0],
         "block": ["TB2", "TB2"],
     })
@@ -107,19 +141,45 @@ def test_4_duplicate_symbol_bart_hard_fail():
 
 
 # ===========================================================================
-# 5. atr0 Finite Positive
+# 8. atr0 Finite Positive
 # ===========================================================================
-def test_5_atr0_finite_positive():
-    trans = exp.load_transition_universe()
-    atr = trans["atr0"].to_numpy(float)
+def test_8_atr0_finite_positive():
+    obs = exp.load_observed_decision_universe()
+    atr = obs["atr0"].to_numpy(float)
     assert np.all(np.isfinite(atr))
     assert (atr > 0).all()
 
 
 # ===========================================================================
-# 6. Vectorized Entry=t+1 vs ex0.entry_bar_for Parity
+# 9. Safe Entry at Data End Returns Unavailable, No OOB
 # ===========================================================================
-def test_6_vectorized_entry_vs_entry_bar_for_parity():
+def test_9_safe_entry_at_data_end_returns_unavailable_no_oob():
+    mock_bars = {
+        "n": 5,
+        "disc": np.zeros(5, dtype=bool),
+        "day": np.array(["2026-01-01"] * 5, dtype="datetime64[us]"),
+        "c": np.array([10.0, 10.1, 10.2, 10.3, 10.4]),
+        "o": np.array([10.0, 10.1, 10.2, 10.3, 10.4]),
+    }
+    # bar_t = 4 -> entry = 5 == n (out of bounds)
+    df_mock = pd.DataFrame({
+        "symbol": ["TEST"],
+        "bar_t": [4],
+        "hazard": [0],
+        "atr0": [1.0],
+        "block": ["TB2"],
+    })
+    aligned, aud = exp.align_raw_bars_and_returns(df_mock, {"TEST": mock_bars})
+    assert not aligned.iloc[0]["is_entry_valid"]
+    assert aligned.iloc[0]["entry_bar"] == -1
+    assert pd.isna(aligned.iloc[0]["entry_day"])
+    assert aud["n_unavailable"] == 1
+
+
+# ===========================================================================
+# 10. ex0.entry_bar_for Parity
+# ===========================================================================
+def test_10_entry_bar_for_parity():
     _, _, bars_by_sym = ex0.load_env()
     bars_ag = bars_by_sym["AG"]
     sample_indices = np.linspace(0, bars_ag["n"] - 2, 200, dtype=int)
@@ -132,50 +192,16 @@ def test_6_vectorized_entry_vs_entry_bar_for_parity():
 
 
 # ===========================================================================
-# 7. Discontinuity Entry Unavailable
+# 11. Raw CC == Gap + Trad on ALL Rows
 # ===========================================================================
-def test_7_discontinuity_entry_unavailable():
-    mock_bars = {
-        "n": 5,
-        "disc": np.array([False, False, True, False, False]),
-        "c": np.array([10.0, 10.1, 10.2, 10.3, 10.4]),
-        "o": np.array([10.0, 10.1, 10.2, 10.3, 10.4]),
-        "day": np.array(["2026-01-01"] * 5),
-    }
-    df_mock = pd.DataFrame({
-        "symbol": ["TEST"],
-        "bar_t": [1],  # entry = 2 which is disc=True
-        "hazard": [0],
-        "z_d_up": [0.0],
-        "atr0": [1.0],
-        "block": ["TB2"],
-    })
-    aligned, aud = exp.align_raw_bars_and_returns(df_mock, {"TEST": mock_bars})
-    assert not aligned.iloc[0]["is_entry_valid"]
-    assert aligned.iloc[0]["entry_bar"] == -1
-    assert aud["n_unavailable"] == 1
-
-
-# ===========================================================================
-# 8. Raw Close-Close / ATR0 == -z_d_up Parity
-# ===========================================================================
-def test_8_raw_return_cc_equals_minus_zdup():
-    trans = exp.load_transition_universe()
+def test_11_raw_cc_equals_gap_plus_trad_on_all_rows():
+    obs = exp.load_observed_decision_universe()
     _, _, bars_by_sym = ex0.load_env()
-    sample = trans.head(200).copy()
-    aligned, aud = exp.align_raw_bars_and_returns(sample, bars_by_sym)
-    valid = aligned[aligned["is_entry_valid"]]
-    assert aud["max_err_r_cc"] <= 1e-8
-    assert np.allclose(valid["r_state_CC_ATR0"], -valid["z_d_up"], atol=1e-8)
+    # Sample containing both hazard == 0 and hazard == 1
+    h0 = obs[obs["hazard"] == 0].head(100)
+    h1 = obs[obs["hazard"] == 1].head(100)
+    sample = pd.concat([h0, h1]).reset_index(drop=True)
 
-
-# ===========================================================================
-# 9. Return Decomposition: Close-Close == Gap + Open-Close
-# ===========================================================================
-def test_9_return_decomposition_cc_equals_gap_plus_trad():
-    trans = exp.load_transition_universe()
-    _, _, bars_by_sym = ex0.load_env()
-    sample = trans.head(200).copy()
     aligned, aud = exp.align_raw_bars_and_returns(sample, bars_by_sym)
     valid = aligned[aligned["is_entry_valid"]]
     assert aud["max_err_decomp"] <= 1e-10
@@ -183,89 +209,183 @@ def test_9_return_decomposition_cc_equals_gap_plus_trad():
 
 
 # ===========================================================================
-# 10. score_mu == -z_d_up_mu
+# 12. Hazard==0 Raw CC == -rebuilt z_d_up
 # ===========================================================================
-def test_10_score_mu_equals_minus_zdup_mu():
+def test_12_hazard0_raw_cc_equals_minus_rebuilt_zdup():
+    trans_aud = exp.load_transition_truth_audit()
+    cur = trans_aud["cur"]
+    obs = exp.load_observed_decision_universe()
+    _, _, bars_by_sym = ex0.load_env()
+
+    # Take first 200 hazard==0 rows
+    h0_sample = obs[obs["hazard"] == 0].head(200).copy()
+    cur_sub = cur.head(200).copy()
+    aligned, aud = exp.align_raw_bars_and_returns(h0_sample, bars_by_sym, cur_truth=cur_sub)
+    valid = aligned[aligned["is_entry_valid"]]
+    assert aud["max_err_r_cc"] <= 1e-8
+    assert np.allclose(valid["r_state_CC_ATR0"], -cur_sub["z_d_up"].to_numpy(float), atol=1e-8)
+
+
+# ===========================================================================
+# 13. Cached/Rebuilt Transition Key Parity
+# ===========================================================================
+def test_13_cached_rebuilt_transition_key_parity():
+    trans_aud = exp.load_transition_truth_audit()
+    assert trans_aud["symbols_equal"]
+    assert trans_aud["episodes_equal"]
+    assert trans_aud["blocks_equal"]
+
+
+# ===========================================================================
+# 14. Cached/Rebuilt z_d_up Precision Difference Reported, Not Overwritten
+# ===========================================================================
+def test_14_cached_rebuilt_zdup_precision_diff_reported_not_overwritten():
+    trans_aud = exp.load_transition_truth_audit()
+    diff = trans_aud["max_abs_z_d_up_float32_vs_rebuilt"]
+    assert 8.0e-7 < diff < 9.0e-7, f"Unexpected float32 precision diff: {diff}"
+    # Verify cached is still float32 and rebuilt is float64
+    assert trans_aud["cached"]["z_d_up"].dtype == np.float32
+    assert trans_aud["cur"]["z_d_up"].dtype == np.float64
+
+
+# ===========================================================================
+# 15. score_mu == -analytic z_d_up_mu
+# ===========================================================================
+def test_15_score_mu_equals_minus_analytic_zdup_mu():
     class DummySampler:
         def analytic_conditional_support(self, df):
             return {"z_d_up_mu": np.array([0.25, -0.50, 0.0])}
-    df = pd.DataFrame({"cur_up_distance_R": [1.0, 1.0, 1.0], "cur_down_distance_R": [1.0, 1.0, 1.0]})
-    # Mock compute_state_conditional_support_probs
-    monkey_probs = {"p_up_distance_negative": np.array([0.1, 0.2, 0.3]), "p_down_distance_negative": np.array([0.1, 0.1, 0.1])}
-    orig = pgm.compute_state_conditional_support_probs
-    pgm.compute_state_conditional_support_probs = lambda d, s: monkey_probs
-    try:
-        scored = exp.score_pgm_block(df, DummySampler())
-        assert np.allclose(scored["score_mu"].to_numpy(), np.array([-0.25, 0.50, 0.0]))
-    finally:
-        pgm.compute_state_conditional_support_probs = orig
+    df = pd.DataFrame({"dummy": [1, 2, 3]})
+    scored = exp.score_pgm_block(df, DummySampler())
+    assert np.allclose(scored["score_mu"].to_numpy(), np.array([-0.25, 0.50, 0.0]))
 
 
 # ===========================================================================
-# 11. TB2 Uses fit_A Only
+# 16. Actual mc.design_cols Contains No Future/Target Cols
 # ===========================================================================
-def test_11_tb2_uses_fit_a_only():
-    # Verify window A contract: train=TB1, eval=TB2
-    win_a = pgm.WINDOWS[0]
-    assert win_a["train"] == ["TB1"]
-    assert win_a["eval"] == "TB2"
-
-
-# ===========================================================================
-# 12. TB3 Uses fit_B Only
-# ===========================================================================
-def test_12_tb3_uses_fit_b_only():
-    # Verify window B contract: train=TB1+TB2, eval=TB3
-    win_b = pgm.WINDOWS[1]
-    assert win_b["train"] == ["TB1", "TB2"]
-    assert win_b["eval"] == "TB3"
-
-
-# ===========================================================================
-# 13. PGM Scoring Wrapper Exact Parity with Direct analytic_conditional_support
-# ===========================================================================
-def test_13_pgm_scoring_wrapper_exact_parity():
-    trans = exp.load_transition_universe()
-    sample = trans[trans["block"] == "TB2"].head(50).copy()
+def test_16_actual_mc_design_cols_contains_no_future_target_cols():
     fit_A = pgm.fit_samplers_for_window(pgm.WINDOWS[0], pgm.SAMPLE_PATH, pgm.TRANSITION_SAMPLE_PATH)
-    mc = fit_A["trans_samplers"]["MC_STATE_CURREENCODING"]
-
-    # Direct
-    mom = mc.analytic_conditional_support(sample)
-    expected_score = -np.asarray(mom["z_d_up_mu"], dtype=np.float64)
-
-    # Wrapper
-    scored = exp.score_pgm_block(sample, mc)
-    actual_score = scored["score_mu"].to_numpy(float)
-
-    assert np.allclose(actual_score, expected_score)
+    mc_A = fit_A["trans_samplers"]["MC_STATE_CURREENCODING"]
+    forbidden = set(base.ALL_Z_COLS + base.COUNT_Z + [
+        "hazard", "target_mask",
+        "reward_SKIP", "reward_MARKET", "reward_LIMIT_RR3", "reward_REASSESS_RR3",
+        "r_CC_ATR0", "gap_ATR0", "r_trad_OC_ATR0",
+    ])
+    intersection = set(mc_A.design_cols).intersection(forbidden)
+    assert len(intersection) == 0, f"mc.design_cols contains forbidden target columns: {intersection}"
 
 
 # ===========================================================================
-# 14. No Future/Reward Columns Enter PGM Design
+# 17. TB2 Experiment Route Really Uses mc_A
 # ===========================================================================
-def test_14_no_future_reward_columns_in_pgm_design():
-    trans = exp.load_transition_universe()
-    forbidden = ["reward_", "next_", "future_", "target_", "pnl", "r_trad", "gap_ATR0"]
-    for col in trans.columns:
-        for f in forbidden:
-            assert not col.startswith(f), f"Found forbidden column {col} in transition universe"
+def test_17_tb2_experiment_route_really_uses_mc_a():
+    class TaggedSampler:
+        def __init__(self, tag: str):
+            self.tag = tag
+        def analytic_conditional_support(self, df):
+            val = 1.0 if self.tag == "SAMPLER_A" else -1.0
+            return {"z_d_up_mu": np.full(len(df), val)}
+
+    s_A = TaggedSampler("SAMPLER_A")
+    s_B = TaggedSampler("SAMPLER_B")
+
+    df_eval = pd.DataFrame({
+        "block": ["TB2", "TB2", "TB3", "TB3"],
+        "hazard": [0, 1, 0, 1],
+    })
+    sc_tb2, sc_tb3 = exp.route_and_score_evaluation(df_eval, s_A, s_B)
+    # score_mu = -z_d_up_mu -> for SAMPLER_A, score_mu = -1.0
+    assert np.all(sc_tb2["score_mu"] == -1.0)
+    # If route was swapped (s_B used on TB2), score_mu would be 1.0
+    assert not np.all(sc_tb2["score_mu"] == 1.0)
 
 
 # ===========================================================================
-# 15. Action Sign Contract
+# 18. TB3 Experiment Route Really Uses mc_B
 # ===========================================================================
-def test_15_action_sign_contract():
-    df = pd.DataFrame({"score_mu": [0.5, -0.2, 0.0, 1.2, -0.001]})
-    s = df["score_mu"].to_numpy(float)
-    actions = np.where(s > 0, 1, np.where(s < 0, -1, 0))
-    assert list(actions) == [1, -1, 0, 1, -1]
+def test_18_tb3_experiment_route_really_uses_mc_b():
+    class TaggedSampler:
+        def __init__(self, tag: str):
+            self.tag = tag
+        def analytic_conditional_support(self, df):
+            val = 1.0 if self.tag == "SAMPLER_A" else -1.0
+            return {"z_d_up_mu": np.full(len(df), val)}
+
+    s_A = TaggedSampler("SAMPLER_A")
+    s_B = TaggedSampler("SAMPLER_B")
+
+    df_eval = pd.DataFrame({
+        "block": ["TB2", "TB2", "TB3", "TB3"],
+        "hazard": [0, 1, 0, 1],
+    })
+    sc_tb2, sc_tb3 = exp.route_and_score_evaluation(df_eval, s_A, s_B)
+    # for SAMPLER_B, score_mu = -(-1.0) = 1.0
+    assert np.all(sc_tb3["score_mu"] == 1.0)
+    assert not np.all(sc_tb3["score_mu"] == -1.0)
 
 
 # ===========================================================================
-# 16. Cost Only Debited on Non-SKIP
+# 19. Action Independent of Hazard Label
 # ===========================================================================
-def test_16_cost_only_debited_on_non_skip():
+def test_19_action_independent_of_hazard_label():
+    df_h0 = pd.DataFrame({"score_mu": [0.5, -0.2, 0.0], "hazard": [0, 0, 0]})
+    df_h1 = pd.DataFrame({"score_mu": [0.5, -0.2, 0.0], "hazard": [1, 1, 1]})
+
+    class Dummy:
+        def analytic_conditional_support(self, df):
+            return {"z_d_up_mu": -df["score_mu"].to_numpy()}
+
+    sc0 = exp.score_pgm_block(df_h0, Dummy())
+    sc1 = exp.score_pgm_block(df_h1, Dummy())
+    assert (sc0["action"].values == sc1["action"].values).all()
+
+
+# ===========================================================================
+# 20. ALL Metrics Use hazard0+hazard1 Rows
+# ===========================================================================
+def test_20_all_metrics_use_hazard0_and_hazard1_rows():
+    df = pd.DataFrame({
+        "score_mu": [0.5, -0.5, 0.2, -0.2],
+        "r_state_CC_ATR0": [0.4, -0.4, 0.1, -0.1],
+        "r_trad_OC_ATR0": [0.3, -0.3, 0.1, -0.1],
+        "gap_ATR0": [0.1, -0.1, 0.0, 0.0],
+        "action": [1, -1, 1, -1],
+        "strategy_return_ATR0": [0.3, 0.3, 0.1, 0.1],
+        "hazard": [0, 0, 1, 1],
+    })
+    m = exp.compute_block_metrics(df)
+    assert m["n_decisions_all"] == 4
+    assert m["n_signals"] == 4
+    assert np.isclose(m["gross_ev_signal"], 0.20)
+
+
+# ===========================================================================
+# 21. H0/H1 Subgroup Metrics Diagnostic Only
+# ===========================================================================
+def test_21_h0_h1_subgroup_metrics_diagnostic_only():
+    df = pd.DataFrame({
+        "score_mu": [0.5, -0.5, 0.2, -0.2],
+        "r_state_CC_ATR0": [0.4, -0.4, 0.1, -0.1],
+        "r_trad_OC_ATR0": [0.3, -0.3, 0.1, -0.1],
+        "gap_ATR0": [0.1, -0.1, 0.0, 0.0],
+        "action": [1, -1, 1, -1],
+        "strategy_return_ATR0": [0.3, 0.3, 0.1, 0.1],
+        "hazard": [0, 0, 1, 1],
+    })
+    m = exp.compute_block_metrics(df)
+    assert "DIAGNOSTIC_H0" in m
+    assert "DIAGNOSTIC_H1" in m
+    assert m["DIAGNOSTIC_H0"]["n"] == 2
+    assert m["DIAGNOSTIC_H1"]["n"] == 2
+    assert "future_filter_EV_bias" in m
+    # H0 EV = 0.30, ALL EV = 0.20 -> bias = +0.10
+    assert np.isclose(m["future_filter_EV_bias"], 0.10)
+
+
+# ===========================================================================
+# 22. Cost Only on Non-SKIP
+# ===========================================================================
+def test_22_cost_only_on_non_skip():
     df = pd.DataFrame({
         "action": [1, -1, 0, 1],
         "strategy_return_ATR0": [0.10, -0.05, 0.00, 0.20],
@@ -273,16 +393,15 @@ def test_16_cost_only_debited_on_non_skip():
     stress = exp.run_cost_stress_grid(df)
     for row in stress:
         cost = row["cost_ATR0"]
-        # SKIP row (idx 2) must have net_ret == 0.00
         net_ret = df["strategy_return_ATR0"] - cost * (df["action"] != 0)
         assert net_ret.iloc[2] == 0.00
         assert np.isclose(row["net_EV_per_signal_ATR0"], net_ret.mean())
 
 
 # ===========================================================================
-# 17. TB3 Bins Use TB2 Edges
+# 23. TB3 Deciles Still Use TB2 Edges
 # ===========================================================================
-def test_17_tb3_bins_use_tb2_edges():
+def test_23_tb3_deciles_still_use_tb2_edges():
     scores_tb2 = np.linspace(-1.0, 1.0, 100)
     edges = exp.compute_decile_edges(scores_tb2)
     assert len(edges) == 11
@@ -302,9 +421,9 @@ def test_17_tb3_bins_use_tb2_edges():
 
 
 # ===========================================================================
-# 18. Day-Cluster Bootstrap Deterministic
+# 24. Day-Cluster Bootstrap Deterministic
 # ===========================================================================
-def test_18_day_cluster_bootstrap_deterministic():
+def test_24_day_cluster_bootstrap_deterministic():
     np.random.seed(42)
     n = 100
     df = pd.DataFrame({
@@ -313,6 +432,7 @@ def test_18_day_cluster_bootstrap_deterministic():
         "r_state_CC_ATR0": np.random.randn(n),
         "r_trad_OC_ATR0": np.random.randn(n),
         "strategy_return_ATR0": np.random.randn(n),
+        "hazard": np.random.choice([0, 1], size=n, p=[0.9, 0.1]),
     })
     b1 = exp.run_day_clustered_bootstrap(df, n_boot=50, seed=20260915)
     b2 = exp.run_day_clustered_bootstrap(df, n_boot=50, seed=20260915)
@@ -320,11 +440,10 @@ def test_18_day_cluster_bootstrap_deterministic():
 
 
 # ===========================================================================
-# 19. No V2 Opportunity / R1-R4 Dependency
+# 25. No V2 / R1-R4 Dependency
 # ===========================================================================
-def test_19_no_v2_opportunity_r1_r4_dependency():
+def test_25_no_v2_r1_r4_dependency():
     src = inspect.getsource(exp)
-    # Ensure no import or reading of execution_lag1_trades or V2 action/reward models
     assert "pd.read_parquet" in src
     assert "execution_lag1_trades.parquet" not in src.replace('"execution_lag1_trades.parquet"', "")
     assert "fit_action_q_models" not in src.replace('"fit_action_q_models"', "")
@@ -334,13 +453,20 @@ def test_19_no_v2_opportunity_r1_r4_dependency():
 
 
 # ===========================================================================
-# 20. Smoke Cannot Emit Formal Verdict
+# 26. Smoke Cannot Emit Formal Verdict
 # ===========================================================================
-def test_20_smoke_cannot_emit_formal_verdict():
-    # Ensure run_smoke_test prints "(No formal verdict emitted)"
+def test_26_smoke_cannot_emit_formal_verdict():
     src = inspect.getsource(exp.run_smoke_test)
     assert "No formal verdict emitted" in src
     assert "PGM_NATIVE_ONE_STEP_TRADABLE_ALPHA_SUPPORTED" not in src
+
+
+# ===========================================================================
+# 27. Formal Verdict Strings Contain ON_FROZEN_PGM_BAR_SAMPLE
+# ===========================================================================
+def test_27_formal_verdict_strings_contain_on_frozen_pgm_bar_sample():
+    for k, v in exp.VERDICT_STRINGS.items():
+        assert "ON_FROZEN_PGM_BAR_SAMPLE" in v, f"Verdict {k} does not contain ON_FROZEN_PGM_BAR_SAMPLE: {v}"
 
 
 # ===========================================================================
@@ -354,7 +480,7 @@ if __name__ == "__main__":
     tests.sort(key=lambda fn: int(fn.__name__.split("_")[1]))
 
     ok = fail = 0
-    print(f"Running {len(tests)} unit tests for PGM-NATIVE-0A...\n")
+    print(f"Running {len(tests)} unit tests for PGM-NATIVE-0A.1...\n")
     for t in tests:
         try:
             t()
