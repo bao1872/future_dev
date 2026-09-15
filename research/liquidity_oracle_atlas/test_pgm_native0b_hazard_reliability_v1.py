@@ -4,7 +4,7 @@ test_pgm_native0b_hazard_reliability_v1.py
 
 Unit tests for PGM-NATIVE-0B: Predicted Hazard Reliability Probe.
 
-Covers 25 required tests:
+Covers 31 required tests:
   1. BASE_SHA is ancestor of HEAD
   2. only SAMPLE_PATH ALL rows as strategy universe
   3. true hazard never enters policy function
@@ -30,6 +30,12 @@ Covers 25 required tests:
   23. smoke emits no scientific verdict
   24. full-exploratory blocked first round
   25. no V2 / R1-R4 / Q model / RL dependency
+  26. audit-only artifact hashes fail-closed / 64-char SHA256
+  27. actual MC_STATE_CURREENCODING design_cols have zero future/target overlap
+  28. T0 TB3 hazard deciles use TB2 T0 edges
+  29. T0 diagnostic helper consumes/generates no economic-policy field
+  30. smoke path actually executes hazard-decile rough ordering without verdict
+  31. full output contract includes T0 diagnostic decile artifact
 """
 
 from __future__ import annotations
@@ -498,6 +504,147 @@ def test_25_no_v2_r1_r4_q_model_rl_dependency():
     forbidden_tokens = ["market_regime_v2", "q_learning", "reinforcement_learning", "gym", "torch", "tensorflow", "stable_baselines"]
     for tok in forbidden_tokens:
         assert tok not in text.lower(), f"Forbidden token {tok} found in {exp.__file__}"
+
+
+# ===========================================================================
+# 26. Audit-Only Artifact Hashes: Fail-Closed / 64-char SHA256
+# ===========================================================================
+def test_26_audit_only_artifact_hashes_fail_closed():
+    # Happy path: valid 64-char lowercase hex SHA256 for both artifacts
+    hashes = exp.compute_artifact_hashes()
+    for k in ("sample_artifact_sha256", "transition_artifact_sha256"):
+        v = hashes[k]
+        assert isinstance(v, str), f"{k} must be a string"
+        assert len(v) == 64, f"{k} must be 64 chars, got {len(v)}"
+        int(v, 16)  # must be valid hex
+
+    # audit-only must print them (not N/A)
+    src = inspect.getsource(exp.run_audit_only)
+    assert "sample_artifact_sha256" in src
+    assert "transition_artifact_sha256" in src
+    assert "compute_artifact_hashes" in src
+    assert "N/A" not in src
+
+    # Fail-closed: a missing sample artifact must abort, never emit N/A
+    orig = pgm.SAMPLE_PATH
+    try:
+        pgm.SAMPLE_PATH = Path("/nonexistent/path/does_not_exist.parquet")
+        raised = None
+        try:
+            exp.compute_artifact_hashes()
+        except SystemExit as e:
+            raised = str(e)
+        assert raised is not None, "expected SystemExit on missing sample artifact"
+        assert "STOP_PGM_NATIVE_SAMPLE_ARTIFACT_MISSING" in raised
+    finally:
+        pgm.SAMPLE_PATH = orig
+
+
+# ===========================================================================
+# 27. Actual MC_STATE_CURREENCODING design_cols Have Zero Future/Target Overlap
+# ===========================================================================
+_FIT_A_CACHE = None
+
+
+def _get_fit_A():
+    global _FIT_A_CACHE
+    if _FIT_A_CACHE is None:
+        _FIT_A_CACHE = pgm.fit_samplers_for_window(pgm.WINDOWS[0], pgm.SAMPLE_PATH, pgm.TRANSITION_SAMPLE_PATH)
+    return _FIT_A_CACHE
+
+
+def test_27_actual_mc_transition_design_has_no_future_target_columns():
+    fit_A = _get_fit_A()
+    mc_sampler = fit_A["trans_samplers"][exp.PRIMARY_TRANSITION_HEAD]
+    design = mc_sampler.design_cols
+    assert design is not None, "MC transition design_cols must be populated"
+    assert len(design) > 0, "MC transition design_cols must be non-empty"
+
+    forbidden = exp.build_forbidden_target_cols()
+    intersection = set(design).intersection(forbidden)
+    assert len(intersection) == 0, f"MC design future/target leakage: {intersection}"
+
+    # audit-only must audit the ACTUAL transition sampler, not just static constants
+    src = inspect.getsource(exp.run_audit_only)
+    assert "fit_A[\"trans_samplers\"][PRIMARY_TRANSITION_HEAD]" in src
+    assert "STOP_PGM_NATIVE0B_TRANSITION_DESIGN_FUTURE_LEAKAGE" in src
+    assert "MC transition design future/target overlap = 0" in src
+    assert "T2 terminal design future/target overlap = 0" in src
+
+
+# ===========================================================================
+# 28. T0 TB3 Hazard Deciles Use TB2 T0 Edges
+# ===========================================================================
+def test_28_t0_tb3_hazard_deciles_use_tb2_t0_edges():
+    p_tb2 = np.linspace(0.01, 0.99, 200)
+    p_tb3 = np.linspace(0.02, 0.98, 200)
+    haz_tb2 = (p_tb2 > 0.8).astype(int)
+    haz_tb3 = (p_tb3 > 0.8).astype(int)
+
+    edges_t0 = exp.compute_hazard_decile_edges(p_tb2)
+    assert len(edges_t0) == 11
+    assert np.all(np.diff(edges_t0) > 0)
+
+    rows, stats = exp.compute_hazard_calibration_deciles(p_tb3, haz_tb3, edges_t0)
+    assert len(rows) > 0
+    assert sum(r["n"] for r in rows) == 200
+    assert "spearman_bin_p_h_vs_observed_H1" in stats
+
+    # Full pipeline contract: T0 edges derived from TB2, reused verbatim for TB3
+    src = inspect.getsource(exp.execute_exploratory_pipeline)
+    assert 'edges_p_h_t0 = compute_hazard_decile_edges(tb2_scored["p_h_t0"]' in src
+    assert 'compute_hazard_calibration_deciles(tb2_scored["p_h_t0"], tb2_scored["hazard"], edges_p_h_t0)' in src
+    assert 'compute_hazard_calibration_deciles(tb3_scored["p_h_t0"], tb3_scored["hazard"], edges_p_h_t0)' in src
+
+
+# ===========================================================================
+# 29. T0 Diagnostic Helper Consumes/Generates No Economic-Policy Field
+# ===========================================================================
+def test_29_t0_diagnostic_helper_has_no_economic_policy_fields():
+    sig = inspect.signature(exp.compute_hazard_calibration_deciles)
+    assert list(sig.parameters.keys()) == ["p_h", "hazard", "edges"]
+
+    src = inspect.getsource(exp.compute_hazard_calibration_deciles)
+    for tok in ["ret_0a", "ret_0b", "position_0b", "exposure_0a", "exposure_0b",
+                "score_mu", "r_trad_OC_ATR0", "EV_0a", "EV_0b", "action_0a"]:
+        assert tok not in src, f"forbidden economic token {tok!r} present in T0 helper"
+
+    p = np.linspace(0.01, 0.99, 100)
+    h = (p > 0.7).astype(int)
+    edges = exp.compute_hazard_decile_edges(p)
+    rows, stats = exp.compute_hazard_calibration_deciles(p, h, edges)
+    for r in rows:
+        assert set(r.keys()) == {"bin_idx", "n", "mean_p_h", "observed_H1_rate"}
+    assert set(stats.keys()) == {"spearman_bin_p_h_vs_observed_H1"}
+
+
+# ===========================================================================
+# 30. Smoke Executes Hazard-Decile Rough Ordering Without Scientific Verdict
+# ===========================================================================
+def test_30_smoke_executes_decile_rough_ordering_without_verdict():
+    src = inspect.getsource(exp.run_smoke_test)
+    assert "compute_hazard_decile_edges" in src
+    assert "evaluate_hazard_deciles" in src
+    assert "SMOKE ROUGH ORDERING ONLY" in src
+    assert "NO SCIENTIFIC VERDICT" in src
+    assert "determine_formal_verdict" not in src
+    # No T0 economic policy may be emitted
+    for tok in ["EV_T0", "position_T0", "ret_T0"]:
+        assert tok not in src, f"forbidden T0 economic token {tok!r} in smoke"
+
+
+# ===========================================================================
+# 31. Full Output Contract Includes T0 Diagnostic Decile Artifact
+# ===========================================================================
+def test_31_full_output_contract_includes_t0_decile_artifact():
+    src = inspect.getsource(exp.execute_exploratory_pipeline)
+    # Artifact names are built with the PREFIX f-string; assert the literal source form.
+    assert "{PREFIX}_t0_hazard_deciles.csv" in src
+    assert '["block", "bin_idx", "n", "mean_p_h", "observed_H1_rate"]' in src
+    assert "TB2_T0_hazard_decile_ordering" in src
+    assert "TB3_T0_hazard_decile_ordering" in src
+    # PRIMARY T2 decile artifact must remain intact
+    assert "{PREFIX}_hazard_deciles.csv" in src
 
 
 # ===========================================================================

@@ -139,6 +139,36 @@ def print_reuse_map() -> None:
 
 
 # ===========================================================================
+# Artifact Provenance (fail-closed)
+# ===========================================================================
+def compute_artifact_hashes() -> Dict[str, str]:
+    """Compute SHA256 of the frozen PGM artifacts. Fail-closed: a missing artifact aborts.
+
+    Reuses the 0A artifact existence semantics (identical STOP codes).
+    """
+    if not pgm.SAMPLE_PATH.exists():
+        raise SystemExit("STOP_PGM_NATIVE_SAMPLE_ARTIFACT_MISSING")
+    if not pgm.TRANSITION_SAMPLE_PATH.exists():
+        raise SystemExit("STOP_PGM_NATIVE_TRANSITION_ARTIFACT_MISSING")
+    return {
+        "sample_artifact_sha256": hashlib.sha256(pgm.SAMPLE_PATH.read_bytes()).hexdigest(),
+        "transition_artifact_sha256": hashlib.sha256(pgm.TRANSITION_SAMPLE_PATH.read_bytes()).hexdigest(),
+    }
+
+
+# ===========================================================================
+# Future / Target Column Contract (shared by terminal and transition design audits)
+# ===========================================================================
+def build_forbidden_target_cols() -> set:
+    """Forbidden future/target columns, kept consistent with the 0A causal audit."""
+    return set(base.ALL_Z_COLS + base.COUNT_Z + [
+        "hazard", "target_mask",
+        "reward_SKIP", "reward_MARKET", "reward_LIMIT_RR3", "reward_REASSESS_RR3",
+        "r_CC_ATR0", "gap_ATR0", "r_trad_OC_ATR0",
+    ])
+
+
+# ===========================================================================
 # Deterministic Hazard Probability Wrapper
 # ===========================================================================
 def predict_hazard_probability(term_sampler: Any, df: pd.DataFrame) -> np.ndarray:
@@ -344,6 +374,41 @@ def evaluate_hazard_deciles(df: pd.DataFrame, edges: np.ndarray) -> Tuple[List[D
         spearman_p_h_vs_0a_EV=sp_ev,
     )
     return rows, stats
+
+
+def compute_hazard_calibration_deciles(
+    p_h: np.ndarray,
+    hazard: np.ndarray,
+    edges: np.ndarray,
+) -> Tuple[List[Dict[str, Any]], Dict[str, float]]:
+    """Pure predicted-hazard calibration / ordering diagnostic (T0 diagnostic head).
+
+    Answers ONLY whether predicted-hazard ordering exists. It consumes nothing beyond the
+    predicted probability array, the realized outcome array, and frozen bin edges, and it
+    emits no trading-size, exposure or economic-policy field of any kind.
+    """
+    p = np.asarray(p_h, dtype=np.float64)
+    haz = np.asarray(hazard, dtype=int)
+    bins = pd.cut(p, bins=edges, labels=False, include_lowest=True, duplicates="drop")
+    n_bins = len(edges) - 1
+
+    rows: List[Dict[str, Any]] = []
+    bin_p_h: List[float] = []
+    bin_obs_h1: List[float] = []
+
+    for b in range(n_bins):
+        mask = bins == b
+        n_b = int(np.sum(mask))
+        if n_b == 0:
+            continue
+        m_ph = float(np.mean(p[mask]))
+        obs_h1 = float(np.mean(haz[mask]))
+        rows.append(dict(bin_idx=b, n=n_b, mean_p_h=m_ph, observed_H1_rate=obs_h1))
+        bin_p_h.append(m_ph)
+        bin_obs_h1.append(obs_h1)
+
+    sp_h1 = float(scipy.stats.spearmanr(bin_p_h, bin_obs_h1).statistic) if len(bin_p_h) > 2 else 0.0
+    return rows, dict(spearman_bin_p_h_vs_observed_H1=sp_h1)
 
 
 # ===========================================================================
@@ -679,6 +744,12 @@ def execute_exploratory_pipeline(
     dec_tb2, dec_stats_tb2 = evaluate_hazard_deciles(tb2_scored, edges_p_h)
     dec_tb3, dec_stats_tb3 = evaluate_hazard_deciles(tb3_scored, edges_p_h)
 
+    # 2b. T0 diagnostic hazard deciles: TB3 MUST reuse the TB2 T0 frozen edges.
+    #     Diagnostic ordering only -- no T0 economic policy is constructed.
+    edges_p_h_t0 = compute_hazard_decile_edges(tb2_scored["p_h_t0"].to_numpy(float))
+    t0_dec_tb2, t0_dec_stats_tb2 = compute_hazard_calibration_deciles(tb2_scored["p_h_t0"], tb2_scored["hazard"], edges_p_h_t0)
+    t0_dec_tb3, t0_dec_stats_tb3 = compute_hazard_calibration_deciles(tb3_scored["p_h_t0"], tb3_scored["hazard"], edges_p_h_t0)
+
     # 3. Subgroup diagnostics (H0 vs H1)
     sub_tb2 = compute_hazard_subgroups(tb2_scored)
     sub_tb3 = compute_hazard_subgroups(tb3_scored)
@@ -698,19 +769,16 @@ def execute_exploratory_pipeline(
     # 7. Pre-registered verdict on TB3
     verdict = determine_formal_verdict_0b(boot_tb3)
 
-    # Artifact hashes
-    if not pgm.SAMPLE_PATH.exists():
-        raise SystemExit("STOP_PGM_NATIVE_SAMPLE_ARTIFACT_MISSING")
-    if not pgm.TRANSITION_SAMPLE_PATH.exists():
-        raise SystemExit("STOP_PGM_NATIVE_TRANSITION_ARTIFACT_MISSING")
+    # Artifact hashes (fail-closed)
+    hashes = compute_artifact_hashes()
 
     summary = {
         "EXPERIMENT_NAME": EXPERIMENT_NAME,
         "EXPERIMENT_SCOPE": EXPERIMENT_SCOPE,
         "base_sha": BASE_SHA,
         "run_head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=str(_REPO_ROOT), text=True).strip(),
-        "sample_artifact_sha256": hashlib.sha256(pgm.SAMPLE_PATH.read_bytes()).hexdigest(),
-        "transition_artifact_sha256": hashlib.sha256(pgm.TRANSITION_SAMPLE_PATH.read_bytes()).hexdigest(),
+        "sample_artifact_sha256": hashes["sample_artifact_sha256"],
+        "transition_artifact_sha256": hashes["transition_artifact_sha256"],
         "max_abs_atr0_owner_error": float(max_abs_atr0_owner_error) if max_abs_atr0_owner_error is not None else 0.0,
         "n_all_obs": len(obs),
         "tb2_row_count": len(tb2_scored),
@@ -745,6 +813,8 @@ def execute_exploratory_pipeline(
         "TB3_bootstrap": boot_tb3,
         "TB2_symbol_breadth": breadth_tb2_counts,
         "TB3_symbol_breadth": breadth_tb3_counts,
+        "TB2_T0_hazard_decile_ordering": t0_dec_stats_tb2,
+        "TB3_T0_hazard_decile_ordering": t0_dec_stats_tb3,
         "formal_verdict": verdict,
         "known_scope_limitations": [
             "cross-block episodes excluded from frozen PGM sample",
@@ -760,9 +830,13 @@ def execute_exploratory_pipeline(
         out_p.mkdir(parents=True, exist_ok=True)
         (out_p / f"{PREFIX}_formal_summary.json").write_text(json.dumps(summary, indent=2))
 
-        # Save deciles
+        # Save deciles (PRIMARY T2)
         dec_all = [dict(block="TB2", **r) for r in dec_tb2] + [dict(block="TB3", **r) for r in dec_tb3]
         pd.DataFrame(dec_all).to_csv(out_p / f"{PREFIX}_hazard_deciles.csv", index=False)
+
+        # Save T0 diagnostic deciles (ordering only; no T0 economic policy field)
+        t0_dec_all = [dict(block="TB2", **r) for r in t0_dec_tb2] + [dict(block="TB3", **r) for r in t0_dec_tb3]
+        pd.DataFrame(t0_dec_all)[["block", "bin_idx", "n", "mean_p_h", "observed_H1_rate"]].to_csv(out_p / f"{PREFIX}_t0_hazard_deciles.csv", index=False)
 
         # Save cost stress
         stress_all = [dict(block="TB2", **r) for r in stress_tb2] + [dict(block="TB3", **r) for r in stress_tb3]
@@ -804,6 +878,11 @@ def run_audit_only() -> None:
     # 2. Print REUSE MAP
     print_reuse_map()
 
+    # 2b. Artifact provenance hashes (fail-closed)
+    hashes = compute_artifact_hashes()
+    print(f"[AUDIT] sample_artifact_sha256: {hashes['sample_artifact_sha256']}")
+    print(f"[AUDIT] transition_artifact_sha256: {hashes['transition_artifact_sha256']}")
+
     # 3. Decision Universe Audit
     print("[AUDIT] Loading observation decision universe from pgm.SAMPLE_PATH...", flush=True)
     obs = n0a.load_observed_decision_universe()
@@ -834,24 +913,37 @@ def run_audit_only() -> None:
     if PRIMARY_TRANSITION_HEAD not in trans_keys:
         raise SystemExit(f"STOP_PGM_NATIVE0B_TRANSITION_SAMPLER_KEY_MISMATCH: {trans_keys}")
 
-    # Check T2 design columns for future/target leakage
+    # Check T2 (terminal) design columns for future/target leakage
+    forbidden_target_cols = build_forbidden_target_cols()
     t2_sampler = fit_A["term_samplers"][PRIMARY_TERMINAL_HEAD]
     t2_design = t2_sampler.design_cols
-    forbidden_target_cols = set(base.ALL_Z_COLS + base.COUNT_Z + [
-        "hazard", "target_mask",
-        "reward_SKIP", "reward_MARKET", "reward_LIMIT_RR3", "reward_REASSESS_RR3",
-        "r_CC_ATR0", "gap_ATR0", "r_trad_OC_ATR0",
-    ])
     intersection = set(t2_design).intersection(forbidden_target_cols)
+    print(f"[AUDIT] T2 terminal design columns count: {len(t2_design)}")
+    print(f"[AUDIT] T2 terminal design columns: {t2_design}")
     print(f"[AUDIT] T2 design future/target overlap count: {len(intersection)}")
     if intersection:
         raise SystemExit(f"STOP_PGM_NATIVE0B_T2_DESIGN_FUTURE_LEAKAGE: {intersection}")
+
+    # Check MC (transition) design columns for future/target leakage -- ACTUAL sampler, not static constants
+    mc_sampler = fit_A["trans_samplers"][PRIMARY_TRANSITION_HEAD]
+    mc_design = mc_sampler.design_cols
+    if not mc_design:
+        raise SystemExit("STOP_PGM_NATIVE0B_TRANSITION_DESIGN_COLS_MISSING")
+    mc_intersection = set(mc_design).intersection(forbidden_target_cols)
+    print(f"[AUDIT] MC transition design columns count: {len(mc_design)}")
+    print(f"[AUDIT] MC transition design columns: {mc_design}")
+    print(f"[AUDIT] MC transition design future/target overlap count: {len(mc_intersection)}")
+    if mc_intersection:
+        raise SystemExit(f"STOP_PGM_NATIVE0B_TRANSITION_DESIGN_FUTURE_LEAKAGE: {mc_intersection}")
 
     # 6. Check deterministic hazard probability wrapper parity
     print("[AUDIT] Verifying deterministic hazard probability wrapper parity against sample_hazard...", flush=True)
     obs_head = obs.head(50)
     audit_hazard_probability_parity(t2_sampler, obs_head)
     print("[AUDIT] Hazard probability wrapper parity check: PASS (exact parity verified)")
+
+    print("[AUDIT] T2 terminal design future/target overlap = 0")
+    print("[AUDIT] MC transition design future/target overlap = 0")
 
     print("[AUDIT] Audit-only completed successfully. Stopping before economic evaluation.", flush=True)
 
@@ -924,6 +1016,27 @@ def run_smoke_test() -> None:
     print(f"[SMOKE TB3 Subgroups] H0: mean_p_h={sub_tb3['H0']['mean_p_h']:.4f}, EV_0A={sub_tb3['H0']['EV_0a']:.4f}, EV_0B={sub_tb3['H0']['EV_0b']:.4f}")
     print(f"[SMOKE TB3 Subgroups] H1: mean_p_h={sub_tb3['H1']['mean_p_h']:.4f}, EV_0A={sub_tb3['H1']['EV_0a']:.4f}, EV_0B={sub_tb3['H1']['EV_0b']:.4f}")
     print(f"[SMOKE TB3 Subgroups] terminal_loss_attenuation={sub_tb3['terminal_loss_attenuation']:.4f}")
+
+    # Hazard-decile rough ordering: TB2-frozen decile edges applied to TB3
+    edges_smoke = compute_hazard_decile_edges(tb2_scored["p_h"].to_numpy(float))
+    dec_rows_tb3, dec_stats_tb3 = evaluate_hazard_deciles(tb3_scored, edges_smoke)
+    print("[SMOKE ROUGH ORDERING] TB2-frozen decile edges applied to TB3 (bin | n | mean_p_h | observed_H1_rate | EV_0A)")
+    for r in dec_rows_tb3:
+        print(f"  bin={r['bin_idx']} n={r['n']} mean_p_h={r['mean_p_h']:.4f} "
+              f"observed_H1_rate={r['observed_H1_rate']:.4f} EV_0A={r['EV_0a']:.4f}")
+    print(f"[SMOKE ROUGH ORDERING] Spearman p_h vs observed H1 = {dec_stats_tb3['spearman_p_h_vs_observed_H1']:.4f}")
+    print(f"[SMOKE ROUGH ORDERING] Spearman p_h vs EV_0A = {dec_stats_tb3['spearman_p_h_vs_0a_EV']:.4f}")
+    print("[SMOKE ROUGH ORDERING] SMOKE ROUGH ORDERING ONLY / NO SCIENTIFIC VERDICT")
+
+    # T0 diagnostic hazard-decile ordering (TB2 T0 edges -> TB3 T0). Diagnostic only.
+    edges_t0_smoke = compute_hazard_decile_edges(tb2_scored["p_h_t0"].to_numpy(float))
+    t0_rows_tb3, t0_stats_tb3 = compute_hazard_calibration_deciles(tb3_scored["p_h_t0"], tb3_scored["hazard"], edges_t0_smoke)
+    print("[SMOKE T0 DIAGNOSTIC ORDERING] bin | n | mean_p_h_t0 | observed_H1_rate")
+    for r in t0_rows_tb3:
+        print(f"  bin={r['bin_idx']} n={r['n']} mean_p_h_t0={r['mean_p_h']:.4f} "
+              f"observed_H1_rate={r['observed_H1_rate']:.4f}")
+    print(f"[SMOKE T0 DIAGNOSTIC ORDERING] Spearman = {t0_stats_tb3['spearman_bin_p_h_vs_observed_H1']:.4f}")
+    print("[SMOKE T0 DIAGNOSTIC ORDERING] T0 diagnostic only; no T0 economic policy")
 
     elapsed = time.perf_counter() - t0
     print(f"[SMOKE COMPLETE] Successfully executed in {elapsed:.2f}s! (NO SCIENTIFIC VERDICT EMITTED)", flush=True)
