@@ -2,9 +2,9 @@
 test_pgm_native0a_one_step_alpha_v1.py
 ======================================
 
-Unit tests for PGM-NATIVE-0A.1 Causal Decision-Universe Repair.
+Unit tests for PGM-NATIVE-0A.2 Formal Runner + Fail-Closed Data Ownership.
 
-Covers 27 required tests per Section XVII:
+Covers 41 required tests per Section XI:
   1. BASE_SHA is ancestor of HEAD
   2. strategy universe sourced from pgm.SAMPLE_PATH
   3. strategy universe includes hazard==0 AND hazard==1
@@ -32,14 +32,30 @@ Covers 27 required tests per Section XVII:
   25. no V2 / R1-R4 dependency
   26. smoke cannot emit formal verdict
   27. formal verdict strings contain ON_FROZEN_PGM_BAR_SAMPLE
+  28. missing episode metadata file -> hard fail
+  29. missing (symbol,start_bar) metadata key -> hard fail
+  30. duplicate episode metadata key -> hard fail
+  31. span_price <= 0 -> hard fail
+  32. atr0 reconstructed owner parity on H0 rows
+  33. nonterminal return parity uses exact key join; shuffle h0 rows still passes
+  34. remove one cur_truth key -> hard fail
+  35. hazard values containing {0,1,2} -> hard fail
+  36. formal route uses ALL H0+H1 rows
+  37. formal route calls route_and_score_evaluation
+  38. formal TB3 deciles use TB2 edges
+  39. formal verdict only consumes TB3 bootstrap
+  40. formal output scope contains all required limitations
+  41. formal wiring testable via pipeline helper; run_formal without authorization raises SystemExit
 """
 
 from __future__ import annotations
 
 import inspect
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 for _bt in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
@@ -63,7 +79,7 @@ import research.liquidity_oracle_atlas.experiment_dynamic_pgm1a1b_count_magnitud
 # 1. BASE_SHA is Ancestor of HEAD
 # ===========================================================================
 def test_1_base_sha_is_ancestor_of_head():
-    assert exp.BASE_SHA == "29b96485f3272dc76df34dcd26b700d4a73aedce"
+    assert exp.BASE_SHA == "3b68cf988796992ba47eb018ac8db52e81289756"
     res = subprocess.run(
         ["git", "merge-base", "--is-ancestor", exp.BASE_SHA, "HEAD"],
         cwd=str(_REPO_ROOT),
@@ -89,7 +105,7 @@ def test_2_strategy_universe_sourced_from_sample_path():
 def test_3_strategy_universe_includes_hazard0_and_hazard1():
     obs = exp.load_observed_decision_universe()
     h_set = set(obs["hazard"].unique())
-    assert 0 in h_set and 1 in h_set, f"Expected both 0 and 1 in hazard set, got {h_set}"
+    assert h_set == {0, 1}, f"Expected exactly {{0, 1}}, got {h_set}"
 
 
 # ===========================================================================
@@ -161,7 +177,6 @@ def test_9_safe_entry_at_data_end_returns_unavailable_no_oob():
         "c": np.array([10.0, 10.1, 10.2, 10.3, 10.4]),
         "o": np.array([10.0, 10.1, 10.2, 10.3, 10.4]),
     }
-    # bar_t = 4 -> entry = 5 == n (out of bounds)
     df_mock = pd.DataFrame({
         "symbol": ["TEST"],
         "bar_t": [4],
@@ -197,7 +212,6 @@ def test_10_entry_bar_for_parity():
 def test_11_raw_cc_equals_gap_plus_trad_on_all_rows():
     obs = exp.load_observed_decision_universe()
     _, _, bars_by_sym = ex0.load_env()
-    # Sample containing both hazard == 0 and hazard == 1
     h0 = obs[obs["hazard"] == 0].head(100)
     h1 = obs[obs["hazard"] == 1].head(100)
     sample = pd.concat([h0, h1]).reset_index(drop=True)
@@ -217,7 +231,6 @@ def test_12_hazard0_raw_cc_equals_minus_rebuilt_zdup():
     obs = exp.load_observed_decision_universe()
     _, _, bars_by_sym = ex0.load_env()
 
-    # Take first 200 hazard==0 rows
     h0_sample = obs[obs["hazard"] == 0].head(200).copy()
     cur_sub = cur.head(200).copy()
     aligned, aud = exp.align_raw_bars_and_returns(h0_sample, bars_by_sym, cur_truth=cur_sub)
@@ -243,7 +256,6 @@ def test_14_cached_rebuilt_zdup_precision_diff_reported_not_overwritten():
     trans_aud = exp.load_transition_truth_audit()
     diff = trans_aud["max_abs_z_d_up_float32_vs_rebuilt"]
     assert 8.0e-7 < diff < 9.0e-7, f"Unexpected float32 precision diff: {diff}"
-    # Verify cached is still float32 and rebuilt is float64
     assert trans_aud["cached"]["z_d_up"].dtype == np.float32
     assert trans_aud["cur"]["z_d_up"].dtype == np.float64
 
@@ -294,9 +306,7 @@ def test_17_tb2_experiment_route_really_uses_mc_a():
         "hazard": [0, 1, 0, 1],
     })
     sc_tb2, sc_tb3 = exp.route_and_score_evaluation(df_eval, s_A, s_B)
-    # score_mu = -z_d_up_mu -> for SAMPLER_A, score_mu = -1.0
     assert np.all(sc_tb2["score_mu"] == -1.0)
-    # If route was swapped (s_B used on TB2), score_mu would be 1.0
     assert not np.all(sc_tb2["score_mu"] == 1.0)
 
 
@@ -319,7 +329,6 @@ def test_18_tb3_experiment_route_really_uses_mc_b():
         "hazard": [0, 1, 0, 1],
     })
     sc_tb2, sc_tb3 = exp.route_and_score_evaluation(df_eval, s_A, s_B)
-    # for SAMPLER_B, score_mu = -(-1.0) = 1.0
     assert np.all(sc_tb3["score_mu"] == 1.0)
     assert not np.all(sc_tb3["score_mu"] == -1.0)
 
@@ -378,7 +387,6 @@ def test_21_h0_h1_subgroup_metrics_diagnostic_only():
     assert m["DIAGNOSTIC_H0"]["n"] == 2
     assert m["DIAGNOSTIC_H1"]["n"] == 2
     assert "future_filter_EV_bias" in m
-    # H0 EV = 0.30, ALL EV = 0.20 -> bias = +0.10
     assert np.isclose(m["future_filter_EV_bias"], 0.10)
 
 
@@ -470,6 +478,333 @@ def test_27_formal_verdict_strings_contain_on_frozen_pgm_bar_sample():
 
 
 # ===========================================================================
+# 28. Missing Episode Metadata File -> Hard Fail
+# ===========================================================================
+def test_28_missing_episode_metadata_file_hard_fail():
+    failed = False
+    try:
+        exp.load_episode_metadata(ep0_path=Path("/tmp/nonexistent_ep0_test.parquet"))
+    except SystemExit as e:
+        failed = True
+        assert "STOP_PGM_NATIVE_EPISODE_METADATA_MISSING" in str(e)
+    assert failed, "Expected SystemExit on missing episode metadata file"
+
+
+# ===========================================================================
+# 29. Missing (symbol, start_bar) Metadata Key -> Hard Fail
+# ===========================================================================
+def test_29_missing_symbol_startbar_metadata_key_hard_fail():
+    s_mock = pd.DataFrame({
+        "symbol": ["AG", "CU"],
+        "start_bar": [100, 200],
+        "cur_width_R": [1.0, 1.0],
+    })
+    # ep_meta only contains AG
+    ep_mock = pd.DataFrame({
+        "symbol": ["AG"],
+        "start_bar": [100],
+        "start_upper_price": [10.0],
+        "start_lower_price": [5.0],
+    })
+    failed = False
+    try:
+        exp.reconstruct_atr0(s_mock, ep_mock)
+    except SystemExit as e:
+        failed = True
+        assert "STOP_PGM_NATIVE_ATR0_METADATA_UNMATCHED" in str(e)
+    assert failed, "Expected SystemExit on unmatched key"
+
+
+# ===========================================================================
+# 30. Duplicate Episode Metadata Key -> Hard Fail
+# ===========================================================================
+def test_30_duplicate_episode_metadata_key_hard_fail():
+    s_mock = pd.DataFrame({
+        "symbol": ["AG"],
+        "start_bar": [100],
+        "cur_width_R": [1.0],
+    })
+    ep_mock = pd.DataFrame({
+        "symbol": ["AG", "AG"],
+        "start_bar": [100, 100],
+        "start_upper_price": [10.0, 10.0],
+        "start_lower_price": [5.0, 5.0],
+    })
+    failed = False
+    try:
+        exp.reconstruct_atr0(s_mock, ep_mock)
+    except SystemExit as e:
+        failed = True
+        assert "STOP_PGM_NATIVE_EPISODE_METADATA_DUPLICATE" in str(e)
+    assert failed, "Expected SystemExit on duplicate metadata key"
+
+
+# ===========================================================================
+# 31. Span Price <= 0 -> Hard Fail
+# ===========================================================================
+def test_31_span_price_le_zero_hard_fail():
+    s_mock = pd.DataFrame({
+        "symbol": ["AG"],
+        "start_bar": [100],
+        "cur_width_R": [1.0],
+    })
+    ep_mock = pd.DataFrame({
+        "symbol": ["AG"],
+        "start_bar": [100],
+        "start_upper_price": [5.0],
+        "start_lower_price": [5.0],  # span == 0
+    })
+    failed = False
+    try:
+        exp.reconstruct_atr0(s_mock, ep_mock)
+    except SystemExit as e:
+        failed = True
+        assert "STOP_PGM_NATIVE_ATR0_SPAN_INVALID" in str(e)
+    assert failed, "Expected SystemExit on invalid span_price"
+
+
+# ===========================================================================
+# 32. atr0 Reconstructed Owner Parity on H0 Rows
+# ===========================================================================
+def test_32_atr0_reconstructed_owner_parity_on_h0_rows():
+    obs = exp.load_observed_decision_universe()
+    trans_aud = exp.load_transition_truth_audit()
+    max_err = exp.audit_atr0_owner_parity(obs, trans_aud["cur"])
+    assert max_err <= 1e-12, f"atr0 owner parity error too large: {max_err}"
+
+
+# ===========================================================================
+# 33. Nonterminal Return Parity Uses Exact Key Join; Shuffle H0 Rows Passes
+# ===========================================================================
+def test_33_nonterminal_return_parity_uses_exact_key_join_shuffle_proof():
+    trans_aud = exp.load_transition_truth_audit()
+    cur = trans_aud["cur"]
+    obs = exp.load_observed_decision_universe()
+    _, _, bars_by_sym = ex0.load_env()
+
+    # Subsample 300 H0 rows and shuffle them randomly
+    h0_sample = obs[obs["hazard"] == 0].head(300).sample(frac=1.0, random_state=123).copy()
+    cur_sub = cur.head(300).copy()
+
+    aligned, aud = exp.align_raw_bars_and_returns(h0_sample, bars_by_sym, cur_truth=cur_sub)
+    assert aud["max_err_r_cc"] <= 1e-8
+
+
+# ===========================================================================
+# 34. Remove One cur_truth Key -> Hard Fail
+# ===========================================================================
+def test_34_remove_one_cur_truth_key_hard_fail():
+    trans_aud = exp.load_transition_truth_audit()
+    cur = trans_aud["cur"]
+    obs = exp.load_observed_decision_universe()
+    _, _, bars_by_sym = ex0.load_env()
+
+    h0_sample = obs[obs["hazard"] == 0].head(50).copy()
+    cur_sub = cur.head(49).copy()  # missing 1 row
+
+    failed = False
+    try:
+        exp.align_raw_bars_and_returns(h0_sample, bars_by_sym, cur_truth=cur_sub)
+    except SystemExit as e:
+        failed = True
+        assert "STOP_PGM_NATIVE_NONTERMINAL_KEY_PARITY_FAIL" in str(e)
+    assert failed, "Expected SystemExit on missing key in cur_truth"
+
+
+# ===========================================================================
+# 35. Hazard Values Containing {0, 1, 2} -> Hard Fail
+# ===========================================================================
+def test_35_hazard_values_containing_other_values_hard_fail():
+    df_mock = pd.DataFrame({
+        "symbol": ["AG", "AG", "AG"],
+        "bar_t": [1, 2, 3],
+        "hazard": [0, 1, 2],  # contains 2
+        "atr0": [1.0, 1.0, 1.0],
+        "block": ["TB2", "TB2", "TB2"],
+    })
+    failed = False
+    try:
+        exp.audit_decision_universe(df_mock)
+    except SystemExit as e:
+        failed = True
+        assert "STOP_PGM_NATIVE_HAZARD_CLASSES_INVALID" in str(e)
+    assert failed, "Expected SystemExit on invalid hazard classes"
+
+
+# ===========================================================================
+# 36. Formal Route Uses ALL H0+H1 Rows
+# ===========================================================================
+def test_36_formal_route_uses_all_h0_and_h1_rows():
+    class DummySampler:
+        def analytic_conditional_support(self, df):
+            return {"z_d_up_mu": np.linspace(-1.0, 1.0, len(df))}
+
+    # Mock obs with TB2 and TB3, each having H0 and H1 across all 15 symbols
+    rows = []
+    for blk in ["TB2", "TB3"]:
+        for sym in exp.EXPECTED_SYMBOLS:
+            rows.append({"block": blk, "symbol": sym, "hazard": 0, "bar_t": 10, "atr0": 1.0})
+            rows.append({"block": blk, "symbol": sym, "hazard": 1, "bar_t": 20, "atr0": 1.0})
+    obs_mock = pd.DataFrame(rows)
+
+    mock_bars = {
+        sym: {
+            "n": 100,
+            "disc": np.zeros(100, dtype=bool),
+            "day": np.array(["2026-01-01"] * 100, dtype="datetime64[us]"),
+            "c": np.ones(100) * 10.0,
+            "o": np.ones(100) * 10.0,
+        }
+        for sym in exp.EXPECTED_SYMBOLS
+    }
+
+    res = exp.execute_formal_pipeline(
+        obs=obs_mock,
+        bars_by_sym=mock_bars,
+        cur_truth=pd.DataFrame(),  # not used when cur_truth is None or empty in nonterminal test
+        mc_A=DummySampler(),
+        mc_B=DummySampler(),
+        n_boot=10,
+        output_dir=None,
+    )
+    # Each block has 15 syms * 2 rows = 30 rows (15 H0 + 15 H1)
+    assert res["tb2_row_count"] == 30
+    assert res["tb3_row_count"] == 30
+    assert res["n_hazard0"] == 30
+    assert res["n_hazard1"] == 30
+
+
+# ===========================================================================
+# 37. Formal Route Calls route_and_score_evaluation
+# ===========================================================================
+def test_37_formal_route_calls_route_and_score_evaluation():
+    src = inspect.getsource(exp.execute_formal_pipeline)
+    assert "route_and_score_evaluation(df_valid, mc_A, mc_B)" in src
+
+
+# ===========================================================================
+# 38. Formal TB3 Deciles Use TB2 Edges
+# ===========================================================================
+def test_38_formal_tb3_deciles_use_tb2_edges():
+    src = inspect.getsource(exp.execute_formal_pipeline)
+    assert "evaluate_decile_bins(tb2_scored, edges_tb2)" in src
+    assert "evaluate_decile_bins(tb3_scored, edges_tb2)" in src
+
+
+# ===========================================================================
+# 39. Formal Verdict Only Consumes TB3 Bootstrap
+# ===========================================================================
+def test_39_formal_verdict_only_consumes_tb3_bootstrap():
+    # Case 1: Model nonterminal CI lower <= 0 -> NOT_SUPPORTED
+    b_not_supp = {
+        "rho_model_nonterminal": {"ci95_lower": -0.01},
+        "rho_trad_all": {"ci95_lower": 0.05},
+        "EV_sign_all": {"ci95_lower": 0.02},
+    }
+    assert exp.determine_formal_verdict(b_not_supp) == exp.VERDICT_STRINGS["NOT_SUPPORTED"]
+
+    # Case 2: Model CI lower > 0, but trad/EV CI lower <= 0 -> PREDICTIVE_BUT_NOT_TRADABLE
+    b_pred_not_trad = {
+        "rho_model_nonterminal": {"ci95_lower": 0.05},
+        "rho_trad_all": {"ci95_lower": -0.01},
+        "EV_sign_all": {"ci95_lower": 0.02},
+    }
+    assert exp.determine_formal_verdict(b_pred_not_trad) == exp.VERDICT_STRINGS["PREDICTIVE_BUT_NOT_TRADABLE"]
+
+    # Case 3: All three CI lower > 0 -> SUPPORTED
+    b_supp = {
+        "rho_model_nonterminal": {"ci95_lower": 0.05},
+        "rho_trad_all": {"ci95_lower": 0.02},
+        "EV_sign_all": {"ci95_lower": 0.01},
+    }
+    assert exp.determine_formal_verdict(b_supp) == exp.VERDICT_STRINGS["SUPPORTED"]
+
+
+# ===========================================================================
+# 40. Formal Output Scope Contains All Required Limitations
+# ===========================================================================
+def test_40_formal_output_scope_contains_all_required_limitations():
+    class DummySampler:
+        def analytic_conditional_support(self, df):
+            return {"z_d_up_mu": np.linspace(-1.0, 1.0, len(df))}
+
+    rows = []
+    for blk in ["TB2", "TB3"]:
+        for sym in exp.EXPECTED_SYMBOLS:
+            rows.append({"block": blk, "symbol": sym, "hazard": 0, "bar_t": 10, "atr0": 1.0})
+            rows.append({"block": blk, "symbol": sym, "hazard": 1, "bar_t": 20, "atr0": 1.0})
+    obs_mock = pd.DataFrame(rows)
+    mock_bars = {
+        sym: {
+            "n": 100, "disc": np.zeros(100, dtype=bool),
+            "day": np.array(["2026-01-01"] * 100, dtype="datetime64[us]"),
+            "c": np.ones(100) * 10.0, "o": np.ones(100) * 10.0,
+        }
+        for sym in exp.EXPECTED_SYMBOLS
+    }
+    res = exp.execute_formal_pipeline(
+        obs=obs_mock, bars_by_sym=mock_bars, cur_truth=pd.DataFrame(),
+        mc_A=DummySampler(), mc_B=DummySampler(), n_boot=10, output_dir=None,
+    )
+    limits = res["known_scope_limitations"]
+    assert any("cross-block episodes excluded" in l for l in limits)
+    assert any("event_mask==0 censored episodes excluded" in l for l in limits)
+    assert any("normalized friction stress only" in l for l in limits)
+    assert any("one-step open-to-close probe" in l for l in limits)
+
+
+# ===========================================================================
+# 41. Formal Wiring Testable Via Pipeline Helper; run_formal Blocked Without Auth
+# ===========================================================================
+def test_41_formal_wiring_testable_via_pipeline_helper():
+    # 1. Test execute_formal_pipeline writes all expected files to temp dir
+    class DummySampler:
+        def analytic_conditional_support(self, df):
+            return {"z_d_up_mu": np.linspace(-1.0, 1.0, len(df))}
+
+    rows = []
+    for blk in ["TB2", "TB3"]:
+        for sym in exp.EXPECTED_SYMBOLS:
+            rows.append({"block": blk, "symbol": sym, "hazard": 0, "bar_t": 10, "atr0": 1.0})
+            rows.append({"block": blk, "symbol": sym, "hazard": 1, "bar_t": 20, "atr0": 1.0})
+    obs_mock = pd.DataFrame(rows)
+    mock_bars = {
+        sym: {
+            "n": 100, "disc": np.zeros(100, dtype=bool),
+            "day": np.array(["2026-01-01"] * 100, dtype="datetime64[us]"),
+            "c": np.ones(100) * 10.0, "o": np.ones(100) * 10.0,
+        }
+        for sym in exp.EXPECTED_SYMBOLS
+    }
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        res = exp.execute_formal_pipeline(
+            obs=obs_mock, bars_by_sym=mock_bars, cur_truth=pd.DataFrame(),
+            mc_A=DummySampler(), mc_B=DummySampler(), n_boot=10, output_dir=Path(tmpdir),
+        )
+        p = Path(tmpdir)
+        assert (p / "pgm_native0a1_formal_summary.json").exists()
+        assert (p / "pgm_native0a1_block_metrics.csv").exists()
+        assert (p / "pgm_native0a1_bootstrap.csv").exists()
+        assert (p / "pgm_native0a1_symbol_breadth.csv").exists()
+        assert (p / "pgm_native0a1_deciles.csv").exists()
+        assert (p / "pgm_native0a1_cost_stress.csv").exists()
+
+    # 2. Test run_formal() raises SystemExit if AUTHORIZE_PGM_NATIVE_FORMAL is unset
+    old_env = os.environ.pop("AUTHORIZE_PGM_NATIVE_FORMAL", None)
+    failed = False
+    try:
+        exp.run_formal()
+    except SystemExit as e:
+        failed = True
+        assert "STOP_PGM_NATIVE_FORMAL_NOT_AUTHORIZED_THIS_ROUND" in str(e)
+    finally:
+        if old_env is not None:
+            os.environ["AUTHORIZE_PGM_NATIVE_FORMAL"] = old_env
+    assert failed, "Expected SystemExit from unauthorized run_formal()"
+
+
+# ===========================================================================
 # Test Runner
 # ===========================================================================
 if __name__ == "__main__":
@@ -480,7 +815,7 @@ if __name__ == "__main__":
     tests.sort(key=lambda fn: int(fn.__name__.split("_")[1]))
 
     ok = fail = 0
-    print(f"Running {len(tests)} unit tests for PGM-NATIVE-0A.1...\n")
+    print(f"Running {len(tests)} unit tests for PGM-NATIVE-0A.2...\n")
     for t in tests:
         try:
             t()
