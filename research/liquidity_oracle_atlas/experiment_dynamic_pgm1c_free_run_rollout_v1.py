@@ -65,6 +65,83 @@ import research.liquidity_oracle_atlas.experiment_pgm_bar0_path_smc_v1 as pbar  
 import research.liquidity_oracle_atlas.experiment_path0_episode_path_memory_v1 as pm  # noqa: E402
 
 # ===========================================================================
+# Rollout Support Error & Fail-Closed Design Validation
+# ===========================================================================
+class RolloutSupportError(RuntimeError):
+    """Raised when the generative model enters an illegal / numerically unrepresentable state.
+
+    Used ONLY for rollout numerical-support failures (so that the failure becomes a
+    scientific result, not a Python crash). Real programming bugs (ValueError,
+    KeyError, etc.) must NOT be swallowed by this class -- they must still crash.
+    """
+
+    def __init__(self, reason: str, diagnostics: Optional[Dict[str, Any]] = None):
+        super().__init__(reason)
+        self.reason = reason
+        self.diagnostics = diagnostics or {}
+
+
+def transition_design_check(X64: np.ndarray) -> Tuple[np.ndarray, Dict[str, Any]]:
+    """Fail-closed two-stage float32 design validation for transition sampling.
+
+    X64: dense float64 design matrix (the frozen float32 design densified).
+    Returns (X32, diagnostics). Raises RolloutSupportError on:
+      - nonfinite X64              -> TRANSITION_DESIGN_NONFINITE_FLOAT64
+      - float32 numerical overflow -> TRANSITION_DESIGN_FLOAT32_OVERFLOW
+    Does NOT change the frozen float32 sampling contract: the caller still uses the
+    original `.astype(np.float32)` design for the actual head sampling.
+    """
+    X64 = np.asarray(X64, dtype=np.float64)
+    if not np.all(np.isfinite(X64)):
+        idx = int(np.argmax(~np.isfinite(X64)))
+        raise RolloutSupportError("TRANSITION_DESIGN_NONFINITE_FLOAT64", {
+            "n_nonfinite": int(np.sum(~np.isfinite(X64))),
+            "first_bad_index": idx,
+        })
+    with np.errstate(over="ignore", invalid="ignore"):
+        X32 = X64.astype(np.float32)
+    if not np.all(np.isfinite(X32)):
+        idx = int(np.argmax(~np.isfinite(X32)))
+        raise RolloutSupportError("TRANSITION_DESIGN_FLOAT32_OVERFLOW", {
+            "n_nonfinite": int(np.sum(~np.isfinite(X32))),
+            "first_bad_index": idx,
+        })
+    return X32, {}
+
+
+def safe_transform(pre: Any, df: pd.DataFrame, input_tag: str, design_tag: str) -> np.ndarray:
+    """Fail-closed preprocessing for terminal / reset samplers.
+
+    - raw numeric conditioning columns must be finite (else `input_tag`)
+    - preprocessor output must be finite (else `design_tag`)
+    Returns the dense float64 design matrix (unchanged semantics for predict_proba).
+    """
+    num = df.select_dtypes(include=[np.number])
+    arr = num.to_numpy(dtype=np.float64)
+    if arr.size and not np.all(np.isfinite(arr)):
+        raise RolloutSupportError(input_tag, {"n_nonfinite": int(np.sum(~np.isfinite(arr)))})
+    X = np.asarray(pbar.densify(pre.transform(df)), dtype=np.float64)
+    if not np.all(np.isfinite(X)):
+        raise RolloutSupportError(design_tag, {"n_nonfinite": int(np.sum(~np.isfinite(X)))})
+    return X
+
+
+# Tokens used to recognise numerical-support failures for gate/counter bookkeeping.
+_NUMERIC_SUPPORT_TOKENS = (
+    "INPUT_NONFINITE", "DESIGN_NONFINITE_FLOAT64", "DESIGN_FLOAT32_OVERFLOW",
+    "GAUSSIAN_NONFINITE", "HURDLE_LOGMAG_OVERFLOW", "DCR_NONFINITE",
+    "TERMINAL_INPUT", "TERMINAL_DESIGN", "RESET_INPUT", "RESET_DESIGN",
+)
+
+
+def is_numeric_support_error(violation: Optional[str]) -> bool:
+    """True if `violation` is a rollout numerical-support failure (vs a physical one)."""
+    if not isinstance(violation, str):
+        return False
+    return any(tok in violation for tok in _NUMERIC_SUPPORT_TOKENS)
+
+
+# ===========================================================================
 # Frozen References & Constants
 # ===========================================================================
 BASE_SHA = "ddaaf8ca8e7072d99957b687f10997f093b3fe44"
@@ -279,18 +356,29 @@ def sample_ztp_vec(lam: float, rng: np.random.Generator, size: int) -> np.ndarra
     return y
 
 
-def sample_gaussian(head: Any, X: np.ndarray, rng: np.random.Generator) -> np.ndarray:
-    """Sample from Gaussian head: Z = X @ B + intercept + Normal(0, Sigma)."""
+def sample_gaussian(head: Any, X: np.ndarray, rng: np.random.Generator, node: str = "gaussian") -> np.ndarray:
+    """Sample from Gaussian head: Z = X @ B + intercept + Normal(0, Sigma).
+
+    Raises RolloutSupportError("<node>_GAUSSIAN_NONFINITE" if the conditional mean or the
+    realized sample is nonfinite (numerical-support failure), instead of propagating inf.
+    """
     X = np.asarray(X, dtype=np.float64)
     mu = X @ head.B + head.intercept
+    if not np.all(np.isfinite(mu)):
+        raise RolloutSupportError(f"{node}_GAUSSIAN_NONFINITE", {"stage": "conditional_mean"})
     z = rng.standard_normal((len(X), head.k))
-    return mu + z @ head.chol.T
+    val = mu + z @ head.chol.T
+    if not np.all(np.isfinite(val)):
+        raise RolloutSupportError(f"{node}_GAUSSIAN_NONFINITE", {"stage": "sampled_value"})
+    return val
 
 
-def sample_hurdle_ln(head: Any, X: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+def sample_hurdle_ln(head: Any, X: np.ndarray, rng: np.random.Generator, node: str = "hurdle") -> np.ndarray:
     """Sample from Hurdle-LogNormal head.
 
     Occurrence Logistic -> if active: logv ~ Gaussian, raw = sign * exp(logv), else 0.
+    Raises RolloutSupportError("<node>_HURDLE_LOGMAG_OVERFLOW" before exp if logv is
+    nonfinite or would overflow exp (no clipping -- overflow is a scientific result).
     """
     X = np.asarray(X, dtype=np.float64)
     n = len(X)
@@ -298,16 +386,24 @@ def sample_hurdle_ln(head: Any, X: np.ndarray, rng: np.random.Generator) -> np.n
     active = rng.random(n) < p
     raw = np.zeros(n, dtype=np.float64)
     if np.any(active):
-        logv = sample_gaussian(head.g, X[active], rng)[:, 0]
+        logv = sample_gaussian(head.g, X[active], rng, node=node)[:, 0]
+        if not np.all(np.isfinite(logv)):
+            raise RolloutSupportError(f"{node}_HURDLE_LOGMAG_OVERFLOW", {"stage": "logv_nonfinite"})
+        max_log = np.log(np.finfo(np.float64).max)
+        if np.any(logv > max_log):
+            raise RolloutSupportError(f"{node}_HURDLE_LOGMAG_OVERFLOW", {
+                "stage": "logv_overflow", "max_logv": float(np.max(logv)),
+            })
         raw[active] = head.sign * np.exp(logv)
     return raw
 
 
-def sample_dcr(head: Any, X: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+def sample_dcr(head: Any, X: np.ndarray, rng: np.random.Generator, node: str = "dcr") -> np.ndarray:
     """Sample from ZeroInteriorOneHead for DCR.
 
     3-class categorical {0, interior, 1}.
     Interior -> Gaussian logit -> sigmoid(z). No clipping.
+    Raises RolloutSupportError("<node>_DCR_NONFINITE" if the interior value is nonfinite.
     """
     X = np.asarray(X, dtype=np.float64)
     n = len(X)
@@ -321,8 +417,11 @@ def sample_dcr(head: Any, X: np.ndarray, rng: np.random.Generator) -> np.ndarray
     raw[cat_draw == 2] = 1.0
     interior = cat_draw == 1
     if np.any(interior):
-        z = sample_gaussian(head.g, X[interior], rng)[:, 0]
-        raw[interior] = 1.0 / (1.0 + np.exp(-z))
+        z = sample_gaussian(head.g, X[interior], rng, node=node)[:, 0]
+        sig = 1.0 / (1.0 + np.exp(-z))
+        if not np.all(np.isfinite(sig)):
+            raise RolloutSupportError(f"{node}_DCR_NONFINITE", {})
+        raw[interior] = sig
     return raw
 
 
@@ -360,7 +459,8 @@ def fit_count_occurrence_models(Xtr: np.ndarray, Ytr: np.ndarray,
     return models
 
 
-def sample_count_head(model: Any, lam: float, X: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+def sample_count_head(model: Any, lam: float, X: np.ndarray, rng: np.random.Generator,
+                     node: str = "count") -> np.ndarray:
     """Sample from state-dependent occurrence Logistic + constant ZTP magnitude."""
     X = np.asarray(X, dtype=np.float64)
     n = len(X)
@@ -370,6 +470,8 @@ def sample_count_head(model: Any, lam: float, X: np.ndarray, rng: np.random.Gene
     n_active = int(np.sum(active))
     if n_active > 0:
         cnt[active] = sample_ztp_vec(lam, rng, n_active)
+    if not np.all(cnt >= 0):
+        raise RolloutSupportError(f"{node}_COUNT_INVALID", {"stage": "negative_count"})
     return cnt
 
 
@@ -392,42 +494,119 @@ class FittedTransitionSampler:
     """Fitted transition sampler for M0 or MC."""
 
     def __init__(self, tag: str, ct: Any, heads: Dict[str, Any],
-                 count_head: Dict[str, Any], count_occ_models: List[Any]):
+                 count_head: Dict[str, Any], count_occ_models: List[Any],
+                 train_min: Optional[np.ndarray] = None,
+                 train_max: Optional[np.ndarray] = None,
+                 train_absmax: Optional[np.ndarray] = None,
+                 feature_names: Optional[List[str]] = None,
+                 design_cols: Optional[List[str]] = None):
         self.tag = tag
         self.ct = ct
         self.heads = heads
         self.count_head = count_head
         self.constant_rates = count_head["constant_rates"]
         self.count_occ_models = count_occ_models
+        # Training-domain support statistics (diagnostic ONLY, never a gate).
+        self.train_min = np.asarray(train_min if train_min is not None else np.array([]), dtype=np.float64)
+        self.train_max = np.asarray(train_max if train_max is not None else np.array([]), dtype=np.float64)
+        self.train_absmax = np.asarray(train_absmax if train_absmax is not None else np.array([]), dtype=np.float64)
+        self.train_feature_names = list(feature_names) if feature_names is not None else []
+        # Design-input columns actually consumed by ct (NOT feature_names_in_, which also
+        # lists target columns that are absent from rollout/observed-state inputs).
+        self.design_cols = list(design_cols) if design_cols is not None else None
+        # Last rollout-step design diagnostics (set by sample_batch).
+        self.last_design_diag: Optional[Dict[str, Any]] = None
+
+    def _design_diagnostics(self, X64: np.ndarray) -> Dict[str, Any]:
+        """Training-domain extrapolation diagnostics. NOT a gate -- pure observation."""
+        X64 = np.asarray(X64, dtype=np.float64)
+        if X64.size == 0:
+            return dict(max_abs_design=0.0, max_extrapolation_ratio=0.0,
+                        n_features_outside_train_minmax=0, worst_feature_name=None,
+                        worst_feature_value=0.0, train_feature_min=None, train_feature_max=None)
+        absX = np.abs(X64)
+        max_abs = float(np.max(absX))
+        denom = np.maximum(self.train_absmax, 1e-12)
+        ratios = absX / denom
+        max_ratio = float(np.max(ratios))
+        outside = int(np.sum(~((X64 >= self.train_min) & (X64 <= self.train_max))))
+        fi = int(np.argmax(ratios))
+        widx = fi % ratios.shape[1]
+        worst_val = float(X64.reshape(-1)[fi])
+        names = self.train_feature_names
+        worst_name = names[widx] if 0 <= widx < len(names) else None
+        train_fmin = float(self.train_min[widx]) if 0 <= widx < len(self.train_min) else None
+        train_fmax = float(self.train_max[widx]) if 0 <= widx < len(self.train_max) else None
+        return dict(
+            max_abs_design=max_abs,
+            max_extrapolation_ratio=max_ratio,
+            n_features_outside_train_minmax=outside,
+            worst_feature_name=worst_name,
+            worst_feature_value=worst_val,
+            train_feature_min=train_fmin,
+            train_feature_max=train_fmax,
+        )
 
     def sample_batch(self, df: pd.DataFrame, rng: np.random.Generator) -> Dict[str, np.ndarray]:
         df_in = df
         needed_zt = [c for c in rep.MC_EXTRA if c.startswith("zt_")]
-        if any(c not in df_in.columns for c in needed_zt):
+        # zt_* encodes the previous step's sampled z. In the rollout it is always finite:
+        # at episode start it is derived from the current embedding (phi_*), and after each
+        # step it equals the freshly-drawn z. So derive/repair zt_* from phi_* BEFORE the
+        # finite guard -- a NaN zt_* (first-step / no-prior row in a transition dataset) is not
+        # a real support failure, it is the legitimate "no previous step" encoding.
+        if needed_zt:
             df_in = df.copy()
             for zc in needed_zt:
                 pc = zc.replace("zt_", "phi_")
-                if pc in df_in.columns and zc not in df_in.columns:
-                    df_in[zc] = df_in[pc]
-        X = self.ct.transform(df_in).astype(np.float32)
+                if zc not in df_in.columns:
+                    df_in[zc] = df_in[pc] if pc in df_in.columns else 0.0
+                else:
+                    df_in[zc] = df_in[zc].fillna(df_in[pc]) if pc in df_in.columns else df_in[zc].fillna(0.0)
+
+        # 0. raw input finite guard (only the design-input columns actually consumed by ct;
+        #     NOT feature_names_in_, which also lists target columns absent from observed-state inputs)
+        feat_cols = self.design_cols
+        if feat_cols:
+            sub = df_in[[c for c in feat_cols if c in df_in.columns]]
+            num = sub.select_dtypes(include=[np.number])
+            if num.size:
+                arr = num.to_numpy(dtype=np.float64)
+                if not np.all(np.isfinite(arr)):
+                    raise RolloutSupportError("TRANSITION_INPUT_NONFINITE", {
+                        "n_nonfinite": int(np.sum(~np.isfinite(arr))),
+                    })
+
+        # 1. transform (frozen float32 contract starts here)
+        raw = self.ct.transform(df_in)
+        X64 = np.asarray(pbar.densify(raw), dtype=np.float64)
+
+        # 2. fail-closed design validation (raises RolloutSupportError before sampling)
+        transition_design_check(X64)
+
+        # 3. training-domain extrapolation diagnostics (NOT a gate)
+        self.last_design_diag = self._design_diagnostics(X64)
+
+        # 4. frozen float32 design matrix for actual head sampling (unchanged semantics)
+        X = raw.astype(np.float32)
         n = len(df)
         nodes = self.heads["nodes"]
 
         # Continuous nodes
-        d_up = sample_gaussian(nodes["z_d_up"]["head"], X, rng)[:, 0]
-        dmfe = sample_hurdle_ln(nodes["z_dmfe"]["head"], X, rng)
-        dmae = sample_hurdle_ln(nodes["z_dmae"]["head"], X, rng)
-        dcr = sample_dcr(nodes["z_dcr"]["head"], X, rng)
-        rng_val = sample_hurdle_ln(nodes["z_range"]["head"], X, rng)
-        uresid = sample_hurdle_ln(nodes["z_uresid"]["head"], X, rng)
-        lresid = sample_hurdle_ln(nodes["z_lresid"]["head"], X, rng)
+        d_up = sample_gaussian(nodes["z_d_up"]["head"], X, rng, node="z_d_up")[:, 0]
+        dmfe = sample_hurdle_ln(nodes["z_dmfe"]["head"], X, rng, node="z_dmfe")
+        dmae = sample_hurdle_ln(nodes["z_dmae"]["head"], X, rng, node="z_dmae")
+        dcr = sample_dcr(nodes["z_dcr"]["head"], X, rng, node="z_dcr")
+        rng_val = sample_hurdle_ln(nodes["z_range"]["head"], X, rng, node="z_range")
+        uresid = sample_hurdle_ln(nodes["z_uresid"]["head"], X, rng, node="z_uresid")
+        lresid = sample_hurdle_ln(nodes["z_lresid"]["head"], X, rng, node="z_lresid")
 
         # Counts
         lam_u = float(self.constant_rates[0])
         lam_l = float(self.constant_rates[1])
         X_64 = np.asarray(X, dtype=np.float64)
-        c_u = sample_count_head(self.count_occ_models[0], lam_u, X_64, rng)
-        c_l = sample_count_head(self.count_occ_models[1], lam_l, X_64, rng)
+        c_u = sample_count_head(self.count_occ_models[0], lam_u, X_64, rng, node="z_delta_upper_count")
+        c_l = sample_count_head(self.count_occ_models[1], lam_l, X_64, rng, node="z_delta_lower_count")
 
         return dict(
             z_d_up=d_up,
@@ -453,11 +632,12 @@ class FittedTerminalSampler:
         self.theta = theta
 
     def sample_hazard(self, df: pd.DataFrame, rng: np.random.Generator) -> np.ndarray:
-        p_h = self.pipe.predict_proba(df)[:, 1]
+        X = safe_transform(self.pre, df, "TERMINAL_INPUT_NONFINITE", "TERMINAL_DESIGN_NONFINITE")
+        p_h = self.clf.predict_proba(X)[:, 1]
         return rng.random(len(df)) < p_h
 
     def sample_endpoint(self, df: pd.DataFrame, rng: np.random.Generator) -> np.ndarray:
-        X = pbar.densify(self.pre.transform(df))
+        X = safe_transform(self.pre, df, "TERMINAL_INPUT_NONFINITE", "TERMINAL_DESIGN_NONFINITE")
         return sample_crf_endpoint(self.theta, X, rng)
 
 
@@ -483,7 +663,7 @@ class FittedResetSampler:
             if c not in df.columns:
                 raise SystemExit(f"STOP_DYNAMIC_PGM1C_RESET_INPUT_MISSING_COL: {c}")
         cols = self.occ_cols + MASK_CAT
-        X_occ = pbar.densify(self.pre_occ.transform(df[cols]))
+        X_occ = safe_transform(self.pre_occ, df[cols], "RESET_INPUT_NONFINITE", "RESET_DESIGN_NONFINITE")
         p_gap = self.gap_occ_clf.predict_proba(X_occ)[:, 1]
         has_gap = rng.random(len(df)) < p_gap
         gap_bars = np.zeros(len(df), dtype=np.int64)
@@ -504,7 +684,7 @@ class FittedResetSampler:
             if c not in df_state.columns:
                 raise SystemExit(f"STOP_DYNAMIC_PGM1C_RESET_INPUT_MISSING_COL: {c}")
         cols = self.state_cols + MASK_CAT
-        X_s = pbar.densify(self.pre_state.transform(df_state[cols]))
+        X_s = safe_transform(self.pre_state, df_state[cols], "RESET_INPUT_NONFINITE", "RESET_DESIGN_NONFINITE")
 
         # 1. Geometry 2D Gaussian
         log_geom = sample_gaussian(self.heads["geometry"], X_s, rng)
@@ -1085,8 +1265,17 @@ def fit_samplers_for_window(w: Dict[str, Any], obs_sample_path: Path,
                           ("MC_STATE_CURREENCODING", obs_cols + rep.MC_EXTRA)]:
         t0 = time.perf_counter()
         ct = lag._make_ct(num_cols)
-        Xtr = ct.fit_transform(tr_trans).astype(np.float32)
-        Xev = ct.transform(ev_trans).astype(np.float32)
+        Xtr_sparse = ct.fit_transform(tr_trans)
+        Xtr = Xtr_sparse.astype(np.float32)
+        Xev_sparse = ct.transform(ev_trans)
+        Xev = Xev_sparse.astype(np.float32)
+
+        # Training-domain support statistics (diagnostic only; never gates sampling).
+        Xtr_d = np.asarray(pbar.densify(Xtr_sparse), dtype=np.float64)
+        train_min = Xtr_d.min(axis=0)
+        train_max = Xtr_d.max(axis=0)
+        train_absmax = np.abs(Xtr_d).max(axis=0)
+        feature_names = list(ct.get_feature_names_out())
 
         k = base.fit_state_heads(Xtr, Xev, Zc_tr, Zc_ev, yd_tr, yd_ev)
         kc = base.fit_state_count_head(Xtr, Yc_tr, Xev, Yc_ev, constant_rates=k0_count["constant_rates"])
@@ -1104,7 +1293,12 @@ def fit_samplers_for_window(w: Dict[str, Any], obs_sample_path: Path,
         mean_j = float(np.mean(cont + disc + cnt))
 
         trans_parity_eval[tag] = dict(mean_joint_nll=mean_j)
-        trans_samplers[tag] = FittedTransitionSampler(tag, ct, k, kc, trans_count_occ_models)
+        trans_samplers[tag] = FittedTransitionSampler(
+            tag, ct, k, kc, trans_count_occ_models,
+            train_min=train_min, train_max=train_max,
+            train_absmax=train_absmax, feature_names=feature_names,
+            design_cols=num_cols,
+        )
         print(f"  [TRANSITION {tag}] took {time.perf_counter() - t0:.2f}s "
               f"mean_joint_nll={mean_j:.16f}", flush=True)
 
@@ -1275,51 +1469,98 @@ def run_single_episode_rollout(init_state: Dict[str, Any],
                                term_sampler: FittedTerminalSampler,
                                rng: np.random.Generator,
                                max_bars: int = MAX_EPISODE_BARS) -> Dict[str, Any]:
-    """Execute one recursive episode rollout from init_state until terminal or violation."""
+    """Execute one recursive episode rollout from init_state until terminal or violation.
+
+    A RolloutSupportError raised by any sampler is caught and turned into a structured
+    INVALID result (failure_step / failure_diagnostics) -- it does NOT kill the process.
+    Physical-support violations from advance_nonterminal/reset_to_start still return their
+    own violation strings (they are not wrapped). Real programmer errors propagate.
+    """
     state = dict(init_state)
     dur = 0
-    while state["episode_age"] < max_bars:
-        dur += 1
-        df_row = pd.DataFrame([state])
-
-        # 1. Sample terminal
-        is_term = bool(term_sampler.sample_hazard(df_row, rng)[0])
-        if is_term:
-            endpoint = int(term_sampler.sample_endpoint(df_row, rng)[0])
-            return dict(
-                status="TERMINAL",
-                duration=dur,
-                endpoint_mask=endpoint,
-                terminal_state={k: state[k] for k in TERMINAL_DYNAMIC_FIELDS if k in state},
-                terminal_full_state=dict(state),
-                violation=None,
-            )
-
-        # 2. Sample transition
-        z_dict = trans_sampler.sample_batch(df_row, rng)
-        z_single = {k: v[0] for k, v in z_dict.items()}
-
-        nxt_state, violation = advance_nonterminal(state, z_single)
-        if violation is not None:
-            return dict(
-                status="INVALID",
-                duration=dur,
-                endpoint_mask=None,
-                terminal_state=None,
-                terminal_full_state=None,
-                violation=violation,
-            )
-
-        state = nxt_state
-
-    return dict(
-        status="TIMEOUT",
-        duration=max_bars,
-        endpoint_mask=None,
-        terminal_state=None,
-        terminal_full_state=None,
-        violation="EPISODE_TIMEOUT",
+    max_extr = 0.0
+    first_outside_step = None
+    max_abs_design = 0.0
+    worst: Dict[str, Any] = dict(
+        worst_feature_name=None, worst_feature_value=0.0,
+        train_feature_min=None, train_feature_max=None,
     )
+
+    def _update_diag(dg: Optional[Dict[str, Any]]) -> None:
+        if not dg:
+            return
+        nonlocal max_extr, first_outside_step, max_abs_design
+        max_extr = max(max_extr, float(dg.get("max_extrapolation_ratio", 0.0)))
+        max_abs_design = max(max_abs_design, float(dg.get("max_abs_design", 0.0)))
+        if first_outside_step is None and int(dg.get("n_features_outside_train_minmax", 0)) > 0:
+            first_outside_step = dur
+        wn = dg.get("worst_feature_name")
+        if wn is not None:
+            worst["worst_feature_name"] = wn
+            worst["worst_feature_value"] = dg.get("worst_feature_value", 0.0)
+            worst["train_feature_min"] = dg.get("train_feature_min")
+            worst["train_feature_max"] = dg.get("train_feature_max")
+
+    def _result(status, violation, duration, endpoint_mask=None):
+        return dict(
+            status=status,
+            duration=duration,
+            endpoint_mask=endpoint_mask,
+            terminal_state=({k: state[k] for k in TERMINAL_DYNAMIC_FIELDS if k in state}
+                            if status == "TERMINAL" else None),
+            terminal_full_state=(dict(state) if status == "TERMINAL" else None),
+            violation=violation,
+            failure_step=None,
+            failure_diagnostics=None,
+            max_extrapolation_ratio_seen=max_extr,
+            first_outside_train_step=first_outside_step,
+            max_abs_design_seen=max_abs_design,
+            worst_feature_name=worst["worst_feature_name"],
+            worst_feature_value=worst["worst_feature_value"],
+            train_feature_min=worst["train_feature_min"],
+            train_feature_max=worst["train_feature_max"],
+        )
+
+    try:
+        while state["episode_age"] < max_bars:
+            dur += 1
+            df_row = pd.DataFrame([state])
+
+            # 1. Sample terminal
+            is_term = bool(term_sampler.sample_hazard(df_row, rng)[0])
+            if is_term:
+                endpoint = int(term_sampler.sample_endpoint(df_row, rng)[0])
+                return _result("TERMINAL", None, dur, endpoint)
+
+            # 2. Sample transition
+            z_dict = trans_sampler.sample_batch(df_row, rng)
+            _update_diag(getattr(trans_sampler, "last_design_diag", None))
+            z_single = {k: v[0] for k, v in z_dict.items()}
+
+            nxt_state, violation = advance_nonterminal(state, z_single)
+            if violation is not None:
+                return _result("INVALID", violation, dur)
+            state = nxt_state
+    except RolloutSupportError as exc:
+        return dict(
+            status="INVALID",
+            duration=dur,
+            endpoint_mask=None,
+            terminal_state=None,
+            terminal_full_state=None,
+            violation=exc.reason,
+            failure_step=dur,
+            failure_diagnostics=exc.diagnostics,
+            max_extrapolation_ratio_seen=max_extr,
+            first_outside_train_step=first_outside_step,
+            max_abs_design_seen=max_abs_design,
+            worst_feature_name=worst["worst_feature_name"],
+            worst_feature_value=worst["worst_feature_value"],
+            train_feature_min=worst["train_feature_min"],
+            train_feature_max=worst["train_feature_max"],
+        )
+
+    return _result("TIMEOUT", "EPISODE_TIMEOUT", max_bars)
 
 
 # ===========================================================================
@@ -1342,12 +1583,30 @@ def run_single_freerun_chain(symbol: str, seed_state: Dict[str, Any],
     episodes_collected: List[Dict[str, Any]] = []
     total_target = burn_in + collect
     chain_violation = None
+    failure_episode = None
+    failure_step = None
+    failure_diagnostics = None
+
+    def _incomplete_chain(violation, ep_idx, step=None, diag=None):
+        return dict(
+            symbol=symbol,
+            episodes=episodes_collected,
+            n_collected=len(episodes_collected),
+            violation=violation,
+            failure_episode=ep_idx,
+            failure_step=step,
+            failure_diagnostics=diag,
+            completed=False,
+        )
 
     for ep_idx in range(total_target):
-        ep_res = run_single_episode_rollout(current_start, trans_sampler, term_sampler, rng, max_bars)
+        try:
+            ep_res = run_single_episode_rollout(current_start, trans_sampler, term_sampler, rng, max_bars)
+        except RolloutSupportError as exc:
+            return _incomplete_chain(exc.reason, ep_idx, exc.diagnostics.get("failure_step"), exc.diagnostics)
         if ep_res["status"] != "TERMINAL":
-            chain_violation = ep_res["violation"]
-            break
+            return _incomplete_chain(ep_res["violation"], ep_idx,
+                                     ep_res.get("failure_step"), ep_res.get("failure_diagnostics"))
 
         endpoint = ep_res["endpoint_mask"]
         term_state = ep_res["terminal_state"]
@@ -1364,15 +1623,17 @@ def run_single_freerun_chain(symbol: str, seed_state: Dict[str, Any],
                 if c not in df_term.columns:
                     raise SystemExit(f"STOP_DYNAMIC_PGM1C_RESET_INPUT_MISSING_COL: {c}")
 
-        gaps = reset_sampler.sample_gap(df_term, rng)
-        gap_val = int(gaps[0])
-        r_dict = reset_sampler.sample_reset_primitives(df_term, gaps, rng)
+        try:
+            gaps = reset_sampler.sample_gap(df_term, rng)
+            gap_val = int(gaps[0])
+            r_dict = reset_sampler.sample_reset_primitives(df_term, gaps, rng)
+        except RolloutSupportError as exc:
+            return _incomplete_chain(exc.reason, ep_idx, exc.diagnostics.get("failure_step"), exc.diagnostics)
         r_single = {k: v[0] for k, v in r_dict.items()}
 
         next_start, reset_viol = reset_to_start(r_single, endpoint)
         if reset_viol is not None:
-            chain_violation = reset_viol
-            break
+            return _incomplete_chain(reset_viol, ep_idx, None, None)
 
         if ep_idx >= burn_in:
             episodes_collected.append(dict(
@@ -1401,6 +1662,9 @@ def run_single_freerun_chain(symbol: str, seed_state: Dict[str, Any],
         episodes=episodes_collected,
         n_collected=len(episodes_collected),
         violation=chain_violation,
+        failure_episode=failure_episode,
+        failure_step=failure_step,
+        failure_diagnostics=failure_diagnostics,
         completed=bool(chain_violation is None and len(episodes_collected) == collect),
     )
 
@@ -1550,16 +1814,32 @@ def run_stage_c2_rollout(window_name: str,
     w1_timeout = 0
     w1_nonfinite = 0
 
+    n_done = 0
+    term_ct = inv_ct = to_ct = 0
+    last_viol = None
+    n_starts = len(eval_first_rows)
+
     for model_key in ["W0", "W1", "WT"]:
         m_spec = WORLD_MODELS[model_key]
         term_sampler = fitted_samplers["term_samplers"][m_spec["terminal"]]
         trans_sampler = fitted_samplers["trans_samplers"][m_spec["transition"]]
 
         for rep in range(n_reps):
-            for i in range(len(eval_first_rows)):
+            for i in range(n_starts):
+                n_done += 1
                 fr = eval_first_rows.iloc[i]
                 st = build_observed_start_state(fr, fr["eps_R"])
                 ep_res = run_single_episode_rollout(st, trans_sampler, term_sampler, rng, max_bars)
+                v = ep_res["violation"]
+
+                if ep_res["status"] == "TERMINAL":
+                    term_ct += 1
+                elif ep_res["status"] == "INVALID":
+                    inv_ct += 1
+                    last_viol = v
+                elif ep_res["status"] == "TIMEOUT":
+                    to_ct += 1
+                    last_viol = v
 
                 rec = {
                     "window": window_name,
@@ -1570,17 +1850,27 @@ def run_stage_c2_rollout(window_name: str,
                     "duration": ep_res["duration"],
                     "endpoint": ep_res["endpoint_mask"],
                     "status": ep_res["status"],
-                    "violation": ep_res["violation"],
+                    "violation": v,
+                    "failure_step": ep_res.get("failure_step"),
+                    "max_extrapolation_ratio_seen": ep_res.get("max_extrapolation_ratio_seen"),
+                    "first_outside_train_step": ep_res.get("first_outside_train_step"),
+                    "worst_feature_name": ep_res.get("worst_feature_name"),
                 }
                 records.append(rec)
 
                 if model_key == "W1":
                     if ep_res["status"] == "INVALID":
                         w1_invalid += 1
+                        if is_numeric_support_error(v):
+                            w1_nonfinite += 1
                     elif ep_res["status"] == "TIMEOUT":
                         w1_timeout += 1
-                    if ep_res["violation"] in ("TRANSITION_NONFINITE", "RESET_NONFINITE"):
-                        w1_nonfinite += 1
+
+                if n_done % 250 == 0:
+                    print(f"[C2 PROGRESS] {window_name} model={model_key} rep={rep} "
+                          f"i={i}/{n_starts} elapsed={time.perf_counter() - t0:.1f}s "
+                          f"term={term_ct} invalid={inv_ct} timeout={to_ct} last_violation={last_viol}",
+                          flush=True)
 
     df_records = pd.DataFrame(records)
     print(f"[STAGE C2 COMPLETE] {window_name} took {time.perf_counter() - t0:.2f}s. "
@@ -1642,6 +1932,9 @@ def run_stage_c3_freerun(window_name: str,
                 res["model"] = model_key
                 res["rep_id"] = rep_id
                 res["seed_episode_id"] = seed_ep_id
+                res.setdefault("failure_episode", None)
+                res.setdefault("failure_step", None)
+                res.setdefault("failure_diagnostics", None)
                 chains_by_model[model_key].append(res)
 
                 if model_key == "W1":
@@ -1649,8 +1942,13 @@ def run_stage_c3_freerun(window_name: str,
                         w1_c3_invalid += 1
                     if res["violation"] == "EPISODE_TIMEOUT":
                         w1_c3_timeout += 1
-                    if res["violation"] in ("TRANSITION_NONFINITE", "RESET_NONFINITE"):
+                    if is_numeric_support_error(res["violation"]):
                         w1_c3_nonfinite += 1
+
+            # Progress: every 4 chain reps per symbol
+            if rep_id % 4 == 0:
+                print(f"[C3 PROGRESS] {window_name} sym={sym} rep={rep_id}/{n_chains} "
+                      f"elapsed={time.perf_counter() - t0:.1f}s", flush=True)
 
     print(f"[STAGE C3 COMPLETE] {window_name} took {time.perf_counter() - t0:.2f}s. "
           f"W1 incomplete_chains={w1_c3_invalid}, timeouts={w1_c3_timeout}, nonfinite={w1_c3_nonfinite}", flush=True)
@@ -1665,63 +1963,84 @@ def run_stage_c3_freerun(window_name: str,
 def compute_replicate_discrepancies(chains_by_model: Dict[str, List[Dict[str, Any]]],
                                     obs_comparator: Dict[str, Any],
                                     n_chains: int = N_CHAIN_REPS) -> Dict[str, Any]:
-    """Compute pooled replicate D_total and by-symbol D_total."""
-    rep_metrics: Dict[str, List[Dict[str, float]]] = {"W0": [], "W1": [], "WT": []}
+    """Compute pooled replicate D_total and by-symbol D_total.
+
+    Hardening (H): a replicate's D_total only counts toward the formal gate if ALL symbol
+    chains for that (model, rep_id) completed. Incomplete chains' already-collected episodes
+    are recorded (partial_D_total_diagnostic) but EXCLUDED from the gate and from the paired
+    bootstrap (no survivor bias). By-symbol comparison only includes symbols whose chains are
+    complete for BOTH compared models; the formal breadth denominator is unchanged.
+    """
+    symbols = sorted(obs_comparator["by_symbol"].keys())
+    expected = len(symbols)
+
+    rep_valid: Dict[str, List[bool]] = {"W0": [], "W1": [], "WT": []}
+    by_symbol_complete: Dict[str, Dict[str, bool]] = {s: {"W0": False, "W1": False, "WT": False} for s in symbols}
+
+    def _pack(all_eps):
+        if len(all_eps) == 0:
+            return dict(
+                durations=np.empty(0, dtype=np.float64),
+                endpoints=np.empty(0, dtype=np.int64),
+                terminals={f: np.empty(0, dtype=np.float64) for f in TERMINAL_DYNAMIC_FIELDS},
+                resets={f: np.empty(0, dtype=np.float64) for f in RESET_STRUCTURAL_FIELDS},
+                gaps=np.empty(0, dtype=np.float64),
+            )
+        durs = np.array([ep["duration"] for ep in all_eps], dtype=np.float64)
+        ends = np.array([ep["endpoint_mask"] for ep in all_eps], dtype=np.int64)
+        terms = {f: np.array([ep["terminal_state"].get(f, np.nan) for ep in all_eps], dtype=np.float64)
+                 for f in TERMINAL_DYNAMIC_FIELDS}
+        resets = {f: np.array([ep["reset_state"].get(f, np.nan) for ep in all_eps], dtype=np.float64)
+                  for f in RESET_STRUCTURAL_FIELDS}
+        gaps = np.array([ep["gap"] for ep in all_eps], dtype=np.float64)
+        return dict(durations=durs, endpoints=ends, terminals=terms, resets=resets, gaps=gaps)
+
+    for model_key in ["W0", "W1", "WT"]:
+        m_chains = chains_by_model[model_key]
+        for rep_id in range(n_chains):
+            rc = [c for c in m_chains if c["rep_id"] == rep_id]
+            valid = (len(rc) == expected) and all(c["completed"] for c in rc)
+            rep_valid[model_key].append(valid)
+        for s in symbols:
+            sc = [c for c in m_chains if c["symbol"] == s]
+            by_symbol_complete[s][model_key] = (len(sc) == n_chains) and all(c["completed"] for c in sc)
+
+    rep_metrics: Dict[str, List[Dict[str, Any]]] = {"W0": [], "W1": [], "WT": []}
     for model_key in ["W0", "W1", "WT"]:
         m_chains = chains_by_model[model_key]
         for rep_id in range(n_chains):
             rep_c = [c for c in m_chains if c["rep_id"] == rep_id]
             all_eps = [ep for c in rep_c for ep in c["episodes"]]
-            if len(all_eps) == 0:
-                gen_pack = dict(
-                    durations=np.empty(0, dtype=np.float64),
-                    endpoints=np.empty(0, dtype=np.int64),
-                    terminals={f: np.empty(0, dtype=np.float64) for f in TERMINAL_DYNAMIC_FIELDS},
-                    resets={f: np.empty(0, dtype=np.float64) for f in RESET_STRUCTURAL_FIELDS},
-                    gaps=np.empty(0, dtype=np.float64),
-                )
-            else:
-                durs = np.array([ep["duration"] for ep in all_eps], dtype=np.float64)
-                ends = np.array([ep["endpoint_mask"] for ep in all_eps], dtype=np.int64)
-                terms = {f: np.array([ep["terminal_state"].get(f, np.nan) for ep in all_eps], dtype=np.float64)
-                         for f in TERMINAL_DYNAMIC_FIELDS}
-                resets = {f: np.array([ep["reset_state"].get(f, np.nan) for ep in all_eps], dtype=np.float64)
-                          for f in RESET_STRUCTURAL_FIELDS}
-                gaps = np.array([ep["gap"] for ep in all_eps], dtype=np.float64)
-                gen_pack = dict(durations=durs, endpoints=ends, terminals=terms, resets=resets, gaps=gaps)
-
+            gen_pack = _pack(all_eps)
             disc = compute_rollout_discrepancy(gen_pack, obs_comparator["pooled"])
+            valid = rep_valid[model_key][rep_id]
+            disc["valid_for_gate"] = bool(valid)
+            disc["D_total_gate"] = float(disc["D_total"]) if valid else float("nan")
+            disc["partial_D_total_diagnostic"] = float(disc["D_total"])
             rep_metrics[model_key].append(disc)
 
-    by_symbol_metrics: Dict[str, Dict[str, Dict[str, float]]] = {}
-    symbols = sorted(obs_comparator["by_symbol"].keys())
+    by_symbol_metrics: Dict[str, Dict[str, Dict[str, Any]]] = {}
     for s in symbols:
         by_symbol_metrics[s] = {}
         for model_key in ["W0", "W1", "WT"]:
             m_chains = [c for c in chains_by_model[model_key] if c["symbol"] == s]
             all_eps = [ep for c in m_chains for ep in c["episodes"]]
-            if len(all_eps) == 0:
-                gen_pack = dict(
-                    durations=np.empty(0, dtype=np.float64),
-                    endpoints=np.empty(0, dtype=np.int64),
-                    terminals={f: np.empty(0, dtype=np.float64) for f in TERMINAL_DYNAMIC_FIELDS},
-                    resets={f: np.empty(0, dtype=np.float64) for f in RESET_STRUCTURAL_FIELDS},
-                    gaps=np.empty(0, dtype=np.float64),
-                )
-            else:
-                durs = np.array([ep["duration"] for ep in all_eps], dtype=np.float64)
-                ends = np.array([ep["endpoint_mask"] for ep in all_eps], dtype=np.int64)
-                terms = {f: np.array([ep["terminal_state"].get(f, np.nan) for ep in all_eps], dtype=np.float64)
-                         for f in TERMINAL_DYNAMIC_FIELDS}
-                resets = {f: np.array([ep["reset_state"].get(f, np.nan) for ep in all_eps], dtype=np.float64)
-                          for f in RESET_STRUCTURAL_FIELDS}
-                gaps = np.array([ep["gap"] for ep in all_eps], dtype=np.float64)
-                gen_pack = dict(durations=durs, endpoints=ends, terminals=terms, resets=resets, gaps=gaps)
-
+            gen_pack = _pack(all_eps)
             disc = compute_rollout_discrepancy(gen_pack, obs_comparator["by_symbol"][s])
+            if model_key in ("W0", "W1"):
+                cmp_valid = bool(by_symbol_complete[s]["W0"] and by_symbol_complete[s]["W1"])
+            else:
+                cmp_valid = bool(by_symbol_complete[s][model_key])
+            disc["comparison_valid"] = cmp_valid
             by_symbol_metrics[s][model_key] = disc
 
-    return dict(rep_metrics=rep_metrics, by_symbol_metrics=by_symbol_metrics)
+    return dict(
+        rep_metrics=rep_metrics,
+        by_symbol_metrics=by_symbol_metrics,
+        rep_valid=rep_valid,
+        by_symbol_complete=by_symbol_complete,
+        expected_symbols=expected,
+    )
 
 
 def evaluate_and_write_outputs(results_by_window: Dict[str, Any],
@@ -1800,7 +2119,7 @@ def evaluate_and_write_outputs(results_by_window: Dict[str, Any],
             n_comp = int(sum(1 for c in mchains if c["completed"]))
             n_inv = int(sum(1 for c in mchains if not c["completed"] and c["violation"] != "EPISODE_TIMEOUT"))
             n_to = int(sum(1 for c in mchains if c["violation"] == "EPISODE_TIMEOUT"))
-            n_nonfin = int(sum(1 for c in mchains if c["violation"] in ("TRANSITION_NONFINITE", "RESET_NONFINITE")))
+            n_nonfin = int(sum(1 for c in mchains if is_numeric_support_error(c["violation"])))
             tot_eps = sum(len(c["episodes"]) for c in mchains)
             c3_rows.append({
                 "window": wname,
@@ -1831,41 +2150,69 @@ def evaluate_and_write_outputs(results_by_window: Dict[str, Any],
     comp_rows = []
     w1_w0_passed_all = True
     wt_w1_passed_all = True
+    w1_w0_support_complete_all = True
+    wt_w1_support_complete_all = True
 
     for wname, wdata in results_by_window.items():
         disc_data = wdata["discrepancies"]["rep_metrics"]
-        d_w0 = np.array([d["D_total"] for d in disc_data["W0"]])
-        d_w1 = np.array([d["D_total"] for d in disc_data["W1"]])
-        d_wt = np.array([d["D_total"] for d in disc_data["WT"]])
+        rep_valid = wdata["discrepancies"]["rep_valid"]
+        by_symbol_complete = wdata["discrepancies"]["by_symbol_complete"]
+        # Use the actual number of replicates produced by compute_replicate_discrepancies
+        # (which respects the n_chains it was called with), not the module default.
+        n_ch = len(rep_valid["W0"])
 
-        # W1 - W0
-        diff_10 = d_w1 - d_w0
-        lo_10, hi_10, pt_10 = paired_bootstrap_replicates(diff_10, seed=20260915, reps=boot_reps)
+        # Paired-valid replicates: both models' rep must be complete.
+        paired_10 = [r for r in range(n_ch) if rep_valid["W0"][r] and rep_valid["W1"][r]]
+        paired_t1 = [r for r in range(n_ch) if rep_valid["W1"][r] and rep_valid["WT"][r]]
+        support_10_complete = (len(paired_10) == n_ch)
+        support_t1_complete = (len(paired_t1) == n_ch)
+        if not support_10_complete:
+            w1_w0_support_complete_all = False
+        if not support_t1_complete:
+            wt_w1_support_complete_all = False
 
-        # WT - W1
-        diff_t1 = d_wt - d_w1
-        lo_t1, hi_t1, pt_t1 = paired_bootstrap_replicates(diff_t1, seed=20260915, reps=boot_reps)
+        if support_10_complete:
+            d_w0 = np.array([disc_data["W0"][r]["D_total"] for r in paired_10])
+            d_w1 = np.array([disc_data["W1"][r]["D_total"] for r in paired_10])
+            diff_10 = d_w1 - d_w0
+            lo_10, hi_10, pt_10 = paired_bootstrap_replicates(diff_10, seed=20260915, reps=boot_reps)
+        else:
+            lo_10 = hi_10 = pt_10 = float("nan")
 
-        # By symbol counts
+        if support_t1_complete:
+            d_w1 = np.array([disc_data["W1"][r]["D_total"] for r in paired_t1])
+            d_wt = np.array([disc_data["WT"][r]["D_total"] for r in paired_t1])
+            diff_t1 = d_wt - d_w1
+            lo_t1, hi_t1, pt_t1 = paired_bootstrap_replicates(diff_t1, seed=20260915, reps=boot_reps)
+        else:
+            lo_t1 = hi_t1 = pt_t1 = float("nan")
+
+        # By-symbol breadth counts ONLY fully-complete symbols (denominator stays total).
         sym_disc = wdata["discrepancies"]["by_symbol_metrics"]
         syms = sorted(sym_disc.keys())
-        fav_10 = sum(1 for s in syms if sym_disc[s]["W1"]["D_total"] < sym_disc[s]["W0"]["D_total"])
-        fav_t1 = sum(1 for s in syms if sym_disc[s]["WT"]["D_total"] < sym_disc[s]["W1"]["D_total"])
+        fav_10 = sum(1 for s in syms if by_symbol_complete[s]["W0"] and by_symbol_complete[s]["W1"]
+                     and sym_disc[s]["W1"]["D_total"] < sym_disc[s]["W0"]["D_total"])
+        fav_t1 = sum(1 for s in syms if by_symbol_complete[s]["W1"] and by_symbol_complete[s]["WT"]
+                     and sym_disc[s]["WT"]["D_total"] < sym_disc[s]["W1"]["D_total"])
 
         comp_rows.append({
             "window": wname, "comparison": "W1 - W0", "point": pt_10,
             "ci_lo": lo_10, "ci_hi": hi_10, "symbols_favored": fav_10,
-            "total_symbols": len(syms), "p_support": bool(hi_10 < 0 and fav_10 >= SYMBOL_BREADTH_MIN),
+            "total_symbols": len(syms),
+            "p_support": bool(support_10_complete and hi_10 < 0 and fav_10 >= SYMBOL_BREADTH_MIN),
+            "support_complete": support_10_complete, "paired_valid_reps": len(paired_10),
         })
         comp_rows.append({
             "window": wname, "comparison": "WT - W1", "point": pt_t1,
             "ci_lo": lo_t1, "ci_hi": hi_t1, "symbols_favored": fav_t1,
-            "total_symbols": len(syms), "p_support": bool(hi_t1 < 0 and fav_t1 >= SYMBOL_BREADTH_MIN),
+            "total_symbols": len(syms),
+            "p_support": bool(support_t1_complete and hi_t1 < 0 and fav_t1 >= SYMBOL_BREADTH_MIN),
+            "support_complete": support_t1_complete, "paired_valid_reps": len(paired_t1),
         })
 
-        if not (hi_10 < 0 and fav_10 >= SYMBOL_BREADTH_MIN):
+        if not (support_10_complete and hi_10 < 0 and fav_10 >= SYMBOL_BREADTH_MIN):
             w1_w0_passed_all = False
-        if not (hi_t1 < 0 and fav_t1 >= SYMBOL_BREADTH_MIN):
+        if not (support_t1_complete and hi_t1 < 0 and fav_t1 >= SYMBOL_BREADTH_MIN):
             wt_w1_passed_all = False
 
     pd.DataFrame(comp_rows).to_csv(OUT / f"{PREFIX}_discrepancy_modules.csv", index=False)
@@ -2001,8 +2348,12 @@ def evaluate_and_write_outputs(results_by_window: Dict[str, Any],
             gate0_pass = False
 
     gate0_dec = "FREE_RUN_SUPPORT_CLOSED" if gate0_pass else "FREE_RUN_SUPPORT_NOT_CLOSED"
-    gate1_dec = "ROLLOUT_PHI_RESET_SUPPORTED" if w1_w0_passed_all else "ONE_STEP_GAINS_DO_NOT_SURVIVE_ROLLOUT"
-    gate_mem_dec = "TERMINAL_MEMORY_ROLLOUT_USEFUL" if wt_w1_passed_all else "TERMINAL_MEMORY_NOT_PROMOTED"
+    gate1_dec = ("ROLLOUT_COMPARISON_SUPPORT_INCOMPLETE" if not w1_w0_support_complete_all
+                 else "ROLLOUT_PHI_RESET_SUPPORTED" if w1_w0_passed_all
+                 else "ONE_STEP_GAINS_DO_NOT_SURVIVE_ROLLOUT")
+    gate_mem_dec = ("TERMINAL_MEMORY_COMPARISON_SUPPORT_INCOMPLETE" if not wt_w1_support_complete_all
+                   else "TERMINAL_MEMORY_ROLLOUT_USEFUL" if wt_w1_passed_all
+                   else "TERMINAL_MEMORY_NOT_PROMOTED")
 
     summary = dict(
         experiment="DYNAMIC-PGM-1C Free-Run Rollout Closure",
@@ -2157,10 +2508,111 @@ def run_dynamic_pgm1c_full(obs_sample_path: Path, transitions_path: Path,
     return summary
 
 
+def run_stability_probe(obs_sample_path: Path, transitions_path: Path, ep_meta_path: Path) -> Dict[str, Any]:
+    """Closed-loop stability probe (K/L). Diagnostic ONLY -- does NOT produce a formal 1C verdict.
+
+    Uses REAL recursive rollout (terminal -> transition -> state update) for W1 only, over both
+    windows, with up to 64 observed starts per symbol, 1 rep, and MAX_EPISODE_BARS=512. Each
+    rollout records its failure mode via the `violation` field and the training-domain
+    extrapolation diagnostics, so we can later decide whether the issue is numeric
+    representation, conditional-head extrapolation, or state-dynamics support closure.
+    """
+    print("==================================================", flush=True)
+    print("CLOSED-LOOP STABILITY PROBE (diagnostic only)", flush=True)
+    print("==================================================", flush=True)
+    PROBE_REPS = 1
+    PROBE_STARTS_PER_SYMBOL = 64
+    probe_rows: List[Dict[str, Any]] = []
+
+    for w in WINDOWS:
+        wname = w["name"]
+        print(f"[STABILITY PROBE] window={wname} ...", flush=True)
+        fitted = fit_samplers_for_window(w, obs_sample_path, transitions_path)
+        term_s = fitted["term_samplers"]["T0_STATE_AVAIL"]
+        trans_s = fitted["trans_samplers"]["MC_STATE_CURREENCODING"]
+        rng = np.random.default_rng(20260915)
+
+        obs = pd.read_parquet(obs_sample_path)
+        ep_meta = pd.read_parquet(ep_meta_path)
+        meta_slim = ep_meta[["symbol", "start_bar", "start_upper_price", "start_lower_price"]].drop_duplicates()
+        obs = obs.merge(meta_slim, on=["symbol", "start_bar"], how="left")
+        span = obs["start_upper_price"].to_numpy(np.float64) - obs["start_lower_price"].to_numpy(np.float64)
+        atr0 = span / obs["start_width_R"].to_numpy(np.float64)
+        obs["eps_R"] = 1e-9 / atr0
+        pair, first = exp1b.build_reset_pairs(obs)
+        ev_obs = obs[obs["block"] == w["eval"]].reset_index(drop=True)
+        ev_firsts = ev_obs[ev_obs["bar_t"] == ev_obs["start_bar"]].reset_index(drop=True)
+
+        syms = sorted(ev_firsts["symbol"].unique())
+        for sym in syms:
+            sym_firsts = ev_firsts[ev_firsts["symbol"] == sym].reset_index(drop=True).head(PROBE_STARTS_PER_SYMBOL)
+            for fr_idx in range(len(sym_firsts)):
+                fr = sym_firsts.iloc[fr_idx]
+                st = build_observed_start_state(fr, fr["eps_R"])
+                ep_res = run_single_episode_rollout(st, trans_s, term_s, rng, MAX_EPISODE_BARS)
+                probe_rows.append(dict(
+                    window=wname,
+                    symbol=sym,
+                    episode_id=str(fr["episode_id"]),
+                    status=ep_res["status"],
+                    duration=ep_res["duration"],
+                    failure_step=ep_res.get("failure_step"),
+                    violation=ep_res["violation"],
+                    max_abs_design_seen=ep_res.get("max_abs_design_seen"),
+                    max_extrapolation_ratio_seen=ep_res.get("max_extrapolation_ratio_seen"),
+                    first_outside_train_step=ep_res.get("first_outside_train_step"),
+                    worst_feature_name=ep_res.get("worst_feature_name"),
+                    worst_feature_value=ep_res.get("worst_feature_value"),
+                    train_feature_min=ep_res.get("train_feature_min"),
+                    train_feature_max=ep_res.get("train_feature_max"),
+                ))
+
+    probe_df = pd.DataFrame(probe_rows)
+    OUT.mkdir(parents=True, exist_ok=True)
+    probe_df.to_csv(OUT / f"{PREFIX}_stability_probe.csv", index=False)
+
+    def _p(arr: "pd.Series", q: float):
+        return float(np.percentile(arr, q)) if len(arr) else None
+
+    summ: Dict[str, Any] = {}
+    for w in WINDOWS:
+        wname = w["name"]
+        sub = probe_df[probe_df["window"] == wname]
+        n = len(sub)
+        invalid = sub[sub["status"] == "INVALID"]
+        timeout = sub[sub["status"] == "TIMEOUT"]
+        terminal = sub[sub["status"] == "TERMINAL"]
+        viol_breakdown = {k: int(v) for k, v in invalid["violation"].value_counts().to_dict().items()} if len(invalid) else {}
+        fs = invalid["failure_step"].dropna().astype(float)
+        mer = sub["max_extrapolation_ratio_seen"].dropna().astype(float)
+        fos = sub["first_outside_train_step"].dropna().astype(float)
+        summ[wname] = dict(
+            n_rollouts=n,
+            terminal=int(len(terminal)),
+            timeout=int(len(timeout)),
+            invalid=int(len(invalid)),
+            invalid_rate=(float(len(invalid) / n) if n else 0.0),
+            violation_breakdown=viol_breakdown,
+            failure_step=dict(median=_p(fs, 50), p10=_p(fs, 10), p50=_p(fs, 50), p90=_p(fs, 90)),
+            max_extrapolation_ratio=dict(
+                median=_p(mer, 50), p90=_p(mer, 90), p99=_p(mer, 99),
+                max=float(mer.max()) if len(mer) else None,
+            ),
+            first_outside_train_step_distribution=dict(
+                median=_p(fos, 50), p10=_p(fos, 10), p90=_p(fos, 90),
+            ),
+        )
+    (OUT / f"{PREFIX}_stability_probe_summary.json").write_text(json.dumps(summ, indent=2, default=str))
+    print(f"[STABILITY PROBE COMPLETE] wrote {len(probe_df)} rows to {OUT}", flush=True)
+    return summ
+
+
 def main():
     parser = argparse.ArgumentParser(description="DYNAMIC-PGM-1C Free-Run Rollout Closure")
     parser.add_argument("--audit-only", action="store_true", help="Run Stage C0 parity and closure audits only.")
     parser.add_argument("--smoke-test", action="store_true", help="Run tiny end-to-end stochastic smoke test through full pipeline.")
+    parser.add_argument("--stability-probe", action="store_true",
+                        help="Run closed-loop stability probe (diagnostic only, no formal gate).")
     args = parser.parse_args()
 
     obs_sample_path = CACHE / "dynamic_pgm1b_sample.parquet"
@@ -2172,6 +2624,11 @@ def main():
 
     if args.audit_only or os.environ.get("DYNAMIC_PGM1C_AUDIT_ONLY") == "1":
         print("[AUDIT-ONLY] Complete. Stopping before any stochastic rollout simulation.", flush=True)
+        return
+
+    if args.stability_probe or os.environ.get("DYNAMIC_PGM1C_STABILITY_PROBE") == "1":
+        run_stability_probe(obs_sample_path, transitions_path, ep_meta_path)
+        print("[STABILITY-PROBE] Complete. Diagnostic only -- no formal 1C verdict produced.", flush=True)
         return
 
     if args.smoke_test or os.environ.get("DYNAMIC_PGM1C_SMOKE_TEST") == "1":

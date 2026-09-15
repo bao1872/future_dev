@@ -667,6 +667,12 @@ def test_31_real_fitted_transition_sampler_smoke():
     fitted = get_window_a_fitted()
     df_m = pd.read_parquet(C.TRANSITION_SAMPLE_PATH)
     batch = df_m.head(32).copy()
+    # Fill NaN zt_* (first-step rows) from phi_* so input is finite like a real rollout.
+    for zc in C.rep.MC_EXTRA:
+        if zc.startswith("zt_") and zc in batch.columns:
+            pc = zc.replace("zt_", "phi_")
+            src = batch[pc] if pc in batch.columns else pd.Series(0.0, index=batch.index)
+            batch[zc] = batch[zc].fillna(src)
     rng = np.random.default_rng(42)
 
     # Check M0
@@ -868,6 +874,397 @@ def test_37_main_execution_chain_not_empty():
     assert "run_stage_c3_freerun" in full_src
     assert "compute_replicate_discrepancies" in full_src
     assert "evaluate_and_write_outputs" in full_src
+
+
+# ===========================================================================
+# 1C Execution-Hardening & Stability-Probe tests (added this round)
+# ===========================================================================
+def _make_fake_trans_sampler(transform_value: float = 0.0):
+    """Build a FittedTransitionSampler with mock heads that emit finite zeros.
+
+    Each node head supports the exact interface the real samplers use
+    (gaussian .B/.intercept/.k/.chol; hurdle .logit/.g/.sign; dcr .cat/.g;
+    count .predict_proba[:,1]). Only the design-check / input-guard paths are
+    exercised by the hardening tests, so the heads can be trivial.
+    """
+
+    class FakeGauss:
+        def __init__(self):
+            self.B = np.zeros((2, 1))
+            self.intercept = np.zeros(1)
+            self.k = 1
+            self.chol = np.eye(1)
+
+    class FakeHurdle:
+        def __init__(self):
+            self.g = FakeGauss()
+            self.sign = 1.0
+
+            class _Logit:
+                def predict_proba(self, X):
+                    n = len(X)
+                    return np.tile([0.5, 0.5], (n, 1))
+
+            self.logit = _Logit()
+
+    class FakeDcr:
+        def __init__(self):
+            self.g = FakeGauss()
+
+            class _Cat:
+                def predict_proba(self, X):
+                    n = len(X)
+                    return np.tile([0.2, 0.6, 0.2], (n, 1))
+
+            self.cat = _Cat()
+
+    class FakeOcc:
+        def predict_proba(self, X):
+            n = len(X)
+            return np.tile([0.5, 0.5], (n, 1))
+
+    def mk_hurdle():
+        return FakeHurdle()
+
+    nodes = {name: {"head": mk_hurdle()} for name in
+             ("z_d_up", "z_dmfe", "z_dmae", "z_dcr", "z_range", "z_uresid", "z_lresid")}
+    nodes["z_d_up"]["head"] = FakeGauss()
+    nodes["z_dcr"]["head"] = FakeDcr()
+
+    class FakeCT:
+        def transform(self, df):
+            n = len(df)
+            return np.full((n, 2), float(transform_value), dtype=np.float32)
+
+    return C.FittedTransitionSampler(
+        "M0", FakeCT(), {"nodes": nodes},
+        {"constant_rates": (0.5, 0.5)}, [FakeOcc(), FakeOcc()],
+        train_min=np.array([0.0, 0.0]), train_max=np.array([1.0, 1.0]),
+        train_absmax=np.array([1.0, 1.0]), feature_names=["f0", "f1"],
+        design_cols=["cur_up_distance_R", "cur_down_distance_R"],
+    )
+
+
+def _mini_comparator(symbols=("SYM",)):
+    TF = C.TERMINAL_DYNAMIC_FIELDS
+    RF = C.RESET_STRUCTURAL_FIELDS
+
+    def block():
+        return {
+            "durations": np.array([1.0, 2.0, 3.0]),
+            "endpoints": np.array([1, 2, 3], dtype=np.int64),
+            "terminals": {f: np.array([0.0, 1.0, 2.0]) for f in TF},
+            "resets": {f: np.array([0.0, 1.0, 2.0]) for f in RF},
+            "gaps": np.array([0.0, 1.0, 0.0]),
+        }
+
+    return {"pooled": block(), "by_symbol": {s: block() for s in symbols}}
+
+
+def _mini_chain(rep_id, completed, symbol="SYM", violation=None, n_eps=3):
+    return {
+        "symbol": symbol, "rep_id": rep_id, "completed": completed, "violation": violation,
+        "episodes": [{"duration": 1.0, "endpoint_mask": 1, "terminal_state": {},
+                      "reset_state": {}, "gap": 0.0}] * n_eps,
+    }
+
+
+def test_38_transition_design_float32_overflow():
+    """Huge-but-finite X64 must raise TRANSITION_DESIGN_FLOAT32_OVERFLOW (not sklearn ValueError)."""
+    X64 = np.array([[1e40, 0.0], [0.0, -1e40]], dtype=np.float64)
+    raised = False
+    try:
+        C.transition_design_check(X64)
+    except C.RolloutSupportError as e:
+        raised = True
+        assert e.reason == "TRANSITION_DESIGN_FLOAT32_OVERFLOW"
+    assert raised, "expected RolloutSupportError on float32 overflow"
+
+
+def test_39_transition_input_nonfinite():
+    """Raw nonfinite state input must raise TRANSITION_INPUT_NONFINITE."""
+    sampler = _make_fake_trans_sampler(0.0)
+    df = pd.DataFrame({"cur_up_distance_R": [np.inf], "cur_down_distance_R": [1.0]})
+    raised = False
+    try:
+        sampler.sample_batch(df, np.random.default_rng(1))
+    except C.RolloutSupportError as e:
+        raised = True
+        assert e.reason == "TRANSITION_INPUT_NONFINITE"
+    assert raised, "expected RolloutSupportError on nonfinite input"
+
+
+def test_40_hurdle_logmag_overflow():
+    """Hurdle log-magnitude overflow must raise a structured *_HURDLE_LOGMAG_OVERFLOW (no inf)."""
+    class FakeGauss:
+        def __init__(self):
+            self.B = np.zeros((1, 1))
+            self.intercept = np.array([1e300])
+            self.k = 1
+            self.chol = np.zeros((1, 1))
+
+    class FakeHurdle:
+        def __init__(self):
+            self.g = FakeGauss()
+            self.sign = 1.0
+
+            class _L:
+                def predict_proba(self, X):
+                    n = len(X)
+                    return np.tile([0.5, 0.5], (n, 1))
+
+            self.logit = _L()
+
+    head = FakeHurdle()
+    X = np.zeros((3, 1))
+    raised = False
+    try:
+        C.sample_hurdle_ln(head, X, np.random.default_rng(1), node="z_dmfe")
+    except C.RolloutSupportError as e:
+        raised = True
+        assert e.reason == "z_dmfe_HURDLE_LOGMAG_OVERFLOW"
+    assert raised, "expected RolloutSupportError on hurdle log-magnitude overflow"
+
+
+def test_41_terminal_safe_transform_nonfinite():
+    """Terminal preprocessing must raise TERMINAL_INPUT/DESIGN_NONFINITE on bad input/design."""
+    class FakePreBad:
+        def transform(self, df):
+            return np.array([[np.inf, 0.0]])
+
+    raised_design = False
+    try:
+        C.safe_transform(FakePreBad(), pd.DataFrame({"a": [1.0]}),
+                         "TERMINAL_INPUT_NONFINITE", "TERMINAL_DESIGN_NONFINITE")
+    except C.RolloutSupportError as e:
+        raised_design = True
+        assert e.reason == "TERMINAL_DESIGN_NONFINITE"
+    assert raised_design
+
+    class FakePreOk:
+        def transform(self, df):
+            return np.array([[0.0, 0.0]])
+
+    raised_input = False
+    try:
+        C.safe_transform(FakePreOk(), pd.DataFrame({"a": [np.inf]}),
+                         "TERMINAL_INPUT_NONFINITE", "TERMINAL_DESIGN_NONFINITE")
+    except C.RolloutSupportError as e:
+        raised_input = True
+        assert e.reason == "TERMINAL_INPUT_NONFINITE"
+    assert raised_input
+
+
+def test_42_reset_safe_transform_nonfinite():
+    """Reset preprocessing must raise RESET_INPUT/DESIGN_NONFINITE on bad input/design."""
+    class FakePreBad:
+        def transform(self, df):
+            return np.array([[np.inf, 0.0]])
+
+    raised_design = False
+    try:
+        C.safe_transform(FakePreBad(), pd.DataFrame({"a": [1.0]}),
+                         "RESET_INPUT_NONFINITE", "RESET_DESIGN_NONFINITE")
+    except C.RolloutSupportError as e:
+        raised_design = True
+        assert e.reason == "RESET_DESIGN_NONFINITE"
+    assert raised_design
+
+    class FakePreOk:
+        def transform(self, df):
+            return np.array([[0.0, 0.0]])
+
+    raised_input = False
+    try:
+        C.safe_transform(FakePreOk(), pd.DataFrame({"a": [np.inf]}),
+                         "RESET_INPUT_NONFINITE", "RESET_DESIGN_NONFINITE")
+    except C.RolloutSupportError as e:
+        raised_input = True
+        assert e.reason == "RESET_INPUT_NONFINITE"
+    assert raised_input
+
+
+def test_43_rollout_catches_support_error():
+    """run_single_episode_rollout must turn RolloutSupportError into INVALID, not kill the process."""
+    st = {"episode_age": 0, "eps_R": 1e-4}
+
+    class DummyTerminalNever:
+        def sample_hazard(self, df, rng):
+            return np.array([False])
+
+        def sample_endpoint(self, df, rng):
+            return np.array([1])
+
+    class DummyTransError:
+        def sample_batch(self, df, rng):
+            raise C.RolloutSupportError("TRANSITION_DESIGN_FLOAT32_OVERFLOW", {"n_nonfinite": 1})
+
+    res = C.run_single_episode_rollout(st, DummyTransError(), DummyTerminalNever(), np.random.default_rng(1))
+    assert res["status"] == "INVALID"
+    assert res["violation"] == "TRANSITION_DESIGN_FLOAT32_OVERFLOW"
+    assert res["failure_step"] == 1
+
+
+def test_44_programmer_valueerror_propagates():
+    """A plain programmer ValueError must propagate (no blanket except swallowing bugs)."""
+    st = {"episode_age": 0, "eps_R": 1e-4}
+
+    class DummyTerminalErr:
+        def sample_hazard(self, df, rng):
+            raise ValueError("real bug")
+
+        def sample_endpoint(self, df, rng):
+            return np.array([1])
+
+    class DummyTrans:
+        def sample_batch(self, df, rng):
+            return {}
+
+    raised = False
+    try:
+        C.run_single_episode_rollout(st, DummyTrans(), DummyTerminalErr(), np.random.default_rng(1))
+    except ValueError:
+        raised = True
+    assert raised, "plain ValueError must propagate (no blanket except)"
+
+
+def test_45_incomplete_chain_excluded_from_gate():
+    """An incomplete replicate must not enter the formal gate D_total."""
+    obs = _mini_comparator()
+    chains = {
+        "W0": [_mini_chain(0, True)],
+        "W1": [_mini_chain(0, False, violation="TRANSITION_DESIGN_FLOAT32_OVERFLOW")],
+        "WT": [_mini_chain(0, True)],
+    }
+    out = C.compute_replicate_discrepancies(chains, obs, n_chains=1)
+    assert out["rep_valid"]["W1"][0] is False
+    assert out["rep_valid"]["W0"][0] is True
+    assert out["rep_metrics"]["W1"][0]["valid_for_gate"] is False
+    assert np.isnan(out["rep_metrics"]["W1"][0]["D_total_gate"])
+    assert "D_total" in out["rep_metrics"]["W1"][0]  # partial still recorded
+
+
+def test_46_15_complete_1_incomplete_rep_invalid():
+    """15/16 symbol chains complete + 1 incomplete -> replicate valid_for_gate=False."""
+    obs = _mini_comparator()
+
+    def mk(mask):
+        return [_mini_chain(rid, mask[rid], violation=None if mask[rid] else "TRANSITION_DESIGN_FLOAT32_OVERFLOW")
+                for rid in range(16)]
+
+    w1 = mk({rid: (rid != 7) for rid in range(16)})
+    w0 = mk({rid: True for rid in range(16)})
+    wt = mk({rid: True for rid in range(16)})
+    out = C.compute_replicate_discrepancies({"W0": w0, "W1": w1, "WT": wt}, obs, n_chains=16)
+    assert out["rep_valid"]["W1"][7] is False
+    assert all(out["rep_valid"]["W0"])
+    assert out["rep_metrics"]["W1"][7]["valid_for_gate"] is False
+    assert np.isnan(out["rep_metrics"]["W1"][7]["D_total_gate"])
+
+
+def test_47_w0_w1_15_of_16_paired_incomplete():
+    """W0/W1 only 15/16 paired-valid -> Gate1 must be support-incomplete (no 15-rep bootstrap)."""
+    obs = _mini_comparator()
+
+    def mk(mask):
+        return [_mini_chain(rid, mask[rid], violation=None if mask[rid] else "TRANSITION_DESIGN_FLOAT32_OVERFLOW")
+                for rid in range(16)]
+
+    w0 = mk({rid: (rid != 7) for rid in range(16)})  # W0 incomplete at rep 7
+    w1 = mk({rid: True for rid in range(16)})          # W1 all complete
+    wt = mk({rid: True for rid in range(16)})
+    out = C.compute_replicate_discrepancies({"W0": w0, "W1": w1, "WT": wt}, obs, n_chains=16)
+    paired = [r for r in range(16) if out["rep_valid"]["W0"][r] and out["rep_valid"]["W1"][r]]
+    assert len(paired) == 15
+    assert out["rep_metrics"]["W0"][7]["valid_for_gate"] is False
+
+
+def test_48_by_symbol_incomplete_excluded():
+    """Incomplete by-symbol chains are flagged; formal breadth denominator is unchanged."""
+    symbols = ("AAA", "BBB", "CCC")
+    obs = _mini_comparator(symbols)
+
+    def mk(mask):
+        return [_mini_chain(0, mask[s], symbol=s) for s in symbols]
+
+    w0 = mk({"AAA": True, "BBB": True, "CCC": False})
+    w1 = mk({"AAA": True, "BBB": True, "CCC": True})
+    wt = mk({"AAA": True, "BBB": True, "CCC": True})
+    out = C.compute_replicate_discrepancies({"W0": w0, "W1": w1, "WT": wt}, obs, n_chains=1)
+    assert out["by_symbol_complete"]["CCC"]["W0"] is False
+    assert out["by_symbol_complete"]["CCC"]["W1"] is True
+    assert out["by_symbol_complete"]["AAA"]["W0"] is True
+    assert out["expected_symbols"] == 3
+    assert out["by_symbol_metrics"]["CCC"]["W0"]["comparison_valid"] is False
+    assert out["by_symbol_metrics"]["AAA"]["W0"]["comparison_valid"] is True
+
+
+def test_49_stability_probe_synthetic_smoke():
+    """Stability probe runs end-to-end with faked heavy steps and writes outputs."""
+    if not (C.SAMPLE_PATH.exists() and C.TRANSITION_SAMPLE_PATH.exists() and C.EP_META_PATH.exists()):
+        return
+    saved_fit = C.fit_samplers_for_window
+    saved_roll = C.run_single_episode_rollout
+    try:
+        C.fit_samplers_for_window = lambda w, o, t: {
+            "term_samplers": {"T0_STATE_AVAIL": object()},
+            "trans_samplers": {"MC_STATE_CURREENCODING": object()},
+        }
+
+        def fake_rollout(init_state, trans_s, term_s, rng, max_bars):
+            return {"status": "TERMINAL", "duration": 1, "endpoint_mask": 1, "terminal_state": {},
+                    "terminal_full_state": {}, "violation": None, "failure_step": None,
+                    "failure_diagnostics": None, "max_extrapolation_ratio_seen": 1.0,
+                    "first_outside_train_step": None, "max_abs_design_seen": 0.0,
+                    "worst_feature_name": None, "worst_feature_value": 0.0,
+                    "train_feature_min": None, "train_feature_max": None}
+
+        C.run_single_episode_rollout = fake_rollout
+        summ = C.run_stability_probe(C.SAMPLE_PATH, C.TRANSITION_SAMPLE_PATH, C.EP_META_PATH)
+        assert set(summ.keys()) == {w["name"] for w in C.WINDOWS}
+        csvp = C.OUT / f"{C.PREFIX}_stability_probe.csv"
+        jsonp = C.OUT / f"{C.PREFIX}_stability_probe_summary.json"
+        assert csvp.exists() and jsonp.exists()
+        df = pd.read_csv(csvp)
+        for col in ("window", "symbol", "status", "violation", "max_extrapolation_ratio_seen"):
+            assert col in df.columns
+    finally:
+        C.fit_samplers_for_window = saved_fit
+        C.run_single_episode_rollout = saved_roll
+
+
+def test_50_real_fitted_sampler_diagnostics():
+    """Real fitted MC sampler on 32 observed rows: finite draws + diagnostics populated."""
+    if not (C.SAMPLE_PATH.exists() and C.TRANSITION_SAMPLE_PATH.exists()):
+        return
+    fitted = get_window_a_fitted()
+    df_m = pd.read_parquet(C.TRANSITION_SAMPLE_PATH)
+    batch = df_m.head(32).copy()
+    # The transition sample stores zt_* (previous-step encodings) as NaN for first-step rows.
+    # In a real rollout zt_* is always finite (derived from the current embedding / prior draw),
+    # so feed representative input by filling zt_* from its phi_* counterpart (else 0).
+    for zc in C.rep.MC_EXTRA:
+        if zc.startswith("zt_") and zc in batch.columns:
+            pc = zc.replace("zt_", "phi_")
+            src = batch[pc] if pc in batch.columns else pd.Series(0.0, index=batch.index)
+            batch[zc] = batch[zc].fillna(src)
+    rng = np.random.default_rng(42)
+    sampler = fitted["trans_samplers"]["MC_STATE_CURREENCODING"]
+    res = sampler.sample_batch(batch, rng)
+    for k in ("z_d_up", "dmfe", "dmae", "dcr", "range", "uresid", "lresid",
+             "delta_upper_count", "delta_lower_count"):
+        assert np.all(np.isfinite(res[k]))
+    diag = sampler.last_design_diag
+    assert diag is not None
+    assert diag["max_extrapolation_ratio"] >= 0.0
+
+
+def test_51_c0_frozen_parity_preserved():
+    """C0 frozen sampler parity must remain within 1e-8 after hardening changes."""
+    if not (C.SAMPLE_PATH.exists() and C.TRANSITION_SAMPLE_PATH.exists() and C.EP_META_PATH.exists()):
+        return
+    audit = C.run_dynamic_pgm1c_audit(C.SAMPLE_PATH, C.TRANSITION_SAMPLE_PATH, C.EP_META_PATH)
+    assert audit["parity"]["all_passed"] is True
 
 
 if __name__ == "__main__":
