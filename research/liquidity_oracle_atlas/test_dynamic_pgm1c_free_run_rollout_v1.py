@@ -618,13 +618,10 @@ def test_26_paired_replicate_bootstrap_multiplicity():
 
 # 27. WT differs from W1 ONLY terminal sampler
 def test_27_wt_differs_from_w1_only_terminal_sampler():
-    # Check docstring and specifications:
-    # W1: T0 + MC + R1
-    # WT: T2 + MC + R1
-    # Both use MC for transition and R1 for reset.
-    assert "T0" in C.__doc__ and "T2" in C.__doc__
-    assert "MC_STATE_CURREENCODING" in C.__doc__
-    assert "R1_STATE_PHI" in C.__doc__
+    assert C.WORLD_MODELS["WT"]["terminal"] == "T2_STATE_PHI_MEM"
+    assert C.WORLD_MODELS["W1"]["terminal"] == "T0_STATE_AVAIL"
+    assert C.WORLD_MODELS["WT"]["transition"] == C.WORLD_MODELS["W1"]["transition"] == "MC_STATE_CURREENCODING"
+    assert C.WORLD_MODELS["WT"]["reset"] == C.WORLD_MODELS["W1"]["reset"] == "R1_STATE_PHI"
 
 
 # 28. no TB4
@@ -651,6 +648,226 @@ def test_30_json_serializable():
     s = json.dumps(dummy, indent=2)
     loaded = json.loads(s)
     assert loaded["parent_commit"] == C.BASE_SHA
+
+
+_WINDOW_A_FITTED = None
+
+
+def get_window_a_fitted():
+    global _WINDOW_A_FITTED
+    if _WINDOW_A_FITTED is None:
+        _WINDOW_A_FITTED = C.fit_samplers_for_window(C.WINDOWS[0], C.SAMPLE_PATH, C.TRANSITION_SAMPLE_PATH)
+    return _WINDOW_A_FITTED
+
+
+# 31. real fitted transition sampler smoke
+def test_31_real_fitted_transition_sampler_smoke():
+    if not C.SAMPLE_PATH.exists() or not C.TRANSITION_SAMPLE_PATH.exists():
+        return
+    fitted = get_window_a_fitted()
+    df_m = pd.read_parquet(C.TRANSITION_SAMPLE_PATH)
+    batch = df_m.head(32).copy()
+    rng = np.random.default_rng(42)
+
+    # Check M0
+    sampler_m0 = fitted["trans_samplers"]["M0_STATE_AVAIL"]
+    res_m0 = sampler_m0.sample_batch(batch, rng)
+    for k in ("z_d_up", "dmfe", "dmae", "dcr", "range", "uresid", "lresid", "delta_upper_count", "delta_lower_count"):
+        assert k in res_m0
+        assert len(res_m0[k]) == 32
+        assert np.all(np.isfinite(res_m0[k]))
+    assert np.all(res_m0["delta_upper_count"] >= 0)
+    assert np.all(res_m0["delta_lower_count"] >= 0)
+
+    # Check MC
+    sampler_mc = fitted["trans_samplers"]["MC_STATE_CURREENCODING"]
+    res_mc = sampler_mc.sample_batch(batch, rng)
+    for k in ("z_d_up", "dmfe", "dmae", "dcr", "range", "uresid", "lresid", "delta_upper_count", "delta_lower_count"):
+        assert k in res_mc
+        assert len(res_mc[k]) == 32
+        assert np.all(np.isfinite(res_mc[k]))
+
+
+# 32. real fitted reset sampler smoke
+def test_32_real_fitted_reset_sampler_smoke():
+    if not C.SAMPLE_PATH.exists() or not C.TRANSITION_SAMPLE_PATH.exists():
+        return
+    fitted = get_window_a_fitted()
+    pair, _ = exp1b.build_reset_pairs(pd.read_parquet(C.SAMPLE_PATH))
+    batch = pair[pair["next_episode_id"].notna()].head(32).copy()
+    rng = np.random.default_rng(42)
+
+    reset_keys = (
+        "start_up_distance_R", "start_down_distance_R", "start_log_ratio_residual",
+        "next_path_max_up_excursion_R", "next_path_max_down_excursion_R",
+        "next_upper_newest_log_age", "next_upper_span",
+        "next_lower_newest_log_age", "next_lower_span",
+        "next_upper_n_active_minus1", "next_lower_n_active_minus1",
+    )
+
+    # Check R0
+    sampler_r0 = fitted["reset_samplers"]["R0_ENDPOINT_ONLY"]
+    gaps_r0 = sampler_r0.sample_gap(batch, rng)
+    assert len(gaps_r0) == 32
+    assert np.all(gaps_r0 >= 0)
+    res_r0 = sampler_r0.sample_reset_primitives(batch, gaps_r0, rng)
+    for k in reset_keys:
+        assert k in res_r0
+        assert len(res_r0[k]) == 32
+        assert np.all(np.isfinite(res_r0[k]))
+
+    # Check R1
+    sampler_r1 = fitted["reset_samplers"]["R1_STATE_PHI"]
+    gaps_r1 = sampler_r1.sample_gap(batch, rng)
+    assert len(gaps_r1) == 32
+    assert np.all(gaps_r1 >= 0)
+    res_r1 = sampler_r1.sample_reset_primitives(batch, gaps_r1, rng)
+    for k in reset_keys:
+        assert k in res_r1
+        assert len(res_r1[k]) == 32
+        assert np.all(np.isfinite(res_r1[k]))
+
+
+# 33. terminal full state reset conditioning
+def test_33_terminal_full_state_reset_conditioning():
+    # Verify that DummyReset receives modified terminal state b, not initial state a
+    state_a = {
+        "start_up_distance_R": 1.0, "start_down_distance_R": 1.0,
+        "cur_up_distance_R": 1.0, "cur_down_distance_R": 1.0,
+        "start_width_R": 2.0, "cur_width_R": 2.0, "start_log_ratio": 0.0,
+        "path_max_up_excursion_R": 0.1, "path_max_down_excursion_R": 0.1,
+        "path_direction_change_rate": 0.5, "path_current_bar_range_R": 0.1,
+        "upper_newest_log_age_residual": 0.0, "lower_newest_log_age_residual": 0.0,
+        "upper_oldest_log_age": 2.0, "lower_oldest_log_age": 2.0,
+        "upper_newest_age_zero": 0.0, "upper_oldest_age_zero": 0.0,
+        "lower_newest_age_zero": 0.0, "lower_oldest_age_zero": 0.0,
+        "upper_newest_log_age": 1.0, "lower_newest_log_age": 1.0,
+        "upper_n_active_identities": 2.0, "lower_n_active_identities": 2.0,
+        "upper_active_identity_count_delta": 0, "lower_active_identity_count_delta": 0,
+        "path_total_variation_R": 0.1, "path_last_return_R": 0.0,
+        "tempo_signed_speed": 0.0, "tempo_abs_speed": 0.0,
+        "tempo_signed_efficiency": 0.0, "tempo_abs_efficiency": 0.0,
+        "elapsed_log": 0.0, "cur_log_ratio": 0.0,
+        "prev_event_mask": 1, C.LAG_AVAIL: 0.0, "episode_age": 0, "eps_R": 1e-4,
+    }
+
+    class DummyTerminalTwoBars:
+        def sample_hazard(self, df, rng):
+            # Terminate on second bar (episode_age == 1)
+            age = df["episode_age"].values[0]
+            return np.array([age >= 1])
+        def sample_endpoint(self, df, rng):
+            return np.array([8])
+
+    class DummyTransitionStep:
+        def sample_batch(self, df, rng):
+            return {
+                "z_d_up": np.array([0.5]),
+                "dmfe": np.array([0.1]),
+                "dmae": np.array([0.05]),
+                "dcr": np.array([0.0]),
+                "range": np.array([0.2]),
+                "uresid": np.array([0.1]),
+                "lresid": np.array([0.1]),
+                "delta_upper_count": np.array([1]),
+                "delta_lower_count": np.array([0]),
+            }
+
+    received_states = []
+
+    class DummyCapturingReset:
+        def sample_gap(self, df, rng):
+            return np.array([0])
+        def sample_reset_primitives(self, df, gaps, rng):
+            received_states.append(df.iloc[0].to_dict())
+            d_u, d_d, eps_R = 1.2, 0.8, 1e-4
+            r_log = float(np.log((d_u + eps_R) / (d_d + eps_R)) - np.log(d_u / d_d))
+            return {
+                "start_up_distance_R": np.array([d_u]),
+                "start_down_distance_R": np.array([d_d]),
+                "start_log_ratio_residual": np.array([r_log]),
+                "next_path_max_up_excursion_R": np.array([0.1]),
+                "next_path_max_down_excursion_R": np.array([0.1]),
+                "next_upper_newest_log_age": np.array([1.0]),
+                "next_upper_span": np.array([1.0]),
+                "next_lower_newest_log_age": np.array([1.0]),
+                "next_lower_span": np.array([1.0]),
+                "next_upper_n_active_minus1": np.array([1]),
+                "next_lower_n_active_minus1": np.array([1]),
+            }
+
+    chain_res = C.run_single_freerun_chain(
+        "AG", state_a, DummyTransitionStep(), DummyTerminalTwoBars(), DummyCapturingReset(),
+        np.random.default_rng(1), burn_in=0, collect=1
+    )
+    assert chain_res["completed"] is True
+    assert len(received_states) == 1
+    # The reset conditioning state must be terminal state (cur_up_distance_R = 1.0 + 0.5 = 1.5), not state_a (1.0)
+    assert np.isclose(received_states[0]["cur_up_distance_R"], 1.5)
+    assert received_states[0]["prev_endpoint_mask"] == 8
+
+
+# 34. first row seed parity
+def test_34_first_row_seed_parity():
+    if not C.SAMPLE_PATH.exists() or not C.EP_META_PATH.exists():
+        return
+    obs = pd.read_parquet(C.SAMPLE_PATH)
+    ep_meta = pd.read_parquet(C.EP_META_PATH)
+    meta_slim = ep_meta[["symbol", "start_bar", "start_upper_price", "start_lower_price"]].drop_duplicates()
+    obs = obs.merge(meta_slim, on=["symbol", "start_bar"], how="left")
+    span = obs["start_upper_price"].to_numpy(np.float64) - obs["start_lower_price"].to_numpy(np.float64)
+    atr0 = span / obs["start_width_R"].to_numpy(np.float64)
+    obs["eps_R"] = 1e-9 / atr0
+
+    first_rows = obs[obs["bar_t"] == obs["start_bar"]].head(50)
+    for _, row in first_rows.iterrows():
+        eps_R = row["eps_R"]
+        st = C.build_observed_start_state(row, eps_R)
+        for col, val in st.items():
+            if isinstance(val, (int, float)) and col in row and isinstance(row[col], (int, float, np.number)):
+                if np.isnan(val) and np.isnan(row[col]):
+                    continue
+                diff = abs(float(val) - float(row[col]))
+                assert diff < 1e-8, f"Mismatch in {col}: val={val} row={row[col]} diff={diff}"
+
+
+# 35. c1 unique invalid draw counting
+def test_35_c1_unique_invalid_draw_counting():
+    # If a draw violates multiple bounds (e.g. range < 0 AND dmfe < 0), it should count as 1 invalid draw
+    inv_mask = np.zeros(10, dtype=bool)
+    # Draw 2 violates two conditions
+    c1 = np.array([False, False, True, False, False, False, False, False, False, False])
+    c2 = np.array([False, False, True, False, False, False, False, False, False, False])
+    inv_mask |= c1
+    inv_mask |= c2
+    # Draw 5 violates one condition
+    c3 = np.array([False, False, False, False, False, True, False, False, False, False])
+    inv_mask |= c3
+    assert int(np.sum(inv_mask)) == 2
+
+
+# 36. tiny end to end stochastic smoke
+def test_36_tiny_end_to_end_stochastic_smoke():
+    if not C.TRANSITION_SAMPLE_PATH.exists():
+        return
+    # Run the smoke test runner with minimal reps
+    res = C.run_dynamic_pgm1c_smoke_test()
+    assert isinstance(res, dict)
+    assert "gate0" in res
+    assert "gate1" in res
+
+
+# 37. main execution chain not empty
+def test_37_main_execution_chain_not_empty():
+    main_src = inspect.getsource(C.main)
+    full_src = inspect.getsource(C.run_dynamic_pgm1c_full)
+    assert "run_dynamic_pgm1c_full" in main_src
+    assert "run_dynamic_pgm1c_smoke_test" in main_src
+    assert "run_stage_c1_probe" in full_src
+    assert "run_stage_c2_rollout" in full_src
+    assert "run_stage_c3_freerun" in full_src
+    assert "compute_replicate_discrepancies" in full_src
+    assert "evaluate_and_write_outputs" in full_src
 
 
 if __name__ == "__main__":

@@ -81,8 +81,17 @@ BOOT_REPS = 5000
 SYMBOL_BREADTH_MIN = 10
 PREFIX = "dynamic_pgm1c"
 
+WORLD_MODELS = {
+    "W0": dict(terminal="T0_STATE_AVAIL", transition="M0_STATE_AVAIL", reset="R0_ENDPOINT_ONLY"),
+    "W1": dict(terminal="T0_STATE_AVAIL", transition="MC_STATE_CURREENCODING", reset="R1_STATE_PHI"),
+    "WT": dict(terminal="T2_STATE_PHI_MEM", transition="MC_STATE_CURREENCODING", reset="R1_STATE_PHI"),
+}
+
 CACHE = base.CACHE
 OUT = base.OUT
+SAMPLE_PATH = CACHE / "dynamic_pgm1b_sample.parquet"
+TRANSITION_SAMPLE_PATH = CACHE / "dynamic_pgm1a2c_transitions.parquet"
+EP_META_PATH = CACHE / "episode_repl0_through_tb3.parquet"
 WINDOWS = base.WINDOWS
 FULL_UNIV = ms.FULL_UNIV
 
@@ -167,6 +176,19 @@ RESET_STRUCTURAL_FIELDS = [
     "upper_n_active_minus1",
     "lower_n_active_minus1",
 ]
+
+RESET_PAIR_TO_STRUCTURAL = {
+    "start_up_distance_R": "next_start_up_distance_R",
+    "start_down_distance_R": "next_start_down_distance_R",
+    "MFE0": "next_path_max_up_excursion_R",
+    "MAE0": "next_path_max_down_excursion_R",
+    "upper_newest_log_age": "next_upper_newest_log_age",
+    "upper_span": "next_upper_span",
+    "lower_newest_log_age": "next_lower_newest_log_age",
+    "lower_span": "next_lower_span",
+    "upper_n_active_minus1": "next_upper_n_active_minus1",
+    "lower_n_active_minus1": "next_lower_n_active_minus1",
+}
 
 
 # ===========================================================================
@@ -304,11 +326,45 @@ def sample_dcr(head: Any, X: np.ndarray, rng: np.random.Generator) -> np.ndarray
     return raw
 
 
-def sample_count_head(clf: Any, lam: float, X: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+class ConstantOccurrenceModel:
+    """Fallback constant occurrence probability model for single-class train data."""
+
+    def __init__(self, p: float):
+        self.p = float(p)
+
+    def predict_proba(self, X: np.ndarray) -> np.ndarray:
+        p = np.full(len(X), self.p, dtype=np.float64)
+        return np.column_stack([1.0 - p, p])
+
+
+def fit_count_occurrence_models(Xtr: np.ndarray, Ytr: np.ndarray,
+                                Xev: np.ndarray, Yev: np.ndarray,
+                                tag: str) -> List[Any]:
+    """Fit local count occurrence models matching frozen base.fit_state_count_head exactly."""
+    models: List[Any] = []
+    Xtr = np.asarray(Xtr, dtype=np.float64)
+    Ytr = np.asarray(Ytr, dtype=np.int64)
+
+    for j in range(Ytr.shape[1]):
+        yt = Ytr[:, j]
+        zt = (yt > 0).astype(np.int64)
+        if len(np.unique(zt)) < 2:
+            p_const = 1.0 - 1e-6 if zt[0] == 1 else 1e-6
+            models.append(ConstantOccurrenceModel(p_const))
+        else:
+            logit = LogisticRegression(penalty="l2", C=1.0, solver="lbfgs", max_iter=3000)
+            logit.fit(Xtr, zt)
+            base._check_logistic_convergence(logit, f"{tag}_count_{j}_occurrence")
+            models.append(logit)
+
+    return models
+
+
+def sample_count_head(model: Any, lam: float, X: np.ndarray, rng: np.random.Generator) -> np.ndarray:
     """Sample from state-dependent occurrence Logistic + constant ZTP magnitude."""
     X = np.asarray(X, dtype=np.float64)
     n = len(X)
-    p = clf.predict_proba(X)[:, 1]
+    p = np.clip(model.predict_proba(X)[:, 1], 1e-6, 1.0 - 1e-6)
     active = rng.random(n) < p
     cnt = np.zeros(n, dtype=np.int64)
     n_active = int(np.sum(active))
@@ -335,15 +391,25 @@ def sample_crf_endpoint(theta: np.ndarray, X: np.ndarray, rng: np.random.Generat
 class FittedTransitionSampler:
     """Fitted transition sampler for M0 or MC."""
 
-    def __init__(self, tag: str, ct: Any, heads: Dict[str, Any], count_head: Dict[str, Any]):
+    def __init__(self, tag: str, ct: Any, heads: Dict[str, Any],
+                 count_head: Dict[str, Any], count_occ_models: List[Any]):
         self.tag = tag
         self.ct = ct
         self.heads = heads
         self.count_head = count_head
         self.constant_rates = count_head["constant_rates"]
+        self.count_occ_models = count_occ_models
 
     def sample_batch(self, df: pd.DataFrame, rng: np.random.Generator) -> Dict[str, np.ndarray]:
-        X = self.ct.transform(df).astype(np.float32)
+        df_in = df
+        needed_zt = [c for c in rep.MC_EXTRA if c.startswith("zt_")]
+        if any(c not in df_in.columns for c in needed_zt):
+            df_in = df.copy()
+            for zc in needed_zt:
+                pc = zc.replace("zt_", "phi_")
+                if pc in df_in.columns and zc not in df_in.columns:
+                    df_in[zc] = df_in[pc]
+        X = self.ct.transform(df_in).astype(np.float32)
         n = len(df)
         nodes = self.heads["nodes"]
 
@@ -357,11 +423,11 @@ class FittedTransitionSampler:
         lresid = sample_hurdle_ln(nodes["z_lresid"]["head"], X, rng)
 
         # Counts
-        cnt_clfs = self.count_head["models"]
         lam_u = float(self.constant_rates[0])
         lam_l = float(self.constant_rates[1])
-        c_u = sample_count_head(cnt_clfs[0], lam_u, X, rng)
-        c_l = sample_count_head(cnt_clfs[1], lam_l, X, rng)
+        X_64 = np.asarray(X, dtype=np.float64)
+        c_u = sample_count_head(self.count_occ_models[0], lam_u, X_64, rng)
+        c_l = sample_count_head(self.count_occ_models[1], lam_l, X_64, rng)
 
         return dict(
             z_d_up=d_up,
@@ -400,7 +466,7 @@ class FittedResetSampler:
 
     def __init__(self, tag: str, occ_cols: List[str], state_cols: List[str],
                  pre_occ: Any, pre_state: Any, gap_occ_clf: Any,
-                 gap_p: float, heads: Dict[str, Any]):
+                 gap_p: float, heads: Dict[str, Any], count_occ_models: List[Any]):
         self.tag = tag
         self.occ_cols = occ_cols
         self.state_cols = state_cols
@@ -410,8 +476,12 @@ class FittedResetSampler:
         self.gap_p = gap_p
         self.heads = heads
         self.constant_rates = heads["count_rates"]
+        self.count_occ_models = count_occ_models
 
     def sample_gap(self, df: pd.DataFrame, rng: np.random.Generator) -> np.ndarray:
+        for c in self.occ_cols + MASK_CAT:
+            if c not in df.columns:
+                raise SystemExit(f"STOP_DYNAMIC_PGM1C_RESET_INPUT_MISSING_COL: {c}")
         cols = self.occ_cols + MASK_CAT
         X_occ = pbar.densify(self.pre_occ.transform(df[cols]))
         p_gap = self.gap_occ_clf.predict_proba(X_occ)[:, 1]
@@ -424,9 +494,15 @@ class FittedResetSampler:
 
     def sample_reset_primitives(self, df: pd.DataFrame, gap_bars: np.ndarray,
                                 rng: np.random.Generator) -> Dict[str, np.ndarray]:
+        for c in self.occ_cols + MASK_CAT:
+            if c not in df.columns:
+                raise SystemExit(f"STOP_DYNAMIC_PGM1C_RESET_INPUT_MISSING_COL: {c}")
         df_state = df.copy()
         df_state["gap_positive"] = (gap_bars > 0).astype(np.int64)
         df_state["log1p_gap"] = np.log1p(gap_bars.astype(np.float64))
+        for c in self.state_cols + MASK_CAT:
+            if c not in df_state.columns:
+                raise SystemExit(f"STOP_DYNAMIC_PGM1C_RESET_INPUT_MISSING_COL: {c}")
         cols = self.state_cols + MASK_CAT
         X_s = pbar.densify(self.pre_state.transform(df_state[cols]))
 
@@ -446,9 +522,9 @@ class FittedResetSampler:
         # 4. Counts
         lam_u = float(self.constant_rates[0])
         lam_l = float(self.constant_rates[1])
-        cnt_clfs = self.heads["counts"]["models"]
-        n_act_u_minus1 = sample_count_head(cnt_clfs[0], lam_u, X_s, rng)
-        n_act_l_minus1 = sample_count_head(cnt_clfs[1], lam_l, X_s, rng)
+        X_s_64 = np.asarray(X_s, dtype=np.float64)
+        n_act_u_minus1 = sample_count_head(self.count_occ_models[0], lam_u, X_s_64, rng)
+        n_act_l_minus1 = sample_count_head(self.count_occ_models[1], lam_l, X_s_64, rng)
 
         return dict(
             start_up_distance_R=d_u,
@@ -486,6 +562,7 @@ def advance_nonterminal(state: Dict[str, Any], z: Dict[str, Any]) -> Tuple[Dict[
 
     nxt["cur_up_distance_R"] = nxt_up
     nxt["cur_down_distance_R"] = nxt_dn
+    nxt["cur_width_R"] = nxt_up + nxt_dn
 
     # Excursions
     dmfe = float(z["dmfe"])
@@ -697,6 +774,73 @@ def reset_to_start(r: Dict[str, Any], endpoint_mask: int) -> Tuple[Dict[str, Any
     return state, None
 
 
+def build_observed_start_state(first_row: Any, eps_R: float) -> Dict[str, Any]:
+    """Construct initial state dictionary S^0 from the observed first row of an episode."""
+    row = dict(first_row)
+    d_u = float(row["start_up_distance_R"])
+    d_d = float(row["start_down_distance_R"])
+    st: Dict[str, Any] = {
+        "start_up_distance_R": d_u,
+        "start_down_distance_R": d_d,
+        "start_width_R": float(row["start_width_R"]),
+        "start_log_ratio": float(row["start_log_ratio"]),
+        "upper_oldest_log_age": float(row["upper_oldest_log_age"]),
+        "upper_newest_log_age": float(row["upper_newest_log_age"]),
+        "upper_newest_age_zero": float(row["upper_newest_age_zero"]),
+        "upper_oldest_age_zero": float(row["upper_oldest_age_zero"]),
+        "upper_n_active_identities": float(row["upper_n_active_identities"]),
+        "lower_oldest_log_age": float(row["lower_oldest_log_age"]),
+        "lower_newest_log_age": float(row["lower_newest_log_age"]),
+        "lower_newest_age_zero": float(row["lower_newest_age_zero"]),
+        "lower_oldest_age_zero": float(row["lower_oldest_age_zero"]),
+        "lower_n_active_identities": float(row["lower_n_active_identities"]),
+        "elapsed_log": 0.0,
+        "cur_up_distance_R": float(row["cur_up_distance_R"]),
+        "cur_down_distance_R": float(row["cur_down_distance_R"]),
+        "cur_width_R": float(row["cur_width_R"]),
+        "cur_log_ratio": float(row["cur_log_ratio"]),
+        "path_total_variation_R": 0.0,
+        "path_max_up_excursion_R": float(row["path_max_up_excursion_R"]),
+        "path_max_down_excursion_R": float(row["path_max_down_excursion_R"]),
+        "path_direction_change_rate": 0.0,
+        "path_last_return_R": 0.0,
+        "path_current_bar_range_R": float(row["path_current_bar_range_R"]),
+        "upper_newest_log_age_residual": 0.0,
+        "upper_current_newest_age_zero": float(row["upper_current_newest_age_zero"]),
+        "upper_active_identity_count_delta": 0.0,
+        "lower_newest_log_age_residual": 0.0,
+        "lower_current_newest_age_zero": float(row["lower_current_newest_age_zero"]),
+        "lower_active_identity_count_delta": 0.0,
+        "tempo_signed_speed": 0.0,
+        "tempo_abs_speed": 0.0,
+        "tempo_signed_efficiency": 0.0,
+        "tempo_abs_efficiency": 0.0,
+        "prev_event_mask": int(row["prev_event_mask"]),
+        LAG_AVAIL: 0.0,
+        "eps_R": float(eps_R),
+        "episode_age": 0,
+        "symbol": str(row.get("symbol", "")),
+        "block": str(row.get("block", "")),
+        "episode_id": str(row.get("episode_id", "")),
+    }
+    _phi_raws = {
+        "z_d_up": 0.0,
+        "z_dcr": 0.0,
+        "z_range": st["path_current_bar_range_R"],
+        "z_uresid": 0.0,
+        "z_lresid": 0.0,
+    }
+    for node, raw in _phi_raws.items():
+        for zc, vals in rep._encode_with_frozen(node, np.array([raw])).items():
+            st[f"phi_{zc}"] = float(vals[0])
+
+    for c in ["mem_z_dmfe_ispos", "mem_z_dmfe_log", "mem_z_dmae_ispos", "mem_z_dmae_log"]:
+        st[c] = 0.0
+    st["mem_z_delta_upper_count"] = np.nan
+    st["mem_z_delta_lower_count"] = np.nan
+    return st
+
+
 # ===========================================================================
 # Rollout Discrepancy Metrics
 # ===========================================================================
@@ -900,6 +1044,13 @@ def fit_samplers_for_window(w: Dict[str, Any], obs_sample_path: Path,
         heads["count_rates"] = k0c["constant_rates"]
         nll_cnt = kc["nll_ev"].sum(axis=1)
 
+        reset_count_occ_models = fit_count_occurrence_models(Xtr_s, Ytr, Xev_s, Yev, f"{w['name']}_{tag}_reset")
+        for j, m in enumerate(reset_count_occ_models):
+            p_eval = np.clip(m.predict_proba(Xev_s.astype(np.float64))[:, 1], 1e-6, 1.0 - 1e-6)
+            diff = float(np.max(np.abs(p_eval - kc["p0_ev"][:, j])))
+            if diff >= 1e-12:
+                raise SystemExit(f"STOP_DYNAMIC_PGM1C_RESET_COUNT_OCC_MISMATCH: {w['name']} {tag} col {j} diff {diff}")
+
         total_nll = (nll_occ
                      + exp1b.gap_positive_nll(pev["gap_bars"].to_numpy(np.float64), gap_p)
                      + nll_geom + nll_rlog + nll_shape_age + nll_cnt)
@@ -907,7 +1058,7 @@ def fit_samplers_for_window(w: Dict[str, Any], obs_sample_path: Path,
         mean_res_nll = float(total_nll.mean())
         reset_parity_eval[tag] = dict(mean_reset_nll=mean_res_nll)
         reset_samplers[tag] = FittedResetSampler(
-            tag, occ_cols, state_cols, pre_o, pre_s, clf_gap, gap_p, heads
+            tag, occ_cols, state_cols, pre_o, pre_s, clf_gap, gap_p, heads, reset_count_occ_models
         )
         print(f"  [RESET {tag}] took {time.perf_counter() - t0:.2f}s "
               f"mean_reset_nll={mean_res_nll:.6f}", flush=True)
@@ -940,13 +1091,20 @@ def fit_samplers_for_window(w: Dict[str, Any], obs_sample_path: Path,
         k = base.fit_state_heads(Xtr, Xev, Zc_tr, Zc_ev, yd_tr, yd_ev)
         kc = base.fit_state_count_head(Xtr, Yc_tr, Xev, Yc_ev, constant_rates=k0_count["constant_rates"])
 
+        trans_count_occ_models = fit_count_occurrence_models(Xtr, Yc_tr, Xev, Yc_ev, f"{w['name']}_{tag}_trans")
+        for j, m in enumerate(trans_count_occ_models):
+            p_eval = np.clip(m.predict_proba(Xev.astype(np.float64))[:, 1], 1e-6, 1.0 - 1e-6)
+            diff = float(np.max(np.abs(p_eval - kc["p0_ev"][:, j])))
+            if diff >= 1e-12:
+                raise SystemExit(f"STOP_DYNAMIC_PGM1C_TRANS_COUNT_OCC_MISMATCH: {w['name']} {tag} col {j} diff {diff}")
+
         cont = rep._node_eval_nll(k["nodes"])
         disc = k["disc_ev"]
         cnt = kc["nll_ev"].sum(axis=1)
         mean_j = float(np.mean(cont + disc + cnt))
 
         trans_parity_eval[tag] = dict(mean_joint_nll=mean_j)
-        trans_samplers[tag] = FittedTransitionSampler(tag, ct, k, kc)
+        trans_samplers[tag] = FittedTransitionSampler(tag, ct, k, kc, trans_count_occ_models)
         print(f"  [TRANSITION {tag}] took {time.perf_counter() - t0:.2f}s "
               f"mean_joint_nll={mean_j:.16f}", flush=True)
 
@@ -979,6 +1137,7 @@ def run_stage_c1_probe(window_name: str, trans_sampler: FittedTransitionSampler,
 
     z_draws = trans_sampler.sample_batch(sample_df, rng)
 
+    t_invalid_mask = np.zeros(n_draws, dtype=bool)
     t_violations: Dict[str, int] = {
         "TRANSITION_UP_DISTANCE_NEGATIVE": 0,
         "TRANSITION_DOWN_DISTANCE_NEGATIVE": 0,
@@ -996,25 +1155,51 @@ def run_stage_c1_probe(window_name: str, trans_sampler: FittedTransitionSampler,
     nxt_up = cur_up + d_up
     nxt_dn = cur_dn - d_up
 
-    t_violations["TRANSITION_UP_DISTANCE_NEGATIVE"] = int(np.sum(nxt_up < 0))
-    t_violations["TRANSITION_DOWN_DISTANCE_NEGATIVE"] = int(np.sum(nxt_dn < 0))
+    v_up_neg = (nxt_up < 0)
+    t_violations["TRANSITION_UP_DISTANCE_NEGATIVE"] = int(np.sum(v_up_neg))
+    t_invalid_mask |= v_up_neg
 
-    dcr = z_draws["dcr"]
-    t_violations["TRANSITION_DCR_OOB"] = int(np.sum((dcr < 0.0) | (dcr > 1.0)))
+    v_dn_neg = (nxt_dn < 0)
+    t_violations["TRANSITION_DOWN_DISTANCE_NEGATIVE"] = int(np.sum(v_dn_neg))
+    t_invalid_mask |= v_dn_neg
 
-    rng_v = z_draws["range"]
-    t_violations["TRANSITION_RANGE_NEGATIVE"] = int(np.sum(rng_v < 0.0))
-
-    cu = z_draws["delta_upper_count"]
-    cl = z_draws["delta_lower_count"]
-    t_violations["TRANSITION_COUNT_NEGATIVE"] = int(np.sum((cu < 0) | (cl < 0)))
-
+    v_age_neg = np.zeros(n_draws, dtype=bool)
     for side, res in [("upper", z_draws["uresid"]), ("lower", z_draws["lresid"])]:
         start_age = np.expm1(sample_df[f"{side}_newest_log_age"].to_numpy(np.float64))
         elapsed_cur = (sample_df["bar_t"].to_numpy(np.int64) - sample_df["start_bar"].to_numpy(np.int64))
         expected_next = start_age + (elapsed_cur + 1)
         age_next = np.expm1(res + np.log1p(expected_next))
-        t_violations["TRANSITION_NEGATIVE_NEWEST_AGE"] += int(np.sum(age_next < -1e-9))
+        v_age_neg |= (age_next < -1e-9)
+    t_violations["TRANSITION_NEGATIVE_NEWEST_AGE"] = int(np.sum(v_age_neg))
+    t_invalid_mask |= v_age_neg
+
+    dcr = z_draws["dcr"]
+    v_dcr_oob = (dcr < 0.0) | (dcr > 1.0)
+    t_violations["TRANSITION_DCR_OOB"] = int(np.sum(v_dcr_oob))
+    t_invalid_mask |= v_dcr_oob
+
+    rng_v = z_draws["range"]
+    v_rng_neg = (rng_v < 0.0)
+    t_violations["TRANSITION_RANGE_NEGATIVE"] = int(np.sum(v_rng_neg))
+    t_invalid_mask |= v_rng_neg
+
+    cu = z_draws["delta_upper_count"]
+    cl = z_draws["delta_lower_count"]
+    v_cnt_nonint = (~np.equal(np.mod(cu, 1), 0)) | (~np.equal(np.mod(cl, 1), 0))
+    t_violations["TRANSITION_COUNT_NONINTEGER"] = int(np.sum(v_cnt_nonint))
+    t_invalid_mask |= v_cnt_nonint
+
+    v_cnt_neg = (cu < 0) | (cl < 0)
+    t_violations["TRANSITION_COUNT_NEGATIVE"] = int(np.sum(v_cnt_neg))
+    t_invalid_mask |= v_cnt_neg
+
+    v_t_nonfin = np.zeros(n_draws, dtype=bool)
+    for col_arr in [d_up, nxt_up, nxt_dn, dcr, rng_v, cu, cl, z_draws["uresid"], z_draws["lresid"]]:
+        v_t_nonfin |= (~np.isfinite(col_arr))
+    t_violations["TRANSITION_NONFINITE"] = int(np.sum(v_t_nonfin))
+    t_invalid_mask |= v_t_nonfin
+
+    total_t_invalid = int(np.sum(t_invalid_mask))
 
     # 2. Reset probe
     idx_r = rng.integers(0, len(ev_pairs), size=n_draws)
@@ -1022,6 +1207,7 @@ def run_stage_c1_probe(window_name: str, trans_sampler: FittedTransitionSampler,
     gaps = reset_sampler.sample_gap(pair_sample, rng)
     r_draws = reset_sampler.sample_reset_primitives(pair_sample, gaps, rng)
 
+    r_invalid_mask = np.zeros(n_draws, dtype=bool)
     r_violations: Dict[str, int] = {
         "RESET_GEOMETRY_NONPOSITIVE": 0,
         "RESET_AGE_NEGATIVE": 0,
@@ -1032,38 +1218,52 @@ def run_stage_c1_probe(window_name: str, trans_sampler: FittedTransitionSampler,
 
     d_u = r_draws["start_up_distance_R"]
     d_d = r_draws["start_down_distance_R"]
-    r_violations["RESET_GEOMETRY_NONPOSITIVE"] = int(np.sum((d_u <= 0) | (d_d <= 0)))
+    v_geom_nonpos = (d_u <= 0) | (d_d <= 0)
+    r_violations["RESET_GEOMETRY_NONPOSITIVE"] = int(np.sum(v_geom_nonpos))
+    r_invalid_mask |= v_geom_nonpos
 
     newest_u = r_draws["next_upper_newest_log_age"]
     span_u = r_draws["next_upper_span"]
     newest_l = r_draws["next_lower_newest_log_age"]
     span_l = r_draws["next_lower_span"]
-    r_violations["RESET_AGE_NEGATIVE"] = int(np.sum(
-        (newest_u < 0) | (span_u < 0) | (newest_l < 0) | (span_l < 0)
-    ))
+    v_age_neg_r = (newest_u < 0) | (span_u < 0) | (newest_l < 0) | (span_l < 0)
+    r_violations["RESET_AGE_NEGATIVE"] = int(np.sum(v_age_neg_r))
+    r_invalid_mask |= v_age_neg_r
 
     nu = r_draws["next_upper_n_active_minus1"]
     nl = r_draws["next_lower_n_active_minus1"]
-    r_violations["RESET_COUNT_INVALID"] = int(np.sum((nu < 0) | (nl < 0)))
+    v_cnt_inv = (nu < 0) | (nl < 0) | (~np.equal(np.mod(nu, 1), 0)) | (~np.equal(np.mod(nl, 1), 0))
+    r_violations["RESET_COUNT_INVALID"] = int(np.sum(v_cnt_inv))
+    r_invalid_mask |= v_cnt_inv
 
     r_log = r_draws["start_log_ratio_residual"]
     l_r = np.log(d_u / d_d) + r_log
     eps_arr = solve_eps_R(d_u, d_d, l_r)
-    r_violations["RESET_EPSR_INCOMPATIBLE"] = int(np.sum(np.isnan(eps_arr)))
+    v_eps_incomp = np.isnan(eps_arr) | (eps_arr <= 0)
+    r_violations["RESET_EPSR_INCOMPATIBLE"] = int(np.sum(v_eps_incomp))
+    r_invalid_mask |= v_eps_incomp
 
-    total_t_bad = sum(t_violations.values())
-    total_r_bad = sum(r_violations.values())
+    v_r_nonfin = np.zeros(n_draws, dtype=bool)
+    for k, arr in r_draws.items():
+        v_r_nonfin |= (~np.isfinite(arr))
+    r_violations["RESET_NONFINITE"] = int(np.sum(v_r_nonfin))
+    r_invalid_mask |= v_r_nonfin
+
+    total_r_invalid = int(np.sum(r_invalid_mask))
 
     return dict(
         window=window_name,
+        n_draws=n_draws,
         n_transition_draws=n_draws,
         n_reset_draws=n_draws,
         transition_violations=t_violations,
         reset_violations=r_violations,
-        total_transition_invalid=total_t_bad,
-        transition_invalid_rate=float(total_t_bad / n_draws),
-        total_reset_invalid=total_r_bad,
-        reset_invalid_rate=float(total_r_bad / n_draws),
+        invalid_draw_count=total_t_invalid + total_r_invalid,
+        invalid_draw_rate=float((total_t_invalid + total_r_invalid) / (2 * n_draws)),
+        total_transition_invalid=total_t_invalid,
+        transition_invalid_rate=float(total_t_invalid / n_draws),
+        total_reset_invalid=total_r_invalid,
+        reset_invalid_rate=float(total_r_invalid / n_draws),
     )
 
 
@@ -1091,6 +1291,7 @@ def run_single_episode_rollout(init_state: Dict[str, Any],
                 duration=dur,
                 endpoint_mask=endpoint,
                 terminal_state={k: state[k] for k in TERMINAL_DYNAMIC_FIELDS if k in state},
+                terminal_full_state=dict(state),
                 violation=None,
             )
 
@@ -1105,6 +1306,7 @@ def run_single_episode_rollout(init_state: Dict[str, Any],
                 duration=dur,
                 endpoint_mask=None,
                 terminal_state=None,
+                terminal_full_state=None,
                 violation=violation,
             )
 
@@ -1115,6 +1317,7 @@ def run_single_episode_rollout(init_state: Dict[str, Any],
         duration=max_bars,
         endpoint_mask=None,
         terminal_state=None,
+        terminal_full_state=None,
         violation="EPISODE_TIMEOUT",
     )
 
@@ -1148,10 +1351,18 @@ def run_single_freerun_chain(symbol: str, seed_state: Dict[str, Any],
 
         endpoint = ep_res["endpoint_mask"]
         term_state = ep_res["terminal_state"]
+        term_full = ep_res["terminal_full_state"]
 
-        # Sample gap and reset for next episode
-        df_term = pd.DataFrame([current_start])
+        # Sample gap and reset for next episode using terminal_full_state
+        df_term = pd.DataFrame([term_full])
         df_term["prev_endpoint_mask"] = endpoint
+
+        # R1 reset input contract check
+        if hasattr(reset_sampler, "occ_cols"):
+            required_cols = list(reset_sampler.occ_cols) + MASK_CAT
+            for c in required_cols:
+                if c not in df_term.columns:
+                    raise SystemExit(f"STOP_DYNAMIC_PGM1C_RESET_INPUT_MISSING_COL: {c}")
 
         gaps = reset_sampler.sample_gap(df_term, rng)
         gap_val = int(gaps[0])
@@ -1292,9 +1503,664 @@ def run_dynamic_pgm1c_audit(obs_sample_path: Path, transitions_path: Path,
     return dict(eps_audit=eps_audit, parity=parity_summary)
 
 
+def build_observed_comparators(ev_obs: pd.DataFrame, ev_pairs: pd.DataFrame) -> Dict[str, Any]:
+    """Construct pooled and per-symbol empirical comparators for eval window."""
+    ev_terms = ev_obs[ev_obs["hazard"] == 1].copy().reset_index(drop=True)
+    ev_terms["duration"] = ev_terms["bar_t"] - ev_terms["start_bar"] + 1
+    ev_valid_pairs = ev_pairs[ev_pairs["next_episode_id"].notna()].copy().reset_index(drop=True)
+
+    def _extract_pack(df_t: pd.DataFrame, df_p: pd.DataFrame) -> Dict[str, Any]:
+        term_dict = {fld: df_t[fld].to_numpy(np.float64) for fld in TERMINAL_DYNAMIC_FIELDS if fld in df_t}
+        reset_dict = {
+            fld: df_p[RESET_PAIR_TO_STRUCTURAL[fld]].to_numpy(np.float64)
+            for fld in RESET_STRUCTURAL_FIELDS if RESET_PAIR_TO_STRUCTURAL[fld] in df_p
+        }
+        return dict(
+            durations=df_t["duration"].to_numpy(np.float64) if len(df_t) else np.empty(0, dtype=np.float64),
+            endpoints=df_t["target_mask"].to_numpy(np.int64) if len(df_t) else np.empty(0, dtype=np.int64),
+            terminals=term_dict,
+            resets=reset_dict,
+            gaps=df_p["gap_bars"].to_numpy(np.float64) if len(df_p) else np.empty(0, dtype=np.float64),
+        )
+
+    pooled = _extract_pack(ev_terms, ev_valid_pairs)
+    by_symbol = {}
+    symbols = sorted(ev_obs["symbol"].unique())
+    for s in symbols:
+        st = ev_terms[ev_terms["symbol"] == s]
+        sp = ev_valid_pairs[ev_valid_pairs["symbol"] == s]
+        by_symbol[s] = _extract_pack(st, sp)
+
+    return dict(pooled=pooled, by_symbol=by_symbol)
+
+
+def run_stage_c2_rollout(window_name: str,
+                         eval_first_rows: pd.DataFrame,
+                         fitted_samplers: Dict[str, Any],
+                         seed: int,
+                         n_reps: int = N_SEEDED_REPS,
+                         max_bars: int = MAX_EPISODE_BARS) -> Dict[str, Any]:
+    """Execute Stage C2: Observed-Start Seeded Episode Rollout."""
+    print(f"[STAGE C2] Seeded episode rollout on {window_name} ({len(eval_first_rows)} episodes x {n_reps} reps)...", flush=True)
+    t0 = time.perf_counter()
+    rng = np.random.default_rng(seed)
+
+    records: List[Dict[str, Any]] = []
+    w1_invalid = 0
+    w1_timeout = 0
+    w1_nonfinite = 0
+
+    for model_key in ["W0", "W1", "WT"]:
+        m_spec = WORLD_MODELS[model_key]
+        term_sampler = fitted_samplers["term_samplers"][m_spec["terminal"]]
+        trans_sampler = fitted_samplers["trans_samplers"][m_spec["transition"]]
+
+        for rep in range(n_reps):
+            for i in range(len(eval_first_rows)):
+                fr = eval_first_rows.iloc[i]
+                st = build_observed_start_state(fr, fr["eps_R"])
+                ep_res = run_single_episode_rollout(st, trans_sampler, term_sampler, rng, max_bars)
+
+                rec = {
+                    "window": window_name,
+                    "model": model_key,
+                    "symbol": str(fr["symbol"]),
+                    "episode_id": str(fr["episode_id"]),
+                    "rep": rep,
+                    "duration": ep_res["duration"],
+                    "endpoint": ep_res["endpoint_mask"],
+                    "status": ep_res["status"],
+                    "violation": ep_res["violation"],
+                }
+                records.append(rec)
+
+                if model_key == "W1":
+                    if ep_res["status"] == "INVALID":
+                        w1_invalid += 1
+                    elif ep_res["status"] == "TIMEOUT":
+                        w1_timeout += 1
+                    if ep_res["violation"] in ("TRANSITION_NONFINITE", "RESET_NONFINITE"):
+                        w1_nonfinite += 1
+
+    df_records = pd.DataFrame(records)
+    print(f"[STAGE C2 COMPLETE] {window_name} took {time.perf_counter() - t0:.2f}s. "
+          f"W1 invalid={w1_invalid}, timeout={w1_timeout}, nonfinite={w1_nonfinite}", flush=True)
+    return dict(
+        records=df_records,
+        w1_invalid=w1_invalid,
+        w1_timeout=w1_timeout,
+        w1_nonfinite=w1_nonfinite,
+    )
+
+
+def run_stage_c3_freerun(window_name: str,
+                         eval_first_rows: pd.DataFrame,
+                         fitted_samplers: Dict[str, Any],
+                         seed: int,
+                         n_chains: int = N_CHAIN_REPS,
+                         burn_in: int = BURN_IN_EPISODES,
+                         collect: int = COLLECT_EPISODES,
+                         max_bars: int = MAX_EPISODE_BARS,
+                         symbols: Optional[List[str]] = None) -> Dict[str, Any]:
+    """Execute Stage C3: Multi-Episode Free-Run."""
+    if symbols is None:
+        symbols = sorted(eval_first_rows["symbol"].unique())
+    print(f"[STAGE C3] Multi-episode free-run on {window_name} "
+          f"({len(symbols)} symbols x {n_chains} chains x {burn_in + collect} episodes)...", flush=True)
+    t0 = time.perf_counter()
+
+    chains_by_model: Dict[str, List[Dict[str, Any]]] = {"W0": [], "W1": [], "WT": []}
+    w1_c3_invalid = 0
+    w1_c3_timeout = 0
+    w1_c3_nonfinite = 0
+
+    for sym in symbols:
+        sym_firsts = eval_first_rows[eval_first_rows["symbol"] == sym].reset_index(drop=True)
+        n_sym = len(sym_firsts)
+        if n_sym == 0:
+            continue
+
+        for rep_id in range(n_chains):
+            seed_row = sym_firsts.iloc[rep_id % n_sym]
+            seed_ep_id = seed_row["episode_id"]
+            seed_state = build_observed_start_state(seed_row, seed_row["eps_R"])
+
+            for model_key in ["W0", "W1", "WT"]:
+                m_spec = WORLD_MODELS[model_key]
+                term_s = fitted_samplers["term_samplers"][m_spec["terminal"]]
+                trans_s = fitted_samplers["trans_samplers"][m_spec["transition"]]
+                reset_s = fitted_samplers["reset_samplers"][m_spec["reset"]]
+
+                chain_seed = int(hashlib.md5(f"{seed}_{window_name}_{sym}_{rep_id}_{model_key}".encode()).hexdigest()[:8], 16)
+                chain_rng = np.random.default_rng(chain_seed)
+
+                res = run_single_freerun_chain(
+                    sym, seed_state, trans_s, term_s, reset_s, chain_rng,
+                    burn_in=burn_in, collect=collect, max_bars=max_bars
+                )
+                res["window"] = window_name
+                res["model"] = model_key
+                res["rep_id"] = rep_id
+                res["seed_episode_id"] = seed_ep_id
+                chains_by_model[model_key].append(res)
+
+                if model_key == "W1":
+                    if not res["completed"]:
+                        w1_c3_invalid += 1
+                    if res["violation"] == "EPISODE_TIMEOUT":
+                        w1_c3_timeout += 1
+                    if res["violation"] in ("TRANSITION_NONFINITE", "RESET_NONFINITE"):
+                        w1_c3_nonfinite += 1
+
+    print(f"[STAGE C3 COMPLETE] {window_name} took {time.perf_counter() - t0:.2f}s. "
+          f"W1 incomplete_chains={w1_c3_invalid}, timeouts={w1_c3_timeout}, nonfinite={w1_c3_nonfinite}", flush=True)
+    return dict(
+        chains=chains_by_model,
+        w1_invalid=w1_c3_invalid,
+        w1_timeout=w1_c3_timeout,
+        w1_nonfinite=w1_c3_nonfinite,
+    )
+
+
+def compute_replicate_discrepancies(chains_by_model: Dict[str, List[Dict[str, Any]]],
+                                    obs_comparator: Dict[str, Any],
+                                    n_chains: int = N_CHAIN_REPS) -> Dict[str, Any]:
+    """Compute pooled replicate D_total and by-symbol D_total."""
+    rep_metrics: Dict[str, List[Dict[str, float]]] = {"W0": [], "W1": [], "WT": []}
+    for model_key in ["W0", "W1", "WT"]:
+        m_chains = chains_by_model[model_key]
+        for rep_id in range(n_chains):
+            rep_c = [c for c in m_chains if c["rep_id"] == rep_id]
+            all_eps = [ep for c in rep_c for ep in c["episodes"]]
+            if len(all_eps) == 0:
+                gen_pack = dict(
+                    durations=np.empty(0, dtype=np.float64),
+                    endpoints=np.empty(0, dtype=np.int64),
+                    terminals={f: np.empty(0, dtype=np.float64) for f in TERMINAL_DYNAMIC_FIELDS},
+                    resets={f: np.empty(0, dtype=np.float64) for f in RESET_STRUCTURAL_FIELDS},
+                    gaps=np.empty(0, dtype=np.float64),
+                )
+            else:
+                durs = np.array([ep["duration"] for ep in all_eps], dtype=np.float64)
+                ends = np.array([ep["endpoint_mask"] for ep in all_eps], dtype=np.int64)
+                terms = {f: np.array([ep["terminal_state"].get(f, np.nan) for ep in all_eps], dtype=np.float64)
+                         for f in TERMINAL_DYNAMIC_FIELDS}
+                resets = {f: np.array([ep["reset_state"].get(f, np.nan) for ep in all_eps], dtype=np.float64)
+                          for f in RESET_STRUCTURAL_FIELDS}
+                gaps = np.array([ep["gap"] for ep in all_eps], dtype=np.float64)
+                gen_pack = dict(durations=durs, endpoints=ends, terminals=terms, resets=resets, gaps=gaps)
+
+            disc = compute_rollout_discrepancy(gen_pack, obs_comparator["pooled"])
+            rep_metrics[model_key].append(disc)
+
+    by_symbol_metrics: Dict[str, Dict[str, Dict[str, float]]] = {}
+    symbols = sorted(obs_comparator["by_symbol"].keys())
+    for s in symbols:
+        by_symbol_metrics[s] = {}
+        for model_key in ["W0", "W1", "WT"]:
+            m_chains = [c for c in chains_by_model[model_key] if c["symbol"] == s]
+            all_eps = [ep for c in m_chains for ep in c["episodes"]]
+            if len(all_eps) == 0:
+                gen_pack = dict(
+                    durations=np.empty(0, dtype=np.float64),
+                    endpoints=np.empty(0, dtype=np.int64),
+                    terminals={f: np.empty(0, dtype=np.float64) for f in TERMINAL_DYNAMIC_FIELDS},
+                    resets={f: np.empty(0, dtype=np.float64) for f in RESET_STRUCTURAL_FIELDS},
+                    gaps=np.empty(0, dtype=np.float64),
+                )
+            else:
+                durs = np.array([ep["duration"] for ep in all_eps], dtype=np.float64)
+                ends = np.array([ep["endpoint_mask"] for ep in all_eps], dtype=np.int64)
+                terms = {f: np.array([ep["terminal_state"].get(f, np.nan) for ep in all_eps], dtype=np.float64)
+                         for f in TERMINAL_DYNAMIC_FIELDS}
+                resets = {f: np.array([ep["reset_state"].get(f, np.nan) for ep in all_eps], dtype=np.float64)
+                          for f in RESET_STRUCTURAL_FIELDS}
+                gaps = np.array([ep["gap"] for ep in all_eps], dtype=np.float64)
+                gen_pack = dict(durations=durs, endpoints=ends, terminals=terms, resets=resets, gaps=gaps)
+
+            disc = compute_rollout_discrepancy(gen_pack, obs_comparator["by_symbol"][s])
+            by_symbol_metrics[s][model_key] = disc
+
+    return dict(rep_metrics=rep_metrics, by_symbol_metrics=by_symbol_metrics)
+
+
+def evaluate_and_write_outputs(results_by_window: Dict[str, Any],
+                               probe_by_window: Dict[str, Any],
+                               comparators_by_window: Dict[str, Any],
+                               boot_reps: int = BOOT_REPS) -> Dict[str, Any]:
+    """Aggregate discrepancies, perform paired bootstrap, evaluate gates, and write 13 CSV/JSON outputs."""
+    OUT.mkdir(parents=True, exist_ok=True)
+    t0 = time.perf_counter()
+
+    # 1. dynamic_pgm1c_support_probe.csv
+    probe_rows = []
+    for wname, pr in probe_by_window.items():
+        probe_rows.append({
+            "window": wname,
+            "n_draws": pr["n_draws"],
+            "n_transition_draws": pr["n_transition_draws"],
+            "n_reset_draws": pr["n_reset_draws"],
+            "total_transition_invalid": pr["total_transition_invalid"],
+            "transition_invalid_rate": pr["transition_invalid_rate"],
+            "total_reset_invalid": pr["total_reset_invalid"],
+            "reset_invalid_rate": pr["reset_invalid_rate"],
+            "invalid_draw_count": pr["invalid_draw_count"],
+            "invalid_draw_rate": pr["invalid_draw_rate"],
+        })
+    pd.DataFrame(probe_rows).to_csv(OUT / f"{PREFIX}_support_probe.csv", index=False)
+
+    # 2. dynamic_pgm1c_violation_counts.csv
+    viol_rows = []
+    for wname, pr in probe_by_window.items():
+        for k, v in pr["transition_violations"].items():
+            viol_rows.append({"window": wname, "stage": "C1_TRANSITION", "violation_type": k, "count": v})
+        for k, v in pr["reset_violations"].items():
+            viol_rows.append({"window": wname, "stage": "C1_RESET", "violation_type": k, "count": v})
+    for wname, wdata in results_by_window.items():
+        c2_recs = wdata["c2"]["records"]
+        for viol, cnt in c2_recs["violation"].value_counts().items():
+            if viol is not None:
+                viol_rows.append({"window": wname, "stage": "C2_ROLLOUT", "violation_type": viol, "count": int(cnt)})
+        for mkey, mchains in wdata["c3"]["chains"].items():
+            for c in mchains:
+                if c["violation"] is not None:
+                    viol_rows.append({"window": wname, "stage": f"C3_CHAIN_{mkey}", "violation_type": c["violation"], "count": 1})
+    pd.DataFrame(viol_rows).to_csv(OUT / f"{PREFIX}_violation_counts.csv", index=False)
+
+    # 3. dynamic_pgm1c_seeded_episode_metrics.csv
+    c2_rows = []
+    for wname, wdata in results_by_window.items():
+        c2_df = wdata["c2"]["records"]
+        for mkey in ["W0", "W1", "WT"]:
+            sub = c2_df[c2_df["model"] == mkey]
+            n_tot = len(sub)
+            n_term = int(np.sum(sub["status"] == "TERMINAL"))
+            n_inv = int(np.sum(sub["status"] == "INVALID"))
+            n_to = int(np.sum(sub["status"] == "TIMEOUT"))
+            durs = sub["duration"].to_numpy(np.float64)
+            c2_rows.append({
+                "window": wname,
+                "model": mkey,
+                "n_episodes": len(sub["episode_id"].unique()),
+                "n_reps": len(sub["rep"].unique()) if len(sub) else 0,
+                "mean_duration": float(np.mean(durs)) if n_tot else np.nan,
+                "std_duration": float(np.std(durs)) if n_tot else np.nan,
+                "terminal_rate": float(n_term / n_tot) if n_tot else np.nan,
+                "invalid_rate": float(n_inv / n_tot) if n_tot else np.nan,
+                "timeout_rate": float(n_to / n_tot) if n_tot else np.nan,
+            })
+    pd.DataFrame(c2_rows).to_csv(OUT / f"{PREFIX}_seeded_episode_metrics.csv", index=False)
+
+    # 4. dynamic_pgm1c_chain_metrics.csv
+    c3_rows = []
+    for wname, wdata in results_by_window.items():
+        for mkey in ["W0", "W1", "WT"]:
+            mchains = wdata["c3"]["chains"][mkey]
+            n_tot = len(mchains)
+            n_comp = int(sum(1 for c in mchains if c["completed"]))
+            n_inv = int(sum(1 for c in mchains if not c["completed"] and c["violation"] != "EPISODE_TIMEOUT"))
+            n_to = int(sum(1 for c in mchains if c["violation"] == "EPISODE_TIMEOUT"))
+            n_nonfin = int(sum(1 for c in mchains if c["violation"] in ("TRANSITION_NONFINITE", "RESET_NONFINITE")))
+            tot_eps = sum(len(c["episodes"]) for c in mchains)
+            c3_rows.append({
+                "window": wname,
+                "model": mkey,
+                "n_chains": n_tot,
+                "burn_in": BURN_IN_EPISODES,
+                "collect": COLLECT_EPISODES,
+                "completed_chains": n_comp,
+                "total_episodes": tot_eps,
+                "invalid_chains": n_inv,
+                "timeout_chains": n_to,
+                "nonfinite_chains": n_nonfin,
+            })
+    pd.DataFrame(c3_rows).to_csv(OUT / f"{PREFIX}_chain_metrics.csv", index=False)
+
+    # 5. dynamic_pgm1c_chain_rep_metrics.csv
+    rep_rows = []
+    for wname, wdata in results_by_window.items():
+        disc_data = wdata["discrepancies"]["rep_metrics"]
+        for mkey in ["W0", "W1", "WT"]:
+            for ridx, d in enumerate(disc_data[mkey]):
+                row = {"window": wname, "model": mkey, "rep_id": ridx}
+                row.update(d)
+                rep_rows.append(row)
+    pd.DataFrame(rep_rows).to_csv(OUT / f"{PREFIX}_chain_rep_metrics.csv", index=False)
+
+    # 6. dynamic_pgm1c_discrepancy_modules.csv
+    comp_rows = []
+    w1_w0_passed_all = True
+    wt_w1_passed_all = True
+
+    for wname, wdata in results_by_window.items():
+        disc_data = wdata["discrepancies"]["rep_metrics"]
+        d_w0 = np.array([d["D_total"] for d in disc_data["W0"]])
+        d_w1 = np.array([d["D_total"] for d in disc_data["W1"]])
+        d_wt = np.array([d["D_total"] for d in disc_data["WT"]])
+
+        # W1 - W0
+        diff_10 = d_w1 - d_w0
+        lo_10, hi_10, pt_10 = paired_bootstrap_replicates(diff_10, seed=20260915, reps=boot_reps)
+
+        # WT - W1
+        diff_t1 = d_wt - d_w1
+        lo_t1, hi_t1, pt_t1 = paired_bootstrap_replicates(diff_t1, seed=20260915, reps=boot_reps)
+
+        # By symbol counts
+        sym_disc = wdata["discrepancies"]["by_symbol_metrics"]
+        syms = sorted(sym_disc.keys())
+        fav_10 = sum(1 for s in syms if sym_disc[s]["W1"]["D_total"] < sym_disc[s]["W0"]["D_total"])
+        fav_t1 = sum(1 for s in syms if sym_disc[s]["WT"]["D_total"] < sym_disc[s]["W1"]["D_total"])
+
+        comp_rows.append({
+            "window": wname, "comparison": "W1 - W0", "point": pt_10,
+            "ci_lo": lo_10, "ci_hi": hi_10, "symbols_favored": fav_10,
+            "total_symbols": len(syms), "p_support": bool(hi_10 < 0 and fav_10 >= SYMBOL_BREADTH_MIN),
+        })
+        comp_rows.append({
+            "window": wname, "comparison": "WT - W1", "point": pt_t1,
+            "ci_lo": lo_t1, "ci_hi": hi_t1, "symbols_favored": fav_t1,
+            "total_symbols": len(syms), "p_support": bool(hi_t1 < 0 and fav_t1 >= SYMBOL_BREADTH_MIN),
+        })
+
+        if not (hi_10 < 0 and fav_10 >= SYMBOL_BREADTH_MIN):
+            w1_w0_passed_all = False
+        if not (hi_t1 < 0 and fav_t1 >= SYMBOL_BREADTH_MIN):
+            wt_w1_passed_all = False
+
+    pd.DataFrame(comp_rows).to_csv(OUT / f"{PREFIX}_discrepancy_modules.csv", index=False)
+
+    # 7. dynamic_pgm1c_by_symbol.csv
+    by_sym_rows = []
+    for wname, wdata in results_by_window.items():
+        sym_disc = wdata["discrepancies"]["by_symbol_metrics"]
+        for s in sorted(sym_disc.keys()):
+            for mkey in ["W0", "W1", "WT"]:
+                r = {"window": wname, "symbol": s, "model": mkey}
+                r.update(sym_disc[s][mkey])
+                by_sym_rows.append(r)
+    pd.DataFrame(by_sym_rows).to_csv(OUT / f"{PREFIX}_by_symbol.csv", index=False)
+
+    # 8. dynamic_pgm1c_duration_diagnostics.csv
+    dur_rows = []
+    for wname, wdata in results_by_window.items():
+        obs_dur = comparators_by_window[wname]["pooled"]["durations"]
+        dur_rows.append({
+            "window": wname, "source": "OBSERVED",
+            "mean": float(np.mean(obs_dur)) if len(obs_dur) else np.nan,
+            "std": float(np.std(obs_dur)) if len(obs_dur) else np.nan,
+            "median": float(np.median(obs_dur)) if len(obs_dur) else np.nan,
+            "q05": float(np.percentile(obs_dur, 5)) if len(obs_dur) else np.nan,
+            "q95": float(np.percentile(obs_dur, 95)) if len(obs_dur) else np.nan,
+            "max": float(np.max(obs_dur)) if len(obs_dur) else np.nan,
+        })
+        for mkey in ["W0", "W1", "WT"]:
+            mchains = wdata["c3"]["chains"][mkey]
+            durs = np.array([ep["duration"] for c in mchains for ep in c["episodes"]], dtype=np.float64)
+            if len(durs):
+                dur_rows.append({
+                    "window": wname, "source": mkey,
+                    "mean": float(np.mean(durs)), "std": float(np.std(durs)),
+                    "median": float(np.median(durs)), "q05": float(np.percentile(durs, 5)),
+                    "q95": float(np.percentile(durs, 95)), "max": float(np.max(durs)),
+                })
+    pd.DataFrame(dur_rows).to_csv(OUT / f"{PREFIX}_duration_diagnostics.csv", index=False)
+
+    # 9. dynamic_pgm1c_endpoint_diagnostics.csv
+    end_rows = []
+    for wname, wdata in results_by_window.items():
+        obs_end = comparators_by_window[wname]["pooled"]["endpoints"]
+        for m in range(1, 16):
+            p_obs = float(np.mean(obs_end == m)) if len(obs_end) else 0.0
+            end_rows.append({"window": wname, "source": "OBSERVED", "mask": m, "probability": p_obs})
+        for mkey in ["W0", "W1", "WT"]:
+            mchains = wdata["c3"]["chains"][mkey]
+            ends = np.array([ep["endpoint_mask"] for c in mchains for ep in c["episodes"]], dtype=np.int64)
+            for m in range(1, 16):
+                p_m = float(np.mean(ends == m)) if len(ends) else 0.0
+                end_rows.append({"window": wname, "source": mkey, "mask": m, "probability": p_m})
+    pd.DataFrame(end_rows).to_csv(OUT / f"{PREFIX}_endpoint_diagnostics.csv", index=False)
+
+    # 10. dynamic_pgm1c_state_diagnostics.csv
+    state_rows = []
+    for wname, wdata in results_by_window.items():
+        obs_term = comparators_by_window[wname]["pooled"]["terminals"]
+        for fld in TERMINAL_DYNAMIC_FIELDS:
+            arr = obs_term.get(fld, np.empty(0))
+            state_rows.append({
+                "window": wname, "source": "OBSERVED", "field": fld,
+                "mean": float(np.mean(arr)) if len(arr) else np.nan,
+                "std": float(np.std(arr)) if len(arr) else np.nan,
+            })
+        for mkey in ["W0", "W1", "WT"]:
+            mchains = wdata["c3"]["chains"][mkey]
+            for fld in TERMINAL_DYNAMIC_FIELDS:
+                arr = np.array([ep["terminal_state"].get(fld, np.nan) for c in mchains for ep in c["episodes"]], dtype=np.float64)
+                arr = arr[np.isfinite(arr)]
+                state_rows.append({
+                    "window": wname, "source": mkey, "field": fld,
+                    "mean": float(np.mean(arr)) if len(arr) else np.nan,
+                    "std": float(np.std(arr)) if len(arr) else np.nan,
+                })
+    pd.DataFrame(state_rows).to_csv(OUT / f"{PREFIX}_state_diagnostics.csv", index=False)
+
+    # 11. dynamic_pgm1c_reset_diagnostics.csv
+    reset_diag_rows = []
+    for wname, wdata in results_by_window.items():
+        obs_rst = comparators_by_window[wname]["pooled"]["resets"]
+        for fld in RESET_STRUCTURAL_FIELDS:
+            arr = obs_rst.get(fld, np.empty(0))
+            reset_diag_rows.append({
+                "window": wname, "source": "OBSERVED", "field": fld,
+                "mean": float(np.mean(arr)) if len(arr) else np.nan,
+                "std": float(np.std(arr)) if len(arr) else np.nan,
+            })
+        for mkey in ["W0", "W1", "WT"]:
+            mchains = wdata["c3"]["chains"][mkey]
+            for fld in RESET_STRUCTURAL_FIELDS:
+                arr = np.array([ep["reset_state"].get(fld, np.nan) for c in mchains for ep in c["episodes"]], dtype=np.float64)
+                arr = arr[np.isfinite(arr)]
+                reset_diag_rows.append({
+                    "window": wname, "source": mkey, "field": fld,
+                    "mean": float(np.mean(arr)) if len(arr) else np.nan,
+                    "std": float(np.std(arr)) if len(arr) else np.nan,
+                })
+    pd.DataFrame(reset_diag_rows).to_csv(OUT / f"{PREFIX}_reset_diagnostics.csv", index=False)
+
+    # 12. dynamic_pgm1c_gap_diagnostics.csv
+    gap_rows = []
+    for wname, wdata in results_by_window.items():
+        obs_gap = comparators_by_window[wname]["pooled"]["gaps"]
+        p_occ = float(np.mean(obs_gap > 0)) if len(obs_gap) else 0.0
+        pos = obs_gap[obs_gap > 0]
+        gap_rows.append({
+            "window": wname, "source": "OBSERVED",
+            "gap_occurrence_prob": p_occ,
+            "mean_positive_gap": float(np.mean(pos)) if len(pos) else 0.0,
+            "max_gap": float(np.max(obs_gap)) if len(obs_gap) else 0.0,
+        })
+        for mkey in ["W0", "W1", "WT"]:
+            mchains = wdata["c3"]["chains"][mkey]
+            gaps = np.array([ep["gap"] for c in mchains for ep in c["episodes"]], dtype=np.float64)
+            p_g = float(np.mean(gaps > 0)) if len(gaps) else 0.0
+            pos_g = gaps[gaps > 0]
+            gap_rows.append({
+                "window": wname, "source": mkey,
+                "gap_occurrence_prob": p_g,
+                "mean_positive_gap": float(np.mean(pos_g)) if len(pos_g) else 0.0,
+                "max_gap": float(np.max(gaps)) if len(gaps) else 0.0,
+            })
+    pd.DataFrame(gap_rows).to_csv(OUT / f"{PREFIX}_gap_diagnostics.csv", index=False)
+
+    # 13. Summary JSON and Gates
+    gate0_pass = True
+    for wname, wdata in results_by_window.items():
+        if wdata["c2"]["w1_invalid"] > 0 or wdata["c2"]["w1_timeout"] > 0 or wdata["c2"]["w1_nonfinite"] > 0:
+            gate0_pass = False
+        if wdata["c3"]["w1_invalid"] > 0 or wdata["c3"]["w1_timeout"] > 0 or wdata["c3"]["w1_nonfinite"] > 0:
+            gate0_pass = False
+
+    gate0_dec = "FREE_RUN_SUPPORT_CLOSED" if gate0_pass else "FREE_RUN_SUPPORT_NOT_CLOSED"
+    gate1_dec = "ROLLOUT_PHI_RESET_SUPPORTED" if w1_w0_passed_all else "ONE_STEP_GAINS_DO_NOT_SURVIVE_ROLLOUT"
+    gate_mem_dec = "TERMINAL_MEMORY_ROLLOUT_USEFUL" if wt_w1_passed_all else "TERMINAL_MEMORY_NOT_PROMOTED"
+
+    summary = dict(
+        experiment="DYNAMIC-PGM-1C Free-Run Rollout Closure",
+        parent_commit=BASE_SHA,
+        gate0=gate0_dec,
+        gate1=gate1_dec,
+        gate_terminal_memory=gate_mem_dec,
+        support_closed=gate0_pass,
+        comparisons=comp_rows,
+        probe_summary=probe_rows,
+        elapsed_seconds=round(time.perf_counter() - t0, 2),
+    )
+    (OUT / f"{PREFIX}_summary.json").write_text(json.dumps(summary, indent=2, default=str))
+
+    print(f"[EVALUATION COMPLETE] 13 output files generated in {OUT}. "
+          f"Gate0={gate0_dec}, Gate1={gate1_dec}, GateMem={gate_mem_dec}", flush=True)
+    return summary
+
+
+def run_dynamic_pgm1c_smoke_test(obs_sample_path: Optional[Path] = None,
+                                 transitions_path: Optional[Path] = None,
+                                 ep_meta_path: Optional[Path] = None) -> Dict[str, Any]:
+    """Execute tiny end-to-end stochastic smoke test through full execution chain."""
+    if obs_sample_path is None:
+        obs_sample_path = SAMPLE_PATH
+    if transitions_path is None:
+        transitions_path = TRANSITION_SAMPLE_PATH
+    if ep_meta_path is None:
+        ep_meta_path = EP_META_PATH
+
+    print("==================================================", flush=True)
+    print("STAGE C0-C3: TINY END-TO-END STOCHASTIC SMOKE TEST", flush=True)
+    print("==================================================", flush=True)
+    t0 = time.perf_counter()
+
+    obs = pd.read_parquet(obs_sample_path)
+    ep_meta = pd.read_parquet(ep_meta_path)
+    meta_slim = ep_meta[["symbol", "start_bar", "start_upper_price", "start_lower_price"]].drop_duplicates()
+    obs = obs.merge(meta_slim, on=["symbol", "start_bar"], how="left")
+    span = obs["start_upper_price"].to_numpy(np.float64) - obs["start_lower_price"].to_numpy(np.float64)
+    atr0 = span / obs["start_width_R"].to_numpy(np.float64)
+    obs["eps_R"] = 1e-9 / atr0
+
+    pair, first = exp1b.build_reset_pairs(obs)
+
+    w = WINDOWS[0]  # Window A
+    wname = w["name"]
+    fitted = fit_samplers_for_window(w, obs_sample_path, transitions_path)
+
+    ev_obs = obs[obs["block"] == w["eval"]].reset_index(drop=True)
+    ev_pairs = pair[pair["block"] == w["eval"]].reset_index(drop=True)
+    ev_firsts = ev_obs[ev_obs["bar_t"] == ev_obs["start_bar"]].reset_index(drop=True)
+
+    # 1. C1 probe (100 draws)
+    c1_probe = run_stage_c1_probe(
+        wname,
+        fitted["trans_samplers"]["MC_STATE_CURREENCODING"],
+        fitted["reset_samplers"]["R1_STATE_PHI"],
+        ev_obs, ev_pairs, seed=20260915, n_draws=100
+    )
+    print(f"[SMOKE C1] 100 draws: invalid={c1_probe['invalid_draw_count']}", flush=True)
+
+    # 2. C2 rollout (2 starts x 2 reps)
+    c2_starts = ev_firsts.head(2).copy().reset_index(drop=True)
+    c2_res = run_stage_c2_rollout(wname, c2_starts, fitted, seed=20260915, n_reps=2, max_bars=64)
+    print(f"[SMOKE C2] {len(c2_res['records'])} episode rollouts completed", flush=True)
+
+    # 3. C3 free-run (1 symbol x 2 chains x burn1 x collect3)
+    sym = "AG"
+    c3_res = run_stage_c3_freerun(
+        wname, ev_firsts, fitted, seed=20260915,
+        n_chains=2, burn_in=1, collect=3, max_bars=64, symbols=[sym]
+    )
+    print(f"[SMOKE C3] {len(c3_res['chains']['W1'])} chains completed for W1", flush=True)
+
+    # 4. Discrepancy & Evaluation
+    obs_comps = {wname: build_observed_comparators(ev_obs, ev_pairs)}
+    disc_res = compute_replicate_discrepancies(c3_res["chains"], obs_comps[wname], n_chains=2)
+
+    results_by_window = {
+        wname: dict(c2=c2_res, c3=c3_res, discrepancies=disc_res)
+    }
+    probe_by_window = {wname: c1_probe}
+
+    summary = evaluate_and_write_outputs(
+        results_by_window, probe_by_window, obs_comps, boot_reps=100
+    )
+    elapsed = time.perf_counter() - t0
+    print(f"[SMOKE COMPLETE] Entire end-to-end chain ran successfully in {elapsed:.2f}s!", flush=True)
+    return summary
+
+
+def run_dynamic_pgm1c_full(obs_sample_path: Path, transitions_path: Path,
+                           ep_meta_path: Path) -> Dict[str, Any]:
+    """Execute formal Stage C1..C3 simulation, discrepancy evaluation, and gate resolution."""
+    print("==================================================", flush=True)
+    print("STAGE C1-C3: FORMAL FREE-RUN ROLLOUT CLOSURE", flush=True)
+    print("==================================================", flush=True)
+    t0 = time.perf_counter()
+
+    obs = pd.read_parquet(obs_sample_path)
+    ep_meta = pd.read_parquet(ep_meta_path)
+    meta_slim = ep_meta[["symbol", "start_bar", "start_upper_price", "start_lower_price"]].drop_duplicates()
+    obs = obs.merge(meta_slim, on=["symbol", "start_bar"], how="left")
+    span = obs["start_upper_price"].to_numpy(np.float64) - obs["start_lower_price"].to_numpy(np.float64)
+    atr0 = span / obs["start_width_R"].to_numpy(np.float64)
+    obs["eps_R"] = 1e-9 / atr0
+
+    pair, first = exp1b.build_reset_pairs(obs)
+
+    results_by_window: Dict[str, Any] = {}
+    probe_by_window: Dict[str, Any] = {}
+    comparators_by_window: Dict[str, Any] = {}
+
+    for w in WINDOWS:
+        wname = w["name"]
+        fitted = fit_samplers_for_window(w, obs_sample_path, transitions_path)
+
+        ev_obs = obs[obs["block"] == w["eval"]].reset_index(drop=True)
+        ev_pairs = pair[pair["block"] == w["eval"]].reset_index(drop=True)
+        ev_firsts = ev_obs[ev_obs["bar_t"] == ev_obs["start_bar"]].reset_index(drop=True)
+
+        obs_comp = build_observed_comparators(ev_obs, ev_pairs)
+        comparators_by_window[wname] = obs_comp
+
+        # Stage C1
+        c1_probe = run_stage_c1_probe(
+            wname,
+            fitted["trans_samplers"]["MC_STATE_CURREENCODING"],
+            fitted["reset_samplers"]["R1_STATE_PHI"],
+            ev_obs, ev_pairs, seed=20260915
+        )
+        probe_by_window[wname] = c1_probe
+
+        # Stage C2
+        c2_res = run_stage_c2_rollout(wname, ev_firsts, fitted, seed=20260915)
+
+        # Stage C3
+        c3_res = run_stage_c3_freerun(wname, ev_firsts, fitted, seed=20260915)
+
+        # Discrepancies
+        disc_res = compute_replicate_discrepancies(c3_res["chains"], obs_comp)
+
+        results_by_window[wname] = dict(
+            c2=c2_res, c3=c3_res, discrepancies=disc_res
+        )
+
+    summary = evaluate_and_write_outputs(
+        results_by_window, probe_by_window, comparators_by_window
+    )
+    print(f"[DYNAMIC-PGM-1C COMPLETE] Full experiment completed in {time.perf_counter() - t0:.2f}s", flush=True)
+    return summary
+
+
 def main():
     parser = argparse.ArgumentParser(description="DYNAMIC-PGM-1C Free-Run Rollout Closure")
     parser.add_argument("--audit-only", action="store_true", help="Run Stage C0 parity and closure audits only.")
+    parser.add_argument("--smoke-test", action="store_true", help="Run tiny end-to-end stochastic smoke test through full pipeline.")
     args = parser.parse_args()
 
     obs_sample_path = CACHE / "dynamic_pgm1b_sample.parquet"
@@ -1307,6 +2173,14 @@ def main():
     if args.audit_only or os.environ.get("DYNAMIC_PGM1C_AUDIT_ONLY") == "1":
         print("[AUDIT-ONLY] Complete. Stopping before any stochastic rollout simulation.", flush=True)
         return
+
+    if args.smoke_test or os.environ.get("DYNAMIC_PGM1C_SMOKE_TEST") == "1":
+        smoke_res = run_dynamic_pgm1c_smoke_test(obs_sample_path, transitions_path, ep_meta_path)
+        print("[SMOKE-TEST] Complete. Stopping before formal full simulation.", flush=True)
+        return
+
+    # Formal full experiment execution
+    run_dynamic_pgm1c_full(obs_sample_path, transitions_path, ep_meta_path)
 
 
 if __name__ == "__main__":
