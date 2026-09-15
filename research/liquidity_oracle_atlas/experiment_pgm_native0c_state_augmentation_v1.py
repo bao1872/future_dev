@@ -153,6 +153,20 @@ FUTURE_TOKENS = ["shift(-1)", "next_", "future_", "final_episode", "remaining_ba
 EXPECTED_TRANSITION_ROWS = 321727
 EXPECTED_SYMBOLS = n0a.EXPECTED_SYMBOLS
 
+# The 9 planned full-run artifacts.
+ARTIFACT_FILES: List[str] = [
+    f"{PREFIX}_terminal_metrics.csv",
+    f"{PREFIX}_terminal_bootstrap.csv",
+    f"{PREFIX}_transition_metrics.csv",
+    f"{PREFIX}_transition_bootstrap.csv",
+    f"{PREFIX}_mechanism_grid.csv",
+    f"{PREFIX}_conditional_contrast.csv",
+    f"{PREFIX}_age_hazard.csv",
+    f"{PREFIX}_h1_harm.csv",
+    f"{PREFIX}_formal_summary.json",
+]
+FULL_RESULT_DIR = _REPO_ROOT / "research" / "analysis_results" / "local_liquidity_transition_v0"
+
 
 # ===========================================================================
 # Block U / E feature construction
@@ -227,6 +241,25 @@ def audit_incremental_features_finite(df: pd.DataFrame) -> Dict[str, Any]:
     return dict(non_finite_counts=bad, all_finite=len(bad) == 0)
 
 
+def attach_decision_day(obs: pd.DataFrame, bars_by_sym: Dict[str, Any]) -> pd.DataFrame:
+    """Attach decision_day = raw-bar trading day of the current state bar (bar_t).
+
+    Cluster identifier ONLY. Must never enter T2 predictors, MC predictors, or U/E.
+    """
+    out = obs.copy()
+    dd = np.full(len(out), np.datetime64("NaT"), dtype="datetime64[us]")
+    bar_t_all = out["bar_t"].to_numpy(dtype=np.int64)
+    for sym, idx in out.groupby("symbol", sort=False).indices.items():
+        bars = bars_by_sym[sym]
+        n = int(bars["n"])
+        t = bar_t_all[idx]
+        if np.any(t < 0) or np.any(t >= n):
+            raise SystemExit("STOP_PGM_NATIVE0C_DECISION_DAY_OOB")
+        dd[idx] = bars["day"][t]
+    out["decision_day"] = dd
+    return out
+
+
 def merge_incremental_features_into_transition(
     trans: pd.DataFrame, feat: pd.DataFrame
 ) -> pd.DataFrame:
@@ -248,8 +281,10 @@ def merge_incremental_features_into_transition(
             f"STOP_PGM_NATIVE0C_TRANSITION_JOIN_PARITY_COLUMNS_MISSING: "
             f"found {len(parity_cols)} < {MIN_JOIN_PARITY_COLS}")
 
-    right = h0[["symbol", "episode_id", "seq"] + INCREMENTAL_COLS
-               + ["bar_t", "start_bar"] + parity_cols].copy()
+    carry = ["symbol", "episode_id", "seq"] + INCREMENTAL_COLS + ["bar_t", "start_bar"]
+    if "decision_day" in h0.columns:
+        carry = carry + ["decision_day"]
+    right = h0[carry + parity_cols].copy()
     right = right.rename(columns={c: c + JOIN_PARITY_SUFFIX for c in parity_cols})
 
     merged = tr.merge(
@@ -962,10 +997,350 @@ def run_smoke_test() -> None:
     print(f"[SMOKE COMPLETE] {time.perf_counter() - t0:.2f}s -- NO SCIENTIFIC VERDICT", flush=True)
 
 
-def run_full_exploratory() -> None:
-    if not os.environ.get("AUTHORIZE_PGM_NATIVE0C_FULL_EXPLORATORY", "").strip():
-        raise SystemExit("STOP_PGM_NATIVE0C_FULL_NOT_AUTHORIZED_FIRST_ROUND")
-    raise SystemExit("STOP_PGM_NATIVE0C_FULL_NOT_AUTHORIZED_FIRST_ROUND")
+# ===========================================================================
+# Full exploratory runner (0C.2)
+# ===========================================================================
+def require_full_authorization() -> None:
+    token = os.environ.get("AUTHORIZE_PGM_NATIVE0C_FULL_EXPLORATORY", "").strip()
+    if token != "1":
+        raise SystemExit("STOP_PGM_NATIVE0C_FULL_EXPLORATORY_NOT_AUTHORIZED")
+
+
+def _terminal_metrics_row(block: str, variant: str, fit: Dict[str, Any],
+                          hazard: np.ndarray) -> Dict[str, Any]:
+    m = evaluate_terminal_variant(fit, hazard)
+    return dict(block=block, variant=variant, n=int(len(hazard)),
+                log_loss=m["log_loss"], brier=m["brier"],
+                roc_auc=m["roc_auc"], pr_auc=m["pr_auc"])
+
+
+def execute_full_pipeline(
+    obs_aug: pd.DataFrame,
+    merged_trans: pd.DataFrame,
+    aligned_econ: pd.DataFrame,
+    fit_A: Dict[str, Any],
+    fit_B: Dict[str, Any],
+    bars_by_sym: Dict[str, Any],
+    output_dir: Path,
+) -> Dict[str, Any]:
+    """Full 0C evaluation. Only ADDS features / calls production owners; no strategy logic.
+
+    Predictive-loss bootstraps cluster on `decision_day` (state bar t).
+    Economic mechanism contrast clusters on `entry_day` (next-open entry).
+    """
+    out_dir = Path(output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    windows = [(TB2_BLOCK, pgm.WINDOWS[0], fit_A), (TB3_BLOCK, pgm.WINDOWS[1], fit_B)]
+
+    terminal_rows: List[Dict[str, Any]] = []
+    terminal_boot: List[Dict[str, Any]] = []
+    transition_rows: List[Dict[str, Any]] = []
+    transition_boot: List[Dict[str, Any]] = []
+    term_fits: Dict[str, Dict[str, Any]] = {}
+    trans_fits: Dict[str, Dict[str, Any]] = {}
+    eval_obs_by_block: Dict[str, pd.DataFrame] = {}
+
+    for block, w, fit in windows:
+        tr_o = obs_aug[obs_aug["block"].isin(w["train"])].reset_index(drop=True)
+        ev_o = obs_aug[obs_aug["block"] == w["eval"]].reset_index(drop=True)
+        eval_obs_by_block[block] = ev_o
+        haz = ev_o["hazard"].to_numpy(np.int64)
+        day_o = ev_o["decision_day"].to_numpy()
+
+        term_fits[block] = {}
+        for v, extra in VARIANTS.items():
+            term_fits[block][v] = fit_terminal_hazard_variant(tr_o, ev_o, extra)
+        for v in VARIANTS:
+            terminal_rows.append(_terminal_metrics_row(block, v, term_fits[block][v], haz))
+        b_ll = next(r["log_loss"] for r in terminal_rows
+                    if r["block"] == block and r["variant"] == "PGM0")
+        b_br = next(r["brier"] for r in terminal_rows
+                    if r["block"] == block and r["variant"] == "PGM0")
+        for r in terminal_rows:
+            if r["block"] == block:
+                r["Delta_LogLoss_vs_PGM0"] = b_ll - r["log_loss"]
+                r["Delta_Brier_vs_PGM0"] = b_br - r["brier"]
+        for v in ["PGM_U", "PGM_E", "PGM_UE"]:
+            for metric, key in [("Delta_LogLoss", "row_logloss"), ("Delta_Brier", "row_brier")]:
+                s = fast_cluster_bootstrap_delta(
+                    day_o, term_fits[block]["PGM0"][key], term_fits[block][v][key])
+                terminal_boot.append(dict(block=block, variant=v, metric=metric, **s))
+
+        tr_t = merged_trans[merged_trans["block"].isin(w["train"])].reset_index(drop=True)
+        ev_t = merged_trans[merged_trans["block"] == w["eval"]].reset_index(drop=True)
+        mc_cols = fit["trans_samplers"][PRIMARY_TRANSITION_HEAD].design_cols
+        day_t = ev_t["decision_day"].to_numpy()
+        trans_fits[block] = {}
+        for v, extra in VARIANTS.items():
+            trans_fits[block][v] = fit_transition_variant(
+                tr_t, ev_t, extra, mc_cols, tag=f"{block}_{v}")
+            m = evaluate_transition_variant(trans_fits[block][v], ev_t)
+            transition_rows.append(dict(block=block, variant=v, n=int(len(ev_t)),
+                                        mean_joint_nll=m["mean_joint_nll"],
+                                        rho_zdup=m["rho_zdup"]))
+        b_j = next(r["mean_joint_nll"] for r in transition_rows
+                   if r["block"] == block and r["variant"] == "PGM0")
+        for r in transition_rows:
+            if r["block"] == block:
+                r["Delta_JNLL_vs_PGM0"] = b_j - r["mean_joint_nll"]
+        for v in ["PGM_U", "PGM_E", "PGM_UE"]:
+            s = fast_cluster_bootstrap_delta(
+                day_t, trans_fits[block]["PGM0"]["joint_nll_row"],
+                trans_fits[block][v]["joint_nll_row"])
+            transition_boot.append(dict(block=block, variant=v, metric="Delta_JNLL", **s))
+
+    # ---- baseline economic mechanism frame (frozen baseline models only) ----
+    scored = build_baseline_scored_frame(aligned_econ, fit_A, fit_B)
+    s2 = scored[scored["block"] == TB2_BLOCK].reset_index(drop=True)
+    s3 = scored[scored["block"] == TB3_BLOCK].reset_index(drop=True)
+    grid, meta = build_baseline_mechanism_grid(s2, s3)
+    p_edges = np.asarray(meta["p_edges"], dtype=np.float64)
+    m_edges = np.asarray(meta["m_edges"], dtype=np.float64)
+    contrast = conditional_hazard_contrast(s3, p_edges, m_edges,
+                                           n_boot=BOOTSTRAP_N, seed=BOOTSTRAP_SEED)
+
+    # ---- age hazard on FULL observation eval rows (not is_entry_valid filtered) ----
+    age_rows: List[Dict[str, Any]] = []
+    for block, w, fit in windows:
+        tmp = eval_obs_by_block[block][["block", "bar_t", "start_bar", "hazard"]].copy()
+        tmp["p_h"] = term_fits[block]["PGM0"]["p_eval"]
+        age_rows += compute_age_hazard_curve(tmp, block)
+
+    # ---- H1 economic harm (frozen TB2 edges) ----
+    harm2 = compute_h1_harm_diagnostics(s2, TB2_BLOCK, p_edges, m_edges)
+    harm3 = compute_h1_harm_diagnostics(s3, TB3_BLOCK, p_edges, m_edges)
+    harm_rows = (harm2["by_hazard_quintile"] + harm2["by_conviction_quintile"]
+                 + harm2["by_age_bucket"] + harm3["by_hazard_quintile"]
+                 + harm3["by_conviction_quintile"] + harm3["by_age_bucket"])
+
+    # ---- PRIMARY verdict (frozen) ----
+    ll_boot = next(r for r in terminal_boot
+                   if r["block"] == TB3_BLOCK and r["variant"] == "PGM_UE"
+                   and r["metric"] == "Delta_LogLoss")
+    jnll_boot = next(r for r in transition_boot
+                     if r["block"] == TB3_BLOCK and r["variant"] == "PGM_UE")
+    verdict = determine_state_augmentation_verdict(ll_boot, jnll_boot)
+
+    summary = {
+        "EXPERIMENT_NAME": EXPERIMENT_NAME,
+        "EXPERIMENT_SCOPE": EXPERIMENT_SCOPE,
+        "base_sha": BASE_SHA,
+        "run_head": subprocess.check_output(["git", "rev-parse", "HEAD"],
+                                            cwd=str(_REPO_ROOT), text=True).strip(),
+        **compute_artifact_hashes(),
+        "U_COLS": U_COLS, "E_COLS": E_COLS,
+        "VARIANTS": {k: list(v) for k, v in VARIANTS.items()},
+        "PRIMARY_VARIANT": PRIMARY_VARIANT,
+        "join_parity": merged_trans.attrs.get("join_parity", {}),
+        "TB2": dict(terminal_metrics=[r for r in terminal_rows if r["block"] == TB2_BLOCK],
+                    terminal_bootstrap=[r for r in terminal_boot if r["block"] == TB2_BLOCK],
+                    transition_metrics=[r for r in transition_rows if r["block"] == TB2_BLOCK],
+                    transition_bootstrap=[r for r in transition_boot if r["block"] == TB2_BLOCK]),
+        "TB3": dict(terminal_metrics=[r for r in terminal_rows if r["block"] == TB3_BLOCK],
+                    terminal_bootstrap=[r for r in terminal_boot if r["block"] == TB3_BLOCK],
+                    transition_metrics=[r for r in transition_rows if r["block"] == TB3_BLOCK],
+                    transition_bootstrap=[r for r in transition_boot if r["block"] == TB3_BLOCK]),
+        "primary": dict(TB3_PGM_UE_Delta_LogLoss_bootstrap=ll_boot,
+                        TB3_PGM_UE_Delta_JNLL_bootstrap=jnll_boot),
+        "mechanism": dict(p_edges=p_edges.tolist(), m_edges=m_edges.tolist(),
+                          conditional_contrast=contrast),
+        "age": dict(TB2_spearman=(age_rows[0]["spearman_age_vs_H1"] if age_rows else 0.0),
+                    TB3_spearman=(next((r["spearman_age_vs_H1"] for r in age_rows
+                                        if r["block"] == TB3_BLOCK), 0.0))),
+        "formal_verdict": verdict,
+        "known_scope_limitations": [
+            "previously inspected TB3 (exploratory mechanism validation, not pristine holdout)",
+            "cross-block episodes excluded from frozen PGM sample",
+            "event_mask==0 censored episodes excluded from frozen PGM sample",
+            "frozen PGM-bar sample",
+            "no trading-policy optimization",
+            "economic mechanism diagnostics are ex-post",
+            "augmentation uses transforms of existing state primitives, not new external data",
+        ],
+    }
+
+    _write_artifacts(summary, terminal_rows, terminal_boot, transition_rows,
+                     transition_boot, grid, contrast, age_rows, harm_rows, out_dir)
+    validate_output_artifacts(summary, out_dir)
+    print("[FULL] verdict:", verdict, flush=True)
+    return summary
+
+
+def _write_artifacts(summary, terminal_rows, terminal_boot, transition_rows,
+                     transition_boot, grid, contrast, age_rows, harm_rows, out_dir: Path) -> None:
+    out_dir = Path(out_dir)
+    terminal_cols = ["block", "variant", "n", "log_loss", "brier", "roc_auc", "pr_auc",
+                     "Delta_LogLoss_vs_PGM0", "Delta_Brier_vs_PGM0"]
+    pd.DataFrame(terminal_rows)[terminal_cols].to_csv(
+        out_dir / f"{PREFIX}_terminal_metrics.csv", index=False)
+    pd.DataFrame(terminal_boot)[["block", "variant", "metric", "point",
+                                 "ci95_lower", "ci95_upper", "p_pos"]].to_csv(
+        out_dir / f"{PREFIX}_terminal_bootstrap.csv", index=False)
+    pd.DataFrame(transition_rows)[["block", "variant", "n", "mean_joint_nll",
+                                   "rho_zdup", "Delta_JNLL_vs_PGM0"]].to_csv(
+        out_dir / f"{PREFIX}_transition_metrics.csv", index=False)
+    pd.DataFrame(transition_boot)[["block", "variant", "metric", "point",
+                                   "ci95_lower", "ci95_upper", "p_pos"]].to_csv(
+        out_dir / f"{PREFIX}_transition_bootstrap.csv", index=False)
+
+    grid_cols = ["block", "hazard_bin", "conviction_bin", "n", "mean_p_h", "mean_abs_m",
+                 "observed_H1_rate", "mu0", "mu1", "EV", "H1_loss_rate", "H1_mean_pi", "p_star"]
+    pd.DataFrame(grid)[grid_cols].to_csv(out_dir / f"{PREFIX}_mechanism_grid.csv", index=False)
+
+    # conditional contrast: fixed schema, row_type in {summary, conviction_bin}
+    cc = contrast
+    cc_rows = [
+        dict(row_type="summary", metric="Delta_H1_cond", conviction_bin=-1,
+             point=cc["Delta_H1_cond"]["point"],
+             ci95_lower=cc["Delta_H1_cond"]["ci95_lower"],
+             ci95_upper=cc["Delta_H1_cond"]["ci95_upper"],
+             p_pos=cc["Delta_H1_cond"]["p_pos"], p_neg=float("nan")),
+        dict(row_type="summary", metric="Delta_EV_cond", conviction_bin=-1,
+             point=cc["Delta_EV_cond"]["point"],
+             ci95_lower=cc["Delta_EV_cond"]["ci95_lower"],
+             ci95_upper=cc["Delta_EV_cond"]["ci95_upper"],
+             p_pos=cc["Delta_EV_cond"]["p_pos"],
+             p_neg=cc["Delta_EV_cond"]["p_neg"]),
+    ]
+    for q in cc["per_conviction"]:
+        cc_rows.append(dict(row_type="conviction_bin", metric="", conviction_bin=q["conviction_bin"],
+                            point=float("nan"), ci95_lower=float("nan"),
+                            ci95_upper=float("nan"), p_pos=float("nan"), p_neg=float("nan"),
+                            n_top=q["n_top"], n_bottom=q["n_bottom"],
+                            H1_top=q["H1_top"], H1_bottom=q["H1_bottom"], Delta_H1=q["Delta_H1"],
+                            EV_top=q["EV_top"], EV_bottom=q["EV_bottom"], Delta_EV=q["Delta_EV"]))
+    cc_cols = ["row_type", "metric", "conviction_bin", "point", "ci95_lower", "ci95_upper",
+               "p_pos", "p_neg", "n_top", "n_bottom", "H1_top", "H1_bottom", "Delta_H1",
+               "EV_top", "EV_bottom", "Delta_EV"]
+    pd.DataFrame(cc_rows).reindex(columns=cc_cols).to_csv(
+        out_dir / f"{PREFIX}_conditional_contrast.csv", index=False)
+
+    age_cols = ["block", "age_bucket", "age_numeric", "n", "H1_rate", "mean_p_h",
+                "spearman_age_vs_H1"]
+    pd.DataFrame(age_rows)[age_cols].to_csv(out_dir / f"{PREFIX}_age_hazard.csv", index=False)
+    pd.DataFrame(harm_rows)[["block", "group", "bin", "n", "harm_rate",
+                             "mean_harm", "mean_pi"]].to_csv(
+        out_dir / f"{PREFIX}_h1_harm.csv", index=False)
+    (out_dir / f"{PREFIX}_formal_summary.json").write_text(json.dumps(summary, indent=2, default=str))
+
+
+def validate_output_artifacts(summary: Dict[str, Any], out_dir: Path) -> bool:
+    """Re-read artifacts and cross-check against the in-memory summary."""
+    out = Path(out_dir)
+
+    def _fail(msg: str):
+        raise SystemExit(f"STOP_PGM_NATIVE0C_OUTPUT_PARITY_FAIL: {msg}")
+
+    for fn in ARTIFACT_FILES:
+        p = out / fn
+        if (not p.exists()) or p.stat().st_size == 0:
+            _fail(f"missing/empty {fn}")
+
+    tm = pd.read_csv(out / f"{PREFIX}_terminal_metrics.csv")
+    for blk in ["TB2", "TB3"]:
+        for r in summary[blk]["terminal_metrics"]:
+            row = tm[(tm["block"] == blk) & (tm["variant"] == r["variant"])]
+            if len(row) != 1:
+                _fail(f"terminal_metrics row {blk}/{r['variant']}")
+            if abs(float(row.iloc[0]["log_loss"]) - r["log_loss"]) > 1e-12:
+                _fail(f"terminal log_loss mismatch {blk}/{r['variant']}")
+
+    trm = pd.read_csv(out / f"{PREFIX}_transition_metrics.csv")
+    for blk in ["TB2", "TB3"]:
+        for r in summary[blk]["transition_metrics"]:
+            row = trm[(trm["block"] == blk) & (trm["variant"] == r["variant"])]
+            if len(row) != 1:
+                _fail(f"transition_metrics row {blk}/{r['variant']}")
+            if abs(float(row.iloc[0]["mean_joint_nll"]) - r["mean_joint_nll"]) > 1e-12:
+                _fail(f"transition mean_joint_nll mismatch {blk}/{r['variant']}")
+
+    tb = pd.read_csv(out / f"{PREFIX}_terminal_bootstrap.csv")
+    p = summary["primary"]["TB3_PGM_UE_Delta_LogLoss_bootstrap"]
+    row = tb[(tb["block"] == "TB3") & (tb["variant"] == "PGM_UE")
+             & (tb["metric"] == "Delta_LogLoss")]
+    if len(row) != 1 or abs(float(row.iloc[0]["ci95_lower"]) - p["ci95_lower"]) > 1e-12:
+        _fail("primary Delta_LogLoss bootstrap mismatch")
+
+    jb = pd.read_csv(out / f"{PREFIX}_transition_bootstrap.csv")
+    pj = summary["primary"]["TB3_PGM_UE_Delta_JNLL_bootstrap"]
+    row = jb[(jb["block"] == "TB3") & (jb["variant"] == "PGM_UE")]
+    if len(row) != 1 or abs(float(row.iloc[0]["ci95_lower"]) - pj["ci95_lower"]) > 1e-12:
+        _fail("primary Delta_JNLL bootstrap mismatch")
+
+    grid = pd.read_csv(out / f"{PREFIX}_mechanism_grid.csv")
+    for blk in ["TB2", "TB3"]:
+        if len(grid[grid["block"] == blk]) > 25:
+            _fail(f"mechanism_grid {blk} has >25 cells")
+        if len(grid[grid["block"] == blk]) == 0:
+            _fail(f"mechanism_grid {blk} empty")
+
+    age = pd.read_csv(out / f"{PREFIX}_age_hazard.csv")
+    for blk in ["TB2", "TB3"]:
+        if len(age[age["block"] == blk]) == 0:
+            _fail(f"age_hazard {blk} empty")
+
+    harm = pd.read_csv(out / f"{PREFIX}_h1_harm.csv")
+    if set(harm["group"].unique()) - {"hazard_quintile", "conviction_quintile", "age_bucket"}:
+        _fail("h1_harm has unexpected group values")
+
+    return True
+
+
+def run_full_exploratory(output_dir: Optional[Path] = None) -> Dict[str, Any]:
+    require_full_authorization()
+
+    # ---- governance + causal gates BEFORE any model fit ----
+    head = subprocess.check_output(["git", "rev-parse", "HEAD"],
+                                   cwd=str(_REPO_ROOT), text=True).strip()
+    res = subprocess.run(["git", "merge-base", "--is-ancestor", BASE_SHA, "HEAD"],
+                         cwd=str(_REPO_ROOT), capture_output=True)
+    if res.returncode != 0:
+        raise SystemExit("STOP_PGM_NATIVE0C_WRONG_BASE_HEAD")
+    hashes = compute_artifact_hashes()
+
+    obs = n0a.load_observed_decision_universe()
+    aud = n0a.audit_decision_universe(obs)
+    trans_aud = n0a.load_transition_truth_audit()
+    max_atr0_err = n0a.audit_atr0_owner_parity(obs, trans_aud["cur"])
+
+    feat = add_incremental_state_features(obs)
+    fin = audit_incremental_features_finite(feat)
+    if not fin["all_finite"]:
+        raise SystemExit("STOP_PGM_NATIVE0C_INCREMENTAL_NON_FINITE")
+    if not _prefix_invariance_check():
+        raise SystemExit("STOP_PGM_NATIVE0C_FEATURE_FUTURE_DEPENDENCE")
+
+    _, _, bars_by_sym = ex0.load_env()
+    obs_day = attach_decision_day(feat, bars_by_sym)
+    trans = pd.read_parquet(pgm.TRANSITION_SAMPLE_PATH)
+    merged = merge_incremental_features_into_transition(trans, obs_day)
+
+    fit_A = pgm.fit_samplers_for_window(pgm.WINDOWS[0], pgm.SAMPLE_PATH,
+                                        pgm.TRANSITION_SAMPLE_PATH)
+    fit_B = pgm.fit_samplers_for_window(pgm.WINDOWS[1], pgm.SAMPLE_PATH,
+                                        pgm.TRANSITION_SAMPLE_PATH)
+    par_A = verify_window_baseline_parity(pgm.WINDOWS[0], fit_A, feat, merged, "WindowA")
+    par_B = verify_window_baseline_parity(pgm.WINDOWS[1], fit_B, feat, merged, "WindowB")
+
+    aligned = n0a.align_raw_bars_and_returns(obs_day, bars_by_sym, cur_truth=trans_aud["cur"])[0]
+
+    if output_dir is None:
+        output_dir = FULL_RESULT_DIR
+
+    summary = execute_full_pipeline(obs_day, merged, aligned, fit_A, fit_B,
+                                    bars_by_sym, output_dir)
+    summary["n_all_obs"] = int(aud["n_all_obs"])
+    summary["n_H0"] = int(aud["n_hazard0"])
+    summary["n_H1"] = int(aud["n_hazard1"])
+    summary["symbols"] = sorted(aud["symbols"])
+    summary["max_abs_atr0_owner_error"] = float(max_atr0_err)
+    summary["sample_artifact_sha256"] = hashes["sample_artifact_sha256"]
+    summary["transition_artifact_sha256"] = hashes["transition_artifact_sha256"]
+    summary["WindowA_baseline_parity"] = par_A
+    summary["WindowB_baseline_parity"] = par_B
+    (Path(output_dir) / f"{PREFIX}_formal_summary.json").write_text(
+        json.dumps(summary, indent=2, default=str))
+    return summary
 
 
 def main():

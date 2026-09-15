@@ -48,6 +48,7 @@ import research.liquidity_oracle_atlas.experiment_pgm_native0c_state_augmentatio
 import research.liquidity_oracle_atlas.experiment_pgm_native0a_one_step_alpha_v1 as n0a
 import research.liquidity_oracle_atlas.experiment_pgm_native0b_hazard_reliability_v1 as n0b
 import research.liquidity_oracle_atlas.experiment_dynamic_pgm1c_free_run_rollout_v1 as pgm
+import research.liquidity_oracle_atlas.run_fixed_execution_baseline_v1 as ex0
 
 
 # ---------------------------------------------------------------------------
@@ -57,6 +58,17 @@ _FIT_A = None
 _FIT_B = None
 _OBS_AUG = None
 _MERGED = None
+_MERGED_DAY = None
+
+
+def merged_with_day():
+    global _MERGED_DAY
+    if _MERGED_DAY is None:
+        _, _, bars = ex0.load_env()
+        obs_day = exp.attach_decision_day(obs_aug(), bars)
+        _MERGED_DAY = exp.merge_incremental_features_into_transition(
+            pd.read_parquet(pgm.TRANSITION_SAMPLE_PATH), obs_day)
+    return _MERGED_DAY
 
 
 def fit_A():
@@ -427,27 +439,17 @@ def test_34_smoke_no_verdict():
 # ---------------------------------------------------------------------------
 # 35. full blocked first round (even with env var set)
 # ---------------------------------------------------------------------------
-def test_35_full_blocked_first_round():
+def test_35_full_blocked_without_authorization():
     old = os.environ.pop("AUTHORIZE_PGM_NATIVE0C_FULL_EXPLORATORY", None)
     try:
-        failed = False
+        raised = None
         try:
             exp.run_full_exploratory()
         except SystemExit as e:
-            failed = True
-            assert "STOP_PGM_NATIVE0C_FULL_NOT_AUTHORIZED_FIRST_ROUND" in str(e)
-        assert failed
-        # even WITH the env var, the first-round gate must hold
-        os.environ["AUTHORIZE_PGM_NATIVE0C_FULL_EXPLORATORY"] = "1"
-        failed2 = False
-        try:
-            exp.run_full_exploratory()
-        except SystemExit as e:
-            failed2 = True
-            assert "STOP_PGM_NATIVE0C_FULL_NOT_AUTHORIZED_FIRST_ROUND" in str(e)
-        assert failed2, "full must remain blocked in first round even with env var"
+            raised = str(e)
+        assert raised is not None
+        assert "STOP_PGM_NATIVE0C_FULL_EXPLORATORY_NOT_AUTHORIZED" in raised
     finally:
-        os.environ.pop("AUTHORIZE_PGM_NATIVE0C_FULL_EXPLORATORY", None)
         if old is not None:
             os.environ["AUTHORIZE_PGM_NATIVE0C_FULL_EXPLORATORY"] = old
 
@@ -697,6 +699,265 @@ def test_47_window_b_zdup_parity():
     mu_w = np.asarray(var["sampler"].analytic_conditional_support(ev)["z_d_up_mu"], np.float64)
     d = float(np.max(np.abs(mu_p - mu_w)))
     assert d <= 1e-12, f"Window B z_d_up_mu parity fail diff={d}"
+
+
+# ---------------------------------------------------------------------------
+# 48/49. Authorization gate
+# ---------------------------------------------------------------------------
+def test_48_authorization_gate_blocks_without_env():
+    os.environ.pop("AUTHORIZE_PGM_NATIVE0C_FULL_EXPLORATORY", None)
+    raised = None
+    try:
+        exp.require_full_authorization()
+    except SystemExit as e:
+        raised = str(e)
+    assert raised is not None
+    assert "STOP_PGM_NATIVE0C_FULL_EXPLORATORY_NOT_AUTHORIZED" in raised
+
+
+def test_49_authorization_helper_env_one_passes():
+    old = os.environ.get("AUTHORIZE_PGM_NATIVE0C_FULL_EXPLORATORY")
+    os.environ["AUTHORIZE_PGM_NATIVE0C_FULL_EXPLORATORY"] = "1"
+    try:
+        exp.require_full_authorization()  # must not raise
+    finally:
+        if old is None:
+            os.environ.pop("AUTHORIZE_PGM_NATIVE0C_FULL_EXPLORATORY", None)
+        else:
+            os.environ["AUTHORIZE_PGM_NATIVE0C_FULL_EXPLORATORY"] = old
+
+
+# ---------------------------------------------------------------------------
+# 50. decision_day exact owner
+# ---------------------------------------------------------------------------
+def test_50_decision_day_exact_owner():
+    days = np.array(["2026-01-01", "2026-01-02", "2026-01-03"], dtype="datetime64[us]")
+    bars = {"X": {"day": days, "n": 3}}
+    obs = pd.DataFrame({"symbol": ["X"] * 3, "bar_t": [0, 1, 2]})
+    out = exp.attach_decision_day(obs, bars)
+    assert out["decision_day"].to_numpy()[1] == bars["X"]["day"][1]
+    assert out["decision_day"].to_numpy()[2] == bars["X"]["day"][2]
+
+
+# ---------------------------------------------------------------------------
+# 51/52. decision_day never a predictor
+# ---------------------------------------------------------------------------
+def test_51_decision_day_not_in_terminal_predictors():
+    assert "decision_day" not in pgm.T2_NUM and "decision_day" not in pgm.CAT
+    src = inspect.getsource(exp.fit_terminal_hazard_variant)
+    assert "decision_day" not in src
+
+
+def test_52_decision_day_not_in_transition_predictors():
+    mc = fit_A()["trans_samplers"][exp.PRIMARY_TRANSITION_HEAD].design_cols
+    assert "decision_day" not in mc
+    assert "decision_day" not in exp.INCREMENTAL_COLS
+    src = inspect.getsource(exp.fit_transition_variant)
+    assert "decision_day" not in src
+
+
+# ---------------------------------------------------------------------------
+# 53. Transition merge preserves decision_day
+# ---------------------------------------------------------------------------
+def test_53_transition_merge_preserves_decision_day():
+    m = merged_with_day()
+    assert "decision_day" in m.columns
+    assert len(m) == exp.EXPECTED_TRANSITION_ROWS
+    assert m["decision_day"].notna().all()
+
+
+# ---------------------------------------------------------------------------
+# 54/55. Registered variants / primary
+# ---------------------------------------------------------------------------
+def test_54_full_registered_variants_exactly_four():
+    assert set(exp.VARIANTS.keys()) == {"PGM0", "PGM_U", "PGM_E", "PGM_UE"}
+    src = inspect.getsource(exp.execute_full_pipeline)
+    assert "for v, extra in VARIANTS.items()" in src
+
+
+def test_55_pgm_ue_sole_primary_in_full():
+    assert exp.PRIMARY_VARIANT == "PGM_UE"
+    src = inspect.getsource(exp.execute_full_pipeline)
+    assert 'r["variant"] == "PGM_UE"' in src          # primary verdict reads PGM_UE only
+    assert 'for v in ["PGM_U", "PGM_E", "PGM_UE"]' in src  # only augmentations are bootstrapped
+
+
+# ---------------------------------------------------------------------------
+# 56/57. Full routing
+# ---------------------------------------------------------------------------
+def test_56_full_terminal_routing():
+    src = inspect.getsource(exp.execute_full_pipeline)
+    assert "windows = [(TB2_BLOCK, pgm.WINDOWS[0], fit_A), (TB3_BLOCK, pgm.WINDOWS[1], fit_B)]" in src
+
+
+def test_57_full_transition_routing():
+    src = inspect.getsource(exp.execute_full_pipeline)
+    assert 'tr_t = merged_trans[merged_trans["block"].isin(w["train"])]' in src
+    assert 'ev_t = merged_trans[merged_trans["block"] == w["eval"]]' in src
+
+
+# ---------------------------------------------------------------------------
+# 58/59. Bootstrap cluster owners
+# ---------------------------------------------------------------------------
+def test_58_terminal_bootstrap_cluster_owner_decision_day():
+    src = inspect.getsource(exp.execute_full_pipeline)
+    assert 'day_o = ev_o["decision_day"].to_numpy()' in src
+    assert "episode_start_day" not in src
+
+
+def test_59_transition_bootstrap_cluster_owner_decision_day():
+    src = inspect.getsource(exp.execute_full_pipeline)
+    assert 'day_t = ev_t["decision_day"].to_numpy()' in src
+
+
+# ---------------------------------------------------------------------------
+# 60. Primary verdict consumes only TB3 UE Delta_LogLoss + Delta_JNLL
+# ---------------------------------------------------------------------------
+def test_60_primary_verdict_wiring():
+    src = inspect.getsource(exp.execute_full_pipeline)
+    assert "determine_state_augmentation_verdict(ll_boot, jnll_boot)" in src
+    assert 'r["metric"] == "Delta_LogLoss"' in src
+    assert "TB3_BLOCK and r[\"variant\"] == \"PGM_UE\"" in src
+
+
+# ---------------------------------------------------------------------------
+# 61/62. Mechanism baseline-only + frozen edges
+# ---------------------------------------------------------------------------
+def test_61_mechanism_grid_uses_baseline_models_only():
+    src = inspect.getsource(exp.execute_full_pipeline)
+    assert "build_baseline_scored_frame(aligned_econ, fit_A, fit_B)" in src
+
+
+def test_62_full_conditional_contrast_uses_tb2_frozen_edges():
+    src = inspect.getsource(exp.execute_full_pipeline)
+    assert "build_baseline_mechanism_grid(s2, s3)" in src
+    assert "conditional_hazard_contrast(s3, p_edges, m_edges" in src
+
+
+# ---------------------------------------------------------------------------
+# 63. Age hazard uses FULL observation eval rows
+# ---------------------------------------------------------------------------
+def test_63_age_hazard_uses_full_observation_rows():
+    src = inspect.getsource(exp.execute_full_pipeline)
+    assert 'eval_obs_by_block[block][["block", "bar_t", "start_bar", "hazard"]]' in src
+
+
+# ---------------------------------------------------------------------------
+# 64. H1 harm uses frozen TB2 edges
+# ---------------------------------------------------------------------------
+def test_64_h1_harm_uses_frozen_tb2_edges():
+    src = inspect.getsource(exp.execute_full_pipeline)
+    assert "compute_h1_harm_diagnostics(s2, TB2_BLOCK, p_edges, m_edges)" in src
+    assert "compute_h1_harm_diagnostics(s3, TB3_BLOCK, p_edges, m_edges)" in src
+
+
+# ---------------------------------------------------------------------------
+# 65. Artifact file set is exactly 9 planned files
+# ---------------------------------------------------------------------------
+def test_65_artifact_file_set_exactly_nine():
+    assert len(exp.ARTIFACT_FILES) == 9
+    assert len(set(exp.ARTIFACT_FILES)) == 9
+    for fn in exp.ARTIFACT_FILES:
+        assert fn.startswith(exp.PREFIX)
+    assert f"{exp.PREFIX}_formal_summary.json" in exp.ARTIFACT_FILES
+
+
+# ---------------------------------------------------------------------------
+# 66. Formal summary required keys
+# ---------------------------------------------------------------------------
+def test_66_formal_summary_required_keys():
+    src = (inspect.getsource(exp.execute_full_pipeline)
+           + inspect.getsource(exp.run_full_exploratory))
+    for k in ["EXPERIMENT_NAME", "EXPERIMENT_SCOPE", "base_sha", "run_head",
+              "sample_artifact_sha256", "transition_artifact_sha256",
+              "max_abs_atr0_owner_error", "n_all_obs", "n_H0", "n_H1", "symbols",
+              "U_COLS", "E_COLS", "VARIANTS", "PRIMARY_VARIANT", "join_parity",
+              "WindowA_baseline_parity", "WindowB_baseline_parity",
+              "primary", "mechanism", "age", "formal_verdict", "known_scope_limitations"]:
+        assert k in src, f"summary key {k} missing"
+    for lim in ["previously inspected TB3", "cross-block episodes excluded",
+                "event_mask==0 censored episodes excluded", "frozen PGM-bar sample",
+                "no trading-policy optimization", "economic mechanism diagnostics are ex-post",
+                "augmentation uses transforms of existing state primitives"]:
+        assert lim in src, f"scope limitation {lim!r} missing"
+
+
+# ---------------------------------------------------------------------------
+# 67. Output parity checker catches a mutated artifact
+# ---------------------------------------------------------------------------
+def _synthetic_full_rows():
+    terminal_rows = [
+        dict(block="TB2", variant="PGM0", n=10, log_loss=0.5, brier=0.2, roc_auc=0.6,
+             pr_auc=0.2, Delta_LogLoss_vs_PGM0=0.0, Delta_Brier_vs_PGM0=0.0),
+        dict(block="TB3", variant="PGM0", n=10, log_loss=0.5, brier=0.2, roc_auc=0.6,
+             pr_auc=0.2, Delta_LogLoss_vs_PGM0=0.0, Delta_Brier_vs_PGM0=0.0),
+    ]
+    terminal_boot = [dict(block="TB3", variant="PGM_UE", metric="Delta_LogLoss",
+                          point=0.01, ci95_lower=0.002, ci95_upper=0.02, p_pos=0.9)]
+    transition_rows = [
+        dict(block="TB2", variant="PGM0", n=10, mean_joint_nll=1.0, rho_zdup=0.1,
+             Delta_JNLL_vs_PGM0=0.0),
+        dict(block="TB3", variant="PGM0", n=10, mean_joint_nll=1.0, rho_zdup=0.1,
+             Delta_JNLL_vs_PGM0=0.0),
+    ]
+    transition_boot = [dict(block="TB3", variant="PGM_UE", metric="Delta_JNLL",
+                            point=0.02, ci95_lower=0.005, ci95_upper=0.03, p_pos=0.95)]
+    grid = [dict(block=b, hazard_bin=0, conviction_bin=0, n=5, mean_p_h=0.1, mean_abs_m=0.2,
+                 observed_H1_rate=0.05, mu0=0.1, mu1=-0.2, EV=0.0, H1_loss_rate=0.5,
+                 H1_mean_pi=-0.2, p_star=float("nan")) for b in ["TB2", "TB3"]]
+    contrast = dict(
+        Delta_H1_cond=dict(point=0.01, ci95_lower=0.0, ci95_upper=0.02, p_pos=0.9),
+        Delta_EV_cond=dict(point=-0.01, ci95_lower=-0.02, ci95_upper=0.0, p_pos=0.3, p_neg=0.7),
+        per_conviction=[dict(conviction_bin=q, n_top=5.0, n_bottom=5.0, H1_top=0.1,
+                             H1_bottom=0.05, Delta_H1=0.05, EV_top=0.01, EV_bottom=0.02,
+                             Delta_EV=-0.01) for q in range(5)],
+        n_days=5, n_boot=10, n_invalid_replicates=0, cluster_owner="entry_day")
+    age_rows = [dict(block=b, age_bucket="0", age_numeric=0.0, n=5, H1_rate=0.1,
+                     mean_p_h=0.1, spearman_age_vs_H1=0.5) for b in ["TB2", "TB3"]]
+    harm_rows = [dict(block=b, group="hazard_quintile", bin=0, n=3, harm_rate=0.5,
+                      mean_harm=0.1, mean_pi=-0.1) for b in ["TB2", "TB3"]]
+    summary = dict(
+        TB2=dict(terminal_metrics=[terminal_rows[0]], transition_metrics=[transition_rows[0]]),
+        TB3=dict(terminal_metrics=[terminal_rows[1]], transition_metrics=[transition_rows[1]]),
+        primary=dict(TB3_PGM_UE_Delta_LogLoss_bootstrap=terminal_boot[0],
+                     TB3_PGM_UE_Delta_JNLL_bootstrap=transition_boot[0]),
+    )
+    return (summary, terminal_rows, terminal_boot, transition_rows, transition_boot,
+            grid, contrast, age_rows, harm_rows)
+
+
+def test_67_output_parity_catches_mutated_artifact():
+    import tempfile
+    (summary, tr, tbk, trr, tbk2, grid, contrast, age, harm) = _synthetic_full_rows()
+    with tempfile.TemporaryDirectory() as td:
+        td = Path(td)
+        exp._write_artifacts(summary, tr, tbk, trr, tbk2, grid, contrast, age, harm, td)
+        assert exp.validate_output_artifacts(summary, td) is True
+
+        p = td / f"{exp.PREFIX}_terminal_metrics.csv"
+        df = pd.read_csv(p)
+        df.loc[0, "log_loss"] = df.loc[0, "log_loss"] + 1.0
+        df.to_csv(p, index=False)
+
+        raised = None
+        try:
+            exp.validate_output_artifacts(summary, td)
+        except SystemExit as e:
+            raised = str(e)
+        assert raised is not None
+        assert "STOP_PGM_NATIVE0C_OUTPUT_PARITY_FAIL" in raised
+
+
+# ---------------------------------------------------------------------------
+# 68. Full runner contains no strategy-optimization tokens
+# ---------------------------------------------------------------------------
+def test_68_full_runner_has_no_strategy_optimization_tokens():
+    src = (inspect.getsource(exp.execute_full_pipeline)
+           + inspect.getsource(exp.run_full_exploratory))
+    for tok in ["best_variant", "select_model", "argmax", "threshold", "position",
+                "ret_0c", "action_0c", "q_learning", "reinforcement_learning",
+                "market_regime_v2"]:
+        assert tok not in src, f"forbidden token {tok!r} in full runner"
 
 
 # ---------------------------------------------------------------------------
