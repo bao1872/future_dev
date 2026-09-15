@@ -28,6 +28,7 @@ Covers 35 required tests (see docstring list in the experiment module):
 from __future__ import annotations
 
 import inspect
+import json
 import os
 import subprocess
 import sys
@@ -885,67 +886,273 @@ def test_66_formal_summary_required_keys():
 # ---------------------------------------------------------------------------
 # 67. Output parity checker catches a mutated artifact
 # ---------------------------------------------------------------------------
-def _synthetic_full_rows():
-    terminal_rows = [
-        dict(block="TB2", variant="PGM0", n=10, log_loss=0.5, brier=0.2, roc_auc=0.6,
-             pr_auc=0.2, Delta_LogLoss_vs_PGM0=0.0, Delta_Brier_vs_PGM0=0.0),
-        dict(block="TB3", variant="PGM0", n=10, log_loss=0.5, brier=0.2, roc_auc=0.6,
-             pr_auc=0.2, Delta_LogLoss_vs_PGM0=0.0, Delta_Brier_vs_PGM0=0.0),
-    ]
-    terminal_boot = [dict(block="TB3", variant="PGM_UE", metric="Delta_LogLoss",
-                          point=0.01, ci95_lower=0.002, ci95_upper=0.02, p_pos=0.9)]
-    transition_rows = [
-        dict(block="TB2", variant="PGM0", n=10, mean_joint_nll=1.0, rho_zdup=0.1,
-             Delta_JNLL_vs_PGM0=0.0),
-        dict(block="TB3", variant="PGM0", n=10, mean_joint_nll=1.0, rho_zdup=0.1,
-             Delta_JNLL_vs_PGM0=0.0),
-    ]
-    transition_boot = [dict(block="TB3", variant="PGM_UE", metric="Delta_JNLL",
-                            point=0.02, ci95_lower=0.005, ci95_upper=0.03, p_pos=0.95)]
-    grid = [dict(block=b, hazard_bin=0, conviction_bin=0, n=5, mean_p_h=0.1, mean_abs_m=0.2,
-                 observed_H1_rate=0.05, mu0=0.1, mu1=-0.2, EV=0.0, H1_loss_rate=0.5,
-                 H1_mean_pi=-0.2, p_star=float("nan")) for b in ["TB2", "TB3"]]
+def _synthetic_bundle():
+    """A fully self-consistent synthetic 9-artifact bundle for parity-gate tests."""
+    variants = ["PGM0", "PGM_U", "PGM_E", "PGM_UE"]
+    terminal_rows, tboot, trans_rows, jboot = [], [], [], []
+    for blk in ["TB2", "TB3"]:
+        b_ll, b_br, b_j = 0.50, 0.25, 1.00
+        for v in variants:
+            ll = b_ll if v == "PGM0" else b_ll - 0.01
+            br = b_br if v == "PGM0" else b_br - 0.005
+            terminal_rows.append(dict(block=blk, variant=v, n=10, log_loss=ll, brier=br,
+                                      roc_auc=0.60, pr_auc=0.20,
+                                      Delta_LogLoss_vs_PGM0=b_ll - ll,
+                                      Delta_Brier_vs_PGM0=b_br - br))
+        for v in ["PGM_U", "PGM_E", "PGM_UE"]:
+            for metric in ["Delta_LogLoss", "Delta_Brier"]:
+                tboot.append(dict(block=blk, variant=v, metric=metric, point=0.01,
+                                  ci95_lower=0.002, ci95_upper=0.02, p_pos=0.90))
+        for v in variants:
+            mj = b_j if v == "PGM0" else b_j - 0.02
+            trans_rows.append(dict(block=blk, variant=v, n=10, mean_joint_nll=mj,
+                                   rho_zdup=0.10, Delta_JNLL_vs_PGM0=b_j - mj))
+        for v in ["PGM_U", "PGM_E", "PGM_UE"]:
+            jboot.append(dict(block=blk, variant=v, metric="Delta_JNLL", point=0.02,
+                              ci95_lower=0.005, ci95_upper=0.03, p_pos=0.95))
+
+    grid = [dict(block=blk, hazard_bin=hb, conviction_bin=cb, n=5, mean_p_h=0.1,
+                 mean_abs_m=0.2, observed_H1_rate=0.05, mu0=0.1, mu1=-0.2, EV=0.0,
+                 H1_loss_rate=0.5, H1_mean_pi=-0.2, p_star=float("nan"))
+            for blk in ["TB2", "TB3"] for hb in range(5) for cb in range(5)]
     contrast = dict(
-        Delta_H1_cond=dict(point=0.01, ci95_lower=0.0, ci95_upper=0.02, p_pos=0.9),
-        Delta_EV_cond=dict(point=-0.01, ci95_lower=-0.02, ci95_upper=0.0, p_pos=0.3, p_neg=0.7),
-        per_conviction=[dict(conviction_bin=q, n_top=5.0, n_bottom=5.0, H1_top=0.1,
+        Delta_H1_cond=dict(point=0.01, ci95_lower=0.0, ci95_upper=0.02, p_pos=0.90),
+        Delta_EV_cond=dict(point=-0.01, ci95_lower=-0.02, ci95_upper=0.0, p_pos=0.30,
+                           p_neg=0.70),
+        per_conviction=[dict(conviction_bin=q, n_top=5.0, n_bottom=5.0, H1_top=0.10,
                              H1_bottom=0.05, Delta_H1=0.05, EV_top=0.01, EV_bottom=0.02,
                              Delta_EV=-0.01) for q in range(5)],
         n_days=5, n_boot=10, n_invalid_replicates=0, cluster_owner="entry_day")
-    age_rows = [dict(block=b, age_bucket="0", age_numeric=0.0, n=5, H1_rate=0.1,
-                     mean_p_h=0.1, spearman_age_vs_H1=0.5) for b in ["TB2", "TB3"]]
-    harm_rows = [dict(block=b, group="hazard_quintile", bin=0, n=3, harm_rate=0.5,
-                      mean_harm=0.1, mean_pi=-0.1) for b in ["TB2", "TB3"]]
+    age_rows = []
+    for blk in ["TB2", "TB3"]:
+        age_rows.append(dict(block=blk, age_bucket="0", age_numeric=0.0, n=5, H1_rate=0.1,
+                             mean_p_h=0.1, spearman_age_vs_H1=0.5))
+        age_rows.append(dict(block=blk, age_bucket="1", age_numeric=1.0, n=5, H1_rate=0.1,
+                             mean_p_h=0.1, spearman_age_vs_H1=0.5))
+    harm_rows = []
+    for blk in ["TB2", "TB3"]:
+        for b in range(5):
+            harm_rows.append(dict(block=blk, group="hazard_quintile", bin=b, n=3,
+                                  harm_rate=0.5, mean_harm=0.1, mean_pi=-0.1))
+            harm_rows.append(dict(block=blk, group="conviction_quintile", bin=b, n=3,
+                                  harm_rate=0.5, mean_harm=0.1, mean_pi=-0.1))
+        harm_rows.append(dict(block=blk, group="age_bucket", bin=0, n=3, harm_rate=0.5,
+                              mean_harm=0.1, mean_pi=-0.1))
+
+    ll_boot = next(r for r in tboot if r["block"] == "TB3" and r["variant"] == "PGM_UE"
+                   and r["metric"] == "Delta_LogLoss")
+    jnll_boot = next(r for r in jboot if r["block"] == "TB3" and r["variant"] == "PGM_UE")
     summary = dict(
-        TB2=dict(terminal_metrics=[terminal_rows[0]], transition_metrics=[transition_rows[0]]),
-        TB3=dict(terminal_metrics=[terminal_rows[1]], transition_metrics=[transition_rows[1]]),
-        primary=dict(TB3_PGM_UE_Delta_LogLoss_bootstrap=terminal_boot[0],
-                     TB3_PGM_UE_Delta_JNLL_bootstrap=transition_boot[0]),
+        EXPERIMENT_NAME=exp.EXPERIMENT_NAME, EXPERIMENT_SCOPE=exp.EXPERIMENT_SCOPE,
+        base_sha=exp.BASE_SHA, run_head="deadbeef",
+        sample_artifact_sha256="a" * 64, transition_artifact_sha256="b" * 64,
+        n_all_obs=100, n_H0=90, n_H1=10, symbols=["AG"],
+        max_abs_atr0_owner_error=0.0,
+        U_COLS=list(exp.U_COLS), E_COLS=list(exp.E_COLS),
+        VARIANTS={k: list(v) for k, v in exp.VARIANTS.items()},
+        PRIMARY_VARIANT=exp.PRIMARY_VARIANT,
+        join_parity=dict(parity_columns=["x"], per_column_max_abs_diff={"x": 0.0},
+                         overall_max_abs_diff=0.0, passed=True),
+        WindowA_baseline_parity=dict(label="WindowA"),
+        WindowB_baseline_parity=dict(label="WindowB"),
+        TB2=dict(terminal_metrics=[r for r in terminal_rows if r["block"] == "TB2"],
+                 terminal_bootstrap=[r for r in tboot if r["block"] == "TB2"],
+                 transition_metrics=[r for r in trans_rows if r["block"] == "TB2"],
+                 transition_bootstrap=[r for r in jboot if r["block"] == "TB2"]),
+        TB3=dict(terminal_metrics=[r for r in terminal_rows if r["block"] == "TB3"],
+                 terminal_bootstrap=[r for r in tboot if r["block"] == "TB3"],
+                 transition_metrics=[r for r in trans_rows if r["block"] == "TB3"],
+                 transition_bootstrap=[r for r in jboot if r["block"] == "TB3"]),
+        primary=dict(TB3_PGM_UE_Delta_LogLoss_bootstrap=ll_boot,
+                     TB3_PGM_UE_Delta_JNLL_bootstrap=jnll_boot),
+        mechanism=dict(p_edges=[-1.0, 0.0, 1.0], m_edges=[-1.0, 0.0, 1.0],
+                       conditional_contrast=contrast),
+        age=dict(TB2_spearman=0.5, TB3_spearman=0.5),
+        formal_verdict=exp.determine_state_augmentation_verdict(ll_boot, jnll_boot),
+        known_scope_limitations=["x"],
     )
-    return (summary, terminal_rows, terminal_boot, transition_rows, transition_boot,
-            grid, contrast, age_rows, harm_rows)
+    return dict(summary=summary, terminal_rows=terminal_rows, terminal_boot=tboot,
+                transition_rows=trans_rows, transition_boot=jboot, grid=grid,
+                contrast=contrast, age_rows=age_rows, harm_rows=harm_rows)
+
+
+def _write_bundle(tmpdir, b):
+    td = Path(tmpdir)
+    exp._write_artifacts(b["summary"], b["terminal_rows"], b["terminal_boot"],
+                         b["transition_rows"], b["transition_boot"], b["grid"],
+                         b["contrast"], b["age_rows"], b["harm_rows"], td)
+    (td / f"{exp.PREFIX}_formal_summary.json").write_text(
+        json.dumps(b["summary"], indent=2, default=str))
+    return td
+
+
+def _expect_parity_fail(b, td):
+    raised = None
+    try:
+        exp.validate_output_artifacts(b["summary"], td)
+    except SystemExit as e:
+        raised = str(e)
+    assert raised is not None, "parity checker did NOT fail"
+    assert "STOP_PGM_NATIVE0C_OUTPUT_PARITY_FAIL" in raised
 
 
 def test_67_output_parity_catches_mutated_artifact():
     import tempfile
-    (summary, tr, tbk, trr, tbk2, grid, contrast, age, harm) = _synthetic_full_rows()
-    with tempfile.TemporaryDirectory() as td:
-        td = Path(td)
-        exp._write_artifacts(summary, tr, tbk, trr, tbk2, grid, contrast, age, harm, td)
-        assert exp.validate_output_artifacts(summary, td) is True
-
+    b = _synthetic_bundle()
+    with tempfile.TemporaryDirectory() as tmp:
+        td = _write_bundle(tmp, b)
+        assert exp.validate_output_artifacts(b["summary"], td) is True
         p = td / f"{exp.PREFIX}_terminal_metrics.csv"
         df = pd.read_csv(p)
         df.loc[0, "log_loss"] = df.loc[0, "log_loss"] + 1.0
         df.to_csv(p, index=False)
+        _expect_parity_fail(b, td)
 
-        raised = None
-        try:
-            exp.validate_output_artifacts(summary, td)
-        except SystemExit as e:
-            raised = str(e)
-        assert raised is not None
-        assert "STOP_PGM_NATIVE0C_OUTPUT_PARITY_FAIL" in raised
+
+# ---------------------------------------------------------------------------
+# 69. Final formal_summary JSON parity
+# ---------------------------------------------------------------------------
+def test_69_formal_summary_json_parity():
+    import tempfile
+    b = _synthetic_bundle()
+    with tempfile.TemporaryDirectory() as tmp:
+        td = _write_bundle(tmp, b)
+        assert exp.validate_output_artifacts(b["summary"], td) is True
+
+
+# ---------------------------------------------------------------------------
+# 70. Mutated formal_verdict is caught
+# ---------------------------------------------------------------------------
+def test_70_mutated_formal_verdict_caught():
+    import tempfile
+    b = _synthetic_bundle()
+    with tempfile.TemporaryDirectory() as tmp:
+        td = _write_bundle(tmp, b)
+        p = td / f"{exp.PREFIX}_formal_summary.json"
+        js = json.loads(p.read_text())
+        js["formal_verdict"] = "TAMPERED"
+        p.write_text(json.dumps(js, indent=2, default=str))
+        _expect_parity_fail(b, td)
+
+
+# ---------------------------------------------------------------------------
+# 71. Mutated primary bootstrap point is caught
+# ---------------------------------------------------------------------------
+def test_71_mutated_primary_bootstrap_point_caught():
+    import tempfile
+    b = _synthetic_bundle()
+    with tempfile.TemporaryDirectory() as tmp:
+        td = _write_bundle(tmp, b)
+        p = td / f"{exp.PREFIX}_terminal_bootstrap.csv"
+        df = pd.read_csv(p)
+        m = (df["block"] == "TB3") & (df["variant"] == "PGM_UE") & (df["metric"] == "Delta_LogLoss")
+        df.loc[m, "point"] = df.loc[m, "point"] + 0.5
+        df.to_csv(p, index=False)
+        _expect_parity_fail(b, td)
+
+
+# ---------------------------------------------------------------------------
+# 72. Mutated conditional contrast point is caught
+# ---------------------------------------------------------------------------
+def test_72_mutated_conditional_contrast_point_caught():
+    import tempfile
+    b = _synthetic_bundle()
+    with tempfile.TemporaryDirectory() as tmp:
+        td = _write_bundle(tmp, b)
+        p = td / f"{exp.PREFIX}_conditional_contrast.csv"
+        df = pd.read_csv(p)
+        m = (df["row_type"] == "summary") & (df["metric"] == "Delta_H1_cond")
+        df.loc[m, "point"] = df.loc[m, "point"] + 1.0
+        df.to_csv(p, index=False)
+        _expect_parity_fail(b, td)
+
+
+# ---------------------------------------------------------------------------
+# 73. Dropping a conviction-bin contrast row is caught
+# ---------------------------------------------------------------------------
+def test_73_dropped_conviction_row_caught():
+    import tempfile
+    b = _synthetic_bundle()
+    with tempfile.TemporaryDirectory() as tmp:
+        td = _write_bundle(tmp, b)
+        p = td / f"{exp.PREFIX}_conditional_contrast.csv"
+        df = pd.read_csv(p)
+        df = df[~((df["row_type"] == "conviction_bin") & (df["conviction_bin"] == 3))]
+        df.to_csv(p, index=False)
+        _expect_parity_fail(b, td)
+
+
+# ---------------------------------------------------------------------------
+# 74. Dropping a mechanism 5x5 cell is caught
+# ---------------------------------------------------------------------------
+def test_74_dropped_mechanism_cell_caught():
+    import tempfile
+    b = _synthetic_bundle()
+    with tempfile.TemporaryDirectory() as tmp:
+        td = _write_bundle(tmp, b)
+        p = td / f"{exp.PREFIX}_mechanism_grid.csv"
+        df = pd.read_csv(p)
+        df = df.drop(index=df.index[0])
+        df.to_csv(p, index=False)
+        _expect_parity_fail(b, td)
+
+
+# ---------------------------------------------------------------------------
+# 75. age hazard sum(n) != terminal PGM0 n is caught
+# ---------------------------------------------------------------------------
+def test_75_age_rowcount_closure_caught():
+    import tempfile
+    b = _synthetic_bundle()
+    with tempfile.TemporaryDirectory() as tmp:
+        td = _write_bundle(tmp, b)
+        p = td / f"{exp.PREFIX}_age_hazard.csv"
+        df = pd.read_csv(p)
+        df.loc[df.index[0], "n"] = df.loc[df.index[0], "n"] + 1
+        df.to_csv(p, index=False)
+        _expect_parity_fail(b, td)
+
+
+# ---------------------------------------------------------------------------
+# 76. Mutated terminal non-logloss field (roc_auc) is caught
+# ---------------------------------------------------------------------------
+def test_76_mutated_terminal_roc_auc_caught():
+    import tempfile
+    b = _synthetic_bundle()
+    with tempfile.TemporaryDirectory() as tmp:
+        td = _write_bundle(tmp, b)
+        p = td / f"{exp.PREFIX}_terminal_metrics.csv"
+        df = pd.read_csv(p)
+        df.loc[df.index[0], "roc_auc"] = df.loc[df.index[0], "roc_auc"] + 0.1
+        df.to_csv(p, index=False)
+        _expect_parity_fail(b, td)
+
+
+# ---------------------------------------------------------------------------
+# 77. Mutated transition rho_zdup is caught
+# ---------------------------------------------------------------------------
+def test_77_mutated_transition_rho_zdup_caught():
+    import tempfile
+    b = _synthetic_bundle()
+    with tempfile.TemporaryDirectory() as tmp:
+        td = _write_bundle(tmp, b)
+        p = td / f"{exp.PREFIX}_transition_metrics.csv"
+        df = pd.read_csv(p)
+        df.loc[df.index[0], "rho_zdup"] = df.loc[df.index[0], "rho_zdup"] + 0.1
+        df.to_csv(p, index=False)
+        _expect_parity_fail(b, td)
+
+
+# ---------------------------------------------------------------------------
+# 78. Final parity runs AFTER all governance summary fields are written
+# ---------------------------------------------------------------------------
+def test_78_final_parity_after_governance_fields():
+    src_pipe = inspect.getsource(exp.execute_full_pipeline)
+    assert "validate_output_artifacts" not in src_pipe  # not validated mid-pipeline
+    src_run = inspect.getsource(exp.run_full_exploratory)
+    i_fields = src_run.index("WindowB_baseline_parity")
+    i_write = src_run.index('{PREFIX}_formal_summary.json')  # f-string source form
+    i_validate = src_run.index("validate_output_artifacts")
+    assert i_fields < i_write < i_validate, "final write/validate must follow governance fields"
 
 
 # ---------------------------------------------------------------------------

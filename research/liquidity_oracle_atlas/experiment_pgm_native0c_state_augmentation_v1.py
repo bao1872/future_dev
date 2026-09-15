@@ -1161,8 +1161,9 @@ def execute_full_pipeline(
 
     _write_artifacts(summary, terminal_rows, terminal_boot, transition_rows,
                      transition_boot, grid, contrast, age_rows, harm_rows, out_dir)
-    validate_output_artifacts(summary, out_dir)
     print("[FULL] verdict:", verdict, flush=True)
+    # NOTE: the FINAL artifact parity check runs in run_full_exploratory() AFTER all
+    # governance fields are added to the summary and the final JSON is written.
     return summary
 
 
@@ -1225,63 +1226,164 @@ def _write_artifacts(summary, terminal_rows, terminal_boot, transition_rows,
 
 
 def validate_output_artifacts(summary: Dict[str, Any], out_dir: Path) -> bool:
-    """Re-read artifacts and cross-check against the in-memory summary."""
+    """Re-read every artifact and cross-check against the FINAL in-memory summary.
+
+    Runs only after all governance fields are in the summary and the final
+    formal_summary.json has been written.
+    """
     out = Path(out_dir)
+    ATOL = 1e-12
 
     def _fail(msg: str):
         raise SystemExit(f"STOP_PGM_NATIVE0C_OUTPUT_PARITY_FAIL: {msg}")
+
+    def _close(a, b) -> bool:
+        return bool(np.isclose(float(a), float(b), rtol=0.0, atol=ATOL))
 
     for fn in ARTIFACT_FILES:
         p = out / fn
         if (not p.exists()) or p.stat().st_size == 0:
             _fail(f"missing/empty {fn}")
 
+    # ---- 1. formal_summary.json parity (governance + primary + verdict) ----
+    js = json.loads((out / f"{PREFIX}_formal_summary.json").read_text())
+    for k in ["EXPERIMENT_NAME", "EXPERIMENT_SCOPE", "base_sha", "run_head",
+              "sample_artifact_sha256", "transition_artifact_sha256",
+              "n_all_obs", "n_H0", "n_H1", "symbols", "max_abs_atr0_owner_error",
+              "U_COLS", "E_COLS", "VARIANTS", "PRIMARY_VARIANT", "formal_verdict",
+              "WindowA_baseline_parity", "WindowB_baseline_parity"]:
+        if k not in summary:
+            _fail(f"summary missing governance key {k}")
+        if k not in js:
+            _fail(f"json missing governance key {k}")
+        if js[k] != summary[k]:
+            _fail(f"summary json mismatch on {k}")
+
+    for k in ["TB3_PGM_UE_Delta_LogLoss_bootstrap", "TB3_PGM_UE_Delta_JNLL_bootstrap"]:
+        a = js["primary"][k]
+        b = summary["primary"][k]
+        for f in ["point", "ci95_lower", "ci95_upper", "p_pos"]:
+            if not _close(a[f], b[f]):
+                _fail(f"primary {k}.{f} json mismatch")
+
+    verdict_recomputed = determine_state_augmentation_verdict(
+        summary["primary"]["TB3_PGM_UE_Delta_LogLoss_bootstrap"],
+        summary["primary"]["TB3_PGM_UE_Delta_JNLL_bootstrap"],
+    )
+    if verdict_recomputed != summary["formal_verdict"]:
+        _fail("formal verdict not reproducible from primary bootstraps")
+
+    # ---- 2. terminal metrics full parity ----
     tm = pd.read_csv(out / f"{PREFIX}_terminal_metrics.csv")
+    t_fields = ["n", "log_loss", "brier", "roc_auc", "pr_auc",
+                "Delta_LogLoss_vs_PGM0", "Delta_Brier_vs_PGM0"]
     for blk in ["TB2", "TB3"]:
         for r in summary[blk]["terminal_metrics"]:
             row = tm[(tm["block"] == blk) & (tm["variant"] == r["variant"])]
             if len(row) != 1:
                 _fail(f"terminal_metrics row {blk}/{r['variant']}")
-            if abs(float(row.iloc[0]["log_loss"]) - r["log_loss"]) > 1e-12:
-                _fail(f"terminal log_loss mismatch {blk}/{r['variant']}")
+            row = row.iloc[0]
+            for f in t_fields:
+                if not _close(row[f], r[f]):
+                    _fail(f"terminal_metrics {blk}/{r['variant']}.{f} mismatch")
 
+    # ---- 3. transition metrics full parity ----
     trm = pd.read_csv(out / f"{PREFIX}_transition_metrics.csv")
     for blk in ["TB2", "TB3"]:
         for r in summary[blk]["transition_metrics"]:
             row = trm[(trm["block"] == blk) & (trm["variant"] == r["variant"])]
             if len(row) != 1:
                 _fail(f"transition_metrics row {blk}/{r['variant']}")
-            if abs(float(row.iloc[0]["mean_joint_nll"]) - r["mean_joint_nll"]) > 1e-12:
-                _fail(f"transition mean_joint_nll mismatch {blk}/{r['variant']}")
+            row = row.iloc[0]
+            for f in ["n", "mean_joint_nll", "rho_zdup", "Delta_JNLL_vs_PGM0"]:
+                if not _close(row[f], r[f]):
+                    _fail(f"transition_metrics {blk}/{r['variant']}.{f} mismatch")
 
+    # ---- 4. bootstrap full parity (all rows) ----
     tb = pd.read_csv(out / f"{PREFIX}_terminal_bootstrap.csv")
-    p = summary["primary"]["TB3_PGM_UE_Delta_LogLoss_bootstrap"]
-    row = tb[(tb["block"] == "TB3") & (tb["variant"] == "PGM_UE")
-             & (tb["metric"] == "Delta_LogLoss")]
-    if len(row) != 1 or abs(float(row.iloc[0]["ci95_lower"]) - p["ci95_lower"]) > 1e-12:
-        _fail("primary Delta_LogLoss bootstrap mismatch")
+    for blk in ["TB2", "TB3"]:
+        for r in summary[blk]["terminal_bootstrap"]:
+            row = tb[(tb["block"] == blk) & (tb["variant"] == r["variant"])
+                     & (tb["metric"] == r["metric"])]
+            if len(row) != 1:
+                _fail(f"terminal_bootstrap row {blk}/{r['variant']}/{r['metric']}")
+            row = row.iloc[0]
+            for f in ["point", "ci95_lower", "ci95_upper", "p_pos"]:
+                if not _close(row[f], r[f]):
+                    _fail(f"terminal_bootstrap {blk}/{r['variant']}.{f} mismatch")
 
     jb = pd.read_csv(out / f"{PREFIX}_transition_bootstrap.csv")
-    pj = summary["primary"]["TB3_PGM_UE_Delta_JNLL_bootstrap"]
-    row = jb[(jb["block"] == "TB3") & (jb["variant"] == "PGM_UE")]
-    if len(row) != 1 or abs(float(row.iloc[0]["ci95_lower"]) - pj["ci95_lower"]) > 1e-12:
-        _fail("primary Delta_JNLL bootstrap mismatch")
+    for blk in ["TB2", "TB3"]:
+        for r in summary[blk]["transition_bootstrap"]:
+            row = jb[(jb["block"] == blk) & (jb["variant"] == r["variant"])]
+            if len(row) != 1:
+                _fail(f"transition_bootstrap row {blk}/{r['variant']}")
+            row = row.iloc[0]
+            for f in ["point", "ci95_lower", "ci95_upper", "p_pos"]:
+                if not _close(row[f], r[f]):
+                    _fail(f"transition_bootstrap {blk}/{r['variant']}.{f} mismatch")
 
+    # ---- 5. conditional contrast parity ----
+    cc = pd.read_csv(out / f"{PREFIX}_conditional_contrast.csv")
+    csum = summary["mechanism"]["conditional_contrast"]
+    for metric in ["Delta_H1_cond", "Delta_EV_cond"]:
+        row = cc[(cc["row_type"] == "summary") & (cc["metric"] == metric)]
+        if len(row) != 1:
+            _fail(f"conditional_contrast summary row {metric}")
+        row = row.iloc[0]
+        s = csum[metric]
+        for f in ["point", "ci95_lower", "ci95_upper", "p_pos"]:
+            if not _close(row[f], s[f]):
+                _fail(f"conditional_contrast {metric}.{f} mismatch")
+        if metric == "Delta_EV_cond" and not _close(row["p_neg"], s["p_neg"]):
+            _fail("conditional_contrast Delta_EV_cond.p_neg mismatch")
+
+    conv = cc[cc["row_type"] == "conviction_bin"].sort_values("conviction_bin")
+    if [int(x) for x in conv["conviction_bin"]] != [0, 1, 2, 3, 4]:
+        _fail("conditional_contrast conviction rows must be exactly 0..4")
+    for q, r in zip(conv.itertuples(index=False), csum["per_conviction"]):
+        for f in ["n_top", "n_bottom", "H1_top", "H1_bottom", "Delta_H1",
+                  "EV_top", "EV_bottom", "Delta_EV"]:
+            if not _close(getattr(q, f), r[f]):
+                _fail(f"conditional_contrast conviction {int(q.conviction_bin)}.{f} mismatch")
+
+    # ---- 6. mechanism grid 5x5 closure ----
     grid = pd.read_csv(out / f"{PREFIX}_mechanism_grid.csv")
     for blk in ["TB2", "TB3"]:
-        if len(grid[grid["block"] == blk]) > 25:
-            _fail(f"mechanism_grid {blk} has >25 cells")
-        if len(grid[grid["block"] == blk]) == 0:
-            _fail(f"mechanism_grid {blk} empty")
+        g = grid[grid["block"] == blk]
+        if len(g) != 25:
+            _fail(f"mechanism_grid {blk} cells={len(g)} != 25")
+        if set(g["hazard_bin"].astype(int)) != set(range(5)):
+            _fail(f"mechanism_grid {blk} hazard bins incomplete")
+        if set(g["conviction_bin"].astype(int)) != set(range(5)):
+            _fail(f"mechanism_grid {blk} conviction bins incomplete")
 
+    # ---- 7. age hazard row-count closure ----
     age = pd.read_csv(out / f"{PREFIX}_age_hazard.csv")
+    if not set(age["age_numeric"].astype(int)) <= set(range(22)):
+        _fail("age_hazard age_numeric outside 0..21")
+    allowed_buckets = {str(i) for i in range(21)} | {"21+"}
+    if not set(age["age_bucket"].astype(str)) <= allowed_buckets:
+        _fail("age_hazard unexpected age_bucket label")
     for blk in ["TB2", "TB3"]:
-        if len(age[age["block"] == blk]) == 0:
-            _fail(f"age_hazard {blk} empty")
+        pgm0_n = next(r["n"] for r in summary[blk]["terminal_metrics"]
+                      if r["variant"] == "PGM0")
+        s = int(age[age["block"] == blk]["n"].sum())
+        if s != int(pgm0_n):
+            _fail(f"age_hazard {blk} sum(n)={s} != terminal PGM0 n={pgm0_n}")
 
+    # ---- 8. H1 harm basic closure ----
     harm = pd.read_csv(out / f"{PREFIX}_h1_harm.csv")
     if set(harm["group"].unique()) - {"hazard_quintile", "conviction_quintile", "age_bucket"}:
         _fail("h1_harm has unexpected group values")
+    for blk in ["TB2", "TB3"]:
+        h = harm[harm["block"] == blk]
+        hq = set(h[h["group"] == "hazard_quintile"]["bin"].astype(int))
+        cq = set(h[h["group"] == "conviction_quintile"]["bin"].astype(int))
+        if set(range(5)) - hq:
+            _fail(f"h1_harm {blk} missing hazard quintiles")
+        if set(range(5)) - cq:
+            _fail(f"h1_harm {blk} missing conviction quintiles")
 
     return True
 
@@ -1338,8 +1440,11 @@ def run_full_exploratory(output_dir: Optional[Path] = None) -> Dict[str, Any]:
     summary["transition_artifact_sha256"] = hashes["transition_artifact_sha256"]
     summary["WindowA_baseline_parity"] = par_A
     summary["WindowB_baseline_parity"] = par_B
+
+    # Final JSON must contain ALL governance fields BEFORE the last parity check.
     (Path(output_dir) / f"{PREFIX}_formal_summary.json").write_text(
         json.dumps(summary, indent=2, default=str))
+    validate_output_artifacts(summary, output_dir)
     return summary
 
 
