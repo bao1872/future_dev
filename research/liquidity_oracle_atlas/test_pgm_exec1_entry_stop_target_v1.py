@@ -886,6 +886,21 @@ def test_entry_price_ownership_gross_return_uses_limit_entry():
 _REAL_EVALUATE_SURFACE = x1.evaluate_surface
 _REAL_SELECT_POLICIES = x1.select_policies
 _REAL_BUILD_FUTURE_TENSOR = x1.build_future_tensor
+_REAL_OUT_DIR = x1.OUT_DIR
+
+
+def _snapshot_real_artifacts_dir() -> Dict[str, Any]:
+    """记录真实 artifacts 目录中 pgm_exec1_* 的 (size, mtime_ns)。
+
+    用于证明 mock 运行对该目录零写入。不要求目录为空：已授权 formal 运行
+    合法产生的产物允许存在，但不得被 mock 运行改写。
+    """
+    if not _REAL_OUT_DIR.exists():
+        return {}
+    return {
+        p.name: (int(p.stat().st_size), int(p.stat().st_mtime_ns))
+        for p in _REAL_OUT_DIR.glob(f"{x1.ARTIFACT_PREFIX}*")
+    }
 
 _MOCK_N_BARS = 40
 _MOCK_SYMBOLS = ["MKA", "MKB"]
@@ -1034,6 +1049,8 @@ def _run_mocked_formal(
         "select_n_rows": None,
         "selection": None,
         "artifacts": None,
+        "real_out_dir_before": None,
+        "real_out_dir_after": None,
     }
 
     monkeypatch.setenv("AUTHORIZE_PGM_EXEC1_FULL_EXPLORATORY", "1")
@@ -1114,7 +1131,9 @@ def _run_mocked_formal(
 
     monkeypatch.setattr(x1, "select_policies", spy_select_policies)
 
+    counters["real_out_dir_before"] = _snapshot_real_artifacts_dir()
     x1.run_full_exploratory()
+    counters["real_out_dir_after"] = _snapshot_real_artifacts_dir()
     return counters
 
 
@@ -1132,9 +1151,9 @@ def test_formal_pipeline_loads_and_fits_exactly_once(monkeypatch, tmp_path):
     assert counters["artifacts"] is not None
     assert set(counters["artifacts"].keys()) == set(x1.EXACT_ARTIFACTS)
 
-    # 真实 artifacts 目录绝不产生任何 pgm_exec1_* 文件
-    real_out_dir = pathlib.Path(x1.__file__).resolve().parents[2] / "artifacts" / "liquidity_oracle_atlas"
-    assert sorted(p.name for p in real_out_dir.glob("pgm_exec1_*")) == []
+    # 真实 artifacts 目录必须被本次 mock 运行完全零写入（内容与 mtime 全部不变）；
+    # 不要求目录为空：已授权 formal 运行合法产生的产物允许存在。
+    assert counters["real_out_dir_before"] == counters["real_out_dir_after"]
     assert sorted(p.name for p in tmp_path.glob("pgm_exec1_*")) == []
 
 
@@ -1237,3 +1256,102 @@ def test_formal_path_stops_when_atr0_audit_receives_block_subset(monkeypatch, tm
     with pytest.raises(SystemExit) as exc:
         _run_mocked_formal(monkeypatch, tmp_path, obs_day_mode="subset_tb2")
     assert "STOP_PGM_EXEC1_ATR0_AUDIT_UNIVERSE_INVALID" in str(exc.value)
+
+
+# ===========================================================================
+# O. Artifact writer / dtype regression (修复 4425720 formal 磁盘校验崩溃)
+# ===========================================================================
+def _make_dummy_artifact_map() -> Dict[str, Any]:
+    """构造覆盖全部 dtype 家族的最小 8 键 artifacts 映射（writer preflight 用）。
+
+    覆盖真实产物出现过的 dtype：extension string / int64 / nullable Int64 / bool / float64。
+    """
+    frame = pd.DataFrame(
+        {
+            "block": pd.Series(["TB2", "TB3"], dtype="string"),
+            "count": pd.Series([1, 2], dtype="int64"),
+            "nullable_count": pd.Series([1, None], dtype="Int64"),
+            "flag": pd.Series([True, False], dtype="bool"),
+            "value": pd.Series([0.5, -0.25], dtype="float64"),
+        }
+    )
+    art: Dict[str, Any] = {
+        name: frame.copy() for name in x1.EXACT_ARTIFACTS if name.endswith(".csv")
+    }
+    art[x1.ARTIFACT_FORMAL_SUMMARY] = {"run_head": "0" * 40, "cost": 0.01, "nested": {"a": 1}}
+    return art
+
+
+def _poison_disk_read(monkeypatch, artifact_name: str, column: str, delta: float) -> None:
+    """让 writer 的磁盘重读返回被微扰的数值，用于锁定 1e-12 阈值语义。"""
+    real_read_csv = x1.pd.read_csv
+
+    def poisoned_read_csv(path, *args, **kwargs):
+        df = real_read_csv(path, *args, **kwargs)
+        if str(path).endswith(artifact_name):
+            df[column] = df[column].to_numpy(float) + delta
+        return df
+
+    monkeypatch.setattr(x1.pd, "read_csv", poisoned_read_csv)
+
+
+def test_artifact_validator_accepts_extension_string_dtype(tmp_path):
+    """Test A：extension string 列（pandas 3 StringDtype）必须被安全跳过而不是 TypeError。"""
+    art = _make_dummy_artifact_map()
+    assert str(art[x1.ARTIFACT_ENTRY_ONLY]["block"].dtype) == "string"
+    assert x1._is_numeric_series(art[x1.ARTIFACT_ENTRY_ONLY]["block"]) is False
+    x1.write_and_verify_artifacts_on_disk(art, out_dir=tmp_path)
+
+
+def test_artifact_validator_accepts_nullable_and_bool_dtypes(tmp_path):
+    """Test C：nullable Int64 必须参与校验且不崩；bool / boolean 必须按原语义跳过。"""
+    series = {
+        "int64": pd.Series([1, 2], dtype="int64"),
+        "Int64": pd.Series([1, None], dtype="Int64"),
+        "string": pd.Series(["a"], dtype="string"),
+        "bool": pd.Series([True], dtype="bool"),
+        "boolean": pd.Series([True, None], dtype="boolean"),
+        "float64": pd.Series([0.5], dtype="float64"),
+    }
+    assert x1._is_numeric_series(series["int64"]) is True
+    assert x1._is_numeric_series(series["Int64"]) is True
+    assert x1._is_numeric_series(series["float64"]) is True
+    assert x1._is_numeric_series(series["string"]) is False
+    assert x1._is_numeric_series(series["bool"]) is False
+    assert x1._is_numeric_series(series["boolean"]) is False
+
+    x1.write_and_verify_artifacts_on_disk(_make_dummy_artifact_map(), out_dir=tmp_path)
+
+
+def test_artifact_disk_numeric_parity_threshold_is_strict_1e_12(monkeypatch, tmp_path):
+    """Test B：float64 往返必须精确；1e-13 级微扰仍在 atol 内通过，阈值未被放松。"""
+    # 精确往返
+    x1.write_and_verify_artifacts_on_disk(_make_dummy_artifact_map(), out_dir=tmp_path)
+
+    # 1e-13 < 1e-12 -> 仍通过
+    _poison_disk_read(monkeypatch, x1.ARTIFACT_BOOTSTRAP, "value", 1e-13)
+    x1.write_and_verify_artifacts_on_disk(_make_dummy_artifact_map(), out_dir=tmp_path)
+
+
+def test_artifact_disk_numeric_parity_still_fail_closed(monkeypatch, tmp_path):
+    """Test D：超过 1e-12 的磁盘偏差必须 STOP，换 validator 不得放松 fail-closed。"""
+    _poison_disk_read(monkeypatch, x1.ARTIFACT_BOOTSTRAP, "value", 1e-5)
+    with pytest.raises(SystemExit) as exc:
+        x1.write_and_verify_artifacts_on_disk(_make_dummy_artifact_map(), out_dir=tmp_path)
+    assert "STOP_PGM_EXEC1_DISK_NUMERIC_MISMATCH" in str(exc.value)
+
+
+def test_artifact_writer_preflight_covers_all_dtypes_and_exact_set(tmp_path):
+    """Writer preflight：正式计算前 <1s 走通全部 dtype 家族，并保持 exact-set fail-closed。"""
+    art = _make_dummy_artifact_map()
+    assert set(art.keys()) == set(x1.EXACT_ARTIFACTS)
+    dtypes = {str(art[x1.ARTIFACT_ENTRY_ONLY][c].dtype) for c in art[x1.ARTIFACT_ENTRY_ONLY].columns}
+    assert {"string", "int64", "Int64", "bool", "float64"}.issubset(dtypes)
+
+    x1.write_and_verify_artifacts_on_disk(art, out_dir=tmp_path)
+
+    # 额外产物必须被 exact-set 校验拦住
+    (tmp_path / "pgm_exec1_extra.csv").write_text("a\n1\n")
+    with pytest.raises(SystemExit) as exc:
+        x1.write_and_verify_artifacts_on_disk(art, out_dir=tmp_path)
+    assert "STOP_PGM_EXEC1_DISK_ARTIFACT_SET_MISMATCH" in str(exc.value)

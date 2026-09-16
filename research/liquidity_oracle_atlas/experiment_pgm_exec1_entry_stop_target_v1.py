@@ -1463,6 +1463,19 @@ def validate_in_memory_artifacts(artifacts: Dict[str, Any]) -> None:
             raise SystemExit(f"STOP_PGM_EXEC1_SUMMARY_MISSING_KEY: {rk}")
 
 
+def _is_numeric_series(series: pd.Series) -> bool:
+    """判断某列是否应参与磁盘数值对齐校验。
+
+    必须使用 pandas 的 dtype 语义判断，不得直接对 dtype 调用 numpy API：
+    pandas 3.x 的字符串列是 StringDtype(na_value=nan) 等扩展 dtype，
+    np.issubdtype(StringDtype, np.number) 会抛 TypeError 而不是返回 False，
+    导致写入器在 formal 的磁盘校验阶段崩溃（而非 fail-closed）。
+
+    排除 bool：保持原有语义 —— 只校验数值列误差，不校验逻辑列（is_core / selection_pass）。
+    """
+    return bool(pd.api.types.is_numeric_dtype(series) and not pd.api.types.is_bool_dtype(series))
+
+
 def write_and_verify_artifacts_on_disk(
     artifacts: Dict[str, Any],
     out_dir: pathlib.Path = OUT_DIR,
@@ -1500,7 +1513,7 @@ def write_and_verify_artifacts_on_disk(
                 raise SystemExit(f"STOP_PGM_EXEC1_DISK_ROWS_MISMATCH: {name}")
             # 校验数值列
             for col in mem_obj.columns:
-                if np.issubdtype(mem_obj[col].dtype, np.number):
+                if _is_numeric_series(mem_obj[col]):
                     mem_vals = mem_obj[col].to_numpy(float)
                     disk_vals = disk_df[col].to_numpy(float)
                     mask = np.isfinite(mem_vals) & np.isfinite(disk_vals)
