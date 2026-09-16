@@ -92,6 +92,30 @@ BOOTSTRAP_N = 2000
 BOOTSTRAP_SEED = 20260916
 SMOKE_BOOTSTRAP_N = 200
 SMOKE_EVAL_CAP = 1024
+CLUSTER_OWNER = "entry_day"
+
+QUINTILE_FEATURES = ["a_burst_exhaustion", "a_conviction_burst"]
+
+ARTIFACT_FILES: List[str] = [
+    f"{PREFIX}_outcome_metrics.csv",
+    f"{PREFIX}_information_bootstrap.csv",
+    f"{PREFIX}_strategy_metrics.csv",
+    f"{PREFIX}_economic_bootstrap.csv",
+    f"{PREFIX}_cost_grid.csv",
+    f"{PREFIX}_symbol_metrics.csv",
+    f"{PREFIX}_acceleration_quintiles.csv",
+    f"{PREFIX}_formal_summary.json",
+]
+FULL_RESULT_DIR = _REPO_ROOT / "research" / "analysis_results" / "local_liquidity_transition_v0"
+
+STRATEGY_FIELDS = [
+    "n_decisions", "n_trades", "trade_rate",
+    "gross_total_ATR0", "net_total_ATR0",
+    "gross_EV_per_decision", "net_EV_per_decision", "net_EV_per_trade",
+    "win_rate", "mean_win", "mean_loss", "payoff_ratio", "profit_factor",
+    "break_even_cost", "daily_sharpe_annualized", "max_drawdown_ATR0",
+    "positive_symbol_count", "top3_profit_share",
+]
 
 VERDICT_STRINGS = {
     "INFO_JOINT": "PGM_ACCELERATION_TERMINAL_OUTCOME_SUPPORTED_JOINTLY_EXPLORATORY",
@@ -528,7 +552,9 @@ REUSE_MAP = {
 
 
 def require_full_authorization() -> None:
-    raise SystemExit("STOP_PGM_NATIVE0D_FULL_NOT_AUTHORIZED_FIRST_ROUND")
+    token = os.environ.get("AUTHORIZE_PGM_NATIVE0D_FULL_EXPLORATORY", "").strip()
+    if token != "1":
+        raise SystemExit("STOP_PGM_NATIVE0D_FULL_EXPLORATORY_NOT_AUTHORIZED")
 
 
 def load_prepared_frame() -> Dict[str, Any]:
@@ -557,13 +583,18 @@ def prepare_window_windowframe(aligned: pd.DataFrame, fit: Dict[str, Any],
 
 
 def verify_window_score_owner(scored: pd.DataFrame, fit: Dict[str, Any], block: str) -> float:
-    """Prove scored.score_mu on `block` is owned by this window's MC sampler."""
+    """Prove scored.score_mu on `block` is owned by this window's MC sampler (fail-closed)."""
     sub = scored[scored["block"] == block]
     if len(sub) == 0:
         raise SystemExit(f"STOP_PGM_NATIVE0D_SCORE_OWNER_PARITY_FAIL: empty block {block}")
     mc = fit["trans_samplers"][n0c.PRIMARY_TRANSITION_HEAD]
+    actual = sub["score_mu"].to_numpy(np.float64)
     expected = -np.asarray(mc.analytic_conditional_support(sub)["z_d_up_mu"], dtype=np.float64)
-    d = float(np.max(np.abs(sub["score_mu"].to_numpy(np.float64) - expected)))
+    diff = actual - expected
+    if not (np.all(np.isfinite(actual)) and np.all(np.isfinite(expected))
+            and np.all(np.isfinite(diff))):
+        raise SystemExit("STOP_PGM_NATIVE0D_SCORE_OWNER_NONFINITE")
+    d = float(np.max(np.abs(diff)))
     if d > 1e-12:
         raise SystemExit(f"STOP_PGM_NATIVE0D_SCORE_OWNER_PARITY_FAIL: {block} {d}")
     return d
@@ -620,8 +651,10 @@ def run_audit_only() -> None:
     print(f"[AUDIT] Window B score-owner parity (TB3) max_abs_diff={dB:.3e}")
 
     fin = audit_acceleration_finite(scored_A)
-    print(f"[AUDIT] acceleration finite={fin['all_finite']} {fin['non_finite_counts']}")
-    if not fin["all_finite"]:
+    finB = audit_acceleration_finite(scored_B)
+    print(f"[AUDIT] WindowA acceleration finite={fin['all_finite']} {fin['non_finite_counts']}")
+    print(f"[AUDIT] WindowB acceleration finite={finB['all_finite']} {finB['non_finite_counts']}")
+    if not fin["all_finite"] or not finB["all_finite"]:
         raise SystemExit("STOP_PGM_NATIVE0D_ACCELERATION_NON_FINITE")
     if not _prefix_invariance_check():
         raise SystemExit("STOP_PGM_NATIVE0D_FEATURE_FUTURE_DEPENDENCE")
@@ -743,12 +776,21 @@ def _run_window(scored: pd.DataFrame, w: Dict[str, Any], n_boot: int,
     if len(set(base_counts)) != 1:
         raise SystemExit(f"STOP_PGM_NATIVE0D_COST_GRID_MONOTONICITY_FAIL: BASE {base_counts}")
 
+    q_edges = {}
+    q_rows: List[Dict[str, Any]] = []
+    for feat in QUINTILE_FEATURES:
+        e = quintile_edges(econ_tr, feat)
+        q_edges[feat] = e.tolist()
+        q_rows += quintile_diagnostic(econ_ev, feat, e, w["eval"])
+
     return dict(harm_metrics=dict(O0=m0, OA=mA), payoff_metrics=dict(O0=p0, OA=pA),
                 delta_harm_logloss=d_ll, delta_payoff_mse=d_mse,
                 beta0=beta0, n_h1_train=len(h1_tr), n_h1_eval=len(h1_ev),
-                n_h0_train=len(h0_tr), p_h_mean=float(np.mean(p_h_UE)),
+                n_h0_train=len(h0_tr), n_h0_eval=len(econ_ev),
+                p_h_mean=float(np.mean(p_h_UE)),
                 V0_mean=float(np.mean(V0)), VA_mean=float(np.mean(VA)),
-                metrics=metrics, bootstrap=boot, cost_grid=cost_grid)
+                metrics=metrics, bootstrap=boot, cost_grid=cost_grid,
+                quintile_edges=q_edges, quintiles=q_rows)
 
 
 def run_smoke_test() -> None:
@@ -805,8 +847,396 @@ def run_smoke_test() -> None:
     print(f"[SMOKE COMPLETE] {time.perf_counter() - t0:.2f}s", flush=True)
 
 
-def run_full_exploratory() -> None:
+# ===========================================================================
+# Pre-fit integrity gates (NO production model fitting)
+# ===========================================================================
+def run_pre_fit_integrity_gates(obs: pd.DataFrame, aligned: pd.DataFrame) -> Dict[str, Any]:
+    head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=str(_REPO_ROOT),
+                                   text=True).strip()
+    if subprocess.run(["git", "merge-base", "--is-ancestor", BASE_SHA, "HEAD"],
+                      cwd=str(_REPO_ROOT), capture_output=True).returncode != 0:
+        raise SystemExit("STOP_PGM_NATIVE0D_FREEZE_CHECK_FAIL")
+    assert_allowed_blocks(obs)
+    if "TB4" in set(aligned["block"].unique()) or "TB4" in set(obs["block"].unique()):
+        raise SystemExit("STOP_PGM_NATIVE0D_FORBIDDEN_BLOCK: TB4")
+
+    hashes = compute_artifact_hashes()
+    aud = n0a.audit_decision_universe(obs)
+    err = n0a.audit_atr0_owner_parity(obs, n0a.load_transition_truth_audit()["cur"])
+
+    if len(A_COLS) != 8:
+        raise SystemExit("STOP_PGM_NATIVE0D_A_COLS_NOT_EIGHT")
+    if set(A_COLS) & set(outcome_base_num()):
+        raise SystemExit("STOP_PGM_NATIVE0D_INCREMENTAL_COLUMN_COLLISION")
+    if not _prefix_invariance_check():
+        raise SystemExit("STOP_PGM_NATIVE0D_FEATURE_FUTURE_DEPENDENCE")
+    for bad in ["hazard", "harm_flag", "pi", "r_trad_OC_ATR0", "target_mask"]:
+        if bad in outcome_base_num() or bad in A_COLS:
+            raise SystemExit(f"STOP_PGM_NATIVE0D_PREDICTOR_LEAK: {bad}")
+    if len(aligned) != len(obs):
+        raise SystemExit("STOP_PGM_NATIVE0D_ALIGN_ROWCOUNT_CHANGED")
+
+    blocks = obs["block"].to_numpy()
+    raw_counts = {b: int((blocks == b).sum()) for b in ALLOWED_BLOCKS}
+    sb = compute_same_block_entry_valid(aligned)
+    sb_counts = {b: int(((aligned["block"].to_numpy() == b) & sb).sum()) for b in ALLOWED_BLOCKS}
+    return dict(head=head, hashes=hashes, aud=aud, atr0=err,
+                raw_counts=raw_counts, same_block_counts=sb_counts)
+
+
+# ===========================================================================
+# Artifact assembly + writers
+# ===========================================================================
+COST_FIELDS = ["n_decisions", "n_trades", "trade_rate", "gross_total_ATR0", "net_total_ATR0",
+               "net_EV_per_decision", "net_EV_per_trade", "profit_factor", "win_rate",
+               "daily_sharpe_annualized", "max_drawdown_ATR0"]
+
+
+def _outcome_rows(block: str, r: Dict[str, Any]) -> List[Dict[str, Any]]:
+    rows = []
+    for task, variants in [("harm", r["harm_metrics"]), ("payoff", r["payoff_metrics"])]:
+        for v in ["O0", "OA"]:
+            m = variants[v]
+            row = dict(block=block, task=task, variant=v, n=int(r["n_h1_eval"]),
+                       log_loss=np.nan, brier=np.nan, roc_auc=np.nan, pr_auc=np.nan,
+                       mse=np.nan, mae=np.nan, spearman=np.nan)
+            if task == "harm":
+                row.update(log_loss=m["log_loss"], brier=m["brier"],
+                           roc_auc=m["roc_auc"], pr_auc=m["pr_auc"])
+            else:
+                row.update(mse=m["mse"], mae=m["mae"], spearman=m["spearman"])
+            rows.append(row)
+    return rows
+
+
+def _info_rows(block: str, r: Dict[str, Any]) -> List[Dict[str, Any]]:
+    out = []
+    for metric, key in [("Delta_Harm_LogLoss", "delta_harm_logloss"),
+                        ("Delta_Payoff_MSE", "delta_payoff_mse")]:
+        b = r[key]
+        out.append(dict(block=block, metric=metric, point=b["point"],
+                        ci95_lower=b["ci95_lower"], ci95_upper=b["ci95_upper"],
+                        p_pos=b["p_pos"]))
+    return out
+
+
+def _strategy_rows(block: str, r: Dict[str, Any]) -> List[Dict[str, Any]]:
+    return [dict(block=block, policy=p, **{f: r["metrics"][p][f] for f in STRATEGY_FIELDS})
+            for p in ["BASE", "GATE0", "GATEA", "FLIPA"]]
+
+
+def _econ_rows(block: str, r: Dict[str, Any]) -> List[Dict[str, Any]]:
+    out = []
+    for it in ["BASE", "GATE0", "GATEA", "FLIPA", "GATEA-BASE", "GATEA-GATE0"]:
+        b = r["bootstrap"][it]
+        out.append(dict(block=block, item=it, point=b["point"],
+                        ci95_lower=b["ci95_lower"], ci95_upper=b["ci95_upper"],
+                        p_pos=b["p_pos"]))
+    return out
+
+
+def _cost_rows(block: str, r: Dict[str, Any]) -> List[Dict[str, Any]]:
+    rows = []
+    for c in COST_GRID:
+        for p in ["BASE", "GATE0", "GATEA", "FLIPA"]:
+            m = r["cost_grid"][str(c)][p]
+            rows.append(dict(block=block, cost=c, policy=p, **{f: m[f] for f in COST_FIELDS}))
+    return rows
+
+
+def _symbol_rows(block: str, r: Dict[str, Any]) -> List[Dict[str, Any]]:
+    rows = []
+    for p in ["BASE", "GATE0", "GATEA", "FLIPA"]:
+        by_sym = r["metrics"][p]["by_symbol"]
+        for s in n0a.EXPECTED_SYMBOLS:
+            v = by_sym.get(s)
+            rows.append(dict(block=block, policy=p, symbol=s,
+                             trade_count=int(v["trade_count"]) if v else 0,
+                             net_total_ATR0=float(v["net_total"]) if v else 0.0))
+    return rows
+
+
+def _quintile_rows(block: str, r: Dict[str, Any]) -> List[Dict[str, Any]]:
+    return [dict(block=row["block"], feature=row["feature"], bin=row["bin"], n=row["n"],
+                 H1_prevalence=row["H1_prevalence"], harm_rate=row["harm_rate"],
+                 mean_pi=row["mean_pi"]) for row in r["quintiles"]]
+
+
+def _write_full_artifacts(summary: Dict[str, Any], out_dir: Path) -> None:
+    out = Path(out_dir)
+    r2, r3 = summary["TB2"], summary["TB3"]
+    outcome = _outcome_rows("TB2", r2) + _outcome_rows("TB3", r3)
+    info = _info_rows("TB2", r2) + _info_rows("TB3", r3)
+    strat = _strategy_rows("TB2", r2) + _strategy_rows("TB3", r3)
+    econ = _econ_rows("TB2", r2) + _econ_rows("TB3", r3)
+    cost = _cost_rows("TB2", r2) + _cost_rows("TB3", r3)
+    sym = _symbol_rows("TB2", r2) + _symbol_rows("TB3", r3)
+    quint = _quintile_rows("TB2", r2) + _quintile_rows("TB3", r3)
+
+    pd.DataFrame(outcome)[["block", "task", "variant", "n", "log_loss", "brier",
+                           "roc_auc", "pr_auc", "mse", "mae", "spearman"]].to_csv(
+        out / f"{PREFIX}_outcome_metrics.csv", index=False)
+    pd.DataFrame(info)[["block", "metric", "point", "ci95_lower", "ci95_upper", "p_pos"]].to_csv(
+        out / f"{PREFIX}_information_bootstrap.csv", index=False)
+    pd.DataFrame(strat)[["block", "policy"] + STRATEGY_FIELDS].to_csv(
+        out / f"{PREFIX}_strategy_metrics.csv", index=False)
+    pd.DataFrame(econ)[["block", "item", "point", "ci95_lower", "ci95_upper", "p_pos"]].to_csv(
+        out / f"{PREFIX}_economic_bootstrap.csv", index=False)
+    pd.DataFrame(cost)[["block", "cost", "policy"] + COST_FIELDS].to_csv(
+        out / f"{PREFIX}_cost_grid.csv", index=False)
+    pd.DataFrame(sym)[["block", "policy", "symbol", "trade_count", "net_total_ATR0"]].to_csv(
+        out / f"{PREFIX}_symbol_metrics.csv", index=False)
+    pd.DataFrame(quint)[["block", "feature", "bin", "n", "H1_prevalence", "harm_rate",
+                         "mean_pi"]].to_csv(
+        out / f"{PREFIX}_acceleration_quintiles.csv", index=False)
+
+
+# ===========================================================================
+# Final artifact parity (fail-closed)
+# ===========================================================================
+def validate_output_artifacts(summary: Dict[str, Any], out_dir: Path) -> bool:
+    out = Path(out_dir)
+    ATOL = 1e-12
+
+    def _fail(msg: str):
+        raise SystemExit(f"STOP_PGM_NATIVE0D_OUTPUT_PARITY_FAIL: {msg}")
+
+    def _close(a, b, atol=ATOL) -> bool:
+        return bool(np.isclose(float(a), float(b), rtol=0.0, atol=atol, equal_nan=True))
+
+    for fn in ARTIFACT_FILES:
+        p = out / fn
+        if (not p.exists()) or p.stat().st_size == 0:
+            _fail(f"missing/empty {fn}")
+
+    # governance JSON parity
+    js = json.loads((out / f"{PREFIX}_formal_summary.json").read_text())
+    for k in ["EXPERIMENT_NAME", "EXPERIMENT_SCOPE", "base_sha", "run_head",
+              "sample_artifact_sha256", "transition_artifact_sha256",
+              "n_all_obs", "n_H0", "n_H1", "symbols", "blocks",
+              "max_abs_atr0_owner_error", "A_COLS", "OUTCOME_BASE_NUM", "OUTCOME_CAT",
+              "PRIMARY_COST_ATR0", "COST_GRID", "BOOTSTRAP_N", "BOOTSTRAP_SEED",
+              "information_verdict", "economic_verdict"]:
+        if k not in summary:
+            _fail(f"summary missing {k}")
+        if k not in js or js[k] != summary[k]:
+            _fail(f"formal_summary mismatch on {k}")
+
+    # outcome metrics: 8 rows
+    om = pd.read_csv(out / f"{PREFIX}_outcome_metrics.csv")
+    if len(om) != 8:
+        _fail(f"outcome_metrics rows={len(om)} != 8")
+    for blk in ["TB2", "TB3"]:
+        for task, key in [("harm", "harm_metrics"), ("payoff", "payoff_metrics")]:
+            for v in ["O0", "OA"]:
+                row = om[(om["block"] == blk) & (om["task"] == task) & (om["variant"] == v)]
+                if len(row) != 1:
+                    _fail(f"outcome row {blk}/{task}/{v}")
+                row = row.iloc[0]
+                m = summary[blk][key][v]
+                if int(row["n"]) != int(summary[blk]["n_h1_eval"]):
+                    _fail(f"outcome n mismatch {blk}/{task}/{v}")
+                fields = (["log_loss", "brier", "roc_auc", "pr_auc"] if task == "harm"
+                          else ["mse", "mae", "spearman"])
+                for f in fields:
+                    if not _close(row[f], m[f]):
+                        _fail(f"outcome {blk}/{task}/{v}.{f} mismatch")
+
+    # information bootstrap: 4 rows + verdict re-derivation
+    ib = pd.read_csv(out / f"{PREFIX}_information_bootstrap.csv")
+    if len(ib) != 4:
+        _fail(f"information_bootstrap rows={len(ib)} != 4")
+    for blk in ["TB2", "TB3"]:
+        for metric, key in [("Delta_Harm_LogLoss", "delta_harm_logloss"),
+                            ("Delta_Payoff_MSE", "delta_payoff_mse")]:
+            row = ib[(ib["block"] == blk) & (ib["metric"] == metric)]
+            if len(row) != 1:
+                _fail(f"info row {blk}/{metric}")
+            row = row.iloc[0]
+            b = summary[blk][key]
+            for f in ["point", "ci95_lower", "ci95_upper", "p_pos"]:
+                if not _close(row[f], b[f]):
+                    _fail(f"info {blk}/{metric}.{f} mismatch")
+    v_info = determine_information_verdict(
+        summary["TB3"]["delta_harm_logloss"], summary["TB3"]["delta_payoff_mse"])
+    if v_info != summary["information_verdict"]:
+        _fail("information verdict not reproducible from TB3 rows")
+
+    # strategy metrics: 8 rows
+    sm = pd.read_csv(out / f"{PREFIX}_strategy_metrics.csv")
+    if len(sm) != 8:
+        _fail(f"strategy_metrics rows={len(sm)} != 8")
+    for blk in ["TB2", "TB3"]:
+        for p in ["BASE", "GATE0", "GATEA", "FLIPA"]:
+            row = sm[(sm["block"] == blk) & (sm["policy"] == p)]
+            if len(row) != 1:
+                _fail(f"strategy row {blk}/{p}")
+            row = row.iloc[0]
+            for f in STRATEGY_FIELDS:
+                if not _close(row[f], summary[blk]["metrics"][p][f]):
+                    _fail(f"strategy {blk}/{p}.{f} mismatch")
+
+    # economic bootstrap: 12 rows + verdict re-derivation
+    eb = pd.read_csv(out / f"{PREFIX}_economic_bootstrap.csv")
+    if len(eb) != 12:
+        _fail(f"economic_bootstrap rows={len(eb)} != 12")
+    for blk in ["TB2", "TB3"]:
+        for it in ["BASE", "GATE0", "GATEA", "FLIPA", "GATEA-BASE", "GATEA-GATE0"]:
+            row = eb[(eb["block"] == blk) & (eb["item"] == it)]
+            if len(row) != 1:
+                _fail(f"econ row {blk}/{it}")
+            row = row.iloc[0]
+            b = summary[blk]["bootstrap"][it]
+            for f in ["point", "ci95_lower", "ci95_upper", "p_pos"]:
+                if not _close(row[f], b[f]):
+                    _fail(f"econ {blk}/{it}.{f} mismatch")
+    v_econ = determine_economic_verdict(summary["TB2"]["bootstrap"], summary["TB3"]["bootstrap"])
+    if v_econ != summary["economic_verdict"]:
+        _fail("economic verdict not reproducible from bootstrap rows")
+
+    # cost grid: 48 rows + monotonic + .01 parity
+    cg = pd.read_csv(out / f"{PREFIX}_cost_grid.csv")
+    if len(cg) != 48:
+        _fail(f"cost_grid rows={len(cg)} != 48")
+    for blk in ["TB2", "TB3"]:
+        for p in ["GATE0", "GATEA", "FLIPA"]:
+            counts = [int(cg[(cg["block"] == blk) & (cg["policy"] == p)
+                             & (cg["cost"] == c)].iloc[0]["n_trades"]) for c in COST_GRID]
+            if any(counts[i + 1] > counts[i] for i in range(len(counts) - 1)):
+                _fail(f"cost_grid monotonic {blk}/{p} {counts}")
+        bc = [int(cg[(cg["block"] == blk) & (cg["policy"] == "BASE")
+                     & (cg["cost"] == c)].iloc[0]["n_trades"]) for c in COST_GRID]
+        if len(set(bc)) != 1:
+            _fail(f"cost_grid BASE invariant {blk} {bc}")
+        for p in ["BASE", "GATE0", "GATEA", "FLIPA"]:
+            row = cg[(cg["block"] == blk) & (cg["policy"] == p)
+                     & (cg["cost"] == PRIMARY_COST_ATR0)]
+            if len(row) != 1:
+                _fail(f"cost_grid .01 row {blk}/{p}")
+            row = row.iloc[0]
+            for f in COST_FIELDS:
+                if not _close(row[f], summary[blk]["metrics"][p][f]):
+                    _fail(f"cost_grid .01 {blk}/{p}.{f} mismatch")
+
+    # symbol metrics: 120 rows + totals closure
+    sy = pd.read_csv(out / f"{PREFIX}_symbol_metrics.csv")
+    if len(sy) != 120:
+        _fail(f"symbol_metrics rows={len(sy)} != 120")
+    for blk in ["TB2", "TB3"]:
+        for p in ["BASE", "GATE0", "GATEA", "FLIPA"]:
+            g = sy[(sy["block"] == blk) & (sy["policy"] == p)]
+            if len(g) != 15:
+                _fail(f"symbol group {blk}/{p} n={len(g)} != 15")
+            if not np.isclose(float(g["net_total_ATR0"].sum()),
+                              summary[blk]["metrics"][p]["net_total_ATR0"], atol=1e-10, rtol=0):
+                _fail(f"symbol net_total closure {blk}/{p}")
+            if int(g["trade_count"].sum()) != int(summary[blk]["metrics"][p]["n_trades"]):
+                _fail(f"symbol trade_count closure {blk}/{p}")
+
+    # quintiles
+    q = pd.read_csv(out / f"{PREFIX}_acceleration_quintiles.csv")
+    if set(q["feature"].unique()) - set(QUINTILE_FEATURES):
+        _fail("quintile unexpected feature")
+    if not set(q["bin"].astype(int)) <= set(range(5)):
+        _fail("quintile unexpected bin")
+    if set(q["block"].unique()) - {"TB2", "TB3"}:
+        _fail("quintile unexpected block")
+    return True
+
+
+def run_full_exploratory(output_dir: Optional[Path] = None) -> Dict[str, Any]:
     require_full_authorization()
+
+    out_dir = Path(output_dir) if output_dir is not None else FULL_RESULT_DIR
+    for fn in ARTIFACT_FILES:
+        if (out_dir / fn).exists():
+            raise SystemExit("STOP_PGM_NATIVE0D_FORMAL_ARTIFACT_ALREADY_EXISTS")
+
+    prep = load_prepared_frame()
+    obs = n0a.load_observed_decision_universe()
+    aligned = prep["aligned"]
+    gates = run_pre_fit_integrity_gates(obs, aligned)
+
+    # Window A: fit exactly once
+    fit_A = pgm.fit_samplers_for_window(pgm.WINDOWS[0], pgm.SAMPLE_PATH,
+                                        pgm.TRANSITION_SAMPLE_PATH)
+    scored_A = prepare_window_windowframe(aligned, fit_A, "formal_scored_A")
+    dA = verify_window_score_owner(scored_A, fit_A, TB2_BLOCK)
+    finA = audit_acceleration_finite(scored_A)
+    if not finA["all_finite"]:
+        raise SystemExit("STOP_PGM_NATIVE0D_ACCELERATION_NON_FINITE")
+
+    # Window B: fit exactly once
+    fit_B = pgm.fit_samplers_for_window(pgm.WINDOWS[1], pgm.SAMPLE_PATH,
+                                        pgm.TRANSITION_SAMPLE_PATH)
+    scored_B = prepare_window_windowframe(aligned, fit_B, "formal_scored_B")
+    dB = verify_window_score_owner(scored_B, fit_B, TB3_BLOCK)
+    finB = audit_acceleration_finite(scored_B)
+    if not finB["all_finite"]:
+        raise SystemExit("STOP_PGM_NATIVE0D_ACCELERATION_NON_FINITE")
+
+    r2 = _run_window(scored_A, pgm.WINDOWS[0], n_boot=BOOTSTRAP_N, eval_cap=None)
+    r3 = _run_window(scored_B, pgm.WINDOWS[1], n_boot=BOOTSTRAP_N, eval_cap=None)
+
+    info_verdict = determine_information_verdict(r3["delta_harm_logloss"], r3["delta_payoff_mse"])
+    econ_verdict = determine_economic_verdict(r2["bootstrap"], r3["bootstrap"])
+
+    aud = gates["aud"]
+    summary = {
+        "EXPERIMENT_NAME": EXPERIMENT_NAME,
+        "EXPERIMENT_SCOPE": EXPERIMENT_SCOPE,
+        "base_sha": BASE_SHA,
+        "run_head": gates["head"],
+        "sample_artifact_sha256": gates["hashes"]["sample_artifact_sha256"],
+        "transition_artifact_sha256": gates["hashes"]["transition_artifact_sha256"],
+        "n_all_obs": int(aud["n_all_obs"]),
+        "n_H0": int(aud["n_hazard0"]),
+        "n_H1": int(aud["n_hazard1"]),
+        "symbols": sorted(aud["symbols"]),
+        "blocks": sorted(obs["block"].unique().tolist()),
+        "same_block_entry_counts": gates["same_block_counts"],
+        "raw_block_counts": gates["raw_counts"],
+        "max_abs_atr0_owner_error": float(gates["atr0"]),
+        "A_COLS": A_COLS,
+        "OUTCOME_BASE_NUM": outcome_base_num(),
+        "OUTCOME_CAT": outcome_cat(),
+        "PRIMARY_COST_ATR0": PRIMARY_COST_ATR0,
+        "COST_GRID": COST_GRID,
+        "BOOTSTRAP_N": BOOTSTRAP_N,
+        "BOOTSTRAP_SEED": BOOTSTRAP_SEED,
+        "cluster_owner": CLUSTER_OWNER,
+        "WindowA_score_owner_max_abs_diff": float(dA),
+        "WindowB_score_owner_max_abs_diff": float(dB),
+        "WindowA_acceleration_finite": bool(finA["all_finite"]),
+        "WindowB_acceleration_finite": bool(finB["all_finite"]),
+        "TB2": r2,
+        "TB3": r3,
+        "information_verdict": info_verdict,
+        "economic_verdict": econ_verdict,
+        "quintile_frozen_edges": {"TB2": r2["quintile_edges"], "TB3": r3["quintile_edges"]},
+        "artifact_files": ARTIFACT_FILES,
+        "known_limitations": [
+            "TB2/TB3 were previously inspected across multiple research rounds; this is exploratory strategy development, not a pristine holdout.",
+            "TB4 is forbidden; this experiment never touches TB4.",
+            "The frozen PGM sample excludes cross-block episodes.",
+            "event_mask==0 censored episodes are absent from the frozen sample.",
+            "Economic return is a single 5m next-open -> next-close bar.",
+            "Cost is ATR0-normalized friction, not a real contract commission/bid-ask/slippage model.",
+            "The H1 outcome head is fit only on realized H1 rows and then used as a conditional branch on all current states.",
+            "score_mu used by the outcome models comes from the same training-window production MC fit, not out-of-fold stacking.",
+            "Models stay fixed Logistic / Ridge; no nonlinear model search.",
+            "No threshold / symbol / holding / cost / feature tuning.",
+        ],
+    }
+
+    _write_full_artifacts(summary, out_dir)
+    # FINAL summary must be written BEFORE the final parity check
+    (out_dir / f"{PREFIX}_formal_summary.json").write_text(
+        json.dumps(summary, indent=2, default=str))
+    validate_output_artifacts(summary, out_dir)
+    print(f"[FULL] information_verdict={info_verdict}", flush=True)
+    print(f"[FULL] economic_verdict={econ_verdict}", flush=True)
+    return summary
 
 
 def main():

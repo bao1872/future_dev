@@ -11,6 +11,7 @@ fixed policies, cost accounting, strategy metrics, day-clustered bootstrap, verd
 from __future__ import annotations
 
 import inspect
+import json
 import os
 import subprocess
 import sys
@@ -476,21 +477,23 @@ def test_48_by_symbol_breadth():
 
 
 # --- 49 full blocked even with env --------------------------------------
-def test_49_full_blocked_even_with_env():
-    old = os.environ.get("AUTHORIZE_PGM_NATIVE0D_FULL_EXPLORATORY")
-    os.environ["AUTHORIZE_PGM_NATIVE0D_FULL_EXPLORATORY"] = "1"
-    raised = None
+def test_49_full_gate_never_runs_pipeline():
+    """The gate must be testable WITHOUT ever executing the full pipeline."""
+    old = os.environ.pop("AUTHORIZE_PGM_NATIVE0D_FULL_EXPLORATORY", None)
     try:
-        d0.run_full_exploratory()
-    except SystemExit as e:
-        raised = str(e)
+        raised = None
+        try:
+            d0.require_full_authorization()
+        except SystemExit as e:
+            raised = str(e)
+        assert raised is not None
+        assert "STOP_PGM_NATIVE0D_FULL_EXPLORATORY_NOT_AUTHORIZED" in raised
     finally:
-        if old is None:
-            os.environ.pop("AUTHORIZE_PGM_NATIVE0D_FULL_EXPLORATORY", None)
-        else:
+        if old is not None:
             os.environ["AUTHORIZE_PGM_NATIVE0D_FULL_EXPLORATORY"] = old
-    assert raised is not None
-    assert "STOP_PGM_NATIVE0D_FULL_NOT_AUTHORIZED_FIRST_ROUND" in raised
+    # run_full_exploratory must gate on authorization BEFORE any heavy work
+    src = inspect.getsource(d0.run_full_exploratory)
+    assert src.index("require_full_authorization()") < src.index("load_prepared_frame()")
 
 
 # --- 50 smoke no verdict -------------------------------------------------
@@ -693,6 +696,444 @@ def test_71_flipa_trade_count_non_increasing():
 def test_72_base_trade_count_invariant():
     c = _cost_counts("BASE")
     assert len(set(c)) == 1, c
+
+
+# --- 73/74 authorization -------------------------------------------------
+def test_73_full_auth_no_env_stops():
+    old = os.environ.pop("AUTHORIZE_PGM_NATIVE0D_FULL_EXPLORATORY", None)
+    raised = None
+    try:
+        d0.require_full_authorization()
+    except SystemExit as e:
+        raised = str(e)
+    finally:
+        if old is not None:
+            os.environ["AUTHORIZE_PGM_NATIVE0D_FULL_EXPLORATORY"] = old
+    assert raised is not None
+    assert "STOP_PGM_NATIVE0D_FULL_EXPLORATORY_NOT_AUTHORIZED" in raised
+
+
+def test_74_auth_env_one_passes_without_heavy_run():
+    old = os.environ.get("AUTHORIZE_PGM_NATIVE0D_FULL_EXPLORATORY")
+    os.environ["AUTHORIZE_PGM_NATIVE0D_FULL_EXPLORATORY"] = "1"
+    try:
+        d0.require_full_authorization()  # must not raise, must not run full
+    finally:
+        if old is None:
+            os.environ.pop("AUTHORIZE_PGM_NATIVE0D_FULL_EXPLORATORY", None)
+        else:
+            os.environ["AUTHORIZE_PGM_NATIVE0D_FULL_EXPLORATORY"] = old
+
+
+# --- 75/76 score owner NaN fail-closed ----------------------------------
+def test_75_actual_score_nan_stops():
+    fit = {"trans_samplers": {n0c.PRIMARY_TRANSITION_HEAD: _FakeMC(-1.0)}}
+    s = d0.prepare_window_windowframe(_synth_aligned(3), fit, "nan_actual")
+    s.loc[s.index[0], "score_mu"] = np.nan
+    raised = None
+    try:
+        d0.verify_window_score_owner(s, fit, "TB1")
+    except SystemExit as e:
+        raised = str(e)
+    assert raised is not None and "STOP_PGM_NATIVE0D_SCORE_OWNER_NONFINITE" in raised
+
+
+class _BadMC:
+    def analytic_conditional_support(self, df):
+        return {"z_d_up_mu": np.full(len(df), np.nan)}
+
+
+def test_76_expected_score_nan_stops():
+    fit = {"trans_samplers": {n0c.PRIMARY_TRANSITION_HEAD: _BadMC()}}
+    s = d0.prepare_window_windowframe(_synth_aligned(3), fit, "nan_expected")
+    raised = None
+    try:
+        d0.verify_window_score_owner(s, fit, "TB1")
+    except SystemExit as e:
+        raised = str(e)
+    assert raised is not None and "STOP_PGM_NATIVE0D_SCORE_OWNER_NONFINITE" in raised
+
+
+# --- 77-82 formal orchestration source contracts ------------------------
+def test_77_formal_window_a_fit_once():
+    src = inspect.getsource(d0.run_full_exploratory)
+    assert src.count("fit_samplers_for_window(pgm.WINDOWS[0]") == 1
+
+
+def test_78_formal_window_b_fit_once():
+    src = inspect.getsource(d0.run_full_exploratory)
+    assert src.count("fit_samplers_for_window(pgm.WINDOWS[1]") == 1
+
+
+def test_79_formal_tb2_uses_scored_a():
+    src = inspect.getsource(d0.run_full_exploratory)
+    assert 'prepare_window_windowframe(aligned, fit_A, "formal_scored_A")' in src
+    assert "_run_window(scored_A, pgm.WINDOWS[0]" in src
+
+
+def test_80_formal_tb3_uses_scored_b():
+    src = inspect.getsource(d0.run_full_exploratory)
+    assert 'prepare_window_windowframe(aligned, fit_B, "formal_scored_B")' in src
+    assert "_run_window(scored_B, pgm.WINDOWS[1]" in src
+
+
+def test_81_both_windows_finite_gate():
+    src = inspect.getsource(d0.run_full_exploratory)
+    assert 'audit_acceleration_finite(scored_A)' in src
+    assert 'audit_acceleration_finite(scored_B)' in src
+    assert src.count("STOP_PGM_NATIVE0D_ACCELERATION_NON_FINITE") == 2
+
+
+def test_82_full_eval_cap_none():
+    src = inspect.getsource(d0.run_full_exploratory)
+    assert src.count("eval_cap=None") == 2
+
+
+# --- 83-92 artifact contract --------------------------------------------
+def test_83_artifact_set_exact_eight():
+    assert len(d0.ARTIFACT_FILES) == 8
+    assert len(set(d0.ARTIFACT_FILES)) == 8
+    assert f"{d0.PREFIX}_formal_summary.json" in d0.ARTIFACT_FILES
+
+
+def test_92_formal_summary_required_keys():
+    src = inspect.getsource(d0.run_full_exploratory)
+    for k in ["EXPERIMENT_NAME", "EXPERIMENT_SCOPE", "base_sha", "run_head",
+              "sample_artifact_sha256", "transition_artifact_sha256",
+              "n_all_obs", "n_H0", "n_H1", "symbols", "blocks",
+              "same_block_entry_counts", "max_abs_atr0_owner_error",
+              "A_COLS", "OUTCOME_BASE_NUM", "OUTCOME_CAT", "PRIMARY_COST_ATR0",
+              "COST_GRID", "BOOTSTRAP_N", "BOOTSTRAP_SEED",
+              "WindowA_score_owner_max_abs_diff", "WindowB_score_owner_max_abs_diff",
+              "WindowA_acceleration_finite", "WindowB_acceleration_finite",
+              "information_verdict", "economic_verdict", "quintile_frozen_edges",
+              "known_limitations"]:
+        assert k in src, f"summary key {k} missing"
+
+
+def test_101_tb4_cannot_enter_full():
+    src = inspect.getsource(d0.run_pre_fit_integrity_gates)
+    assert "STOP_PGM_NATIVE0D_FORBIDDEN_BLOCK" in src
+    assert "TB4" in src
+
+
+def test_102_final_parity_after_json_write():
+    src = inspect.getsource(d0.run_full_exploratory)
+    i_write = src.index("{PREFIX}_formal_summary.json")
+    i_validate = src.index("validate_output_artifacts(summary, out_dir)")
+    assert i_write < i_validate
+
+
+# --- synthetic complete 8-artifact bundle --------------------------------
+_SYMS = ["AG", "AL", "AU", "CF", "CU", "I", "M", "MA", "NI", "P", "RB", "RU", "SC", "SN", "TA"]
+
+
+def _synth_metrics(n_trades, net_total):
+    m = {}
+    m["n_decisions"] = 10
+    m["n_trades"] = n_trades
+    m["trade_rate"] = n_trades / 10.0
+    m["gross_total_ATR0"] = net_total + 0.01 * n_trades
+    m["net_total_ATR0"] = net_total
+    m["gross_EV_per_decision"] = (net_total + 0.01 * n_trades) / 10.0
+    m["net_EV_per_decision"] = net_total / 10.0
+    m["net_EV_per_trade"] = (net_total / n_trades) if n_trades else 0.0
+    m["win_rate"] = 0.5
+    m["mean_win"] = 0.1
+    m["mean_loss"] = -0.1
+    m["payoff_ratio"] = 1.0
+    m["profit_factor"] = 1.0
+    m["break_even_cost"] = 0.02
+    m["daily_sharpe_annualized"] = 1.0
+    m["max_drawdown_ATR0"] = -0.2
+    m["positive_symbol_count"] = 1
+    m["top3_profit_share"] = 1.0
+    by_sym = {s: dict(net_total=0.0, trade_count=0) for s in _SYMS}
+    by_sym[_SYMS[0]] = dict(net_total=net_total, trade_count=n_trades)
+    m["by_symbol"] = by_sym
+    return m
+
+
+def _synth_bootstrap(gatea_lo=0.01, delta_lo=0.005):
+    return {
+        "BASE": dict(point=0.0, ci95_lower=-0.01, ci95_upper=0.01, p_pos=0.5),
+        "GATE0": dict(point=0.0, ci95_lower=-0.01, ci95_upper=0.01, p_pos=0.5),
+        "GATEA": dict(point=0.02, ci95_lower=gatea_lo, ci95_upper=0.03, p_pos=0.95),
+        "FLIPA": dict(point=-0.05, ci95_lower=-0.09, ci95_upper=-0.01, p_pos=0.01),
+        "GATEA-BASE": dict(point=0.02, ci95_lower=0.005, ci95_upper=0.04, p_pos=0.95),
+        "GATEA-GATE0": dict(point=0.02, ci95_lower=delta_lo, ci95_upper=0.04, p_pos=0.95),
+        "n_days": 10, "n_boot": 2000,
+    }
+
+
+def _synth_cost_grid(base_counts, gate_counts, flip_counts):
+    grid = {}
+    for c in d0.COST_GRID:
+        grid[str(c)] = {}
+        for p in ["BASE", "GATE0", "GATEA", "FLIPA"]:
+            if p == "BASE":
+                nt = base_counts
+            elif p in ("GATE0", "GATEA"):
+                nt = gate_counts[c]
+            else:
+                nt = flip_counts[c]
+            row = {f: 0.0 for f in d0.COST_FIELDS}
+            row["n_decisions"] = 10
+            row["n_trades"] = nt
+            row["trade_rate"] = nt / 10.0
+            row["net_total_ATR0"] = 0.01 * nt
+            grid[str(c)][p] = row
+    return grid
+
+
+def _synth_bundle():
+    r2_metrics = {"BASE": _synth_metrics(10, 0.10), "GATE0": _synth_metrics(4, 0.05),
+                  "GATEA": _synth_metrics(4, 0.06), "FLIPA": _synth_metrics(6, -0.02)}
+    r3_metrics = {"BASE": _synth_metrics(10, -0.10), "GATE0": _synth_metrics(4, 0.01),
+                  "GATEA": _synth_metrics(4, 0.03), "FLIPA": _synth_metrics(6, -0.05)}
+    gate_counts = {0.0: 6, 0.01: 4, 0.02: 3, 0.03: 2, 0.05: 1, 0.10: 0}
+    flip_counts = {0.0: 8, 0.01: 6, 0.02: 5, 0.03: 4, 0.05: 2, 0.10: 1}
+    # cost grid .01 must equal metrics exactly -> patch .01 rows
+    def grid_for(metrics):
+        g = _synth_cost_grid(10, gate_counts, flip_counts)
+        for p in ["BASE", "GATE0", "GATEA", "FLIPA"]:
+            row = {f: metrics[p][f] for f in d0.COST_FIELDS}
+            g["0.01"][p] = row
+        return g
+
+    quint = []
+    for blk in ["TB2", "TB3"]:
+        for feat in d0.QUINTILE_FEATURES:
+            for b in range(5):
+                quint.append(dict(block=blk, feature=feat, bin=b, n=3, H1_prevalence=0.1,
+                                  harm_rate=0.5, mean_pi=-0.1))
+    r2 = dict(harm_metrics={"O0": dict(log_loss=0.6, brier=0.2, roc_auc=0.6, pr_auc=0.2),
+                            "OA": dict(log_loss=0.5, brier=0.19, roc_auc=0.62, pr_auc=0.21)},
+              payoff_metrics={"O0": dict(mse=1.0, mae=0.8, spearman=0.1),
+                              "OA": dict(mse=0.9, mae=0.7, spearman=0.2)},
+              delta_harm_logloss=dict(point=0.01, ci95_lower=0.001, ci95_upper=0.02, p_pos=0.9),
+              delta_payoff_mse=dict(point=0.01, ci95_lower=0.001, ci95_upper=0.02, p_pos=0.9),
+              n_h1_eval=10, n_h1_train=100, n_h0_train=1000,
+              metrics=r2_metrics, bootstrap=_synth_bootstrap(),
+              cost_grid=grid_for(r2_metrics), quintiles=quint,
+              quintile_edges={f: [-1.0, 0.0, 1.0] for f in d0.QUINTILE_FEATURES})
+    r3 = dict(harm_metrics={"O0": dict(log_loss=0.6, brier=0.2, roc_auc=0.6, pr_auc=0.2),
+                            "OA": dict(log_loss=0.5, brier=0.19, roc_auc=0.62, pr_auc=0.21)},
+              payoff_metrics={"O0": dict(mse=1.0, mae=0.8, spearman=0.1),
+                              "OA": dict(mse=0.9, mae=0.7, spearman=0.2)},
+              delta_harm_logloss=dict(point=0.01, ci95_lower=0.002, ci95_upper=0.02, p_pos=0.9),
+              delta_payoff_mse=dict(point=0.01, ci95_lower=0.003, ci95_upper=0.02, p_pos=0.9),
+              n_h1_eval=10, n_h1_train=100, n_h0_train=1000,
+              metrics=r3_metrics, bootstrap=_synth_bootstrap(),
+              cost_grid=grid_for(r3_metrics), quintiles=quint,
+              quintile_edges={f: [-1.0, 0.0, 1.0] for f in d0.QUINTILE_FEATURES})
+    summary = dict(
+        EXPERIMENT_NAME=d0.EXPERIMENT_NAME, EXPERIMENT_SCOPE=d0.EXPERIMENT_SCOPE,
+        base_sha=d0.BASE_SHA, run_head="deadbeef",
+        sample_artifact_sha256="a" * 64, transition_artifact_sha256="b" * 64,
+        n_all_obs=100, n_H0=90, n_H1=10, symbols=_SYMS, blocks=["TB1", "TB2", "TB3"],
+        same_block_entry_counts={"TB1": 10, "TB2": 10, "TB3": 10},
+        max_abs_atr0_owner_error=0.0,
+        A_COLS=list(d0.A_COLS), OUTCOME_BASE_NUM=d0.outcome_base_num(),
+        OUTCOME_CAT=d0.outcome_cat(), PRIMARY_COST_ATR0=d0.PRIMARY_COST_ATR0,
+        COST_GRID=list(d0.COST_GRID), BOOTSTRAP_N=2000, BOOTSTRAP_SEED=d0.BOOTSTRAP_SEED,
+        cluster_owner=d0.CLUSTER_OWNER,
+        WindowA_score_owner_max_abs_diff=0.0, WindowB_score_owner_max_abs_diff=0.0,
+        WindowA_acceleration_finite=True, WindowB_acceleration_finite=True,
+        TB2=r2, TB3=r3,
+        information_verdict=d0.determine_information_verdict(r3["delta_harm_logloss"],
+                                                             r3["delta_payoff_mse"]),
+        economic_verdict=d0.determine_economic_verdict(r2["bootstrap"], r3["bootstrap"]),
+        quintile_frozen_edges={}, known_limitations=["x"],
+    )
+    return summary
+
+
+def _write_synth(tmp):
+    summary = _synth_bundle()
+    td = Path(tmp)
+    d0._write_full_artifacts(summary, td)
+    (td / f"{d0.PREFIX}_formal_summary.json").write_text(
+        json.dumps(summary, indent=2, default=str))
+    return summary, td
+
+
+def _expect_fail(summary, td):
+    raised = None
+    try:
+        d0.validate_output_artifacts(summary, td)
+    except SystemExit as e:
+        raised = str(e)
+    assert raised is not None, "parity checker did NOT fail"
+    assert "STOP_PGM_NATIVE0D_OUTPUT_PARITY_FAIL" in raised
+
+
+# --- 84-91 + 93-100 artifact parity / mutations -------------------------
+def test_84_to_91_and_mutations():
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        summary, td = _write_synth(tmp)
+        assert d0.validate_output_artifacts(summary, td) is True
+        # row counts
+        assert len(pd.read_csv(td / f"{d0.PREFIX}_outcome_metrics.csv")) == 8
+        assert len(pd.read_csv(td / f"{d0.PREFIX}_information_bootstrap.csv")) == 4
+        assert len(pd.read_csv(td / f"{d0.PREFIX}_strategy_metrics.csv")) == 8
+        assert len(pd.read_csv(td / f"{d0.PREFIX}_economic_bootstrap.csv")) == 12
+        assert len(pd.read_csv(td / f"{d0.PREFIX}_cost_grid.csv")) == 48
+        assert len(pd.read_csv(td / f"{d0.PREFIX}_symbol_metrics.csv")) == 120
+        q = pd.read_csv(td / f"{d0.PREFIX}_acceleration_quintiles.csv")
+        assert set(q["feature"].unique()) <= set(d0.QUINTILE_FEATURES)
+
+
+def test_90_symbol_totals_close_to_strategy_totals():
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        summary, td = _write_synth(tmp)
+        sy = pd.read_csv(td / f"{d0.PREFIX}_symbol_metrics.csv")
+        for blk in ["TB2", "TB3"]:
+            for p in ["BASE", "GATE0", "GATEA", "FLIPA"]:
+                g = sy[(sy["block"] == blk) & (sy["policy"] == p)]
+                assert np.isclose(g["net_total_ATR0"].sum(),
+                                  summary[blk]["metrics"][p]["net_total_ATR0"], atol=1e-10)
+                assert int(g["trade_count"].sum()) == int(summary[blk]["metrics"][p]["n_trades"])
+
+
+_SYNTH_CACHE = None
+
+
+def synth_dir():
+    global _SYNTH_CACHE
+    if _SYNTH_CACHE is None:
+        import tempfile
+        td = Path(tempfile.mkdtemp())
+        s = _write_synth(td)[0]
+        _SYNTH_CACHE = (s, td)
+    return _SYNTH_CACHE
+
+
+def test_85_information_bootstrap_rows():
+    _, td = synth_dir()
+    assert len(pd.read_csv(td / f"{d0.PREFIX}_information_bootstrap.csv")) == 4
+
+
+def test_86_strategy_metrics_rows():
+    _, td = synth_dir()
+    assert len(pd.read_csv(td / f"{d0.PREFIX}_strategy_metrics.csv")) == 8
+
+
+def test_87_economic_bootstrap_rows():
+    _, td = synth_dir()
+    assert len(pd.read_csv(td / f"{d0.PREFIX}_economic_bootstrap.csv")) == 12
+
+
+def test_88_cost_grid_rows():
+    _, td = synth_dir()
+    assert len(pd.read_csv(td / f"{d0.PREFIX}_cost_grid.csv")) == 48
+
+
+def test_89_symbol_metrics_rows():
+    _, td = synth_dir()
+    assert len(pd.read_csv(td / f"{d0.PREFIX}_symbol_metrics.csv")) == 120
+
+
+def test_91_quintile_only_frozen_features():
+    _, td = synth_dir()
+    q = pd.read_csv(td / f"{d0.PREFIX}_acceleration_quintiles.csv")
+    assert set(q["feature"].unique()) <= set(d0.QUINTILE_FEATURES)
+    assert set(q["bin"].astype(int)) <= set(range(5))
+
+
+def test_93_mutate_outcome_stops():
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        summary, td = _write_synth(tmp)
+        p = td / f"{d0.PREFIX}_outcome_metrics.csv"
+        df = pd.read_csv(p)
+        df.loc[0, "log_loss"] = df.loc[0, "log_loss"] + 1.0
+        df.to_csv(p, index=False)
+        _expect_fail(summary, td)
+
+
+def test_94_mutate_info_bootstrap_stops():
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        summary, td = _write_synth(tmp)
+        p = td / f"{d0.PREFIX}_information_bootstrap.csv"
+        df = pd.read_csv(p)
+        df.loc[0, "point"] = df.loc[0, "point"] + 1.0
+        df.to_csv(p, index=False)
+        _expect_fail(summary, td)
+
+
+def test_95_mutate_economic_bootstrap_stops():
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        summary, td = _write_synth(tmp)
+        p = td / f"{d0.PREFIX}_economic_bootstrap.csv"
+        df = pd.read_csv(p)
+        df.loc[0, "ci95_lower"] = df.loc[0, "ci95_lower"] + 1.0
+        df.to_csv(p, index=False)
+        _expect_fail(summary, td)
+
+
+def test_96_mutate_cost_grid_stops():
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        summary, td = _write_synth(tmp)
+        p = td / f"{d0.PREFIX}_cost_grid.csv"
+        df = pd.read_csv(p)
+        m = (df["block"] == "TB2") & (df["policy"] == "GATEA") & (df["cost"] == d0.PRIMARY_COST_ATR0)
+        df.loc[m, "n_trades"] = df.loc[m, "n_trades"] + 1
+        df.to_csv(p, index=False)
+        _expect_fail(summary, td)
+
+
+def test_97_mutate_symbol_totals_stops():
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        summary, td = _write_synth(tmp)
+        p = td / f"{d0.PREFIX}_symbol_metrics.csv"
+        df = pd.read_csv(p)
+        df.loc[0, "net_total_ATR0"] = df.loc[0, "net_total_ATR0"] + 1.0
+        df.to_csv(p, index=False)
+        _expect_fail(summary, td)
+
+
+def test_98_mutate_formal_information_verdict_stops():
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        summary, td = _write_synth(tmp)
+        p = td / f"{d0.PREFIX}_formal_summary.json"
+        js = json.loads(p.read_text())
+        js["information_verdict"] = "TAMPERED"
+        p.write_text(json.dumps(js, indent=2, default=str))
+        _expect_fail(summary, td)
+
+
+def test_99_mutate_formal_economic_verdict_stops():
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        summary, td = _write_synth(tmp)
+        p = td / f"{d0.PREFIX}_formal_summary.json"
+        js = json.loads(p.read_text())
+        js["economic_verdict"] = "TAMPERED"
+        p.write_text(json.dumps(js, indent=2, default=str))
+        _expect_fail(summary, td)
+
+
+def test_100_flipa_cannot_alter_primary_verdict():
+    good2 = _synth_bootstrap()
+    good3 = _synth_bootstrap()
+    v = d0.determine_economic_verdict(good2, good3)
+    assert v == d0.VERDICT_STRINGS["ECON_SUPPORTED"]
+    # make FLIPA look catastrophic -> verdict must not change
+    bad3 = _synth_bootstrap()
+    bad3["FLIPA"] = dict(point=-9.0, ci95_lower=-9.0, ci95_upper=-8.0, p_pos=0.0)
+    assert d0.determine_economic_verdict(good2, bad3) == v
+    # and GATEA-BASE is not part of the verdict either
+    bad3b = _synth_bootstrap()
+    bad3b["GATEA-BASE"] = dict(point=-9.0, ci95_lower=-9.0, ci95_upper=-8.0, p_pos=0.0)
+    assert d0.determine_economic_verdict(good2, bad3b) == v
 
 
 # --- runner --------------------------------------------------------------
