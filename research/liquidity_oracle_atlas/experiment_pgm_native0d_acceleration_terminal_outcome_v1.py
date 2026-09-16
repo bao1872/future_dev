@@ -224,15 +224,14 @@ def assert_allowed_blocks(df: pd.DataFrame) -> None:
 # ===========================================================================
 # Trigger ONCE per block (efficiency contract)
 # ===========================================================================
-_ACC_DONE: Dict[int, bool] = {}
+_ACC_DONE: Dict[str, bool] = {}
 
 
 def build_acceleration_once(df: pd.DataFrame, tag: str) -> pd.DataFrame:
-    key = id(df)
-    if _ACC_DONE.get(key):
+    if _ACC_DONE.get(tag):
         raise SystemExit("STOP_PGM_NATIVE0D_ACCELERATION_BUILT_TWICE")
     out = add_acceleration_features(df)
-    _ACC_DONE[key] = True
+    _ACC_DONE[tag] = True
     return out
 
 
@@ -544,14 +543,30 @@ def load_prepared_frame() -> Dict[str, Any]:
 
 
 def prepare_window_windowframe(aligned: pd.DataFrame, fit: Dict[str, Any],
-                               extra_hazard_cols: Sequence[str]) -> pd.DataFrame:
-    """Attach baseline score + acceleration + hazard probability on the full aligned frame."""
+                               tag: str) -> pd.DataFrame:
+    """Attach the WINDOW-OWNED baseline PGM score, acceleration block and economic labels/scope.
+
+    p_h_UE (hazard) is NOT computed here -- it is fitted/scored per window inside _run_window.
+    """
     mc = fit["trans_samplers"][n0c.PRIMARY_TRANSITION_HEAD]
     scored = attach_baseline_score(aligned, mc)
-    scored = build_acceleration_once(scored, tag="scored")
+    scored = build_acceleration_once(scored, tag=tag)
     scored = finalize_scored_frame(scored)
     scored["same_block_entry_valid"] = compute_same_block_entry_valid(scored)
     return scored
+
+
+def verify_window_score_owner(scored: pd.DataFrame, fit: Dict[str, Any], block: str) -> float:
+    """Prove scored.score_mu on `block` is owned by this window's MC sampler."""
+    sub = scored[scored["block"] == block]
+    if len(sub) == 0:
+        raise SystemExit(f"STOP_PGM_NATIVE0D_SCORE_OWNER_PARITY_FAIL: empty block {block}")
+    mc = fit["trans_samplers"][n0c.PRIMARY_TRANSITION_HEAD]
+    expected = -np.asarray(mc.analytic_conditional_support(sub)["z_d_up_mu"], dtype=np.float64)
+    d = float(np.max(np.abs(sub["score_mu"].to_numpy(np.float64) - expected)))
+    if d > 1e-12:
+        raise SystemExit(f"STOP_PGM_NATIVE0D_SCORE_OWNER_PARITY_FAIL: {block} {d}")
+    return d
 
 
 # ===========================================================================
@@ -590,10 +605,21 @@ def run_audit_only() -> None:
     if collision:
         raise SystemExit(f"STOP_PGM_NATIVE0D_INCREMENTAL_COLUMN_COLLISION: {collision}")
 
+    print("[AUDIT] Fitting Window A samplers...", flush=True)
     fit_A = pgm.fit_samplers_for_window(pgm.WINDOWS[0], pgm.SAMPLE_PATH,
                                         pgm.TRANSITION_SAMPLE_PATH)
-    scored = prepare_window_windowframe(aligned, fit_A, n0c.U_COLS + n0c.E_COLS)
-    fin = audit_acceleration_finite(scored)
+    scored_A = prepare_window_windowframe(aligned, fit_A, "scored_A")
+    print("[AUDIT] Fitting Window B samplers...", flush=True)
+    fit_B = pgm.fit_samplers_for_window(pgm.WINDOWS[1], pgm.SAMPLE_PATH,
+                                        pgm.TRANSITION_SAMPLE_PATH)
+    scored_B = prepare_window_windowframe(aligned, fit_B, "scored_B")
+
+    dA = verify_window_score_owner(scored_A, fit_A, TB2_BLOCK)
+    dB = verify_window_score_owner(scored_B, fit_B, TB3_BLOCK)
+    print(f"[AUDIT] Window A score-owner parity (TB2) max_abs_diff={dA:.3e}")
+    print(f"[AUDIT] Window B score-owner parity (TB3) max_abs_diff={dB:.3e}")
+
+    fin = audit_acceleration_finite(scored_A)
     print(f"[AUDIT] acceleration finite={fin['all_finite']} {fin['non_finite_counts']}")
     if not fin["all_finite"]:
         raise SystemExit("STOP_PGM_NATIVE0D_ACCELERATION_NON_FINITE")
@@ -607,28 +633,27 @@ def run_audit_only() -> None:
             raise SystemExit(f"STOP_PGM_NATIVE0D_FUTURE_TOKEN: {tok}")
     print("[AUDIT] no future token: PASS")
 
-    g = scored.groupby(["symbol", "episode_id"], sort=False)["bar_t"].first()
-    first_mask = scored.index.isin(
-        scored.groupby(["symbol", "episode_id"], sort=False).head(1).index)
-    first_rows = scored[first_mask]
+    first_mask = scored_A.index.isin(
+        scored_A.groupby(["symbol", "episode_id"], sort=False).head(1).index)
+    first_rows = scored_A[first_mask]
     if not np.allclose(first_rows["a_dir_jerk_1"].to_numpy(float), 0.0, atol=1e-12):
         raise SystemExit("STOP_PGM_NATIVE0D_FIRST_ROW_JERK_NONZERO")
     print("[AUDIT] first-row acceleration zero: PASS")
 
-    # same-block entry exclusion counts
+    # same-block entry exclusion counts (row/scope identical across score frames)
     for b in ALLOWED_BLOCKS:
-        m = scored["block"] == b
+        m = scored_A["block"] == b
         raw = int(m.sum())
-        ev = int((m & scored["is_entry_valid"]).sum())
-        sb = int((m & scored["is_entry_valid"] & scored["same_block_entry_valid"]).sum())
+        ev = int((m & scored_A["is_entry_valid"]).sum())
+        sb = int((m & scored_A["is_entry_valid"] & scored_A["same_block_entry_valid"]).sum())
         print(f"[AUDIT] {b}: raw={raw} entry_valid={ev} same_block_valid={sb} excluded={ev - sb}")
 
-    # H1 sample sizes per window
-    for blk, w in [(TB2_BLOCK, pgm.WINDOWS[0]), (TB3_BLOCK, pgm.WINDOWS[1])]:
-        tr = scored[(scored["block"].isin(w["train"])) & scored["same_block_entry_valid"]
-                    & (scored["hazard"] == 1) & (scored["base_action"] != 0)]
-        ev = scored[(scored["block"] == w["eval"]) & scored["same_block_entry_valid"]
-                    & (scored["hazard"] == 1) & (scored["base_action"] != 0)]
+    # H1 sample sizes: TB2 uses Window A score frame, TB3 uses Window B score frame
+    for blk, w, sf in [(TB2_BLOCK, pgm.WINDOWS[0], scored_A), (TB3_BLOCK, pgm.WINDOWS[1], scored_B)]:
+        tr = sf[(sf["block"].isin(w["train"])) & sf["same_block_entry_valid"]
+                & (sf["hazard"] == 1) & (sf["base_action"] != 0)]
+        ev = sf[(sf["block"] == w["eval"]) & sf["same_block_entry_valid"]
+                & (sf["hazard"] == 1) & (sf["base_action"] != 0)]
         print(f"[AUDIT] window {blk}: H1 train={len(tr)} H1 eval={len(ev)}")
     print("[AUDIT] NO SCIENTIFIC VERDICT EMITTED", flush=True)
 
@@ -676,24 +701,47 @@ def _run_window(scored: pd.DataFrame, w: Dict[str, Any], n_boot: int,
     VA = compose_branch_value(p_h_UE, econ_ev["score_mu"].to_numpy(np.float64), beta0, mu1_OA)
 
     base_action = econ_ev["base_action"].to_numpy(np.float64)
+    score_mu = econ_ev["score_mu"].to_numpy(np.float64)
     r_trad = econ_ev["r_trad_OC_ATR0"].to_numpy(np.float64)
     day = econ_ev["entry_day"].to_numpy()
     sym = econ_ev["symbol"].to_numpy()
 
-    policies = {
-        "BASE": base_action,
-        "GATE0": apply_value_gate(econ_ev["score_mu"].to_numpy(np.float64), V0, PRIMARY_COST_ATR0),
-        "GATEA": apply_value_gate(econ_ev["score_mu"].to_numpy(np.float64), VA, PRIMARY_COST_ATR0),
-        "FLIPA": apply_value_flip(econ_ev["score_mu"].to_numpy(np.float64), VA, PRIMARY_COST_ATR0),
-    }
+    def policies_at(cost: float) -> Dict[str, np.ndarray]:
+        return {
+            "BASE": base_action,
+            "GATE0": apply_value_gate(score_mu, V0, cost),
+            "GATEA": apply_value_gate(score_mu, VA, cost),
+            "FLIPA": apply_value_flip(score_mu, VA, cost),
+        }
+
+    policies = policies_at(PRIMARY_COST_ATR0)
     net = {k: net_return(a, r_trad, PRIMARY_COST_ATR0) for k, a in policies.items()}
-    metrics = {k: strategy_metrics(a, r_trad, PRIMARY_COST_ATR0, day, sym) for k, a in policies.items()}
+    metrics = {k: strategy_metrics(a, r_trad, PRIMARY_COST_ATR0, day, sym)
+               for k, a in policies.items()}
     boot = economic_bootstrap(day, net, n_boot=n_boot)
 
+    # Cost grid: gates MUST be recomputed at each cost (the threshold IS the cost).
     cost_grid = {}
     for c in COST_GRID:
-        cost_grid[str(c)] = {
-            k: strategy_metrics(a, r_trad, c, day, sym) for k, a in policies.items()}
+        pol_c = policies_at(c)
+        cost_grid[str(c)] = {k: strategy_metrics(a, r_trad, c, day, sym)
+                             for k, a in pol_c.items()}
+
+    grid_primary = cost_grid[str(PRIMARY_COST_ATR0)]
+    for k in policies:
+        for f in ["n_trades", "trade_rate", "gross_total_ATR0", "net_total_ATR0",
+                  "net_EV_per_decision", "profit_factor"]:
+            if not np.isclose(grid_primary[k][f], metrics[k][f], rtol=0.0, atol=1e-12,
+                              equal_nan=True):
+                raise SystemExit("STOP_PGM_NATIVE0D_PRIMARY_COST_GRID_PARITY_FAIL")
+
+    for k in ["GATE0", "GATEA", "FLIPA"]:
+        counts = [cost_grid[str(c)][k]["n_trades"] for c in COST_GRID]
+        if any(counts[i + 1] > counts[i] for i in range(len(counts) - 1)):
+            raise SystemExit(f"STOP_PGM_NATIVE0D_COST_GRID_MONOTONICITY_FAIL: {k} {counts}")
+    base_counts = [cost_grid[str(c)]["BASE"]["n_trades"] for c in COST_GRID]
+    if len(set(base_counts)) != 1:
+        raise SystemExit(f"STOP_PGM_NATIVE0D_COST_GRID_MONOTONICITY_FAIL: BASE {base_counts}")
 
     return dict(harm_metrics=dict(O0=m0, OA=mA), payoff_metrics=dict(O0=p0, OA=pA),
                 delta_harm_logloss=d_ll, delta_payoff_mse=d_mse,
@@ -710,14 +758,24 @@ def run_smoke_test() -> None:
     t0 = time.perf_counter()
     prep = load_prepared_frame()
     aligned = prep["aligned"]
+    print_reuse_map()
+    print("[SMOKE] Fitting Window A samplers...", flush=True)
     fit_A = pgm.fit_samplers_for_window(pgm.WINDOWS[0], pgm.SAMPLE_PATH,
                                         pgm.TRANSITION_SAMPLE_PATH)
-    scored = prepare_window_windowframe(aligned, fit_A, n0c.U_COLS + n0c.E_COLS)
-    print_reuse_map()
+    scored_A = prepare_window_windowframe(aligned, fit_A, "scored_A")
+    print("[SMOKE] Fitting Window B samplers...", flush=True)
+    fit_B = pgm.fit_samplers_for_window(pgm.WINDOWS[1], pgm.SAMPLE_PATH,
+                                        pgm.TRANSITION_SAMPLE_PATH)
+    scored_B = prepare_window_windowframe(aligned, fit_B, "scored_B")
 
-    for blk, w in [(TB2_BLOCK, pgm.WINDOWS[0]), (TB3_BLOCK, pgm.WINDOWS[1])]:
+    dA = verify_window_score_owner(scored_A, fit_A, TB2_BLOCK)
+    dB = verify_window_score_owner(scored_B, fit_B, TB3_BLOCK)
+    print(f"[SMOKE] score-owner parity: WindowA(TB2)={dA:.3e} WindowB(TB3)={dB:.3e}")
+
+    for blk, w, sf in [(TB2_BLOCK, pgm.WINDOWS[0], scored_A),
+                       (TB3_BLOCK, pgm.WINDOWS[1], scored_B)]:
         print(f"[SMOKE] --- window {blk} ---")
-        r = _run_window(scored, w, n_boot=SMOKE_BOOTSTRAP_N, eval_cap=SMOKE_EVAL_CAP)
+        r = _run_window(sf, w, n_boot=SMOKE_BOOTSTRAP_N, eval_cap=SMOKE_EVAL_CAP)
         print(f"  H1 train={r['n_h1_train']} eval={r['n_h1_eval']} H0 train={r['n_h0_train']}")
         print(f"  harm O0 LL={r['harm_metrics']['O0']['log_loss']:.6f} "
               f"OA LL={r['harm_metrics']['OA']['log_loss']:.6f}")
@@ -740,6 +798,9 @@ def run_smoke_test() -> None:
         for k in ["GATEA-BASE", "GATEA-GATE0"]:
             print(f"    {k}: point={r['bootstrap'][k]['point']:.6f} "
                   f"CI=[{r['bootstrap'][k]['ci95_lower']:.6f}, {r['bootstrap'][k]['ci95_upper']:.6f}]")
+        for p in ["BASE", "GATE0", "GATEA", "FLIPA"]:
+            row = " ".join(f"{c:g}={r['cost_grid'][str(c)][p]['n_trades']}" for c in COST_GRID)
+            print(f"    cost-grid n_trades {p}: {row}")
     print("[SMOKE] SMOKE ONLY / NO SCIENTIFIC VERDICT", flush=True)
     print(f"[SMOKE COMPLETE] {time.perf_counter() - t0:.2f}s", flush=True)
 

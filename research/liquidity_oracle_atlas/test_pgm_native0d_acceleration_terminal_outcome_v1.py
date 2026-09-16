@@ -35,7 +35,10 @@ import research.liquidity_oracle_atlas.experiment_dynamic_pgm1c_free_run_rollout
 
 _PREP = None
 _FIT_A = None
-_SCORED = None
+_FIT_B = None
+_SCORED_A = None
+_SCORED_B = None
+_WIN_A = None
 
 
 def prep():
@@ -53,12 +56,37 @@ def fit_A():
     return _FIT_A
 
 
+def fit_B():
+    global _FIT_B
+    if _FIT_B is None:
+        _FIT_B = pgm.fit_samplers_for_window(pgm.WINDOWS[1], pgm.SAMPLE_PATH,
+                                             pgm.TRANSITION_SAMPLE_PATH)
+    return _FIT_B
+
+
+def scored_A():
+    global _SCORED_A
+    if _SCORED_A is None:
+        _SCORED_A = d0.prepare_window_windowframe(prep()["aligned"], fit_A(), "test_scored_A")
+    return _SCORED_A
+
+
+def scored_B():
+    global _SCORED_B
+    if _SCORED_B is None:
+        _SCORED_B = d0.prepare_window_windowframe(prep()["aligned"], fit_B(), "test_scored_B")
+    return _SCORED_B
+
+
 def scored():
-    global _SCORED
-    if _SCORED is None:
-        _SCORED = d0.prepare_window_windowframe(prep()["aligned"], fit_A(),
-                                                n0c.U_COLS + n0c.E_COLS)
-    return _SCORED
+    return scored_A()
+
+
+def win_A_run():
+    global _WIN_A
+    if _WIN_A is None:
+        _WIN_A = d0._run_window(scored_A(), d0.pgm.WINDOWS[0], n_boot=50, eval_cap=300)
+    return _WIN_A
 
 
 def synth(n=4, seed=0):
@@ -512,6 +540,159 @@ def test_55_no_gbdt_rl_v2():
     for tok in ["xgboost", "lightgbm", "q_learning", "reinforcement_learning",
                 "stable_baselines", "market_regime_v2", "torch"]:
         assert tok not in text
+
+
+# --- 56/57 score owner parity -------------------------------------------
+def test_56_window_a_score_owner_parity():
+    d = d0.verify_window_score_owner(scored_A(), fit_A(), "TB2")
+    assert d <= 1e-12, d
+
+
+def test_57_window_b_score_owner_parity():
+    d = d0.verify_window_score_owner(scored_B(), fit_B(), "TB3")
+    assert d <= 1e-12, d
+
+
+# --- 58 fake A/B samplers produce distinct score ------------------------
+def _synth_aligned(n=3):
+    return pd.DataFrame(dict(
+        symbol=["X"] * n, episode_id=["E"] * n, block=["TB1"] * n,
+        bar_t=np.arange(10, 10 + n), start_bar=[10] * n, hazard=[0] * n,
+        path_last_return_R=np.full(n, 0.1), path_current_bar_range_R=np.full(n, 0.5),
+        e_local_eff_3=np.full(n, 0.6), r_trad_OC_ATR0=np.full(n, 0.01),
+        entry_day=pd.to_datetime(["2026-01-01"] * n),
+        decision_day=pd.to_datetime(["2026-01-01"] * n),
+    ))
+
+
+class _FakeMC:
+    def __init__(self, mu):
+        self.mu = mu
+
+    def analytic_conditional_support(self, df):
+        return {"z_d_up_mu": np.full(len(df), self.mu)}
+
+
+def test_58_fake_ab_samplers_distinct_score():
+    fit_a = {"trans_samplers": {n0c.PRIMARY_TRANSITION_HEAD: _FakeMC(-1.0)}}
+    fit_b = {"trans_samplers": {n0c.PRIMARY_TRANSITION_HEAD: _FakeMC(-2.0)}}
+    df = _synth_aligned()
+    sa = d0.prepare_window_windowframe(df, fit_a, "fake_a")
+    sb = d0.prepare_window_windowframe(df, fit_b, "fake_b")
+    assert np.allclose(sa["score_mu"].to_numpy(float), 1.0)
+    assert np.allclose(sb["score_mu"].to_numpy(float), 2.0)
+
+
+# --- 59/60 non-vacuous routing ------------------------------------------
+def test_59_tb3_must_consume_scored_b():
+    fb = fit_B()
+    mc = fb["trans_samplers"][n0c.PRIMARY_TRANSITION_HEAD]
+    subB = scored_B()
+    subB = subB[subB["block"] == "TB3"]
+    exp = -np.asarray(mc.analytic_conditional_support(subB)["z_d_up_mu"], np.float64)
+    assert np.max(np.abs(subB["score_mu"].to_numpy(float) - exp)) <= 1e-12
+    subA = scored_A()
+    subA = subA[subA["block"] == "TB3"]
+    # Window A's score on TB3 is NOT the Window B owner -> mis-routing would be detectable
+    assert not np.allclose(subA["score_mu"].to_numpy(float), exp, atol=1e-9)
+
+
+def test_60_tb2_must_consume_scored_a():
+    fa = fit_A()
+    mc = fa["trans_samplers"][n0c.PRIMARY_TRANSITION_HEAD]
+    subA = scored_A()
+    subA = subA[subA["block"] == "TB2"]
+    exp = -np.asarray(mc.analytic_conditional_support(subA)["z_d_up_mu"], np.float64)
+    assert np.max(np.abs(subA["score_mu"].to_numpy(float) - exp)) <= 1e-12
+    subB = scored_B()
+    subB = subB[subB["block"] == "TB2"]
+    assert not np.allclose(subB["score_mu"].to_numpy(float), exp, atol=1e-9)
+
+
+# --- 61/62 audit + smoke fit A and B separately -------------------------
+def test_61_audit_fits_a_and_b_separately():
+    src = inspect.getsource(d0.run_audit_only)
+    assert "pgm.WINDOWS[0]" in src and "pgm.WINDOWS[1]" in src
+    assert "scored_A" in src and "scored_B" in src
+
+
+def test_62_smoke_fits_a_and_b_separately():
+    src = inspect.getsource(d0.run_smoke_test)
+    assert "pgm.WINDOWS[0]" in src and "pgm.WINDOWS[1]" in src
+    assert "scored_A" in src and "scored_B" in src
+
+
+# --- 63/64 production fit exactly once per window -----------------------
+def test_63_window_a_fit_once():
+    src = inspect.getsource(d0.run_smoke_test)
+    assert src.count("fit_samplers_for_window(pgm.WINDOWS[0]") == 1
+
+
+def test_64_window_b_fit_once():
+    src = inspect.getsource(d0.run_smoke_test)
+    assert src.count("fit_samplers_for_window(pgm.WINDOWS[1]") == 1
+
+
+# --- 65/66/67 cost grid recomputes gates ---------------------------------
+def test_65_gate0_recomputed_at_cost():
+    sm = np.ones(4)
+    V = np.array([0.005, 0.015, 0.025, 0.06])
+    counts = [int((d0.apply_value_gate(sm, V, c) != 0).sum())
+              for c in [0.01, 0.02, 0.05, 0.10]]
+    assert counts == [3, 2, 1, 0]
+
+
+def test_66_gatea_recomputed_at_cost():
+    sm = np.array([1.0, -1.0, 1.0, -1.0])
+    VA = np.array([0.005, 0.015, 0.025, 0.06])
+    counts = [int((d0.apply_value_gate(sm, VA, c) != 0).sum())
+              for c in [0.01, 0.02, 0.05, 0.10]]
+    assert counts == [3, 2, 1, 0]
+
+
+def test_67_flipa_recomputed_at_cost():
+    sm = np.ones(4)
+    VA = np.array([0.005, -0.015, 0.025, -0.06])
+    counts = [int((d0.apply_value_flip(sm, VA, c) != 0).sum())
+              for c in [0.01, 0.02, 0.05, 0.10]]
+    assert counts == [3, 2, 1, 0]
+
+
+# --- 68 primary .01 grid parity -----------------------------------------
+def test_68_primary_cost_grid_parity():
+    r = win_A_run()
+    g = r["cost_grid"][str(d0.PRIMARY_COST_ATR0)]
+    for k in ["BASE", "GATE0", "GATEA", "FLIPA"]:
+        for f in ["n_trades", "trade_rate", "gross_total_ATR0", "net_total_ATR0",
+                  "net_EV_per_decision", "profit_factor"]:
+            assert np.isclose(g[k][f], r["metrics"][k][f], rtol=0, atol=1e-12,
+                              equal_nan=True), (k, f)
+
+
+# --- 69/70/71/72 monotonic trade counts ---------------------------------
+def _cost_counts(pol):
+    r = win_A_run()
+    return [r["cost_grid"][str(c)][pol]["n_trades"] for c in d0.COST_GRID]
+
+
+def test_69_gate0_trade_count_non_increasing():
+    c = _cost_counts("GATE0")
+    assert all(c[i + 1] <= c[i] for i in range(len(c) - 1)), c
+
+
+def test_70_gatea_trade_count_non_increasing():
+    c = _cost_counts("GATEA")
+    assert all(c[i + 1] <= c[i] for i in range(len(c) - 1)), c
+
+
+def test_71_flipa_trade_count_non_increasing():
+    c = _cost_counts("FLIPA")
+    assert all(c[i + 1] <= c[i] for i in range(len(c) - 1)), c
+
+
+def test_72_base_trade_count_invariant():
+    c = _cost_counts("BASE")
+    assert len(set(c)) == 1, c
 
 
 # --- runner --------------------------------------------------------------
