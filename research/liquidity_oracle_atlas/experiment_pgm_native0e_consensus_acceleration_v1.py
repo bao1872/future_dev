@@ -191,21 +191,31 @@ def fit_rank_maps(train: pd.DataFrame) -> Dict[str, np.ndarray]:
 
 
 def empirical_rank(values, ref: np.ndarray) -> np.ndarray:
+    """Empirical rank in (-1, 1). NaN input -> NaN output (never mapped to a high rank)."""
     values = np.asarray(values, float)
-    k = np.searchsorted(ref, values, side="right")
+    out = np.full(len(values), np.nan)
+    finite = np.isfinite(values)
+    if not finite.any():
+        return out
+    k = np.searchsorted(ref, values[finite], side="right")
     u = (k + 0.5) / (len(ref) + 1.0)
-    return 2.0 * u - 1.0
+    out[finite] = 2.0 * u - 1.0
+    return out
 
 
 def attach_consensus_score(df: pd.DataFrame, rank_maps: Dict[str, np.ndarray]) -> pd.DataFrame:
-    """Mean of the 4 empirical ranks -> consensus_score in [-1, 1]. Equal weight."""
+    """Mean of the 4 empirical ranks -> consensus_score in [-1, 1]. Equal weight.
+
+    NaN contract: any component rank NaN -> consensus_score NaN (no skipna).
+    """
     x = df.copy()
     rank_cols = []
     for col in CONSENSUS_RAW:
         rc = f"{col}_rank"
         x[rc] = empirical_rank(x[col].to_numpy(float), rank_maps[col])
         rank_cols.append(rc)
-    x["consensus_score"] = x[rank_cols].mean(axis=1)
+    rank_matrix = x[rank_cols].to_numpy(float)
+    x["consensus_score"] = np.mean(rank_matrix, axis=1)
     return x
 
 
@@ -232,9 +242,31 @@ def attach_primary_acceleration(df: pd.DataFrame) -> pd.DataFrame:
     return x
 
 
+def primary_eligibility_mask(x: pd.DataFrame) -> np.ndarray:
+    """Exact primary-sample eligibility, reused for rank-map training, tercile
+    training, predictive training and primary-sample construction.
+
+    same_block_entry_valid & direction_stable & consensus_eligible &
+    (base_action != 0) & isfinite(pi)
+    """
+    return (
+        x["same_block_entry_valid"].to_numpy(bool)
+        & x["direction_stable"].to_numpy(bool)
+        & x["consensus_eligible"].to_numpy(bool)
+        & (x["base_action"].to_numpy(float) != 0)
+        & np.isfinite(x["pi"].to_numpy(float))
+    )
+
+
 def prepare_consensus(scored: pd.DataFrame, train_blocks: List[str]) -> Tuple[pd.DataFrame, Dict[str, np.ndarray]]:
     x = add_consensus_primitives(scored)
-    maps = fit_rank_maps(x[x["block"].isin(train_blocks)])
+    # rank-map reference must come ONLY from train-block, PRIMARY-ELIGIBLE rows.
+    # Ineligible rows (no complete C_{t-1}, zero base action, non-finite pi) must
+    # NOT move the empirical ranks / terciles.
+    train_block_mask = x["block"].isin(train_blocks).to_numpy(bool)
+    elig = primary_eligibility_mask(x)
+    train_ref = x[train_block_mask & elig]
+    maps = fit_rank_maps(train_ref)
     x = attach_consensus_score(x, maps)
     x = attach_primary_acceleration(x)
     return x, maps
@@ -272,9 +304,13 @@ def _cells_with_group(sub: pd.DataFrame, group_col: str) -> Dict[str, Dict[str, 
             m = (gv == grp) & (acc == a)
             key = f"{grp}_{'ACCEL' if a else 'OFF'}"
             n = int(m.sum())
+            mp = float(np.mean(pi[m])) if n else float("nan")
             out[key] = dict(
                 n=n,
-                mean_pi=float(np.mean(pi[m])) if n else float("nan"),
+                mean_pi=mp,
+                # reporting-only economic fields; do NOT enter DID / verdict
+                gross_EV=mp,
+                net_EV_at_0p01=(mp - PRIMARY_COST_ATR0) if n else float("nan"),
                 harm_rate=float(np.mean(harm[m])) if n else float("nan"),
                 H1_prevalence=float(np.mean(haz[m])) if n else float("nan"),
             )
@@ -442,11 +478,12 @@ def _predict_ridge(train: pd.DataFrame, eval_: pd.DataFrame, num_cols, cat_cols,
     pipe.fit(train[num_cols + cat_cols], train[target].to_numpy(float))
     pred = np.asarray(pipe.predict(eval_[num_cols + cat_cols]), float)
     y = eval_[target].to_numpy(float)
+    sqerr = (pred - y) ** 2                     # row-level, same order as eval_
     return pred, dict(
-        mse=float(np.mean((pred - y) ** 2)),
+        mse=float(np.mean(sqerr)),
         mae=float(np.mean(np.abs(pred - y))),
         spearman=float(scipy.stats.spearmanr(pred, y).statistic) if len(pred) > 2 else 0.0,
-    )
+    ), sqerr
 
 
 def _predict_logistic(train: pd.DataFrame, eval_: pd.DataFrame, num_cols, cat_cols, target: str):
@@ -455,11 +492,44 @@ def _predict_logistic(train: pd.DataFrame, eval_: pd.DataFrame, num_cols, cat_co
     p = np.asarray(pipe.predict_proba(eval_[num_cols + cat_cols])[:, 1], float)
     y = eval_[target].to_numpy(int)
     pc = np.clip(p, 1e-15, 1.0 - 1e-15)
-    ll = float(np.mean(-(y * np.log(pc) + (1 - y) * np.log(1 - pc))))
+    row_logloss = -(y * np.log(pc) + (1 - y) * np.log(1 - pc))   # row-level
     brier = float(np.mean((p - y) ** 2))
     roc = float(sklearn.metrics.roc_auc_score(y, p)) if len(np.unique(y)) > 1 else 0.5
     prauc = float(sklearn.metrics.average_precision_score(y, p)) if len(np.unique(y)) > 1 else float(np.mean(y))
-    return p, dict(log_loss=ll, brier=brier, roc_auc=roc, pr_auc=prauc)
+    return p, dict(log_loss=float(np.mean(row_logloss)), brier=brier, roc_auc=roc, pr_auc=prauc), row_logloss
+
+
+def paired_day_loss_bootstrap(entry_day, loss0, loss1, n_boot: int = BOOTSTRAP_N,
+                             seed: int = BOOTSTRAP_SEED) -> Dict[str, float]:
+    """Entry-day paired bootstrap of the predictive increment.
+
+    delta = loss0 - loss1  (positive => M1 with interaction IMPROVES over M0).
+    Pre-aggregate to per-day sum_delta / count, then multinomial-resample DAYS
+    only so every within-day row shares the same resampled weight.
+
+    point = mean(delta); returns point / ci95 / P(delta > 0).
+    """
+    day = np.asarray(entry_day)
+    days = np.unique(day)
+    D = len(days)
+    didx = {d: i for i, d in enumerate(days)}
+    pos = np.array([didx[x] for x in day])
+    delta = np.asarray(loss0, float) - np.asarray(loss1, float)
+
+    S = np.zeros(D)
+    C = np.zeros(D)
+    for i, p in enumerate(pos):
+        S[p] += delta[i]
+        C[p] += 1.0
+
+    point = float(np.mean(delta))
+    rng = np.random.default_rng(seed)
+    dist = np.empty(n_boot)
+    for b in range(n_boot):
+        w = rng.multinomial(D, np.full(D, 1.0 / D))
+        denom = w @ C
+        dist[b] = (w @ S) / denom if denom > 0 else float("nan")
+    return _summ(point, dist)
 
 
 def m0_num() -> List[str]:
@@ -508,7 +578,8 @@ def age_zero_diagnostic(sub: pd.DataFrame) -> Dict[str, float]:
 # ===========================================================================
 # Fixed psychology economic diagnostic (does NOT drive verdict)
 # ===========================================================================
-def psych_gate_diagnostic(eval_sub: pd.DataFrame, cost: float = PRIMARY_COST_ATR0) -> Dict[str, Any]:
+def psych_gate_diagnostic(eval_sub: pd.DataFrame, cost: float = PRIMARY_COST_ATR0,
+                          n_boot: int = BOOTSTRAP_N, seed: int = BOOTSTRAP_SEED) -> Dict[str, Any]:
     base = eval_sub["base_action"].to_numpy(float)
     high = eval_sub["consensus_group"].to_numpy() == "HIGH"
     accel = eval_sub["accel_positive"].to_numpy(bool)
@@ -523,7 +594,8 @@ def psych_gate_diagnostic(eval_sub: pd.DataFrame, cost: float = PRIMARY_COST_ATR
     gate_m = d0.strategy_metrics(gate, r, cost, day, sym)
 
     net = {"BASE": d0.net_return(base, r, cost), "PSYCH_GATE": d0.net_return(gate, r, cost)}
-    boot = d0.economic_bootstrap(day, net, n_boot=BOOTSTRAP_N, seed=BOOTSTRAP_SEED)
+    # n_boot is owned by the caller (200 smoke, 2000 formal future); never fixed here.
+    boot = d0.economic_bootstrap(day, net, n_boot=n_boot, seed=seed)
 
     # explicit paired day bootstrap for the policy difference
     ndiff = net["PSYCH_GATE"] - net["BASE"]
@@ -536,9 +608,9 @@ def psych_gate_diagnostic(eval_sub: pd.DataFrame, cost: float = PRIMARY_COST_ATR
     for i, p in enumerate(pos):
         S[p] += ndiff[i]
         Nc[p] += 1.0
-    rng = np.random.default_rng(BOOTSTRAP_SEED)
-    dist = np.empty(BOOTSTRAP_N)
-    for b in range(BOOTSTRAP_N):
+    rng = np.random.default_rng(seed)
+    dist = np.empty(n_boot)
+    for b in range(n_boot):
         w = rng.multinomial(D, np.full(D, 1.0 / D))
         denom = w @ Nc
         dist[b] = (w @ S) / denom if denom > 0 else float("nan")
@@ -564,8 +636,14 @@ def determine_psych_verdict(did_pi: Dict[str, float], dlow_pi: Dict[str, float],
 def run_window_complete(scored: pd.DataFrame, w: Dict[str, Any], n_boot: int,
                          eval_cap: Optional[int] = None) -> Tuple[Dict[str, Any], Tuple[float, float], Dict[str, np.ndarray]]:
     x, maps = prepare_consensus(scored, w["train"])
-    cs_train = x[x["block"].isin(w["train"])]["consensus_score"].to_numpy(float)
-    terciles = compute_consensus_terciles(cs_train)
+
+    # terciles trained ONLY on train-block PRIMARY-ELIGIBLE rows (same universe
+    # as the rank-map reference). n_rank_train == n_tercile_train == n_train_primary.
+    train_block_mask = x["block"].isin(w["train"]).to_numpy(bool)
+    elig = primary_eligibility_mask(x)
+    train_primary = x[train_block_mask & elig]
+    n_rank_train = int(len(train_primary))
+    terciles = compute_consensus_terciles(train_primary["consensus_score"].to_numpy(float))
     sub = build_primary_sample_from_scored(x, terciles)
 
     ev_full = sub[sub["block"] == w["eval"]].copy()
@@ -580,12 +658,19 @@ def run_window_complete(scored: pd.DataFrame, w: Dict[str, Any], n_boot: int,
     boot = bootstrap_did(ev, n_boot=n_boot, seed=BOOTSTRAP_SEED)
 
     tr = sub[sub["block"].isin(w["train"])].copy()
-    pay0, m0m = _predict_ridge(tr, ev, m0_num(), PRED_CAT, "pi")
-    pay1, m1m = _predict_ridge(tr, ev, m1_num(), PRED_CAT, "pi")
-    h0p, h0m = _predict_logistic(tr, ev, m0_num(), PRED_CAT, "harm_flag")
-    h1p, h1m = _predict_logistic(tr, ev, m1_num(), PRED_CAT, "harm_flag")
+    pay0, m0m, sq0 = _predict_ridge(tr, ev, m0_num(), PRED_CAT, "pi")
+    pay1, m1m, sq1 = _predict_ridge(tr, ev, m1_num(), PRED_CAT, "pi")
+    h0p, h0m, ll0 = _predict_logistic(tr, ev, m0_num(), PRED_CAT, "harm_flag")
+    h1p, h1m, ll1 = _predict_logistic(tr, ev, m1_num(), PRED_CAT, "harm_flag")
 
-    psych = psych_gate_diagnostic(ev)
+    # predictive falsification via ENTRY-DAY PAIRED bootstrap (not point estimate alone)
+    payoff_boot = paired_day_loss_bootstrap(ev["entry_day"].to_numpy(), sq0, sq1,
+                                           n_boot=n_boot, seed=BOOTSTRAP_SEED)
+    harm_boot = paired_day_loss_bootstrap(ev["entry_day"].to_numpy(), ll0, ll1,
+                                         n_boot=n_boot, seed=BOOTSTRAP_SEED)
+
+    # n_boot ownership: smoke=200, formal future=2000 -- passed through, never fixed here.
+    psych = psych_gate_diagnostic(ev, PRIMARY_COST_ATR0, n_boot, BOOTSTRAP_SEED)
     comp = component_diagnostics(ev, maps)
     age = age_zero_diagnostic(ev)
 
@@ -593,8 +678,9 @@ def run_window_complete(scored: pd.DataFrame, w: Dict[str, Any], n_boot: int,
         cells=cells, effects=effects, bootstrap=boot,
         payoff_m0=m0m, payoff_m1=m1m, delta_mse=m0m["mse"] - m1m["mse"],
         harm_m0=h0m, harm_m1=h1m, delta_logloss=h0m["log_loss"] - h1m["log_loss"],
+        payoff_bootstrap=payoff_boot, harm_bootstrap=harm_boot,
         psych=psych, component=comp, age_zero=age,
-        n_train=len(tr), n_eval=len(ev),
+        n_rank_train=n_rank_train, n_train=len(tr), n_eval=len(ev),
     ), terciles, maps
 
 
@@ -628,6 +714,12 @@ def require_full_authorization() -> None:
 # Modes
 # ===========================================================================
 def run_audit_only() -> None:
+    # Round-1.1 ACK: prior audit path at SHA 33a338f2df8148a835a7d43215ce296cd76407cd
+    # prematurely evaluated full TB2/TB3 exploratory metrics (DID / payoff / harm /
+    # PSYCH_GATE). Those numbers are NOT used to alter CONSENSUS_RAW, the 4 primitive
+    # formulas, acceleration, the threshold rule, or the verdict rule. 0E remains
+    # EXPLORATORY. Audit-only is GOVERNANCE ONLY: it never calls run_window_complete,
+    # never computes DID / Ridge / Logistic / PSYCH_GATE, and emits no scientific metrics.
     print("=" * 60, flush=True)
     print("PGM-NATIVE-0E: AUDIT-ONLY", flush=True)
     print("=" * 60, flush=True)
@@ -664,53 +756,42 @@ def run_audit_only() -> None:
         raise SystemExit("STOP_PGM_NATIVE0E_ACCELERATION_NON_FINITE")
     print(f"[AUDIT] WindowA/B acceleration finite={finA['all_finite']}/{finB['all_finite']}")
 
-    xA, _ = prepare_consensus(scored_A, pgm.WINDOWS[0]["train"])
-    eligA = xA["consensus_eligible"].to_numpy(bool)
-    for c in CONSENSUS_RAW + ["consensus_score"]:
-        v = xA[c].to_numpy(float)
-        if np.any(np.isinf(v)):
-            raise SystemExit(f"STOP_PGM_NATIVE0E_CONSENSUS_INF:{c}")
-        # ineligible rows (no t-1 lag / insufficient prior) are NaN by design;
-        # only the consensus-eligible rows must be finite.
-        if not np.all(np.isfinite(v[eligA])):
-            raise SystemExit(f"STOP_PGM_NATIVE0E_CONSENSUS_NON_FINITE:{c}")
-    cs = xA[xA["block"].isin(pgm.WINDOWS[0]["train"])]["consensus_score"].to_numpy(float)
-    ql, qh = compute_consensus_terciles(cs)
-    print(f"[AUDIT] Window A train consensus terciles q_low={ql:.4f} q_high={qh:.4f}")
+    # consensus finite / eligibility / rank / tercile / sample-count audit (governance only)
+    for blk, scored, tb in [(TB2_BLOCK, scored_A, pgm.WINDOWS[0]),
+                            (TB3_BLOCK, scored_B, pgm.WINDOWS[1])]:
+        x, _ = prepare_consensus(scored, tb["train"])
+        elig = primary_eligibility_mask(x)
+        for c in CONSENSUS_RAW + ["consensus_score"]:
+            v = x[c].to_numpy(float)
+            if np.any(np.isinf(v)):
+                raise SystemExit(f"STOP_PGM_NATIVE0E_CONSENSUS_INF:{c}")
+            # ineligible rows are NaN by design; only PRIMARY-eligible rows must be finite
+            if not np.all(np.isfinite(v[elig])):
+                raise SystemExit(f"STOP_PGM_NATIVE0E_CONSENSUS_NON_FINITE:{c}")
+        tbm = x["block"].isin(tb["train"]).to_numpy(bool)
+        train_primary = x[tbm & elig]
+        n_rank_train = int(len(train_primary))
+        ql, qh = compute_consensus_terciles(train_primary["consensus_score"].to_numpy(float))
+        sub = build_primary_sample_from_scored(x, (ql, qh))
+        tr_primary = sub[sub["block"].isin(tb["train"])]
+        ev_primary = sub[sub["block"] == tb["eval"]]
+        print(f"[AUDIT] {blk}: n_rank_train={n_rank_train} n_tercile_train={n_rank_train} "
+              f"q_low={ql:.4f} q_high={qh:.4f}")
+        print(f"[AUDIT] {blk}: n_train_primary={len(tr_primary)} n_eval_primary={len(ev_primary)}")
+        cells = _cells_with_group(ev_primary, "consensus_group")
+        for k in PRIMARY_CELLS:
+            c = cells[k]
+            print(f"[AUDIT]   {k}: n={c['n']} mean_pi={c['mean_pi']:.5f} "
+                  f"gross_EV={c['gross_EV']:.5f} net_EV_0p01={c['net_EV_at_0p01']:.5f}")
+        assert_min_cells(ev_primary)  # MIN_CELL_N gate on the real eval (pre-cap)
+        print(f"[AUDIT] {blk}: MIN_CELL_N gate PASS (>= {MIN_CELL_N})")
 
     # consensus causal audit: current-row mutation must NOT change C(t-1)
     if not _causal_prefix_invariant():
         raise SystemExit("STOP_PGM_NATIVE0E_FEATURE_FUTURE_DEPENDENCE")
     print("[AUDIT] consensus causal (lag-1) audit: PASS")
 
-    rA, _, _ = run_window_complete(scored_A, pgm.WINDOWS[0], n_boot=BOOTSTRAP_N)
-    rB, _, _ = run_window_complete(scored_B, pgm.WINDOWS[1], n_boot=BOOTSTRAP_N)
-
-    for blk, res in [(TB2_BLOCK, rA), (TB3_BLOCK, rB)]:
-        print(f"[AUDIT] --- {blk} ---")
-        print(f"  n_train_primary={res['n_train']} n_eval_primary={res['n_eval']}")
-        for k in PRIMARY_CELLS:
-            c = res["cells"][k]
-            print(f"  {k}: n={c['n']} mean_pi={c['mean_pi']:.5f} "
-                  f"harm_rate={c['harm_rate']:.4f} H1prev={c['H1_prevalence']:.4f}")
-        e = res["effects"]
-        print(f"  Delta_LOW_pi={e['Delta_LOW_pi']:.6f} Delta_HIGH_pi={e['Delta_HIGH_pi']:.6f} "
-              f"DID_pi={e['DID_pi']:.6f}")
-        b = res["bootstrap"]
-        print(f"  DID_pi CI=[{b['DID_pi']['ci95_lower']:.6f}, {b['DID_pi']['ci95_upper']:.6f}] "
-              f"p_pos={b['DID_pi']['p_pos']:.3f}")
-        print(f"  DID_harm={e['DID_harm']:.6f} DID_H1={e['DID_H1']:.6f}")
-        print(f"  payoff M0 MSE={res['payoff_m0']['mse']:.5f} M1 MSE={res['payoff_m1']['mse']:.5f} "
-              f"delta_MSE={res['delta_mse']:.6f}")
-        print(f"  harm M0 LL={res['harm_m0']['log_loss']:.5f} M1 LL={res['harm_m1']['log_loss']:.5f} "
-              f"delta_LL={res['delta_logloss']:.6f}")
-        print(f"  PSYCH_GATE netEV/dec={res['psych']['PSYCH_GATE']['net_EV_per_decision']:.6f} "
-              f"BASE={res['psych']['BASE']['net_EV_per_decision']:.6f}")
-        pg = res['psych']['bootstrap'].get('PSYCH_GATE-BASE')
-        if pg:
-            print(f"  PSYCH_GATE-BASE netEV point={pg['point']:.6f} "
-                  f"CI=[{pg['ci95_lower']:.6f},{pg['ci95_upper']:.6f}]")
-    print("[AUDIT] NO SCIENTIFIC VERDICT EMITTED", flush=True)
+    print("[AUDIT] AUDIT ONLY / NO SCIENTIFIC METRICS / NO SCIENTIFIC VERDICT EMITTED", flush=True)
 
 
 def run_smoke_test() -> None:
@@ -741,8 +822,14 @@ def run_smoke_test() -> None:
         print(f"  Delta_HIGH_pi CI=[{b['Delta_HIGH_pi']['ci95_lower']:.6f},{b['Delta_HIGH_pi']['ci95_upper']:.6f}]")
         print(f"  payoff M0 MSE={r['payoff_m0']['mse']:.5f} M1={r['payoff_m1']['mse']:.5f} "
               f"delta_MSE={r['delta_mse']:.6f}")
+        print(f"  Delta_MSE point={r['delta_mse']:.6f} "
+              f"CI=[{r['payoff_bootstrap']['ci95_lower']:.6f},{r['payoff_bootstrap']['ci95_upper']:.6f}] "
+              f"P>0={r['payoff_bootstrap']['p_pos']:.3f}")
         print(f"  harm M0 LL={r['harm_m0']['log_loss']:.5f} M1 LL={r['harm_m1']['log_loss']:.5f} "
               f"delta_LL={r['delta_logloss']:.6f}")
+        print(f"  Delta_LogLoss point={r['delta_logloss']:.6f} "
+              f"CI=[{r['harm_bootstrap']['ci95_lower']:.6f},{r['harm_bootstrap']['ci95_upper']:.6f}] "
+              f"P>0={r['harm_bootstrap']['p_pos']:.3f}")
         for comp in CONSENSUS_RAW:
             ce = r["component"][comp]
             print(f"  COMPONENT {comp}: DID_pi={ce['DID_pi']:.6f} "

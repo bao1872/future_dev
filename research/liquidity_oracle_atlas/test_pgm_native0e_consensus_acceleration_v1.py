@@ -383,28 +383,43 @@ def test_rank_map_clips_range():
 
 
 def test_eval_mutation_cannot_alter_rank_map():
-    x, maps = make_consen_synth(200, seed=14)
-    before = {c: maps[c].copy() for c in maps}
-    x2 = x.copy()
-    x2["cur_up_distance_R"] = 99.0
-    # rank map is a frozen train-only reference; an eval mutation must not change it
-    maps2 = e0.fit_rank_maps(x2)
+    # TB1 = train, TB2 = eval, but in DISJOINT episodes so a TB2 row is never the
+    # t-1 predecessor of a TB1 train row (otherwise the C_{t-1} shift would
+    # legitimately pull TB2 geometry into a TB1 row's primitive). With that isolation,
+    # mutating eval-block (TB2) raw must NOT move the TB1-train rank maps.
+    tb1 = make_synth(300, seed=55, blocks=("TB1",))
+    tb1["episode_id"] = "E_TB1"
+    tb2 = make_synth(300, seed=155, blocks=("TB2",))
+    tb2["episode_id"] = "E_TB2"
+    df = pd.concat([tb1, tb2], ignore_index=True)
+    x = e0.add_consensus_primitives(df)
+    elig = e0.primary_eligibility_mask(x)
+    maps1 = e0.fit_rank_maps(x[elig & (x["block"] == "TB1")])
+    df2 = df.copy()
+    for c in ["cur_up_distance_R", "cur_down_distance_R", "upper_newest_log_age",
+              "lower_newest_log_age", "upper_n_active_identities",
+              "lower_n_active_identities", "path_last_return_R", "score_mu"]:
+        df2.loc[df2["block"] == "TB2", c] *= 50.0 + 7.0
+    x2 = e0.add_consensus_primitives(df2)
+    elig2 = e0.primary_eligibility_mask(x2)
+    maps2 = e0.fit_rank_maps(x2[elig2 & (x2["block"] == "TB1")])
     for c in e0.CONSENSUS_RAW:
-        assert np.array_equal(maps[c], before[c])
-        assert np.array_equal(maps2[c], maps[c])
+        assert np.array_equal(maps1[c], maps2[c]), c
 
 
 def test_equal_weight_exact():
     x, _ = make_consen_synth(200, seed=15)
     rank_cols = [f"{c}_rank" for c in e0.CONSENSUS_RAW]
-    manual = x[rank_cols].mean(axis=1).to_numpy(float)
-    assert np.allclose(x["consensus_score"].to_numpy(float), manual, atol=1e-12)
+    # consensus_score = mean of the 4 ranks with NO skipna (NaN contract)
+    manual = np.mean(x[rank_cols].to_numpy(float), axis=1)
+    assert np.allclose(x["consensus_score"].to_numpy(float), manual, atol=1e-12, equal_nan=True)
 
 
 def test_consensus_score_in_unit_range():
     x, _ = make_consen_synth(200, seed=16)
     cs = x["consensus_score"].to_numpy(float)
-    assert np.all((cs >= -1.0) & (cs <= 1.0))
+    csf = cs[np.isfinite(cs)]   # ineligible rows are NaN by design
+    assert np.all((csf >= -1.0) & (csf <= 1.0))
 
 
 def test_tercile_frozen_train_only():
@@ -631,8 +646,9 @@ def test_no_symbol_pruning_in_psych_gate():
 
 
 def test_psych_gate_no_threshold_param():
+    # n_boot/seed are bootstrap controls owned by the caller, NOT a threshold parameter.
     sig = inspect.signature(e0.psych_gate_diagnostic)
-    assert set(sig.parameters.keys()) == {"eval_sub", "cost"}
+    assert set(sig.parameters.keys()) == {"eval_sub", "cost", "n_boot", "seed"}
 
 
 # ---------------------------------------------------------------------------
@@ -643,7 +659,8 @@ def test_component_diagnostics_four_keys():
     x, terr = make_consen(s)
     sub = e0.build_primary_sample_from_scored(x, terr)
     sub = sub[sub["block"] == "TB1"].copy()
-    maps = e0.fit_rank_maps(x[x["block"].isin(["TB1"])])
+    # component must use the SAME eligible-trained rank reference as the primary path
+    maps = e0.prepare_consensus(s, ["TB1"])[1]
     comp = e0.component_diagnostics(sub, maps)
     assert set(comp.keys()) == set(e0.CONSENSUS_RAW)
     for c in comp:
@@ -655,7 +672,7 @@ def test_component_diagnostics_do_not_emit_verdict():
     x, terr = make_consen(s)
     sub = e0.build_primary_sample_from_scored(x, terr)
     sub = sub[sub["block"] == "TB1"].copy()
-    maps = e0.fit_rank_maps(x[x["block"].isin(["TB1"])])
+    maps = e0.prepare_consensus(s, ["TB1"])[1]
     comp = e0.component_diagnostics(sub, maps)
     # verdict function only consumes bootstrap dicts, never the component mapping
     assert "consensus_score" in sub.columns
@@ -742,8 +759,9 @@ def test_empirical_rank_monotonic():
 def test_consensus_score_is_mean_of_ranks():
     x, _ = make_consen_synth(120, seed=31)
     rc = [f"{c}_rank" for c in e0.CONSENSUS_RAW]
-    expected = x[rc].mean(axis=1).to_numpy(float)
-    assert np.allclose(x["consensus_score"].to_numpy(float), expected, atol=1e-12)
+    # no skipna; matches the NaN contract
+    expected = np.mean(x[rc].to_numpy(float), axis=1)
+    assert np.allclose(x["consensus_score"].to_numpy(float), expected, atol=1e-12, equal_nan=True)
 
 
 def test_tercile_assigns_low_high_mid():
@@ -842,7 +860,7 @@ def test_component_diagnostics_has_delta_low_high():
     x, terr = make_consen(s)
     sub = e0.build_primary_sample_from_scored(x, terr)
     sub = sub[sub["block"] == "TB1"].copy()
-    maps = e0.fit_rank_maps(x[x["block"].isin(["TB1"])])
+    maps = e0.prepare_consensus(s, ["TB1"])[1]
     comp = e0.component_diagnostics(sub, maps)
     for c in e0.CONSENSUS_RAW:
         assert "Delta_LOW_pi" in comp[c] and "Delta_HIGH_pi" in comp[c]
@@ -900,21 +918,292 @@ def test_verdict_state_dep_lower_not_positive():
 
 
 # ---------------------------------------------------------------------------
+# Round 1.1 new coverage (0E.1): eligibility / NaN / bootstrap / perf
+# ---------------------------------------------------------------------------
+class _ScoredWindows:
+    def __init__(self, tup, counts):
+        self.tup = tup
+        self.fit_counts = counts
+
+    def __iter__(self):
+        return iter(self.tup)
+
+
+@pytest.fixture(scope="module")
+def real_scored_windows():
+    # Production Window A/B samplers are fit EXACTLY ONCE for the whole test module.
+    counts = {"A": 0, "B": 0}
+    orig = pgm.fit_samplers_for_window
+
+    def spy(win, *a, **k):
+        if win is pgm.WINDOWS[0]:
+            counts["A"] += 1
+        elif win is pgm.WINDOWS[1]:
+            counts["B"] += 1
+        return orig(win, *a, **k)
+
+    pgm.fit_samplers_for_window = spy
+    res = e0._load_and_score()
+    pgm.fit_samplers_for_window = orig
+    return _ScoredWindows(res, counts)
+
+
+@pytest.fixture
+def reuse_windows(monkeypatch, real_scored_windows):
+    # run_audit_only / run_smoke_test must reuse the already-fitted windows.
+    monkeypatch.setattr(e0, "_load_and_score", lambda: real_scored_windows)
+    return real_scored_windows
+
+
+# 86: NaN input rank stays NaN (never mapped to a high rank)
+def test_empirical_rank_nan_stays_nan():
+    ref = np.array([-1.0, 0.0, 1.0])
+    out = e0.empirical_rank(np.array([-1.0, np.nan, 1.0]), ref)
+    assert np.isnan(out[1])
+    assert np.isfinite(out[0]) and np.isfinite(out[2])
+
+
+# 87: partial NaN component -> consensus_score NaN (no automatic skipna)
+def test_consensus_score_nan_when_component_nan():
+    x, maps = make_consen_synth(200, seed=15)
+    x.loc[x.index[3], "c_position"] = np.nan   # corrupt one raw component
+    x2 = e0.attach_consensus_score(x, maps)
+    assert np.isnan(x2["consensus_score"].to_numpy(float)[3])
+
+
+# 88: rank map is trained only on PRIMARY-ELIGIBLE train rows
+def test_rank_map_uses_eligible_rows_only():
+    df = make_synth(600, seed=50, blocks=("TB1",))
+    df.loc[df.index[::2], "score_mu"] = 0.0        # half rows -> direction_stable False -> ineligible
+    x = e0.add_consensus_primitives(df)
+    elig = e0.primary_eligibility_mask(x)
+    maps_eligible = e0.fit_rank_maps(x[elig])
+    x2, maps2 = e0.prepare_consensus(df, ["TB1"])
+    for c in e0.CONSENSUS_RAW:
+        assert np.array_equal(maps2[c], maps_eligible[c]), c
+
+
+# 89: ineligible extreme train rows cannot move the rank map
+def test_ineligible_extreme_rows_cannot_move_rank_map():
+    df = make_synth(400, seed=51, blocks=("TB1",))
+    x = e0.add_consensus_primitives(df)
+    base = e0.fit_rank_maps(x[e0.primary_eligibility_mask(x)])
+    extreme = make_synth(1000, seed=52, blocks=("TB1",))
+    extreme.loc[:, "score_mu"] = 0.0              # ineligible
+    for c in ["cur_up_distance_R", "cur_down_distance_R", "upper_newest_log_age",
+              "lower_newest_log_age", "upper_n_active_identities", "lower_n_active_identities"]:
+        extreme.loc[:, c] = 1e6 if "up" in c or "upper" in c else 1e-6
+    ext = e0.add_consensus_primitives(extreme)
+    combined = pd.concat([x, ext], ignore_index=True)
+    comb = e0.fit_rank_maps(combined[e0.primary_eligibility_mask(combined)])
+    for c in e0.CONSENSUS_RAW:
+        assert np.array_equal(base[c], comb[c]), c
+
+
+# 90: ineligible extreme train rows cannot move the terciles
+def test_ineligible_extreme_rows_cannot_move_terciles():
+    df = make_synth(400, seed=53, blocks=("TB1",))
+    x, _ = e0.prepare_consensus(df, ["TB1"])   # adds consensus_score on eligible rows
+    elig = e0.primary_eligibility_mask(x)
+    ql0, qh0 = e0.compute_consensus_terciles(x[elig]["consensus_score"].to_numpy(float))
+    extreme = make_synth(1000, seed=54, blocks=("TB1",))
+    extreme.loc[:, "score_mu"] = 0.0           # ineligible (direction_stable False)
+    for c in ["cur_up_distance_R", "cur_down_distance_R", "upper_newest_log_age",
+              "lower_newest_log_age", "upper_n_active_identities", "lower_n_active_identities"]:
+        extreme.loc[:, c] = 1e6 if "up" in c or "upper" in c else 1e-6
+    ext = e0.add_consensus_primitives(extreme)
+    combined = pd.concat([x, ext], ignore_index=True)
+    cmask = e0.primary_eligibility_mask(combined)
+    ql1, qh1 = e0.compute_consensus_terciles(combined[cmask]["consensus_score"].to_numpy(float))
+    assert ql0 == ql1 and qh0 == qh1
+
+
+# 92: a train mutation MUST move the train maps (proves the test is non-vacuous)
+def test_train_mutation_moves_train_maps():
+    df = make_synth(400, seed=56, blocks=("TB1",))
+    x = e0.add_consensus_primitives(df)
+    elig = e0.primary_eligibility_mask(x)
+    maps1 = e0.fit_rank_maps(x[elig])
+    df2 = df.copy()
+    for c in ["cur_up_distance_R", "cur_down_distance_R",
+              "upper_n_active_identities", "lower_n_active_identities"]:
+        df2.loc[df2["block"] == "TB1", c] *= 100.0
+    x2 = e0.add_consensus_primitives(df2)
+    maps2 = e0.fit_rank_maps(x2[e0.primary_eligibility_mask(x2)])
+    moved = any(not np.array_equal(maps1[c], maps2[c]) for c in e0.CONSENSUS_RAW)
+    assert moved, "train mutation must change at least one rank map"
+
+
+# 93: n_rank_train == n_tercile_train (same eligible universe)
+def test_rank_and_tercile_train_counts_equal():
+    df = make_synth(500, seed=57, blocks=("TB1",))
+    x, _ = e0.prepare_consensus(df, ["TB1"])
+    elig = e0.primary_eligibility_mask(x)
+    train_primary = x[x["block"].isin(["TB1"]) & elig]
+    n_rank_train = len(train_primary)
+    ql, qh = e0.compute_consensus_terciles(train_primary["consensus_score"].to_numpy(float))
+    sub = e0.build_primary_sample_from_scored(x, (ql, qh))
+    n_train_primary = len(sub[sub["block"].isin(["TB1"])])
+    assert n_rank_train == n_train_primary
+
+
+# 94: predictive MSE paired bootstrap formula (point == mean(row sqerr diff))
+def test_predictive_mse_paired_bootstrap_formula():
+    rng = np.random.default_rng(60)
+    n = 300
+    day = np.array(["2024-01-%02d" % (i % 6 + 1) for i in range(n)])
+    p0 = rng.normal(0, 1, n); p1 = p0 + rng.normal(0, 0.3, n); y = rng.normal(0, 1, n)
+    sq0 = (p0 - y) ** 2; sq1 = (p1 - y) ** 2
+    res = e0.paired_day_loss_bootstrap(day, sq0, sq1, n_boot=500, seed=20260916)
+    assert abs(res["point"] - float(np.mean(sq0 - sq1))) < 1e-12
+    assert res["ci95_lower"] <= res["ci95_upper"]
+    assert 0.0 <= res["p_pos"] <= 1.0
+
+
+# 95: predictive LogLoss paired bootstrap formula
+def test_predictive_ll_paired_bootstrap_formula():
+    rng = np.random.default_rng(61)
+    n = 300
+    day = np.array(["2024-01-%02d" % (i % 6 + 1) for i in range(n)])
+    y = rng.integers(0, 2, n)
+    pc0 = np.clip(rng.uniform(0.1, 0.9, n), 1e-15, 1 - 1e-15)
+    pc1 = np.clip(rng.uniform(0.1, 0.9, n), 1e-15, 1 - 1e-15)
+    ll0 = -(y * np.log(pc0) + (1 - y) * np.log(1 - pc0))
+    ll1 = -(y * np.log(pc1) + (1 - y) * np.log(1 - pc1))
+    res = e0.paired_day_loss_bootstrap(day, ll0, ll1, n_boot=500, seed=20260916)
+    assert abs(res["point"] - float(np.mean(ll0 - ll1))) < 1e-12
+    assert res["ci95_lower"] <= res["ci95_upper"]
+
+
+# 96: predictive bootstrap deterministic at fixed seed
+def test_predictive_bootstrap_deterministic():
+    rng = np.random.default_rng(62)
+    n = 200
+    day = np.array(["2024-01-%02d" % (i % 5 + 1) for i in range(n)])
+    l0 = rng.normal(0, 1, n); l1 = rng.normal(0, 1, n)
+    r1 = e0.paired_day_loss_bootstrap(day, l0, l1, n_boot=300, seed=20260916)
+    r2 = e0.paired_day_loss_bootstrap(day, l0, l1, n_boot=300, seed=20260916)
+    for k in ("point", "ci95_lower", "ci95_upper", "p_pos"):
+        assert r1[k] == r2[k]
+
+
+# 97: paired bootstrap aggregates by entry DAY (same day weights drive every row)
+def _ref_paired_day(entry_day, loss0, loss1, n_boot, seed):
+    days = np.unique(entry_day); D = len(days)
+    didx = {d: i for i, d in enumerate(days)}
+    pos = np.array([didx[x] for x in entry_day])
+    delta = np.asarray(loss0) - np.asarray(loss1)
+    S = np.zeros(D); C = np.zeros(D)
+    for i, p in enumerate(pos):
+        S[p] += delta[i]; C[p] += 1.0
+    point = float(np.mean(delta))
+    rng = np.random.default_rng(seed)
+    dist = []
+    for _ in range(n_boot):
+        w = rng.multinomial(D, np.full(D, 1.0 / D))
+        denom = w @ C
+        dist.append((w @ S) / denom if denom > 0 else float("nan"))
+    dist = np.array(dist); dist = dist[np.isfinite(dist)]
+    return dict(point=point, lo=np.percentile(dist, 2.5), hi=np.percentile(dist, 97.5),
+                ppos=np.mean(dist > 0))
+
+
+def test_predictive_bootstrap_same_day_weights():
+    rng = np.random.default_rng(63)
+    n = 240
+    day = np.array(["2024-01-%02d" % (i % 8 + 1) for i in range(n)])
+    l0 = rng.normal(0, 1, n); l1 = rng.normal(0, 1, n)
+    res = e0.paired_day_loss_bootstrap(day, l0, l1, n_boot=400, seed=20260916)
+    ref = _ref_paired_day(day, l0, l1, 400, 20260916)
+    assert abs(res["point"] - ref["point"]) < 1e-12
+    assert abs(res["ci95_lower"] - ref["lo"]) < 1e-9
+    assert abs(res["ci95_upper"] - ref["hi"]) < 1e-9
+    assert abs(res["p_pos"] - ref["ppos"]) < 1e-9
+
+
+# 103: four cells include gross_EV / net_EV_at_0p01 reporting fields
+def test_four_cells_include_gross_net_ev():
+    df = _explicit_cell_df()
+    cells = e0._cells_with_group(df, "consensus_group")
+    for k in ["LOW_OFF", "LOW_ACCEL", "HIGH_OFF", "HIGH_ACCEL"]:
+        assert "gross_EV" in cells[k]
+        assert "net_EV_at_0p01" in cells[k]
+        assert abs(cells[k]["gross_EV"] - cells[k]["mean_pi"]) < 1e-12
+        assert abs(cells[k]["net_EV_at_0p01"] - (cells[k]["mean_pi"] - e0.PRIMARY_COST_ATR0)) < 1e-12
+
+
+# 98: smoke passes n_boot=200 to the predictive (payoff/harm) paired bootstrap
+def test_smoke_predictive_n_boot_200(monkeypatch, reuse_windows):
+    seen = {}
+    orig = e0.paired_day_loss_bootstrap
+
+    def spy(entry_day, loss0, loss1, n_boot=20260916, seed=20260916):
+        seen["predictive"] = n_boot
+        return orig(entry_day, loss0, loss1, n_boot, seed)
+
+    monkeypatch.setattr(e0, "paired_day_loss_bootstrap", spy)
+    e0.run_smoke_test()
+    assert seen["predictive"] == 200
+
+
+# 99: smoke passes n_boot=200 to the psych_gate bootstrap
+def test_smoke_psych_n_boot_200(monkeypatch, reuse_windows):
+    seen = {}
+    orig = e0.psych_gate_diagnostic
+
+    def spy(eval_sub, cost=0.01, n_boot=2000, seed=20260916):
+        seen["psych"] = n_boot
+        return orig(eval_sub, cost, n_boot, seed)
+
+    monkeypatch.setattr(e0, "psych_gate_diagnostic", spy)
+    e0.run_smoke_test()
+    assert seen["psych"] == 200
+
+
+# 100: audit-only must NOT call run_window_complete (no scientific experiment)
+def test_audit_does_not_call_run_window_complete(monkeypatch, reuse_windows):
+    called = []
+    monkeypatch.setattr(e0, "run_window_complete", lambda *a, **k: called.append(1) or {})
+    e0.run_audit_only()
+    assert called == []
+
+
+# 101: audit-only emits no scientific metric (DID / payoff / PSYCH_GATE / bootstrap)
+def test_audit_emits_no_scientific_metric(capsys, reuse_windows):
+    e0.run_audit_only()
+    out = capsys.readouterr().out
+    for tok in ("DID", "payoff", "PSYCH_GATE", "Delta_LOW", "Delta_HIGH", "MSE",
+                "LogLoss", "Log Loss"):
+        assert tok not in out, tok
+
+
+# 102: in the real-pipeline test group, production Window A/B samplers each fit ONCE
+def test_production_ab_fit_only_once(real_scored_windows, reuse_windows):
+    e0.run_audit_only()
+    e0.run_smoke_test()
+    assert real_scored_windows.fit_counts["A"] == 1
+    assert real_scored_windows.fit_counts["B"] == 1
+
+
+# ---------------------------------------------------------------------------
 # Real pipeline: audit + smoke (slow but required)
 # ---------------------------------------------------------------------------
-def test_real_audit_runs_and_emits_no_verdict(capsys):
+def test_real_audit_runs_and_emits_no_verdict(capsys, reuse_windows):
     e0.run_audit_only()
     out = capsys.readouterr().out
     assert "WindowA score-owner parity" in out
     assert "NO SCIENTIFIC VERDICT EMITTED" in out
 
 
-def test_real_smoke_runs_and_emits_no_verdict(capsys):
+def test_real_smoke_runs_and_emits_no_verdict(capsys, reuse_windows):
     e0.run_smoke_test()
     out = capsys.readouterr().out
     assert "score-owner parity" in out
     assert "SMOKE ONLY / NO SCIENTIFIC VERDICT" in out
 
 
-def test_window_owner_parity_passes():
-    e0.run_audit_only()
+def test_window_owner_parity_passes(real_scored_windows):
+    prep, fit_A, scored_A, fit_B, scored_B = real_scored_windows
+    dA = d0.verify_window_score_owner(scored_A, fit_A, e0.TB2_BLOCK)
+    dB = d0.verify_window_score_owner(scored_B, fit_B, e0.TB3_BLOCK)
+    assert dA < 1e-6 and dB < 1e-6
