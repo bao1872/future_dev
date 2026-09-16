@@ -818,3 +818,321 @@ def test_real_pipeline_fit_once_and_baseline_parity(real_scored_bundle):
     t_tb3_val = x1.slice_future_tensor(t_tb3, t_tb3["path_valid"])
     err_tb3 = x1.verify_baseline_parity(t_tb3_val, eval_tb3_val["pi"].to_numpy(float))
     assert err_tb3 <= 1e-12
+
+
+# ===========================================================================
+# N. 所有权审计补丁 (Audit Patch A/B/C)
+#    本轮仅新增所有权 / 单次加载 / 冻结路由审计测试，
+#    不修改任何模型、执行语义、选择规则或正式产物定义。
+# ===========================================================================
+def test_entry_price_ownership_gross_return_uses_limit_entry():
+    """审计 A：成交后收益必须从 limit entry 价 E_k 起算，而不是次根 open。
+
+    这直接防止 entry edge 被系统性高估：
+    若 gross 误用 (exit - next_open) / ATR0，则 pullback 入场的全部价值都会消失。
+    """
+    # 多头：d=+1, ATR0=100, 次根 open O[0]=1000, k=0.10 => E_k = 990
+    # bar 0 低点跌破 990 立即成交；第 fill_idx + 5 = 5 根收盘价 1005
+    # 正确收益 (1005 - 990) / 100 = 0.15；若误用次根 open 则为 (1005 - 1000) / 100 = 0.05
+    O = np.full((1, 8), 1000.0)
+    H = np.full((1, 8), 1000.0)
+    L = np.full((1, 8), 995.0)
+    C = np.full((1, 8), 1000.0)
+    L[0, 0] = 985.0
+    H[0, 5] = 1010.0
+    C[0, 5] = 1005.0
+
+    tensor_long = dict(
+        O=O, H=H, L=L, C=C, direction=np.array([1.0]), atr0=np.array([100.0]),
+        hazard=np.array([0]), entry_day=np.array(["2024-01-02"]),
+        symbol=np.array(["AGL8"]), path_valid=np.array([True]),
+    )
+    rel_long = x1.precompute_relative_path_for_k(tensor_long, k=0.10)
+    assert rel_long["filled"][0] == True
+    assert rel_long["fill_idx"][0] == 0
+    assert pytest.approx(rel_long["Ek"][0, 0], abs=1e-12) == 990.0
+
+    sim_long = x1.simulate_policy(rel_long, stop_s=None, target_code="NONE")
+    assert sim_long["exit_reason"][0] == x1.TIMEOUT
+    assert sim_long["exit_idx"][0] == 5
+    assert pytest.approx(sim_long["gross_return"][0], abs=1e-12) == 0.15
+    # 关键反例断言：绝不能退化成 "次根 open -> 收盘" 的 0.05
+    assert abs(sim_long["gross_return"][0] - 0.05) > 1e-6
+
+    # 空头镜像：d=-1, O[0]=1000, k=0.10 => E_k = 1010；第 5 根收盘 995
+    # 正确收益 -1 * (995 - 1010) / 100 = 0.15；误用次根 open 则为 0.05
+    O_s = np.full((1, 8), 1000.0)
+    H_s = np.full((1, 8), 1005.0)
+    L_s = np.full((1, 8), 1000.0)
+    C_s = np.full((1, 8), 1000.0)
+    H_s[0, 0] = 1015.0
+    L_s[0, 5] = 990.0
+    C_s[0, 5] = 995.0
+
+    tensor_short = dict(
+        O=O_s, H=H_s, L=L_s, C=C_s, direction=np.array([-1.0]), atr0=np.array([100.0]),
+        hazard=np.array([0]), entry_day=np.array(["2024-01-02"]),
+        symbol=np.array(["AGL8"]), path_valid=np.array([True]),
+    )
+    rel_short = x1.precompute_relative_path_for_k(tensor_short, k=0.10)
+    assert pytest.approx(rel_short["Ek"][0, 0], abs=1e-12) == 1010.0
+    sim_short = x1.simulate_policy(rel_short, stop_s=None, target_code="NONE")
+    assert sim_short["exit_reason"][0] == x1.TIMEOUT
+    assert pytest.approx(sim_short["gross_return"][0], abs=1e-12) == 0.15
+
+
+# --- Mock 正式管线 harness (审计 B/C 共用，绝不写真实磁盘) --------------------
+# 在导入期捕获真实所有者，避免同一 monkeypatch 内二次调用时 spy 链式套娃。
+_REAL_EVALUATE_SURFACE = x1.evaluate_surface
+_REAL_SELECT_POLICIES = x1.select_policies
+_REAL_BUILD_FUTURE_TENSOR = x1.build_future_tensor
+
+_MOCK_N_BARS = 40
+_MOCK_SYMBOLS = ["MKA", "MKB"]
+
+
+def _make_mock_bars() -> Dict[str, Any]:
+    """构造 mock 用连续 5m K 线：同一交易日内、无 discontinuity、无时间缺口。"""
+    bars_by_sym: Dict[str, Any] = {}
+    for si, sym in enumerate(_MOCK_SYMBOLS):
+        rng = np.random.default_rng(7 + si)
+        close = 100.0 + 10.0 * si + np.cumsum(rng.normal(0.0, 0.6, size=_MOCK_N_BARS))
+        open_ = close - rng.normal(0.0, 0.2, size=_MOCK_N_BARS)
+        bars_by_sym[sym] = dict(
+            o=open_,
+            h=np.maximum(open_, close) + 0.5,
+            l=np.minimum(open_, close) - 0.5,
+            c=close,
+            t=pd.date_range(
+                "2024-01-02 09:00:00", periods=_MOCK_N_BARS, freq="5min"
+            ).to_numpy(dtype="datetime64[ns]"),
+            day=np.full(_MOCK_N_BARS, np.datetime64("2024-01-02", "ns"), dtype="datetime64[ns]"),
+            disc=np.zeros(_MOCK_N_BARS, dtype=bool),
+            n=_MOCK_N_BARS,
+        )
+    return bars_by_sym
+
+
+def _make_mock_block_frame(
+    bars_by_sym: Dict[str, Any],
+    block: str,
+    owner_tag: str,
+    n_rows: int = 40,
+    seed: int = 101,
+    flip: bool = False,
+    shift: int = 0,
+) -> pd.DataFrame:
+    """构造 mock block 决策帧；pi 与 future tensor 使用完全相同的表达式与运算顺序。
+
+    owner_tag 用于证明 tensor 输入帧的所有权路由（A -> TB2, B -> TB3）。
+    """
+    rng = np.random.default_rng(seed)
+    symbols = sorted(bars_by_sym.keys())
+    rows = []
+    for i in range(n_rows):
+        sym = symbols[i % len(symbols)]
+        bars = bars_by_sym[sym]
+        e = 3 + (i % 20) + shift
+        d = 1.0 if (i % 2 == 0) else -1.0
+        if flip:
+            d = -d
+        atr = float(rng.uniform(1.5, 3.0))
+        rows.append(
+            dict(
+                block=block,
+                owner_tag=owner_tag,
+                symbol=sym,
+                entry_bar=int(e),
+                base_action=float(d),
+                atr0=atr,
+                pi=float(d * (bars["c"][e] - bars["o"][e]) / atr),
+                score_mu=float(rng.uniform(-1.0, 1.0)),
+                same_block_entry_valid=True,
+                hazard=int(i % 2),
+                entry_day=f"2024-01-{2 + (i % 5):02d}",
+            )
+        )
+    return pd.DataFrame(rows)
+
+
+def _run_mocked_formal(
+    monkeypatch,
+    tmp_path,
+    tb3_variant: int = 0,
+) -> Dict[str, Any]:
+    """在完全 mock 的数据所有者上运行正式管线，只审计调用计数与路由。
+
+    硬保证：
+    - 绝不加载真实数据（load_prepared_frame 被替换）
+    - 绝不真实拟合 sampler（fit_samplers_for_window 被替换）
+    - 绝不写真实 artifacts（写入器被替换为纯内存记录器）
+    - TB2 与 TB3 数据严格来自不同 Window 所有者
+    """
+    bars_by_sym = _make_mock_bars()
+    scored_A = _make_mock_block_frame(bars_by_sym, x1.TB2_BLOCK, "A", seed=101)
+    scored_B = _make_mock_block_frame(
+        bars_by_sym,
+        x1.TB3_BLOCK,
+        "B",
+        seed=202,
+        flip=(tb3_variant == 1),
+        shift=(1 if tb3_variant == 1 else 0),
+    )
+    aligned = pd.DataFrame({"block": ["TB1", "TB2", "TB3"]})
+
+    counters: Dict[str, Any] = {
+        "load_prepared_frame": 0,
+        "fit_A": 0,
+        "fit_B": 0,
+        "prepare_tags": [],
+        "owner_checks": [],
+        "tensor_builds": [],
+        "surface_calls": [],
+        "select_calls": 0,
+        "select_n_rows": None,
+        "selection": None,
+        "artifacts": None,
+    }
+
+    monkeypatch.setenv("AUTHORIZE_PGM_EXEC1_FULL_EXPLORATORY", "1")
+    monkeypatch.setattr(x1, "OUT_DIR", tmp_path)
+    monkeypatch.setattr(x1, "BOOTSTRAP_N", 200)
+    monkeypatch.setattr(x1, "assert_clean_git_tree", lambda: "0" * 40)
+    monkeypatch.setattr(
+        x1,
+        "write_and_verify_artifacts_on_disk",
+        lambda artifacts, out_dir=None: counters.__setitem__("artifacts", dict(artifacts)),
+    )
+
+    def fake_load_prepared_frame():
+        counters["load_prepared_frame"] += 1
+        return dict(aligned=aligned, bars_by_sym=bars_by_sym)
+
+    monkeypatch.setattr(x1.d0, "load_prepared_frame", fake_load_prepared_frame)
+
+    def fake_fit_samplers_for_window(w, obs_sample_path, transitions_path):
+        if w is x1.pgm.WINDOWS[0]:
+            counters["fit_A"] += 1
+            return dict(tag="A", trans_samplers={})
+        if w is x1.pgm.WINDOWS[1]:
+            counters["fit_B"] += 1
+            return dict(tag="B", trans_samplers={})
+        raise AssertionError(f"UNEXPECTED_WINDOW: {w}")
+
+    monkeypatch.setattr(x1.pgm, "fit_samplers_for_window", fake_fit_samplers_for_window)
+
+    def fake_prepare_window_windowframe(aligned_df, fit, tag):
+        counters["prepare_tags"].append(tag)
+        return scored_A if tag.endswith("_A") else scored_B
+
+    monkeypatch.setattr(x1.d0, "prepare_window_windowframe", fake_prepare_window_windowframe)
+
+    def fake_verify_window_score_owner(scored, fit, block):
+        counters["owner_checks"].append((block, fit["tag"]))
+        return 0.0
+
+    monkeypatch.setattr(x1.d0, "verify_window_score_owner", fake_verify_window_score_owner)
+    monkeypatch.setattr(
+        x1.d0,
+        "compute_artifact_hashes",
+        lambda: {"sample_artifact_sha256": "s" * 8, "transition_artifact_sha256": "t" * 8},
+    )
+    monkeypatch.setattr(x1.n0a, "load_transition_truth_audit", lambda: {"cur": None})
+    monkeypatch.setattr(x1.n0a, "audit_atr0_owner_parity", lambda s, cur_truth: 0.0)
+
+    def spy_build_future_tensor(eval_df, bars_arg, n_future=x1.FUTURE_BARS):
+        counters["tensor_builds"].append((str(eval_df["owner_tag"].iloc[0]), len(eval_df)))
+        return _REAL_BUILD_FUTURE_TENSOR(eval_df, bars_arg, n_future=n_future)
+
+    monkeypatch.setattr(x1, "build_future_tensor", spy_build_future_tensor)
+
+    def spy_evaluate_surface(tensor, eval_block=x1.TB2_BLOCK):
+        counters["surface_calls"].append(eval_block)
+        if eval_block != x1.TB2_BLOCK:
+            raise SystemExit(f"STOP_PGM_EXEC1_SURFACE_FORBIDDEN_ON_BLOCK: {eval_block}")
+        return _REAL_EVALUATE_SURFACE(tensor, eval_block=eval_block)
+
+    monkeypatch.setattr(x1, "evaluate_surface", spy_evaluate_surface)
+
+    def spy_select_policies(surface_df):
+        counters["select_calls"] += 1
+        counters["select_n_rows"] = len(surface_df)
+        out = _REAL_SELECT_POLICIES(surface_df)
+        counters["selection"] = out
+        return out
+
+    monkeypatch.setattr(x1, "select_policies", spy_select_policies)
+
+    x1.run_full_exploratory()
+    return counters
+
+
+def test_formal_pipeline_loads_and_fits_exactly_once(monkeypatch, tmp_path):
+    """审计 B：正式管线必须 load 一次、Window A/B 各 fit 一次，且绝不写真实 artifacts。"""
+    counters = _run_mocked_formal(monkeypatch, tmp_path)
+
+    assert counters["load_prepared_frame"] == 1
+    assert counters["fit_A"] == 1
+    assert counters["fit_B"] == 1
+    # A / B 评分帧各构造一次
+    assert sorted(counters["prepare_tags"]) == ["pgm_exec1_A", "pgm_exec1_B"]
+
+    # 内存收口：恰好 8 个产物键
+    assert counters["artifacts"] is not None
+    assert set(counters["artifacts"].keys()) == set(x1.EXACT_ARTIFACTS)
+
+    # 真实 artifacts 目录绝不产生任何 pgm_exec1_* 文件
+    real_out_dir = pathlib.Path(x1.__file__).resolve().parents[2] / "artifacts" / "liquidity_oracle_atlas"
+    assert sorted(p.name for p in real_out_dir.glob("pgm_exec1_*")) == []
+    assert sorted(p.name for p in tmp_path.glob("pgm_exec1_*")) == []
+
+
+def test_formal_window_routing_tb2_from_A_tb3_from_B_and_no_tb3_surface(monkeypatch, tmp_path):
+    """审计 C-1：TB2 必须来自 Window A 所有者、TB3 来自 Window B 所有者，且 TB3 无 surface。"""
+    counters = _run_mocked_formal(monkeypatch, tmp_path)
+
+    # 1. 评估张量输入帧的所有权路由：TB2 来自 A 拥有的评分帧，TB3 来自 B 拥有的评分帧
+    assert [tag for tag, _ in counters["tensor_builds"]] == ["A", "B"]
+
+    # 2. TB3 的 score owner 校验只能由 Window B 拟合的 sampler 完成
+    owner_checks = counters["owner_checks"]
+    assert len(owner_checks) > 0
+    assert {tag for block, tag in owner_checks if block == "TB3"} == {"B"}
+
+    # 3. evaluate_surface 被调用且仅使用 TB2；TB3 永远不进入 125 surface
+    assert counters["surface_calls"] == [x1.TB2_BLOCK]
+    # 4. 选择器只运行一次，且只作用于 125 行 TB2 surface
+    assert counters["select_calls"] == 1
+    assert counters["select_n_rows"] == 125
+
+    # 5. TB3 冻结验证只包含 BASE / PRIMARY / STOP_ONLY_SECONDARY 三行
+    df_tb3 = counters["artifacts"][x1.ARTIFACT_TB3_VALIDATION]
+    assert df_tb3["policy_name"].tolist() == ["BASE", "PRIMARY", "STOP_ONLY_SECONDARY"]
+
+
+def test_tb3_data_cannot_influence_frozen_selection(monkeypatch, tmp_path):
+    """审计 C-2：TB3 样本改变时冻结的选择必须完全不变（TB3 没有 selector）。"""
+    counters_v0 = _run_mocked_formal(monkeypatch, tmp_path, tb3_variant=0)
+    counters_v1 = _run_mocked_formal(monkeypatch, tmp_path, tb3_variant=1)
+
+    for counters in (counters_v0, counters_v1):
+        assert counters["surface_calls"] == [x1.TB2_BLOCK]
+        assert counters["select_calls"] == 1
+        assert counters["fit_A"] == 1 and counters["fit_B"] == 1
+
+    primary_v0 = counters_v0["selection"]["primary"]
+    primary_v1 = counters_v1["selection"]["primary"]
+    for key in ("k", "stop_s", "target_code"):
+        assert primary_v0[key] == primary_v1[key]
+
+    stop_only_v0 = counters_v0["selection"]["stop_only"]
+    stop_only_v1 = counters_v1["selection"]["stop_only"]
+    for key in ("k", "stop_s"):
+        assert stop_only_v0[key] == stop_only_v1[key]
+
+    # 证明 TB3 数据本身确实不同（否则该冻结测试是空转）
+    val_v0 = counters_v0["artifacts"][x1.ARTIFACT_TB3_VALIDATION]
+    val_v1 = counters_v1["artifacts"][x1.ARTIFACT_TB3_VALIDATION]
+    pri_v0 = float(val_v0[val_v0["policy_name"] == "PRIMARY"]["net_EV_per_decision"].iloc[0])
+    pri_v1 = float(val_v1[val_v1["policy_name"] == "PRIMARY"]["net_EV_per_decision"].iloc[0])
+    assert pri_v0 != pri_v1
