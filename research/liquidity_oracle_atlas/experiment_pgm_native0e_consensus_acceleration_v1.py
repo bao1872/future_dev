@@ -404,10 +404,8 @@ def bootstrap_did(eval_sub: pd.DataFrame, n_boot: int = BOOTSTRAP_N,
     """
     sub = eval_sub[eval_sub["consensus_group"].isin(["LOW", "HIGH"])].copy()
     day = sub["entry_day"].to_numpy()
-    days = np.unique(day)
+    days, pos = np.unique(day, return_inverse=True)
     D = len(days)
-    didx = {d: i for i, d in enumerate(days)}
-    pos = np.array([didx[x] for x in day])
 
     grp = sub["consensus_group"].to_numpy()
     acc = sub["accel_positive"].to_numpy(bool)
@@ -527,35 +525,49 @@ def _predict_logistic(train: pd.DataFrame, eval_: pd.DataFrame, num_cols, cat_co
     return p, dict(log_loss=float(np.mean(row_logloss)), brier=brier, roc_auc=roc, pr_auc=prauc), row_logloss
 
 
-def paired_day_loss_bootstrap(entry_day, loss0, loss1, n_boot: int = BOOTSTRAP_N,
+def paired_day_mean_bootstrap(entry_day, values, n_boot: int = BOOTSTRAP_N,
                              seed: int = BOOTSTRAP_SEED) -> Dict[str, float]:
-    """Entry-day paired bootstrap of the predictive increment.
+    """Generic entry-day (day-cluster) mean bootstrap — the SINGLE owner for every
+    day-resampled statistic in this module (predictive delta, psych-gate policy diff, ...).
 
-    delta = loss0 - loss1  (positive => M1 with interaction IMPROVES over M0).
-    Pre-aggregate to per-day sum_delta / count, then multinomial-resample DAYS
-    only so every within-day row shares the same resampled weight.
+    Aggregates ``values`` per entry_day via bincount (row-order accumulation, bit-identical
+    to a per-row loop), then multinomial-resamples DAYS only. ``rng.multinomial(...,
+    size=n_boot)`` is bit-identical to ``n_boot`` sequential draws, so the result matches
+    the old per-row + per-bootstrap loop exactly.
 
-    point = mean(delta); returns point / ci95 / P(delta > 0).
+    point = mean(values); returns point / ci95_lower / ci95_upper / p_pos.
     """
     day = np.asarray(entry_day)
-    days = np.unique(day)
+    days, pos = np.unique(day, return_inverse=True)
     D = len(days)
-    didx = {d: i for i, d in enumerate(days)}
-    pos = np.array([didx[x] for x in day])
-    delta = np.asarray(loss0, float) - np.asarray(loss1, float)
+    values = np.asarray(values, float)
 
     # Vectorized per-day aggregation (bincount accumulates in row order -> bit-identical
     # to the old per-row loop).
-    S = np.bincount(pos, weights=delta, minlength=D)
+    S = np.bincount(pos, weights=values, minlength=D)
     C = np.bincount(pos, minlength=D).astype(float)
 
-    point = float(np.mean(delta))
+    point = float(np.mean(values))
     rng = np.random.default_rng(seed)
     # Vectorized multinomial: bit-identical to n_boot sequential draws.
     W = rng.multinomial(D, np.full(D, 1.0 / D), size=n_boot)  # (n_boot, D)
     denom = W @ C
     dist = np.where(denom > 0, (W @ S) / denom, float("nan"))
     return _summ(point, dist)
+
+
+def paired_day_loss_bootstrap(entry_day, loss0, loss1, n_boot: int = BOOTSTRAP_N,
+                             seed: int = BOOTSTRAP_SEED) -> Dict[str, float]:
+    """Entry-day paired bootstrap of the predictive increment.
+
+    delta = loss0 - loss1  (positive => M1 with interaction IMPROVES over M0).
+    Delegates the day-aggregation + multinomial bootstrap to ``paired_day_mean_bootstrap``
+    so there is exactly ONE owner for every day-cluster bootstrap in this module.
+
+    point = mean(delta); returns point / ci95 / P(delta > 0).
+    """
+    delta = np.asarray(loss0, float) - np.asarray(loss1, float)
+    return paired_day_mean_bootstrap(entry_day, delta, n_boot, seed)
 
 
 def m0_num() -> List[str]:
@@ -623,24 +635,11 @@ def psych_gate_diagnostic(eval_sub: pd.DataFrame, cost: float = PRIMARY_COST_ATR
     # n_boot is owned by the caller (200 smoke, 2000 formal future); never fixed here.
     boot = d0.economic_bootstrap(day, net, n_boot=n_boot, seed=seed)
 
-    # explicit paired day bootstrap for the policy difference
+    # explicit paired day bootstrap for the policy difference (single owner:
+    # paired_day_mean_bootstrap — bit-identical to the old row-aggregation + sequential
+    # multinomial version).
     ndiff = net["PSYCH_GATE"] - net["BASE"]
-    days = np.unique(day)
-    D = len(days)
-    didx = {d: i for i, d in enumerate(days)}
-    pos = np.array([didx[x] for x in day])
-    S = np.zeros(D)
-    Nc = np.zeros(D)
-    for i, p in enumerate(pos):
-        S[p] += ndiff[i]
-        Nc[p] += 1.0
-    rng = np.random.default_rng(seed)
-    dist = np.empty(n_boot)
-    for b in range(n_boot):
-        w = rng.multinomial(D, np.full(D, 1.0 / D))
-        denom = w @ Nc
-        dist[b] = (w @ S) / denom if denom > 0 else float("nan")
-    boot["PSYCH_GATE-BASE"] = _summ(float(np.sum(ndiff) / len(ndiff)), dist)
+    boot["PSYCH_GATE-BASE"] = paired_day_mean_bootstrap(day, ndiff, n_boot, seed)
     return dict(BASE=base_m, PSYCH_GATE=gate_m, bootstrap=boot)
 
 

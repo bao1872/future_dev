@@ -1389,6 +1389,182 @@ def test_vectorized_primitives_preserve_order_parity():
     assert np.array_equal(a, b)  # matrix multinomial == sequential draws
 
 
+# ===========================================================================
+# 0E.1c parity + no-hot-loop contract
+# ===========================================================================
+def _old_day_index(day):
+    days = np.unique(day)
+    didx = {d: i for i, d in enumerate(days)}
+    pos = np.array([didx[x] for x in day])
+    return days, pos
+
+
+def _make_did_synth(n=4000, seed=1):
+    rng = np.random.default_rng(seed)
+    days = np.array([f"D{i % 50}" for i in range(n)])
+    # random (not anti-correlated) so ALL FOUR cells (LOW_OFF/LOW_ACCEL/HIGH_OFF/HIGH_ACCEL)
+    # are populated and have finite point estimates.
+    grp = rng.choice(["LOW", "HIGH"], size=n)
+    acc = rng.integers(0, 2, n).astype(bool)
+    pi = rng.normal(0, 0.01, n)
+    harm = rng.integers(0, 2, n)
+    haz = rng.integers(0, 2, n)
+    return pd.DataFrame({"entry_day": days, "consensus_group": grp,
+                         "accel_positive": acc, "pi": pi,
+                         "harm_flag": harm, "hazard": haz})
+
+
+def _ref_bootstrap_did(sub, n_boot=200, seed=20260916):
+    """Frozen OLD (pre-0E.1b) bootstrap_did: per-row aggregation + sequential multinomial."""
+    day = sub["entry_day"].to_numpy()
+    days = np.unique(day)
+    didx = {d: i for i, d in enumerate(days)}
+    pos = np.array([didx[x] for x in day])
+    D = len(days)
+    grp = sub["consensus_group"].to_numpy()
+    acc = sub["accel_positive"].to_numpy(bool)
+    pi = sub["pi"].to_numpy(float)
+    harm = sub["harm_flag"].to_numpy(int)
+    haz = sub["hazard"].to_numpy(int)
+    CELLS = ["LOW_OFF", "LOW_ACCEL", "HIGH_OFF", "HIGH_ACCEL"]
+    cidx = {c: i for i, c in enumerate(CELLS)}
+    count = np.zeros((D, 4)); spi = np.zeros((D, 4))
+    sharm = np.zeros((D, 4)); shaz = np.zeros((D, 4))
+    for i in range(len(pos)):
+        c = cidx[f"{grp[i]}_{'ACCEL' if acc[i] else 'OFF'}"]
+        d = pos[i]
+        count[d, c] += 1; spi[d, c] += pi[i]; sharm[d, c] += harm[i]; shaz[d, c] += haz[i]
+    om = e0._overall_cell_means(sub)
+    LOFF, LACC, HOFF, HACC = (cidx["LOW_OFF"], cidx["LOW_ACCEL"], cidx["HIGH_OFF"], cidx["HIGH_ACCEL"])
+    point = dict(
+        dl=om["LOW_ACCEL"]["pi"] - om["LOW_OFF"]["pi"],
+        dh=om["HIGH_ACCEL"]["pi"] - om["HIGH_OFF"]["pi"],
+        did=(om["HIGH_ACCEL"]["pi"] - om["HIGH_OFF"]["pi"]) - (om["LOW_ACCEL"]["pi"] - om["LOW_OFF"]["pi"]),
+        dlh=om["LOW_ACCEL"]["harm"] - om["LOW_OFF"]["harm"],
+        dhh=om["HIGH_ACCEL"]["harm"] - om["HIGH_OFF"]["harm"],
+        didh=(om["HIGH_ACCEL"]["harm"] - om["HIGH_OFF"]["harm"]) - (om["LOW_ACCEL"]["harm"] - om["LOW_OFF"]["harm"]),
+        dlz=om["LOW_ACCEL"]["hz"] - om["LOW_OFF"]["hz"],
+        dhz=om["HIGH_ACCEL"]["hz"] - om["HIGH_OFF"]["hz"],
+        didz=(om["HIGH_ACCEL"]["hz"] - om["HIGH_OFF"]["hz"]) - (om["LOW_ACCEL"]["hz"] - om["LOW_OFF"]["hz"]),
+    )
+    rng = np.random.default_rng(seed)
+    dist = {k: [] for k in point}
+    for _ in range(n_boot):
+        w = rng.multinomial(D, np.full(D, 1.0 / D))
+        cnt = w @ count; mp = w @ spi; mh = w @ sharm; mz = w @ shaz
+        mpi = np.where(cnt > 0, mp / cnt, np.nan)
+        mh_ = np.where(cnt > 0, mh / cnt, np.nan)
+        mz_ = np.where(cnt > 0, mz / cnt, np.nan)
+        dist["dl"].append(mpi[LACC] - mpi[LOFF])
+        dist["dh"].append(mpi[HACC] - mpi[HOFF])
+        dist["did"].append((mpi[HACC] - mpi[HOFF]) - (mpi[LACC] - mpi[LOFF]))
+        dist["dlh"].append(mh_[LACC] - mh_[LOFF])
+        dist["dhh"].append(mh_[HACC] - mh_[HOFF])
+        dist["didh"].append((mh_[HACC] - mh_[HOFF]) - (mh_[LACC] - mh_[LOFF]))
+        dist["dlz"].append(mz_[LACC] - mz_[LOFF])
+        dist["dhz"].append(mz_[HACC] - mz_[HOFF])
+        dist["didz"].append((mz_[HACC] - mz_[HOFF]) - (mz_[LACC] - mz_[LOFF]))
+    res = {k: e0._summ(float(point[k]), np.array(dist[k], float)) for k in point}
+    return {
+        "Delta_LOW_pi": res["dl"], "Delta_HIGH_pi": res["dh"], "DID_pi": res["did"],
+        "Delta_LOW_harm": res["dlh"], "Delta_HIGH_harm": res["dhh"], "DID_harm": res["didh"],
+        "Delta_LOW_H1": res["dlz"], "Delta_HIGH_H1": res["dhz"], "DID_H1": res["didz"],
+    }
+
+
+def _ref_paired_day_mean_bootstrap(entry_day, values, n_boot=200, seed=20260916):
+    """Frozen OLD per-row entry-day mean bootstrap."""
+    day = np.asarray(entry_day)
+    days = np.unique(day)
+    didx = {d: i for i, d in enumerate(days)}
+    pos = np.array([didx[x] for x in day])
+    D = len(days)
+    values = np.asarray(values, float)
+    S = np.zeros(D); C = np.zeros(D)
+    for i, p in enumerate(pos):
+        S[p] += values[i]; C[p] += 1.0
+    point = float(np.mean(values))
+    rng = np.random.default_rng(seed)
+    dist = np.empty(n_boot)
+    for b in range(n_boot):
+        w = rng.multinomial(D, np.full(D, 1.0 / D))
+        denom = w @ C
+        dist[b] = (w @ S) / denom if denom > 0 else float("nan")
+    return e0._summ(point, dist)
+
+
+def _ref_paired_day_loss_bootstrap(entry_day, loss0, loss1, n_boot=200, seed=20260916):
+    delta = np.asarray(loss0, float) - np.asarray(loss1, float)
+    return _ref_paired_day_mean_bootstrap(entry_day, delta, n_boot, seed)
+
+
+# 0E.1c parity: bootstrap_did is bit-identical to its old per-row + sequential-multinomial
+# reference across ALL 9 statistics (point / ci95_lower / ci95_upper / p_pos).
+def test_bootstrap_did_old_reference_parity():
+    sub = _make_did_synth(4000, seed=1)
+    n_boot, seed = 200, 20260916
+    new = e0.bootstrap_did(sub, n_boot=n_boot, seed=seed)
+    ref = _ref_bootstrap_did(sub, n_boot=n_boot, seed=seed)
+    for key in new:
+        for s in ("point", "ci95_lower", "ci95_upper", "p_pos"):
+            assert abs(new[key][s] - ref[key][s]) < 1e-12, (key, s)
+
+
+def test_paired_day_loss_old_reference_parity():
+    rng = np.random.default_rng(2)
+    n = 4000
+    days = np.array([f"D{i % 50}" for i in range(n)])
+    loss0 = rng.normal(0, 1, n); loss1 = rng.normal(0, 1, n)
+    n_boot, seed = 200, 20260916
+    new = e0.paired_day_loss_bootstrap(days, loss0, loss1, n_boot=n_boot, seed=seed)
+    ref = _ref_paired_day_loss_bootstrap(days, loss0, loss1, n_boot=n_boot, seed=seed)
+    for s in ("point", "ci95_lower", "ci95_upper", "p_pos"):
+        assert abs(new[s] - ref[s]) < 1e-12, s
+
+
+# PSYCH_GATE-BASE now routes through paired_day_mean_bootstrap; parity vs the old
+# row-aggregation reference under the same seed.
+def test_psych_gate_base_old_reference_parity():
+    rng = np.random.default_rng(3)
+    n = 4000
+    days = np.array([f"D{i % 50}" for i in range(n)])
+    values = rng.normal(0, 1, n)  # stand-in for ndiff = PSYCH_GATE - BASE
+    n_boot, seed = 200, 20260916
+    new = e0.paired_day_mean_bootstrap(days, values, n_boot=n_boot, seed=seed)
+    ref = _ref_paired_day_mean_bootstrap(days, values, n_boot=n_boot, seed=seed)
+    for s in ("point", "ci95_lower", "ci95_upper", "p_pos"):
+        assert abs(new[s] - ref[s]) < 1e-12, s
+
+
+# Day index: old np.unique + dict mapping must equal np.unique(return_inverse=True).
+def test_day_index_old_vs_return_inverse():
+    day = np.array([f"D{i % 37}" for i in range(500)])
+    days_old, pos_old = _old_day_index(day)
+    days_new, pos_new = np.unique(day, return_inverse=True)
+    assert list(days_old) == list(days_new)
+    assert np.array_equal(pos_old, pos_new)
+
+
+# 0E.1c contract: the day-cluster bootstrap owners must contain NO length-(rows)/(n_boot)
+# Python loops (no for i in range(len(...)), no for b/_ in range(n_boot), no dict day index).
+def test_bootstrap_owners_have_no_hot_python_loops():
+    fns = [e0.bootstrap_did, e0.paired_day_mean_bootstrap,
+           e0.paired_day_loss_bootstrap, e0.psych_gate_diagnostic]
+    forbidden = [
+        "didx",
+        "for i in range(len(",
+        "for _ in range(n_boot",
+        "for b in range(n_boot",
+        "range(n_boot)",
+        "enumerate(pos",
+        "enumerate(day",
+    ]
+    for fn in fns:
+        src = inspect.getsource(fn)
+        for pat in forbidden:
+            assert pat not in src, f"{fn.__name__} contains forbidden hot-loop pattern: {pat}"
+
+
 # 100: audit-only must NOT call run_window_complete (no scientific experiment)
 def test_audit_does_not_call_run_window_complete(monkeypatch, reuse_windows):
     called = []
