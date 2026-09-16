@@ -1,0 +1,5098 @@
+{
+  "EXPERIMENT_NAME": "PGM-NATIVE-0D -- Acceleration Terminal-Outcome & Economic Gate",
+  "EXPERIMENT_SCOPE": "EXPLORATORY_STRATEGY_DEVELOPMENT_ON_FROZEN_TB1_TB2_TB3_ONLY",
+  "base_sha": "3399f20b5497572dd44d29b48f2f340b34d29599",
+  "run_head": "69a5b026dd352e51af7b3966b99ee07d7e1a8877",
+  "sample_artifact_sha256": "12cb5c109039f068535bd156278897df5e4a3179c73e8f792e9d3ca674e80f55",
+  "transition_artifact_sha256": "efdce8122e355d8f1407ddc3c9be3273fad998e2ecbad4372d159ccfa780c6b4",
+  "n_all_obs": 359714,
+  "n_H0": 321727,
+  "n_H1": 37987,
+  "symbols": [
+    "AG",
+    "AL",
+    "AU",
+    "CF",
+    "CU",
+    "I",
+    "M",
+    "MA",
+    "NI",
+    "P",
+    "RB",
+    "RU",
+    "SC",
+    "SN",
+    "TA"
+  ],
+  "blocks": [
+    "TB1",
+    "TB2",
+    "TB3"
+  ],
+  "same_block_entry_counts": {
+    "TB1": 114978,
+    "TB2": 124556,
+    "TB3": 120180
+  },
+  "raw_block_counts": {
+    "TB1": 114978,
+    "TB2": 124556,
+    "TB3": 120180
+  },
+  "max_abs_atr0_owner_error": 0.0,
+  "A_COLS": [
+    "a_dir_velocity",
+    "a_dir_accel_1",
+    "a_dir_jerk_1",
+    "a_speed_accel_1",
+    "a_range_accel_2",
+    "a_eff_slope_1",
+    "a_burst_exhaustion",
+    "a_conviction_burst"
+  ],
+  "OUTCOME_BASE_NUM": [
+    "start_up_distance_R",
+    "start_down_distance_R",
+    "start_width_R",
+    "start_log_ratio",
+    "upper_oldest_log_age",
+    "upper_newest_log_age",
+    "upper_newest_age_zero",
+    "upper_oldest_age_zero",
+    "upper_n_active_identities",
+    "lower_oldest_log_age",
+    "lower_newest_log_age",
+    "lower_newest_age_zero",
+    "lower_oldest_age_zero",
+    "lower_n_active_identities",
+    "elapsed_log",
+    "cur_up_distance_R",
+    "cur_down_distance_R",
+    "cur_width_R",
+    "cur_log_ratio",
+    "path_total_variation_R",
+    "path_max_up_excursion_R",
+    "path_max_down_excursion_R",
+    "path_direction_change_rate",
+    "path_last_return_R",
+    "path_current_bar_range_R",
+    "upper_newest_log_age_residual",
+    "upper_current_newest_age_zero",
+    "upper_active_identity_count_delta",
+    "lower_newest_log_age_residual",
+    "lower_current_newest_age_zero",
+    "lower_active_identity_count_delta",
+    "tempo_signed_speed",
+    "tempo_abs_speed",
+    "tempo_signed_efficiency",
+    "tempo_abs_efficiency",
+    "lag1_available",
+    "phi_z_d_up",
+    "phi_z_dcr_is0",
+    "phi_z_dcr_is1",
+    "phi_z_dcr_logit",
+    "phi_z_range_ispos",
+    "phi_z_range_log",
+    "phi_z_uresid_ispos",
+    "phi_z_uresid_log",
+    "phi_z_lresid_ispos",
+    "phi_z_lresid_log",
+    "mem_z_dmfe_ispos",
+    "mem_z_dmfe_log",
+    "mem_z_dmae_ispos",
+    "mem_z_dmae_log",
+    "mem_z_delta_upper_count",
+    "mem_z_delta_lower_count",
+    "u_log_age",
+    "u_tv_per_bar",
+    "u_excursion_per_bar",
+    "u_path_efficiency",
+    "u_net_speed",
+    "e_speed_decay_3",
+    "e_speed_ratio_5",
+    "e_range_decay_3",
+    "e_local_eff_3",
+    "e_local_eff_5",
+    "e_dcr_change",
+    "score_mu",
+    "abs_score_mu"
+  ],
+  "OUTCOME_CAT": [
+    "prev_event_mask"
+  ],
+  "PRIMARY_COST_ATR0": 0.01,
+  "COST_GRID": [
+    0.0,
+    0.01,
+    0.02,
+    0.03,
+    0.05,
+    0.1
+  ],
+  "BOOTSTRAP_N": 2000,
+  "BOOTSTRAP_SEED": 20260916,
+  "cluster_owner": "entry_day",
+  "WindowA_score_owner_max_abs_diff": 0.0,
+  "WindowB_score_owner_max_abs_diff": 0.0,
+  "WindowA_acceleration_finite": true,
+  "WindowB_acceleration_finite": true,
+  "TB2": {
+    "harm_metrics": {
+      "O0": {
+        "log_loss": 0.6463782210824491,
+        "brier": 0.22708698489808835,
+        "roc_auc": 0.6181458941140856,
+        "pr_auc": 0.7104213623953712
+      },
+      "OA": {
+        "log_loss": 0.6452519202291435,
+        "brier": 0.22657881907605468,
+        "roc_auc": 0.6221670878654046,
+        "pr_auc": 0.7140480383017938
+      }
+    },
+    "payoff_metrics": {
+      "O0": {
+        "mse": 1.5273284776457616,
+        "mae": 0.781365668085719,
+        "spearman": 0.1853504164132385
+      },
+      "OA": {
+        "mse": 1.5241236167898402,
+        "mae": 0.7800690229969772,
+        "spearman": 0.19137872974927742
+      }
+    },
+    "delta_harm_logloss": {
+      "point": 0.0011263008533056729,
+      "ci95_lower": 0.00016786970185871388,
+      "ci95_upper": 0.0020919245839515596,
+      "p_pos": 0.989
+    },
+    "delta_payoff_mse": {
+      "point": 0.003204860855921421,
+      "ci95_lower": -0.0010021985980362912,
+      "ci95_upper": 0.009271021586737887,
+      "p_pos": 0.9115
+    },
+    "beta0": 0.8536420817750473,
+    "n_h1_train": 12247,
+    "n_h1_eval": 12999,
+    "n_h0_train": 102731,
+    "n_econ_eval": 124556,
+    "n_h0_eval": 111557,
+    "p_h_mean": 0.10674730137551212,
+    "V0_mean": 0.017069189506841855,
+    "VA_mean": 0.01741392924956566,
+    "metrics": {
+      "BASE": {
+        "n_decisions": 124556,
+        "n_trades": 124556,
+        "trade_rate": 1.0,
+        "gross_total_ATR0": 759.986908589518,
+        "net_total_ATR0": -485.5730914104819,
+        "gross_EV_per_decision": 0.0061015680383885,
+        "net_EV_per_decision": -0.003898431961611499,
+        "net_EV_per_trade": -0.003898431961611499,
+        "win_rate": 0.4514274703747712,
+        "mean_win": 0.45703098794216923,
+        "mean_loss": -0.38320324729865896,
+        "payoff_ratio": 1.1926594859619517,
+        "profit_factor": 0.9814550049272424,
+        "break_even_cost": 0.0061015680383885,
+        "daily_sharpe_annualized": -3.087745082592453,
+        "max_drawdown_ATR0": -568.3271737599853,
+        "by_symbol": {
+          "AG": {
+            "net_total": -228.53092519077325,
+            "trade_count": 10056
+          },
+          "AL": {
+            "net_total": 35.008440612335946,
+            "trade_count": 9242
+          },
+          "AU": {
+            "net_total": -125.20655673196147,
+            "trade_count": 10404
+          },
+          "CF": {
+            "net_total": 101.67640548154125,
+            "trade_count": 6872
+          },
+          "CU": {
+            "net_total": -127.20069392843186,
+            "trade_count": 9214
+          },
+          "I": {
+            "net_total": 48.147995519469184,
+            "trade_count": 7011
+          },
+          "M": {
+            "net_total": 34.40112515255838,
+            "trade_count": 6981
+          },
+          "MA": {
+            "net_total": 50.05937118096649,
+            "trade_count": 6905
+          },
+          "NI": {
+            "net_total": -44.90618487182688,
+            "trade_count": 9420
+          },
+          "P": {
+            "net_total": -1.1730085859727666,
+            "trade_count": 6912
+          },
+          "RB": {
+            "net_total": 35.24549641486865,
+            "trade_count": 6996
+          },
+          "RU": {
+            "net_total": -69.58997353091694,
+            "trade_count": 7001
+          },
+          "SC": {
+            "net_total": -157.42637406141887,
+            "trade_count": 11103
+          },
+          "SN": {
+            "net_total": -61.85134046513593,
+            "trade_count": 9426
+          },
+          "TA": {
+            "net_total": 25.773131594216114,
+            "trade_count": 7013
+          }
+        },
+        "positive_symbol_count": 7,
+        "top3_profit_share": 0.6051363340819131
+      },
+      "GATE0": {
+        "n_decisions": 124556,
+        "n_trades": 65299,
+        "trade_rate": 0.5242541507434407,
+        "gross_total_ATR0": 379.17478814271686,
+        "net_total_ATR0": -273.8152118572832,
+        "gross_EV_per_decision": 0.003044211343835037,
+        "net_EV_per_decision": -0.0021983301635993707,
+        "net_EV_per_trade": -0.004193252758193587,
+        "win_rate": 0.4571739230309806,
+        "mean_win": 0.4333843578481978,
+        "mean_loss": -0.37272579266206424,
+        "payoff_ratio": 1.1627431382006082,
+        "profit_factor": 0.9792746968544477,
+        "break_even_cost": 0.005806747241806411,
+        "daily_sharpe_annualized": -2.5406502168681953,
+        "max_drawdown_ATR0": -294.63302050559366,
+        "by_symbol": {
+          "AG": {
+            "net_total": -174.20139501498653,
+            "trade_count": 5720
+          },
+          "AL": {
+            "net_total": 27.958651604925258,
+            "trade_count": 4883
+          },
+          "AU": {
+            "net_total": -86.4394964866738,
+            "trade_count": 6097
+          },
+          "CF": {
+            "net_total": 25.434502335733022,
+            "trade_count": 3195
+          },
+          "CU": {
+            "net_total": -42.35419080033196,
+            "trade_count": 5075
+          },
+          "I": {
+            "net_total": 50.81971444589169,
+            "trade_count": 3169
+          },
+          "M": {
+            "net_total": 25.154735653620143,
+            "trade_count": 3211
+          },
+          "MA": {
+            "net_total": 23.849331480343103,
+            "trade_count": 3352
+          },
+          "NI": {
+            "net_total": -14.104310908084646,
+            "trade_count": 5176
+          },
+          "P": {
+            "net_total": 9.417404682248774,
+            "trade_count": 3333
+          },
+          "RB": {
+            "net_total": 23.70299818467373,
+            "trade_count": 3291
+          },
+          "RU": {
+            "net_total": -35.46038272765372,
+            "trade_count": 3295
+          },
+          "SC": {
+            "net_total": -97.47074812548497,
+            "trade_count": 6746
+          },
+          "SN": {
+            "net_total": -59.13557183602374,
+            "trade_count": 5452
+          },
+          "TA": {
+            "net_total": 49.01354565452052,
+            "trade_count": 3304
+          }
+        },
+        "positive_symbol_count": 8,
+        "top3_profit_share": 0.5429846258089936
+      },
+      "GATEA": {
+        "n_decisions": 124556,
+        "n_trades": 65948,
+        "trade_rate": 0.5294646584668743,
+        "gross_total_ATR0": 392.839831797912,
+        "net_total_ATR0": -266.64016820208803,
+        "gross_EV_per_decision": 0.0031539213831361956,
+        "net_EV_per_decision": -0.002140725201532548,
+        "net_EV_per_trade": -0.00404318809064851,
+        "win_rate": 0.4559501425365439,
+        "mean_win": 0.435927801231352,
+        "mean_loss": -0.3727682829350765,
+        "payoff_ratio": 1.1694337238108738,
+        "profit_factor": 0.9800636205376172,
+        "break_even_cost": 0.005956811909351489,
+        "daily_sharpe_annualized": -2.3739603727772893,
+        "max_drawdown_ATR0": -294.7617706760162,
+        "by_symbol": {
+          "AG": {
+            "net_total": -164.64323662522546,
+            "trade_count": 5720
+          },
+          "AL": {
+            "net_total": 39.730550246083105,
+            "trade_count": 4933
+          },
+          "AU": {
+            "net_total": -92.10546346816884,
+            "trade_count": 6174
+          },
+          "CF": {
+            "net_total": 32.17451143180112,
+            "trade_count": 3234
+          },
+          "CU": {
+            "net_total": -61.00146073784036,
+            "trade_count": 5144
+          },
+          "I": {
+            "net_total": 52.96976290370564,
+            "trade_count": 3237
+          },
+          "M": {
+            "net_total": 11.587398307916269,
+            "trade_count": 3251
+          },
+          "MA": {
+            "net_total": 26.31517341933545,
+            "trade_count": 3381
+          },
+          "NI": {
+            "net_total": -0.9312973526377135,
+            "trade_count": 5223
+          },
+          "P": {
+            "net_total": 10.772179663636786,
+            "trade_count": 3365
+          },
+          "RB": {
+            "net_total": 23.579965282687706,
+            "trade_count": 3355
+          },
+          "RU": {
+            "net_total": -30.241785304428713,
+            "trade_count": 3334
+          },
+          "SC": {
+            "net_total": -92.11846035889928,
+            "trade_count": 6778
+          },
+          "SN": {
+            "net_total": -70.3134883514924,
+            "trade_count": 5483
+          },
+          "TA": {
+            "net_total": 47.58548274143857,
+            "trade_count": 3336
+          }
+        },
+        "positive_symbol_count": 8,
+        "top3_profit_share": 0.5732618847838853
+      },
+      "FLIPA": {
+        "n_decisions": 124556,
+        "n_trades": 96545,
+        "trade_rate": 0.7751132020938373,
+        "gross_total_ATR0": 238.14525544881863,
+        "net_total_ATR0": -727.3047445511813,
+        "gross_EV_per_decision": 0.0019119533017182523,
+        "net_EV_per_decision": -0.0058391787192201205,
+        "net_EV_per_trade": -0.007533323782186352,
+        "win_rate": 0.4451499300844166,
+        "mean_win": 0.46505955305803004,
+        "mean_loss": -0.38668923902938585,
+        "payoff_ratio": 1.2026700153988215,
+        "profit_factor": 0.9648885388999991,
+        "break_even_cost": 0.002466676217813648,
+        "daily_sharpe_annualized": -5.746565803722165,
+        "max_drawdown_ATR0": -738.1947113180323,
+        "by_symbol": {
+          "AG": {
+            "net_total": -175.48757136362008,
+            "trade_count": 7755
+          },
+          "AL": {
+            "net_total": -24.40901767054953,
+            "trade_count": 7126
+          },
+          "AU": {
+            "net_total": -69.6622289121554,
+            "trade_count": 8093
+          },
+          "CF": {
+            "net_total": -52.91051218115395,
+            "trade_count": 5341
+          },
+          "CU": {
+            "net_total": -63.9670340147565,
+            "trade_count": 7219
+          },
+          "I": {
+            "net_total": 1.1893415505334062,
+            "trade_count": 5419
+          },
+          "M": {
+            "net_total": -26.789335653194886,
+            "trade_count": 5387
+          },
+          "MA": {
+            "net_total": -28.0973035463256,
+            "trade_count": 5324
+          },
+          "NI": {
+            "net_total": -0.6028538377259878,
+            "trade_count": 7327
+          },
+          "P": {
+            "net_total": 3.132085737767227,
+            "trade_count": 5195
+          },
+          "RB": {
+            "net_total": -42.50830265867043,
+            "trade_count": 5417
+          },
+          "RU": {
+            "net_total": -60.90154463723928,
+            "trade_count": 5395
+          },
+          "SC": {
+            "net_total": -105.68571663727715,
+            "trade_count": 8817
+          },
+          "SN": {
+            "net_total": -104.90851917468858,
+            "trade_count": 7338
+          },
+          "TA": {
+            "net_total": 24.303768447875335,
+            "trade_count": 5392
+          }
+        },
+        "positive_symbol_count": 3,
+        "top3_profit_share": 1.0
+      }
+    },
+    "bootstrap": {
+      "BASE": {
+        "point": -0.003898431961611499,
+        "ci95_lower": -0.007844240837671802,
+        "ci95_upper": -0.00014609665466518425,
+        "p_pos": 0.022
+      },
+      "GATE0": {
+        "point": -0.0021983301635993707,
+        "ci95_lower": -0.004945169131690538,
+        "ci95_upper": 0.00045418246213350125,
+        "p_pos": 0.0555
+      },
+      "GATEA": {
+        "point": -0.002140725201532548,
+        "ci95_lower": -0.004977245453393093,
+        "ci95_upper": 0.000655787580356684,
+        "p_pos": 0.068
+      },
+      "FLIPA": {
+        "point": -0.0058391787192201205,
+        "ci95_lower": -0.009088216830768764,
+        "ci95_upper": -0.002787671758387501,
+        "p_pos": 0.0
+      },
+      "GATEA-BASE": {
+        "point": 0.001757706760078951,
+        "ci95_lower": -0.00044661572161281825,
+        "ci95_upper": 0.004040881158398499,
+        "p_pos": 0.933
+      },
+      "GATEA-GATE0": {
+        "point": 5.760496206682264e-05,
+        "ci95_lower": -0.0007961354881739837,
+        "ci95_upper": 0.0008382527289206393,
+        "p_pos": 0.577
+      },
+      "n_days": 102,
+      "n_boot": 2000
+    },
+    "cost_grid": {
+      "0.0": {
+        "BASE": {
+          "n_decisions": 124556,
+          "n_trades": 124556,
+          "trade_rate": 1.0,
+          "gross_total_ATR0": 759.986908589518,
+          "net_total_ATR0": 759.986908589518,
+          "gross_EV_per_decision": 0.0061015680383885,
+          "net_EV_per_decision": 0.0061015680383885,
+          "net_EV_per_trade": 0.0061015680383885,
+          "win_rate": 0.451668325893574,
+          "mean_win": 0.46678511487914,
+          "mean_loss": -0.48945124921844796,
+          "payoff_ratio": 0.9536907212403665,
+          "profit_factor": 1.0298029288971313,
+          "break_even_cost": 0.0061015680383885,
+          "daily_sharpe_annualized": 4.848357971687427,
+          "max_drawdown_ATR0": -90.8518125678338,
+          "by_symbol": {
+            "AG": {
+              "net_total": -127.97092519077324,
+              "trade_count": 10056
+            },
+            "AL": {
+              "net_total": 127.42844061233595,
+              "trade_count": 9242
+            },
+            "AU": {
+              "net_total": -21.166556731961478,
+              "trade_count": 10404
+            },
+            "CF": {
+              "net_total": 170.39640548154125,
+              "trade_count": 6872
+            },
+            "CU": {
+              "net_total": -35.06069392843187,
+              "trade_count": 9214
+            },
+            "I": {
+              "net_total": 118.25799551946915,
+              "trade_count": 7011
+            },
+            "M": {
+              "net_total": 104.21112515255838,
+              "trade_count": 6981
+            },
+            "MA": {
+              "net_total": 119.10937118096649,
+              "trade_count": 6905
+            },
+            "NI": {
+              "net_total": 49.29381512817311,
+              "trade_count": 9420
+            },
+            "P": {
+              "net_total": 67.94699141402724,
+              "trade_count": 6912
+            },
+            "RB": {
+              "net_total": 105.20549641486866,
+              "trade_count": 6996
+            },
+            "RU": {
+              "net_total": 0.4200264690830515,
+              "trade_count": 7001
+            },
+            "SC": {
+              "net_total": -46.396374061418875,
+              "trade_count": 11103
+            },
+            "SN": {
+              "net_total": 32.4086595348641,
+              "trade_count": 9426
+            },
+            "TA": {
+              "net_total": 95.90313159421609,
+              "trade_count": 7013
+            }
+          },
+          "positive_symbol_count": 11,
+          "top3_profit_share": 0.4208984669522344
+        },
+        "GATE0": {
+          "n_decisions": 124556,
+          "n_trades": 79727,
+          "trade_rate": 0.6400895982529946,
+          "gross_total_ATR0": 491.5190871658752,
+          "net_total_ATR0": 491.5190871658752,
+          "gross_EV_per_decision": 0.003946169491360314,
+          "net_EV_per_decision": 0.003946169491360314,
+          "net_EV_per_trade": 0.006165026743335071,
+          "win_rate": 0.45467658384236204,
+          "mean_win": 0.4449908691187142,
+          "mean_loss": -0.4709527800044421,
+          "payoff_ratio": 0.9448736434139258,
+          "profit_factor": 1.0314282574606966,
+          "break_even_cost": 0.006165026743335072,
+          "daily_sharpe_annualized": 4.190102024261886,
+          "max_drawdown_ATR0": -92.1812242815684,
+          "by_symbol": {
+            "AG": {
+              "net_total": -118.41149880201549,
+              "trade_count": 6864
+            },
+            "AL": {
+              "net_total": 61.744866944534245,
+              "trade_count": 5967
+            },
+            "AU": {
+              "net_total": -19.997551260093203,
+              "trade_count": 7400
+            },
+            "CF": {
+              "net_total": 82.27861614627514,
+              "trade_count": 3931
+            },
+            "CU": {
+              "net_total": -24.90940893760385,
+              "trade_count": 6169
+            },
+            "I": {
+              "net_total": 104.52592039678073,
+              "trade_count": 3957
+            },
+            "M": {
+              "net_total": 101.07231103818663,
+              "trade_count": 4027
+            },
+            "MA": {
+              "net_total": 81.33317699706419,
+              "trade_count": 4146
+            },
+            "NI": {
+              "net_total": 62.82190445420889,
+              "trade_count": 6290
+            },
+            "P": {
+              "net_total": 57.31340675571528,
+              "trade_count": 4198
+            },
+            "RB": {
+              "net_total": 58.17761254023507,
+              "trade_count": 4087
+            },
+            "RU": {
+              "net_total": -15.873595921800492,
+              "trade_count": 4051
+            },
+            "SC": {
+              "net_total": -40.251816935280615,
+              "trade_count": 7962
+            },
+            "SN": {
+              "net_total": -19.756327877806033,
+              "trade_count": 6555
+            },
+            "TA": {
+              "net_total": 121.45147162747472,
+              "trade_count": 4123
+            }
+          },
+          "positive_symbol_count": 9,
+          "top3_profit_share": 0.44757228791606635
+        },
+        "GATEA": {
+          "n_decisions": 124556,
+          "n_trades": 80401,
+          "trade_rate": 0.645500818908764,
+          "gross_total_ATR0": 543.8432041762886,
+          "net_total_ATR0": 543.8432041762886,
+          "gross_EV_per_decision": 0.004366254569641676,
+          "net_EV_per_decision": 0.004366254569641676,
+          "net_EV_per_trade": 0.006764134826386346,
+          "win_rate": 0.45458389821022127,
+          "mean_win": 0.44613675370065314,
+          "mean_loss": -0.4708169247514452,
+          "payoff_ratio": 0.9475801107536198,
+          "profit_factor": 1.0345034191986993,
+          "break_even_cost": 0.006764134826386345,
+          "daily_sharpe_annualized": 4.500445684797944,
+          "max_drawdown_ATR0": -103.5028948111156,
+          "by_symbol": {
+            "AG": {
+              "net_total": -83.64222276067589,
+              "trade_count": 6929
+            },
+            "AL": {
+              "net_total": 67.13278546733973,
+              "trade_count": 6025
+            },
+            "AU": {
+              "net_total": 1.714664045565197,
+              "trade_count": 7434
+            },
+            "CF": {
+              "net_total": 98.83181973036048,
+              "trade_count": 3962
+            },
+            "CU": {
+              "net_total": -27.39006276366811,
+              "trade_count": 6215
+            },
+            "I": {
+              "net_total": 70.12088929515768,
+              "trade_count": 4023
+            },
+            "M": {
+              "net_total": 85.11241316972877,
+              "trade_count": 4089
+            },
+            "MA": {
+              "net_total": 95.60581766406152,
+              "trade_count": 4179
+            },
+            "NI": {
+              "net_total": 59.00971717687522,
+              "trade_count": 6347
+            },
+            "P": {
+              "net_total": 44.38068653052693,
+              "trade_count": 4226
+            },
+            "RB": {
+              "net_total": 81.40464407905573,
+              "trade_count": 4122
+            },
+            "RU": {
+              "net_total": -12.844987254724042,
+              "trade_count": 4091
+            },
+            "SC": {
+              "net_total": -32.60434589246185,
+              "trade_count": 7999
+            },
+            "SN": {
+              "net_total": -3.260461093654424,
+              "trade_count": 6608
+            },
+            "TA": {
+              "net_total": 100.27184678280167,
+              "trade_count": 4152
+            }
+          },
+          "positive_symbol_count": 10,
+          "top3_profit_share": 0.4188681754772728
+        },
+        "FLIPA": {
+          "n_decisions": 124556,
+          "n_trades": 124556,
+          "trade_rate": 1.0,
+          "gross_total_ATR0": 327.69949976305924,
+          "net_total_ATR0": 327.69949976305924,
+          "gross_EV_per_decision": 0.0026309411008948523,
+          "net_EV_per_decision": 0.0026309411008948523,
+          "net_EV_per_trade": 0.0026309411008948523,
+          "win_rate": 0.44294132759561966,
+          "mean_win": 0.47206418749809553,
+          "mean_loss": -0.483512019641912,
+          "payoff_ratio": 0.976323583119413,
+          "profit_factor": 1.0127427454882048,
+          "break_even_cost": 0.0026309411008948523,
+          "daily_sharpe_annualized": 2.354694624646434,
+          "max_drawdown_ATR0": -213.16803174729068,
+          "by_symbol": {
+            "AG": {
+              "net_total": -39.31352033057858,
+              "trade_count": 10056
+            },
+            "AL": {
+              "net_total": 6.8371303223435405,
+              "trade_count": 9242
+            },
+            "AU": {
+              "net_total": 24.595884823091858,
+              "trade_count": 10404
+            },
+            "CF": {
+              "net_total": 27.26723397917972,
+              "trade_count": 6872
+            },
+            "CU": {
+              "net_total": -19.71943159890434,
+              "trade_count": 9214
+            },
+            "I": {
+              "net_total": 21.983783070846236,
+              "trade_count": 7011
+            },
+            "M": {
+              "net_total": 66.01370118689914,
+              "trade_count": 6981
+            },
+            "MA": {
+              "net_total": 72.10226414715655,
+              "trade_count": 6905
+            },
+            "NI": {
+              "net_total": 68.7256192255773,
+              "trade_count": 9420
+            },
+            "P": {
+              "net_total": 20.814381647026607,
+              "trade_count": 6912
+            },
+            "RB": {
+              "net_total": 57.60379174324281,
+              "trade_count": 6996
+            },
+            "RU": {
+              "net_total": -26.11000097853115,
+              "trade_count": 7001
+            },
+            "SC": {
+              "net_total": -18.81231772350487,
+              "trade_count": 11103
+            },
+            "SN": {
+              "net_total": -38.929581722172934,
+              "trade_count": 9426
+            },
+            "TA": {
+              "net_total": 104.64056197138729,
+              "trade_count": 7013
+            }
+          },
+          "positive_symbol_count": 10,
+          "top3_profit_share": 0.5216247506742869
+        }
+      },
+      "0.01": {
+        "BASE": {
+          "n_decisions": 124556,
+          "n_trades": 124556,
+          "trade_rate": 1.0,
+          "gross_total_ATR0": 759.986908589518,
+          "net_total_ATR0": -485.5730914104819,
+          "gross_EV_per_decision": 0.0061015680383885,
+          "net_EV_per_decision": -0.003898431961611499,
+          "net_EV_per_trade": -0.003898431961611499,
+          "win_rate": 0.4514274703747712,
+          "mean_win": 0.45703098794216923,
+          "mean_loss": -0.38320324729865896,
+          "payoff_ratio": 1.1926594859619517,
+          "profit_factor": 0.9814550049272424,
+          "break_even_cost": 0.0061015680383885,
+          "daily_sharpe_annualized": -3.087745082592453,
+          "max_drawdown_ATR0": -568.3271737599853,
+          "by_symbol": {
+            "AG": {
+              "net_total": -228.53092519077325,
+              "trade_count": 10056
+            },
+            "AL": {
+              "net_total": 35.008440612335946,
+              "trade_count": 9242
+            },
+            "AU": {
+              "net_total": -125.20655673196147,
+              "trade_count": 10404
+            },
+            "CF": {
+              "net_total": 101.67640548154125,
+              "trade_count": 6872
+            },
+            "CU": {
+              "net_total": -127.20069392843186,
+              "trade_count": 9214
+            },
+            "I": {
+              "net_total": 48.147995519469184,
+              "trade_count": 7011
+            },
+            "M": {
+              "net_total": 34.40112515255838,
+              "trade_count": 6981
+            },
+            "MA": {
+              "net_total": 50.05937118096649,
+              "trade_count": 6905
+            },
+            "NI": {
+              "net_total": -44.90618487182688,
+              "trade_count": 9420
+            },
+            "P": {
+              "net_total": -1.1730085859727666,
+              "trade_count": 6912
+            },
+            "RB": {
+              "net_total": 35.24549641486865,
+              "trade_count": 6996
+            },
+            "RU": {
+              "net_total": -69.58997353091694,
+              "trade_count": 7001
+            },
+            "SC": {
+              "net_total": -157.42637406141887,
+              "trade_count": 11103
+            },
+            "SN": {
+              "net_total": -61.85134046513593,
+              "trade_count": 9426
+            },
+            "TA": {
+              "net_total": 25.773131594216114,
+              "trade_count": 7013
+            }
+          },
+          "positive_symbol_count": 7,
+          "top3_profit_share": 0.6051363340819131
+        },
+        "GATE0": {
+          "n_decisions": 124556,
+          "n_trades": 65299,
+          "trade_rate": 0.5242541507434407,
+          "gross_total_ATR0": 379.17478814271686,
+          "net_total_ATR0": -273.8152118572832,
+          "gross_EV_per_decision": 0.003044211343835037,
+          "net_EV_per_decision": -0.0021983301635993707,
+          "net_EV_per_trade": -0.004193252758193587,
+          "win_rate": 0.4571739230309806,
+          "mean_win": 0.4333843578481978,
+          "mean_loss": -0.37272579266206424,
+          "payoff_ratio": 1.1627431382006082,
+          "profit_factor": 0.9792746968544477,
+          "break_even_cost": 0.005806747241806411,
+          "daily_sharpe_annualized": -2.5406502168681953,
+          "max_drawdown_ATR0": -294.63302050559366,
+          "by_symbol": {
+            "AG": {
+              "net_total": -174.20139501498653,
+              "trade_count": 5720
+            },
+            "AL": {
+              "net_total": 27.958651604925258,
+              "trade_count": 4883
+            },
+            "AU": {
+              "net_total": -86.4394964866738,
+              "trade_count": 6097
+            },
+            "CF": {
+              "net_total": 25.434502335733022,
+              "trade_count": 3195
+            },
+            "CU": {
+              "net_total": -42.35419080033196,
+              "trade_count": 5075
+            },
+            "I": {
+              "net_total": 50.81971444589169,
+              "trade_count": 3169
+            },
+            "M": {
+              "net_total": 25.154735653620143,
+              "trade_count": 3211
+            },
+            "MA": {
+              "net_total": 23.849331480343103,
+              "trade_count": 3352
+            },
+            "NI": {
+              "net_total": -14.104310908084646,
+              "trade_count": 5176
+            },
+            "P": {
+              "net_total": 9.417404682248774,
+              "trade_count": 3333
+            },
+            "RB": {
+              "net_total": 23.70299818467373,
+              "trade_count": 3291
+            },
+            "RU": {
+              "net_total": -35.46038272765372,
+              "trade_count": 3295
+            },
+            "SC": {
+              "net_total": -97.47074812548497,
+              "trade_count": 6746
+            },
+            "SN": {
+              "net_total": -59.13557183602374,
+              "trade_count": 5452
+            },
+            "TA": {
+              "net_total": 49.01354565452052,
+              "trade_count": 3304
+            }
+          },
+          "positive_symbol_count": 8,
+          "top3_profit_share": 0.5429846258089936
+        },
+        "GATEA": {
+          "n_decisions": 124556,
+          "n_trades": 65948,
+          "trade_rate": 0.5294646584668743,
+          "gross_total_ATR0": 392.839831797912,
+          "net_total_ATR0": -266.64016820208803,
+          "gross_EV_per_decision": 0.0031539213831361956,
+          "net_EV_per_decision": -0.002140725201532548,
+          "net_EV_per_trade": -0.00404318809064851,
+          "win_rate": 0.4559501425365439,
+          "mean_win": 0.435927801231352,
+          "mean_loss": -0.3727682829350765,
+          "payoff_ratio": 1.1694337238108738,
+          "profit_factor": 0.9800636205376172,
+          "break_even_cost": 0.005956811909351489,
+          "daily_sharpe_annualized": -2.3739603727772893,
+          "max_drawdown_ATR0": -294.7617706760162,
+          "by_symbol": {
+            "AG": {
+              "net_total": -164.64323662522546,
+              "trade_count": 5720
+            },
+            "AL": {
+              "net_total": 39.730550246083105,
+              "trade_count": 4933
+            },
+            "AU": {
+              "net_total": -92.10546346816884,
+              "trade_count": 6174
+            },
+            "CF": {
+              "net_total": 32.17451143180112,
+              "trade_count": 3234
+            },
+            "CU": {
+              "net_total": -61.00146073784036,
+              "trade_count": 5144
+            },
+            "I": {
+              "net_total": 52.96976290370564,
+              "trade_count": 3237
+            },
+            "M": {
+              "net_total": 11.587398307916269,
+              "trade_count": 3251
+            },
+            "MA": {
+              "net_total": 26.31517341933545,
+              "trade_count": 3381
+            },
+            "NI": {
+              "net_total": -0.9312973526377135,
+              "trade_count": 5223
+            },
+            "P": {
+              "net_total": 10.772179663636786,
+              "trade_count": 3365
+            },
+            "RB": {
+              "net_total": 23.579965282687706,
+              "trade_count": 3355
+            },
+            "RU": {
+              "net_total": -30.241785304428713,
+              "trade_count": 3334
+            },
+            "SC": {
+              "net_total": -92.11846035889928,
+              "trade_count": 6778
+            },
+            "SN": {
+              "net_total": -70.3134883514924,
+              "trade_count": 5483
+            },
+            "TA": {
+              "net_total": 47.58548274143857,
+              "trade_count": 3336
+            }
+          },
+          "positive_symbol_count": 8,
+          "top3_profit_share": 0.5732618847838853
+        },
+        "FLIPA": {
+          "n_decisions": 124556,
+          "n_trades": 96545,
+          "trade_rate": 0.7751132020938373,
+          "gross_total_ATR0": 238.14525544881863,
+          "net_total_ATR0": -727.3047445511813,
+          "gross_EV_per_decision": 0.0019119533017182523,
+          "net_EV_per_decision": -0.0058391787192201205,
+          "net_EV_per_trade": -0.007533323782186352,
+          "win_rate": 0.4451499300844166,
+          "mean_win": 0.46505955305803004,
+          "mean_loss": -0.38668923902938585,
+          "payoff_ratio": 1.2026700153988215,
+          "profit_factor": 0.9648885388999991,
+          "break_even_cost": 0.002466676217813648,
+          "daily_sharpe_annualized": -5.746565803722165,
+          "max_drawdown_ATR0": -738.1947113180323,
+          "by_symbol": {
+            "AG": {
+              "net_total": -175.48757136362008,
+              "trade_count": 7755
+            },
+            "AL": {
+              "net_total": -24.40901767054953,
+              "trade_count": 7126
+            },
+            "AU": {
+              "net_total": -69.6622289121554,
+              "trade_count": 8093
+            },
+            "CF": {
+              "net_total": -52.91051218115395,
+              "trade_count": 5341
+            },
+            "CU": {
+              "net_total": -63.9670340147565,
+              "trade_count": 7219
+            },
+            "I": {
+              "net_total": 1.1893415505334062,
+              "trade_count": 5419
+            },
+            "M": {
+              "net_total": -26.789335653194886,
+              "trade_count": 5387
+            },
+            "MA": {
+              "net_total": -28.0973035463256,
+              "trade_count": 5324
+            },
+            "NI": {
+              "net_total": -0.6028538377259878,
+              "trade_count": 7327
+            },
+            "P": {
+              "net_total": 3.132085737767227,
+              "trade_count": 5195
+            },
+            "RB": {
+              "net_total": -42.50830265867043,
+              "trade_count": 5417
+            },
+            "RU": {
+              "net_total": -60.90154463723928,
+              "trade_count": 5395
+            },
+            "SC": {
+              "net_total": -105.68571663727715,
+              "trade_count": 8817
+            },
+            "SN": {
+              "net_total": -104.90851917468858,
+              "trade_count": 7338
+            },
+            "TA": {
+              "net_total": 24.303768447875335,
+              "trade_count": 5392
+            }
+          },
+          "positive_symbol_count": 3,
+          "top3_profit_share": 1.0
+        }
+      },
+      "0.02": {
+        "BASE": {
+          "n_decisions": 124556,
+          "n_trades": 124556,
+          "trade_rate": 1.0,
+          "gross_total_ATR0": 759.986908589518,
+          "net_total_ATR0": -1731.1330914104828,
+          "gross_EV_per_decision": 0.0061015680383885,
+          "net_EV_per_decision": -0.013898431961611507,
+          "net_EV_per_trade": -0.013898431961611507,
+          "win_rate": 0.4502392498153441,
+          "mean_win": 0.4482222652233437,
+          "mean_loss": -0.39236283844172554,
+          "payoff_ratio": 1.142366761856104,
+          "profit_factor": 0.9355676150021951,
+          "break_even_cost": 0.0061015680383885,
+          "daily_sharpe_annualized": -10.961653407899728,
+          "max_drawdown_ATR0": -1714.943226653501,
+          "by_symbol": {
+            "AG": {
+              "net_total": -329.0909251907733,
+              "trade_count": 10056
+            },
+            "AL": {
+              "net_total": -57.41155938766411,
+              "trade_count": 9242
+            },
+            "AU": {
+              "net_total": -229.24655673196156,
+              "trade_count": 10404
+            },
+            "CF": {
+              "net_total": 32.956405481541175,
+              "trade_count": 6872
+            },
+            "CU": {
+              "net_total": -219.34069392843193,
+              "trade_count": 9214
+            },
+            "I": {
+              "net_total": -21.96200448053094,
+              "trade_count": 7011
+            },
+            "M": {
+              "net_total": -35.408874847441666,
+              "trade_count": 6981
+            },
+            "MA": {
+              "net_total": -18.99062881903357,
+              "trade_count": 6905
+            },
+            "NI": {
+              "net_total": -139.10618487182694,
+              "trade_count": 9420
+            },
+            "P": {
+              "net_total": -70.29300858597284,
+              "trade_count": 6912
+            },
+            "RB": {
+              "net_total": -34.714503585131396,
+              "trade_count": 6996
+            },
+            "RU": {
+              "net_total": -139.599973530917,
+              "trade_count": 7001
+            },
+            "SC": {
+              "net_total": -268.45637406141896,
+              "trade_count": 11103
+            },
+            "SN": {
+              "net_total": -156.11134046513598,
+              "trade_count": 9426
+            },
+            "TA": {
+              "net_total": -44.35686840578394,
+              "trade_count": 7013
+            }
+          },
+          "positive_symbol_count": 1,
+          "top3_profit_share": 1.0
+        },
+        "GATE0": {
+          "n_decisions": 124556,
+          "n_trades": 51711,
+          "trade_rate": 0.4151626577603648,
+          "gross_total_ATR0": 317.1502320625748,
+          "net_total_ATR0": -717.0697679374256,
+          "gross_EV_per_decision": 0.00254624612272853,
+          "net_EV_per_decision": -0.005757007032478769,
+          "net_EV_per_trade": -0.013866871032032364,
+          "win_rate": 0.45794898570903675,
+          "mean_win": 0.4235230138794348,
+          "mean_loss": -0.383393444866797,
+          "payoff_ratio": 1.104669418713145,
+          "profit_factor": 0.9332742242078481,
+          "break_even_cost": 0.0061331289679676425,
+          "daily_sharpe_annualized": -7.06905276577777,
+          "max_drawdown_ATR0": -705.6601596107055,
+          "by_symbol": {
+            "AG": {
+              "net_total": -187.9665097916639,
+              "trade_count": 4473
+            },
+            "AL": {
+              "net_total": 15.246446346412995,
+              "trade_count": 3889
+            },
+            "AU": {
+              "net_total": -127.63937398808864,
+              "trade_count": 4876
+            },
+            "CF": {
+              "net_total": 4.748406344882051,
+              "trade_count": 2501
+            },
+            "CU": {
+              "net_total": -89.46380214743992,
+              "trade_count": 4094
+            },
+            "I": {
+              "net_total": 24.82337704094451,
+              "trade_count": 2486
+            },
+            "M": {
+              "net_total": -23.854959354449385,
+              "trade_count": 2490
+            },
+            "MA": {
+              "net_total": -13.708238507548955,
+              "trade_count": 2620
+            },
+            "NI": {
+              "net_total": -59.39082503558578,
+              "trade_count": 4137
+            },
+            "P": {
+              "net_total": -29.491049665513597,
+              "trade_count": 2559
+            },
+            "RB": {
+              "net_total": 13.853364099814545,
+              "trade_count": 2598
+            },
+            "RU": {
+              "net_total": -41.98781188059898,
+              "trade_count": 2577
+            },
+            "SC": {
+              "net_total": -146.5075325154495,
+              "trade_count": 5545
+            },
+            "SN": {
+              "net_total": -79.20652877010676,
+              "trade_count": 4297
+            },
+            "TA": {
+              "net_total": 23.475269886965705,
+              "trade_count": 2569
+            }
+          },
+          "positive_symbol_count": 5,
+          "top3_profit_share": 0.7735547091813116
+        },
+        "GATEA": {
+          "n_decisions": 124556,
+          "n_trades": 52223,
+          "trade_rate": 0.4192732586145991,
+          "gross_total_ATR0": 320.7442434699094,
+          "net_total_ATR0": -723.715756530091,
+          "gross_EV_per_decision": 0.0025751007054650873,
+          "net_EV_per_decision": -0.005810364466826897,
+          "net_EV_per_trade": -0.013858180428740038,
+          "win_rate": 0.45642724470061086,
+          "mean_win": 0.42729199631159354,
+          "mean_loss": -0.38428322050985436,
+          "payoff_ratio": 1.1119194737274152,
+          "profit_factor": 0.9336566941123287,
+          "break_even_cost": 0.00614181957125997,
+          "daily_sharpe_annualized": -6.96560977078096,
+          "max_drawdown_ATR0": -713.0470944418305,
+          "by_symbol": {
+            "AG": {
+              "net_total": -165.3783379459467,
+              "trade_count": 4505
+            },
+            "AL": {
+              "net_total": 7.576176317369335,
+              "trade_count": 3957
+            },
+            "AU": {
+              "net_total": -120.61782703945532,
+              "trade_count": 4904
+            },
+            "CF": {
+              "net_total": 10.035049901662003,
+              "trade_count": 2492
+            },
+            "CU": {
+              "net_total": -82.8267258632833,
+              "trade_count": 4133
+            },
+            "I": {
+              "net_total": 22.64570522451323,
+              "trade_count": 2554
+            },
+            "M": {
+              "net_total": -18.189730767441908,
+              "trade_count": 2518
+            },
+            "MA": {
+              "net_total": -23.821234395410947,
+              "trade_count": 2654
+            },
+            "NI": {
+              "net_total": -52.851117486126014,
+              "trade_count": 4141
+            },
+            "P": {
+              "net_total": -24.732715185597158,
+              "trade_count": 2587
+            },
+            "RB": {
+              "net_total": -9.217698081677796,
+              "trade_count": 2646
+            },
+            "RU": {
+              "net_total": -41.2667073419489,
+              "trade_count": 2636
+            },
+            "SC": {
+              "net_total": -144.21773895287964,
+              "trade_count": 5562
+            },
+            "SN": {
+              "net_total": -86.06787872003527,
+              "trade_count": 4350
+            },
+            "TA": {
+              "net_total": 5.2150238061674195,
+              "trade_count": 2584
+            }
+          },
+          "positive_symbol_count": 4,
+          "top3_profit_share": 0.8853134030078804
+        },
+        "FLIPA": {
+          "n_decisions": 124556,
+          "n_trades": 72190,
+          "trade_rate": 0.579578663412441,
+          "gross_total_ATR0": 215.02473345990956,
+          "net_total_ATR0": -1228.775266540091,
+          "gross_EV_per_decision": 0.0017263297910972539,
+          "net_EV_per_decision": -0.009865243477151571,
+          "net_EV_per_trade": -0.017021405548415167,
+          "win_rate": 0.4472918686798726,
+          "mean_win": 0.45731686161836815,
+          "mean_loss": -0.4008906448169724,
+          "payoff_ratio": 1.140752141590027,
+          "profit_factor": 0.9231801165900245,
+          "break_even_cost": 0.002978594451584839,
+          "daily_sharpe_annualized": -10.401806540818242,
+          "max_drawdown_ATR0": -1217.0642063796097,
+          "by_symbol": {
+            "AG": {
+              "net_total": -164.49423572192043,
+              "trade_count": 5757
+            },
+            "AL": {
+              "net_total": -50.81696838280044,
+              "trade_count": 5359
+            },
+            "AU": {
+              "net_total": -106.55473002061936,
+              "trade_count": 6088
+            },
+            "CF": {
+              "net_total": -60.241143315143766,
+              "trade_count": 3984
+            },
+            "CU": {
+              "net_total": -116.6940731361845,
+              "trade_count": 5474
+            },
+            "I": {
+              "net_total": -29.972980110554367,
+              "trade_count": 4072
+            },
+            "M": {
+              "net_total": -50.769399135311495,
+              "trade_count": 3915
+            },
+            "MA": {
+              "net_total": -81.12774487466501,
+              "trade_count": 3987
+            },
+            "NI": {
+              "net_total": -53.42043366682739,
+              "trade_count": 5530
+            },
+            "P": {
+              "net_total": -44.26505506618113,
+              "trade_count": 3740
+            },
+            "RB": {
+              "net_total": -74.25002209523443,
+              "trade_count": 4036
+            },
+            "RU": {
+              "net_total": -100.19739251995958,
+              "trade_count": 3951
+            },
+            "SC": {
+              "net_total": -148.5844767607715,
+              "trade_count": 6785
+            },
+            "SN": {
+              "net_total": -111.64728359291884,
+              "trade_count": 5546
+            },
+            "TA": {
+              "net_total": -35.73932814099882,
+              "trade_count": 3966
+            }
+          },
+          "positive_symbol_count": 0,
+          "top3_profit_share": 0.0
+        }
+      },
+      "0.03": {
+        "BASE": {
+          "n_decisions": 124556,
+          "n_trades": 124556,
+          "trade_rate": 1.0,
+          "gross_total_ATR0": 759.986908589518,
+          "net_total_ATR0": -2976.6930914104823,
+          "gross_EV_per_decision": 0.0061015680383885,
+          "net_EV_per_decision": -0.023898431961611503,
+          "net_EV_per_trade": -0.023898431961611503,
+          "win_rate": 0.4478547801791965,
+          "mean_win": 0.44058383318088057,
+          "mean_loss": -0.4006482348849046,
+          "payoff_ratio": 1.0996774597233616,
+          "profit_factor": 0.8919678905347779,
+          "break_even_cost": 0.0061015680383885,
+          "daily_sharpe_annualized": -18.75038230186139,
+          "max_drawdown_ATR0": -2937.903226653501,
+          "by_symbol": {
+            "AG": {
+              "net_total": -429.65092519077325,
+              "trade_count": 10056
+            },
+            "AL": {
+              "net_total": -149.83155938766413,
+              "trade_count": 9242
+            },
+            "AU": {
+              "net_total": -333.28655673196147,
+              "trade_count": 10404
+            },
+            "CF": {
+              "net_total": -35.76359451845879,
+              "trade_count": 6872
+            },
+            "CU": {
+              "net_total": -311.4806939284319,
+              "trade_count": 9214
+            },
+            "I": {
+              "net_total": -92.0720044805309,
+              "trade_count": 7011
+            },
+            "M": {
+              "net_total": -105.21887484744167,
+              "trade_count": 6981
+            },
+            "MA": {
+              "net_total": -88.04062881903354,
+              "trade_count": 6905
+            },
+            "NI": {
+              "net_total": -233.30618487182693,
+              "trade_count": 9420
+            },
+            "P": {
+              "net_total": -139.41300858597282,
+              "trade_count": 6912
+            },
+            "RB": {
+              "net_total": -104.67450358513139,
+              "trade_count": 6996
+            },
+            "RU": {
+              "net_total": -209.60997353091696,
+              "trade_count": 7001
+            },
+            "SC": {
+              "net_total": -379.4863740614189,
+              "trade_count": 11103
+            },
+            "SN": {
+              "net_total": -250.37134046513594,
+              "trade_count": 9426
+            },
+            "TA": {
+              "net_total": -114.48686840578395,
+              "trade_count": 7013
+            }
+          },
+          "positive_symbol_count": 0,
+          "top3_profit_share": 0.0
+        },
+        "GATE0": {
+          "n_decisions": 124556,
+          "n_trades": 39817,
+          "trade_rate": 0.319671473072353,
+          "gross_total_ATR0": 226.32224264162787,
+          "net_total_ATR0": -968.1877573583723,
+          "gross_EV_per_decision": 0.0018170320389353212,
+          "net_EV_per_decision": -0.00777311215323527,
+          "net_EV_per_trade": -0.024315939356515364,
+          "win_rate": 0.45829670743652207,
+          "mean_win": 0.4191145692004902,
+          "mean_loss": -0.39947101933927937,
+          "payoff_ratio": 1.0491739047646085,
+          "profit_factor": 0.8876315737467929,
+          "break_even_cost": 0.005684060643484639,
+          "daily_sharpe_annualized": -11.239341323136953,
+          "max_drawdown_ATR0": -961.0512890445884,
+          "by_symbol": {
+            "AG": {
+              "net_total": -170.6132708100482,
+              "trade_count": 3424
+            },
+            "AL": {
+              "net_total": -26.30212689445268,
+              "trade_count": 3040
+            },
+            "AU": {
+              "net_total": -123.98736719944148,
+              "trade_count": 3766
+            },
+            "CF": {
+              "net_total": -16.0766095139517,
+              "trade_count": 1900
+            },
+            "CU": {
+              "net_total": -117.06713577898292,
+              "trade_count": 3200
+            },
+            "I": {
+              "net_total": -8.118461586410913,
+              "trade_count": 1910
+            },
+            "M": {
+              "net_total": -58.00035735011154,
+              "trade_count": 1869
+            },
+            "MA": {
+              "net_total": 4.947646756720502,
+              "trade_count": 2053
+            },
+            "NI": {
+              "net_total": -66.83846327942035,
+              "trade_count": 3148
+            },
+            "P": {
+              "net_total": -54.61764088998488,
+              "trade_count": 1921
+            },
+            "RB": {
+              "net_total": -8.740848869429525,
+              "trade_count": 1972
+            },
+            "RU": {
+              "net_total": -48.40446118985064,
+              "trade_count": 1963
+            },
+            "SC": {
+              "net_total": -157.94096680397138,
+              "trade_count": 4353
+            },
+            "SN": {
+              "net_total": -109.3306509428563,
+              "trade_count": 3327
+            },
+            "TA": {
+              "net_total": -7.097043006180378,
+              "trade_count": 1971
+            }
+          },
+          "positive_symbol_count": 1,
+          "top3_profit_share": 1.0
+        },
+        "GATEA": {
+          "n_decisions": 124556,
+          "n_trades": 40203,
+          "trade_rate": 0.32277048074761555,
+          "gross_total_ATR0": 254.73985389567423,
+          "net_total_ATR0": -951.350146104326,
+          "gross_EV_per_decision": 0.002045183322326297,
+          "net_EV_per_decision": -0.007637931100102171,
+          "net_EV_per_trade": -0.023663660575189063,
+          "win_rate": 0.45700569609233144,
+          "mean_win": 0.4221804705383337,
+          "mean_loss": -0.39890389057742237,
+          "payoff_ratio": 1.0583513485597194,
+          "profit_factor": 0.8907507708239909,
+          "break_even_cost": 0.006336339424810941,
+          "daily_sharpe_annualized": -10.656270774203787,
+          "max_drawdown_ATR0": -945.850406087728,
+          "by_symbol": {
+            "AG": {
+              "net_total": -158.42008568426792,
+              "trade_count": 3481
+            },
+            "AL": {
+              "net_total": -10.007470727856631,
+              "trade_count": 3066
+            },
+            "AU": {
+              "net_total": -126.57020586878187,
+              "trade_count": 3765
+            },
+            "CF": {
+              "net_total": -27.802351699014146,
+              "trade_count": 1930
+            },
+            "CU": {
+              "net_total": -104.60873144395393,
+              "trade_count": 3235
+            },
+            "I": {
+              "net_total": 1.2033507420417395,
+              "trade_count": 1950
+            },
+            "M": {
+              "net_total": -54.284641524414155,
+              "trade_count": 1890
+            },
+            "MA": {
+              "net_total": 2.6908016369949763,
+              "trade_count": 2045
+            },
+            "NI": {
+              "net_total": -78.27339786662051,
+              "trade_count": 3163
+            },
+            "P": {
+              "net_total": -28.93978294367097,
+              "trade_count": 1937
+            },
+            "RB": {
+              "net_total": -18.595704263054298,
+              "trade_count": 2006
+            },
+            "RU": {
+              "net_total": -61.44333199947347,
+              "trade_count": 1978
+            },
+            "SC": {
+              "net_total": -154.0706613337832,
+              "trade_count": 4412
+            },
+            "SN": {
+              "net_total": -112.33825590537751,
+              "trade_count": 3374
+            },
+            "TA": {
+              "net_total": -19.88967722309408,
+              "trade_count": 1971
+            }
+          },
+          "positive_symbol_count": 2,
+          "top3_profit_share": 1.0
+        },
+        "FLIPA": {
+          "n_decisions": 124556,
+          "n_trades": 52847,
+          "trade_rate": 0.42428305340569705,
+          "gross_total_ATR0": 181.64465858326054,
+          "net_total_ATR0": -1403.7653414167398,
+          "gross_EV_per_decision": 0.001458337282694214,
+          "net_EV_per_decision": -0.0112701543194767,
+          "net_EV_per_trade": -0.026562819865209752,
+          "win_rate": 0.449013189017352,
+          "mean_win": 0.45136031176643693,
+          "mean_loss": -0.4160345552346494,
+          "payoff_ratio": 1.084910630829363,
+          "profit_factor": 0.8841213118672283,
+          "break_even_cost": 0.0034371801347902534,
+          "daily_sharpe_annualized": -14.15220990727939,
+          "max_drawdown_ATR0": -1398.319266544733,
+          "by_symbol": {
+            "AG": {
+              "net_total": -163.93647956264067,
+              "trade_count": 4272
+            },
+            "AL": {
+              "net_total": -48.14116937963212,
+              "trade_count": 3931
+            },
+            "AU": {
+              "net_total": -106.78761520381804,
+              "trade_count": 4490
+            },
+            "CF": {
+              "net_total": -75.36137663569885,
+              "trade_count": 2901
+            },
+            "CU": {
+              "net_total": -158.7228399639921,
+              "trade_count": 4095
+            },
+            "I": {
+              "net_total": -47.008080118773655,
+              "trade_count": 2950
+            },
+            "M": {
+              "net_total": -70.09775052799193,
+              "trade_count": 2786
+            },
+            "MA": {
+              "net_total": -58.01903172003644,
+              "trade_count": 2900
+            },
+            "NI": {
+              "net_total": -95.51194349397784,
+              "trade_count": 4061
+            },
+            "P": {
+              "net_total": -45.33590967433025,
+              "trade_count": 2647
+            },
+            "RB": {
+              "net_total": -57.316364372627824,
+              "trade_count": 2904
+            },
+            "RU": {
+              "net_total": -118.40543852580123,
+              "trade_count": 2782
+            },
+            "SC": {
+              "net_total": -142.0481797834395,
+              "trade_count": 5126
+            },
+            "SN": {
+              "net_total": -139.05543331425665,
+              "trade_count": 4138
+            },
+            "TA": {
+              "net_total": -78.01772913972268,
+              "trade_count": 2864
+            }
+          },
+          "positive_symbol_count": 0,
+          "top3_profit_share": 0.0
+        }
+      },
+      "0.05": {
+        "BASE": {
+          "n_decisions": 124556,
+          "n_trades": 124556,
+          "trade_rate": 1.0,
+          "gross_total_ATR0": 759.986908589518,
+          "net_total_ATR0": -5467.813091410482,
+          "gross_EV_per_decision": 0.0061015680383885,
+          "net_EV_per_decision": -0.0438984319616115,
+          "net_EV_per_trade": -0.0438984319616115,
+          "win_rate": 0.4403320594752561,
+          "mean_win": 0.42793121511070714,
+          "mean_loss": -0.4151514025589603,
+          "payoff_ratio": 1.0307834984368909,
+          "profit_factor": 0.8110515996739075,
+          "break_even_cost": 0.0061015680383885,
+          "daily_sharpe_annualized": -33.987680918042756,
+          "max_drawdown_ATR0": -5394.525398381019,
+          "by_symbol": {
+            "AG": {
+              "net_total": -630.7709251907734,
+              "trade_count": 10056
+            },
+            "AL": {
+              "net_total": -334.67155938766416,
+              "trade_count": 9242
+            },
+            "AU": {
+              "net_total": -541.3665567319615,
+              "trade_count": 10404
+            },
+            "CF": {
+              "net_total": -173.2035945184588,
+              "trade_count": 6872
+            },
+            "CU": {
+              "net_total": -495.7606939284319,
+              "trade_count": 9214
+            },
+            "I": {
+              "net_total": -232.29200448053092,
+              "trade_count": 7011
+            },
+            "M": {
+              "net_total": -244.83887484744167,
+              "trade_count": 6981
+            },
+            "MA": {
+              "net_total": -226.14062881903357,
+              "trade_count": 6905
+            },
+            "NI": {
+              "net_total": -421.70618487182696,
+              "trade_count": 9420
+            },
+            "P": {
+              "net_total": -277.65300858597277,
+              "trade_count": 6912
+            },
+            "RB": {
+              "net_total": -244.59450358513143,
+              "trade_count": 6996
+            },
+            "RU": {
+              "net_total": -349.62997353091697,
+              "trade_count": 7001
+            },
+            "SC": {
+              "net_total": -601.5463740614189,
+              "trade_count": 11103
+            },
+            "SN": {
+              "net_total": -438.891340465136,
+              "trade_count": 9426
+            },
+            "TA": {
+              "net_total": -254.74686840578397,
+              "trade_count": 7013
+            }
+          },
+          "positive_symbol_count": 0,
+          "top3_profit_share": 0.0
+        },
+        "GATE0": {
+          "n_decisions": 124556,
+          "n_trades": 21643,
+          "trade_rate": 0.17376119978162433,
+          "gross_total_ATR0": 112.54820047063457,
+          "net_total_ATR0": -969.6017995293656,
+          "gross_EV_per_decision": 0.000903595173822494,
+          "net_EV_per_decision": -0.007784464815258724,
+          "net_EV_per_trade": -0.04479978743840344,
+          "win_rate": 0.45631381971076096,
+          "mean_win": 0.41579954093432725,
+          "mean_loss": -0.4314157798569421,
+          "payoff_ratio": 0.9638023464793215,
+          "profit_factor": 0.8089845294772888,
+          "break_even_cost": 0.0052002125615965705,
+          "daily_sharpe_annualized": -15.08478518868461,
+          "max_drawdown_ATR0": -966.8730411531596,
+          "by_symbol": {
+            "AG": {
+              "net_total": -149.8796435037727,
+              "trade_count": 1836
+            },
+            "AL": {
+              "net_total": -46.18453529541338,
+              "trade_count": 1685
+            },
+            "AU": {
+              "net_total": -94.35818082687163,
+              "trade_count": 2047
+            },
+            "CF": {
+              "net_total": -32.69713039032051,
+              "trade_count": 1081
+            },
+            "CU": {
+              "net_total": -113.4525224760873,
+              "trade_count": 1755
+            },
+            "I": {
+              "net_total": -3.939680102511163,
+              "trade_count": 1042
+            },
+            "M": {
+              "net_total": -55.09765655864554,
+              "trade_count": 952
+            },
+            "MA": {
+              "net_total": -35.620322503218986,
+              "trade_count": 1108
+            },
+            "NI": {
+              "net_total": -89.6667617194469,
+              "trade_count": 1695
+            },
+            "P": {
+              "net_total": -17.430611837288346,
+              "trade_count": 975
+            },
+            "RB": {
+              "net_total": -9.25880122210597,
+              "trade_count": 1055
+            },
+            "RU": {
+              "net_total": -44.025643947849815,
+              "trade_count": 1077
+            },
+            "SC": {
+              "net_total": -194.07970971948544,
+              "trade_count": 2566
+            },
+            "SN": {
+              "net_total": -73.65071675975585,
+              "trade_count": 1726
+            },
+            "TA": {
+              "net_total": -10.259882666592068,
+              "trade_count": 1043
+            }
+          },
+          "positive_symbol_count": 0,
+          "top3_profit_share": 0.0
+        },
+        "GATEA": {
+          "n_decisions": 124556,
+          "n_trades": 21630,
+          "trade_rate": 0.1736568290568098,
+          "gross_total_ATR0": 95.1394803457789,
+          "net_total_ATR0": -986.3605196542212,
+          "gross_EV_per_decision": 0.0007638289632436728,
+          "net_EV_per_decision": -0.007919012489596818,
+          "net_EV_per_trade": -0.045601503451420305,
+          "win_rate": 0.45487748497457237,
+          "mean_win": 0.41688920782613575,
+          "mean_loss": -0.4315268794381792,
+          "payoff_ratio": 0.9660793514621829,
+          "profit_factor": 0.8061449189242997,
+          "break_even_cost": 0.0043984965485797,
+          "daily_sharpe_annualized": -15.114900818448598,
+          "max_drawdown_ATR0": -985.4419881840671,
+          "by_symbol": {
+            "AG": {
+              "net_total": -161.50980503238452,
+              "trade_count": 1822
+            },
+            "AL": {
+              "net_total": -51.391220395317816,
+              "trade_count": 1684
+            },
+            "AU": {
+              "net_total": -88.75321319023261,
+              "trade_count": 2037
+            },
+            "CF": {
+              "net_total": -43.18125495941037,
+              "trade_count": 1069
+            },
+            "CU": {
+              "net_total": -97.65702331619453,
+              "trade_count": 1751
+            },
+            "I": {
+              "net_total": -3.852864454382882,
+              "trade_count": 1079
+            },
+            "M": {
+              "net_total": -53.79910454764087,
+              "trade_count": 959
+            },
+            "MA": {
+              "net_total": -38.200138363513844,
+              "trade_count": 1103
+            },
+            "NI": {
+              "net_total": -80.46657310015706,
+              "trade_count": 1670
+            },
+            "P": {
+              "net_total": -15.638637147601152,
+              "trade_count": 965
+            },
+            "RB": {
+              "net_total": -24.334386373168538,
+              "trade_count": 1066
+            },
+            "RU": {
+              "net_total": -39.340177203587174,
+              "trade_count": 1095
+            },
+            "SC": {
+              "net_total": -186.7390135661828,
+              "trade_count": 2550
+            },
+            "SN": {
+              "net_total": -84.0597193424959,
+              "trade_count": 1716
+            },
+            "TA": {
+              "net_total": -17.437388661951196,
+              "trade_count": 1064
+            }
+          },
+          "positive_symbol_count": 0,
+          "top3_profit_share": 0.0
+        },
+        "FLIPA": {
+          "n_decisions": 124556,
+          "n_trades": 26526,
+          "trade_rate": 0.21296444972542472,
+          "gross_total_ATR0": 96.81963053095798,
+          "net_total_ATR0": -1229.4803694690424,
+          "gross_EV_per_decision": 0.0007773180780609363,
+          "net_EV_per_decision": -0.009870904408210302,
+          "net_EV_per_trade": -0.0463500101586761,
+          "win_rate": 0.44974741762798764,
+          "mean_win": 0.443998450786342,
+          "mean_loss": -0.44713496076665527,
+          "payoff_ratio": 0.9929853170619103,
+          "profit_factor": 0.8116137868284865,
+          "break_even_cost": 0.003649989841323908,
+          "daily_sharpe_annualized": -16.62599642440467,
+          "max_drawdown_ATR0": -1224.9626601539726,
+          "by_symbol": {
+            "AG": {
+              "net_total": -168.02112311999446,
+              "trade_count": 2093
+            },
+            "AL": {
+              "net_total": -67.31381613163491,
+              "trade_count": 2044
+            },
+            "AU": {
+              "net_total": -87.94736804295607,
+              "trade_count": 2285
+            },
+            "CF": {
+              "net_total": -49.346782197092395,
+              "trade_count": 1466
+            },
+            "CU": {
+              "net_total": -135.2168277063965,
+              "trade_count": 2081
+            },
+            "I": {
+              "net_total": -23.604569267679814,
+              "trade_count": 1490
+            },
+            "M": {
+              "net_total": -79.54286082316275,
+              "trade_count": 1309
+            },
+            "MA": {
+              "net_total": -71.54703418551952,
+              "trade_count": 1433
+            },
+            "NI": {
+              "net_total": -89.98466611922235,
+              "trade_count": 2016
+            },
+            "P": {
+              "net_total": -16.207401503263753,
+              "trade_count": 1244
+            },
+            "RB": {
+              "net_total": -39.91219146566793,
+              "trade_count": 1419
+            },
+            "RU": {
+              "net_total": -70.64786344398198,
+              "trade_count": 1396
+            },
+            "SC": {
+              "net_total": -177.56219924681784,
+              "trade_count": 2811
+            },
+            "SN": {
+              "net_total": -98.13851682874686,
+              "trade_count": 2018
+            },
+            "TA": {
+              "net_total": -54.487149386905145,
+              "trade_count": 1421
+            }
+          },
+          "positive_symbol_count": 0,
+          "top3_profit_share": 0.0
+        }
+      },
+      "0.1": {
+        "BASE": {
+          "n_decisions": 124556,
+          "n_trades": 124556,
+          "trade_rate": 1.0,
+          "gross_total_ATR0": 759.986908589518,
+          "net_total_ATR0": -11695.613091410483,
+          "gross_EV_per_decision": 0.0061015680383885,
+          "net_EV_per_decision": -0.09389843196161152,
+          "net_EV_per_trade": -0.09389843196161152,
+          "win_rate": 0.4153071710716465,
+          "mean_win": 0.4020703716251667,
+          "mean_loss": -0.4465037629022155,
+          "payoff_ratio": 0.900485964579027,
+          "profit_factor": 0.6400719816105598,
+          "break_even_cost": 0.0061015680383885,
+          "daily_sharpe_annualized": -69.30584346644191,
+          "max_drawdown_ATR0": -11562.975398381017,
+          "by_symbol": {
+            "AG": {
+              "net_total": -1133.5709251907733,
+              "trade_count": 10056
+            },
+            "AL": {
+              "net_total": -796.7715593876642,
+              "trade_count": 9242
+            },
+            "AU": {
+              "net_total": -1061.5665567319616,
+              "trade_count": 10404
+            },
+            "CF": {
+              "net_total": -516.8035945184589,
+              "trade_count": 6872
+            },
+            "CU": {
+              "net_total": -956.460693928432,
+              "trade_count": 9214
+            },
+            "I": {
+              "net_total": -582.8420044805309,
+              "trade_count": 7011
+            },
+            "M": {
+              "net_total": -593.8888748474416,
+              "trade_count": 6981
+            },
+            "MA": {
+              "net_total": -571.3906288190335,
+              "trade_count": 6905
+            },
+            "NI": {
+              "net_total": -892.706184871827,
+              "trade_count": 9420
+            },
+            "P": {
+              "net_total": -623.2530085859728,
+              "trade_count": 6912
+            },
+            "RB": {
+              "net_total": -594.3945035851314,
+              "trade_count": 6996
+            },
+            "RU": {
+              "net_total": -699.679973530917,
+              "trade_count": 7001
+            },
+            "SC": {
+              "net_total": -1156.696374061419,
+              "trade_count": 11103
+            },
+            "SN": {
+              "net_total": -910.191340465136,
+              "trade_count": 9426
+            },
+            "TA": {
+              "net_total": -605.396868405784,
+              "trade_count": 7013
+            }
+          },
+          "positive_symbol_count": 0,
+          "top3_profit_share": 0.0
+        },
+        "GATE0": {
+          "n_decisions": 124556,
+          "n_trades": 3359,
+          "trade_rate": 0.026967789588618774,
+          "gross_total_ATR0": -17.250002405612832,
+          "net_total_ATR0": -353.1500024056129,
+          "gross_EV_per_decision": -0.00013849194262510704,
+          "net_EV_per_decision": -0.002835270901486985,
+          "net_EV_per_trade": -0.10513545769741378,
+          "win_rate": 0.44447752307234295,
+          "mean_win": 0.4606453536751077,
+          "mean_loss": -0.5578207478255888,
+          "payoff_ratio": 0.8257945862908914,
+          "profit_factor": 0.6607241786346735,
+          "break_even_cost": -0.005135457697413763,
+          "daily_sharpe_annualized": -9.114016876455455,
+          "max_drawdown_ATR0": -348.2202446449816,
+          "by_symbol": {
+            "AG": {
+              "net_total": -20.79387956606852,
+              "trade_count": 243
+            },
+            "AL": {
+              "net_total": -20.03182516547546,
+              "trade_count": 313
+            },
+            "AU": {
+              "net_total": -29.956744065064573,
+              "trade_count": 280
+            },
+            "CF": {
+              "net_total": -13.413977620136487,
+              "trade_count": 276
+            },
+            "CU": {
+              "net_total": -33.01202738536546,
+              "trade_count": 264
+            },
+            "I": {
+              "net_total": -4.209268019752889,
+              "trade_count": 199
+            },
+            "M": {
+              "net_total": -9.629612962983064,
+              "trade_count": 159
+            },
+            "MA": {
+              "net_total": -10.919936205297002,
+              "trade_count": 178
+            },
+            "NI": {
+              "net_total": -37.17583872573982,
+              "trade_count": 247
+            },
+            "P": {
+              "net_total": -7.960851205684667,
+              "trade_count": 100
+            },
+            "RB": {
+              "net_total": -15.702070549591241,
+              "trade_count": 154
+            },
+            "RU": {
+              "net_total": -11.38430626632126,
+              "trade_count": 129
+            },
+            "SC": {
+              "net_total": -97.98009230769468,
+              "trade_count": 462
+            },
+            "SN": {
+              "net_total": -38.195079454242524,
+              "trade_count": 169
+            },
+            "TA": {
+              "net_total": -2.7844929061952355,
+              "trade_count": 186
+            }
+          },
+          "positive_symbol_count": 0,
+          "top3_profit_share": 0.0
+        },
+        "GATEA": {
+          "n_decisions": 124556,
+          "n_trades": 3426,
+          "trade_rate": 0.027505700247278334,
+          "gross_total_ATR0": -34.46233006073565,
+          "net_total_ATR0": -377.0623300607357,
+          "gross_EV_per_decision": -0.0002766814128643795,
+          "net_EV_per_decision": -0.0030272514375922132,
+          "net_EV_per_trade": -0.11005905722730172,
+          "win_rate": 0.4407472270869819,
+          "mean_win": 0.4640003769041941,
+          "mean_loss": -0.5624754171117269,
+          "payoff_ratio": 0.8249256105925563,
+          "profit_factor": 0.6501240459262839,
+          "break_even_cost": -0.010059057227301707,
+          "daily_sharpe_annualized": -9.68595754323097,
+          "max_drawdown_ATR0": -372.4824536411911,
+          "by_symbol": {
+            "AG": {
+              "net_total": -32.33266465292536,
+              "trade_count": 251
+            },
+            "AL": {
+              "net_total": -18.26809416567603,
+              "trade_count": 326
+            },
+            "AU": {
+              "net_total": -26.79555718187631,
+              "trade_count": 287
+            },
+            "CF": {
+              "net_total": -16.580530953664535,
+              "trade_count": 278
+            },
+            "CU": {
+              "net_total": -39.32134202140511,
+              "trade_count": 278
+            },
+            "I": {
+              "net_total": -5.539760891209386,
+              "trade_count": 215
+            },
+            "M": {
+              "net_total": -14.405033865609848,
+              "trade_count": 156
+            },
+            "MA": {
+              "net_total": -8.470345357441989,
+              "trade_count": 178
+            },
+            "NI": {
+              "net_total": -42.38321450170697,
+              "trade_count": 247
+            },
+            "P": {
+              "net_total": -10.183623495079509,
+              "trade_count": 106
+            },
+            "RB": {
+              "net_total": -14.267187059035805,
+              "trade_count": 158
+            },
+            "RU": {
+              "net_total": -4.857591476412878,
+              "trade_count": 129
+            },
+            "SC": {
+              "net_total": -100.5961996137483,
+              "trade_count": 455
+            },
+            "SN": {
+              "net_total": -41.1939646623282,
+              "trade_count": 175
+            },
+            "TA": {
+              "net_total": -1.8672201626154674,
+              "trade_count": 187
+            }
+          },
+          "positive_symbol_count": 0,
+          "top3_profit_share": 0.0
+        },
+        "FLIPA": {
+          "n_decisions": 124556,
+          "n_trades": 3701,
+          "trade_rate": 0.029713542502970553,
+          "gross_total_ATR0": -37.48455220206918,
+          "net_total_ATR0": -407.58455220206923,
+          "gross_EV_per_decision": -0.00030094537559065146,
+          "net_EV_per_decision": -0.003272299625887707,
+          "net_EV_per_trade": -0.11012822269712758,
+          "win_rate": 0.4423128884085382,
+          "mean_win": 0.47880792311343134,
+          "mean_loss": -0.5772253499703276,
+          "payoff_ratio": 0.8294991256673752,
+          "profit_factor": 0.6578924751538241,
+          "break_even_cost": -0.010128222697127582,
+          "daily_sharpe_annualized": -10.293775381973363,
+          "max_drawdown_ATR0": -403.04906310436644,
+          "by_symbol": {
+            "AG": {
+              "net_total": -34.71154911940519,
+              "trade_count": 262
+            },
+            "AL": {
+              "net_total": -32.890359379149686,
+              "trade_count": 365
+            },
+            "AU": {
+              "net_total": -22.83786070874648,
+              "trade_count": 300
+            },
+            "CF": {
+              "net_total": -13.026381068538662,
+              "trade_count": 303
+            },
+            "CU": {
+              "net_total": -40.311713272215854,
+              "trade_count": 308
+            },
+            "I": {
+              "net_total": -10.549093693834141,
+              "trade_count": 232
+            },
+            "M": {
+              "net_total": -15.92685961316866,
+              "trade_count": 166
+            },
+            "MA": {
+              "net_total": -12.116654913597628,
+              "trade_count": 204
+            },
+            "NI": {
+              "net_total": -43.161526993114194,
+              "trade_count": 265
+            },
+            "P": {
+              "net_total": -17.61755026983255,
+              "trade_count": 117
+            },
+            "RB": {
+              "net_total": -13.704536773591403,
+              "trade_count": 176
+            },
+            "RU": {
+              "net_total": -12.951213652633593,
+              "trade_count": 140
+            },
+            "SC": {
+              "net_total": -99.83414741651512,
+              "trade_count": 464
+            },
+            "SN": {
+              "net_total": -37.29592529763907,
+              "trade_count": 197
+            },
+            "TA": {
+              "net_total": -0.6491800300870159,
+              "trade_count": 202
+            }
+          },
+          "positive_symbol_count": 0,
+          "top3_profit_share": 0.0
+        }
+      }
+    },
+    "quintile_edges": {
+      "a_burst_exhaustion": [
+        -Infinity,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        Infinity
+      ],
+      "a_conviction_burst": [
+        -Infinity,
+        0.0,
+        0.0,
+        0.0,
+        0.007117059078294423,
+        Infinity
+      ]
+    },
+    "quintiles": [
+      {
+        "block": "TB2",
+        "feature": "a_burst_exhaustion",
+        "bin": 4,
+        "n": 124556,
+        "H1_prevalence": 0.10436269629724783,
+        "harm_rate": 0.41828575098750764,
+        "mean_pi": 0.0061015680383885
+      },
+      {
+        "block": "TB2",
+        "feature": "a_conviction_burst",
+        "bin": 3,
+        "n": 99262,
+        "H1_prevalence": 0.10413854244323105,
+        "harm_rate": 0.4180552477282344,
+        "mean_pi": 0.006115610207202398
+      },
+      {
+        "block": "TB2",
+        "feature": "a_conviction_burst",
+        "bin": 4,
+        "n": 25294,
+        "H1_prevalence": 0.10524234996441843,
+        "harm_rate": 0.4191903218154503,
+        "mean_pi": 0.006046461935723635
+      }
+    ]
+  },
+  "TB3": {
+    "harm_metrics": {
+      "O0": {
+        "log_loss": 0.642094278201627,
+        "brier": 0.22515513517517743,
+        "roc_auc": 0.6244698036274794,
+        "pr_auc": 0.7175896795620312
+      },
+      "OA": {
+        "log_loss": 0.6400107607475775,
+        "brier": 0.22443179203426566,
+        "roc_auc": 0.6294208971931173,
+        "pr_auc": 0.7215723156564008
+      }
+    },
+    "payoff_metrics": {
+      "O0": {
+        "mse": 3.712289123629598,
+        "mae": 0.8159558239712654,
+        "spearman": 0.2110720074839549
+      },
+      "OA": {
+        "mse": 3.6983169350392373,
+        "mae": 0.8133568268317511,
+        "spearman": 0.22354243392414272
+      }
+    },
+    "delta_harm_logloss": {
+      "point": 0.002083517454049555,
+      "ci95_lower": 0.0006524629525379938,
+      "ci95_upper": 0.003938816698456681,
+      "p_pos": 0.9985
+    },
+    "delta_payoff_mse": {
+      "point": 0.013972188590360535,
+      "ci95_lower": 0.0048574715345750755,
+      "ci95_upper": 0.03035686994219922,
+      "p_pos": 1.0
+    },
+    "beta0": 0.856199489035905,
+    "n_h1_train": 25246,
+    "n_h1_eval": 12741,
+    "n_h0_train": 214288,
+    "n_econ_eval": 120180,
+    "n_h0_eval": 107439,
+    "p_h_mean": 0.10548384976202946,
+    "V0_mean": 0.01381637539656812,
+    "VA_mean": 0.014057455497339293,
+    "metrics": {
+      "BASE": {
+        "n_decisions": 120180,
+        "n_trades": 120180,
+        "trade_rate": 1.0,
+        "gross_total_ATR0": 167.54577989224506,
+        "net_total_ATR0": -1034.254220107755,
+        "gross_EV_per_decision": 0.0013941236469649282,
+        "net_EV_per_decision": -0.008605876353035072,
+        "net_EV_per_trade": -0.008605876353035072,
+        "win_rate": 0.463954068896655,
+        "mean_win": 0.45142407287226943,
+        "mean_loss": -0.4067672173375516,
+        "payoff_ratio": 1.109784794917875,
+        "profit_factor": 0.9605318151412697,
+        "break_even_cost": 0.0013941236469649282,
+        "daily_sharpe_annualized": -4.497587122882724,
+        "max_drawdown_ATR0": -1172.8925726076475,
+        "by_symbol": {
+          "AG": {
+            "net_total": -267.5832699651109,
+            "trade_count": 9723
+          },
+          "AL": {
+            "net_total": -32.45450775696064,
+            "trade_count": 8747
+          },
+          "AU": {
+            "net_total": -266.3742166992983,
+            "trade_count": 10375
+          },
+          "CF": {
+            "net_total": 21.14449799573467,
+            "trade_count": 6736
+          },
+          "CU": {
+            "net_total": 15.358612814171096,
+            "trade_count": 8708
+          },
+          "I": {
+            "net_total": 39.67454771247363,
+            "trade_count": 6964
+          },
+          "M": {
+            "net_total": -8.740380241462105,
+            "trade_count": 6960
+          },
+          "MA": {
+            "net_total": -23.09367621003645,
+            "trade_count": 6599
+          },
+          "NI": {
+            "net_total": -75.27573821480802,
+            "trade_count": 8966
+          },
+          "P": {
+            "net_total": -2.17052210681255,
+            "trade_count": 6811
+          },
+          "RB": {
+            "net_total": 21.971604355410086,
+            "trade_count": 6948
+          },
+          "RU": {
+            "net_total": -91.4679452769434,
+            "trade_count": 6955
+          },
+          "SC": {
+            "net_total": -227.57705160129495,
+            "trade_count": 10583
+          },
+          "SN": {
+            "net_total": -132.5490396443767,
+            "trade_count": 8536
+          },
+          "TA": {
+            "net_total": -5.1171352684404425,
+            "trade_count": 6569
+          }
+        },
+        "positive_symbol_count": 4,
+        "top3_profit_share": 0.8435177976497402
+      },
+      "GATE0": {
+        "n_decisions": 120180,
+        "n_trades": 60368,
+        "trade_rate": 0.5023131968713597,
+        "gross_total_ATR0": -27.158795203346827,
+        "net_total_ATR0": -630.8387952033469,
+        "gross_EV_per_decision": -0.0002259843168858947,
+        "net_EV_per_decision": -0.005249116285599492,
+        "net_EV_per_trade": -0.010449887278083532,
+        "win_rate": 0.47089517625231914,
+        "mean_win": 0.42808712682969213,
+        "mean_loss": -0.4007411023321438,
+        "payoff_ratio": 1.068238631721094,
+        "profit_factor": 0.9507159946130533,
+        "break_even_cost": -0.0004498872780835347,
+        "daily_sharpe_annualized": -3.8273080801148116,
+        "max_drawdown_ATR0": -760.0038121675719,
+        "by_symbol": {
+          "AG": {
+            "net_total": -202.62471120522693,
+            "trade_count": 5467
+          },
+          "AL": {
+            "net_total": -1.5463515730823811,
+            "trade_count": 4511
+          },
+          "AU": {
+            "net_total": -158.65766094232265,
+            "trade_count": 5588
+          },
+          "CF": {
+            "net_total": -3.6187768353327385,
+            "trade_count": 3020
+          },
+          "CU": {
+            "net_total": -32.146935802303965,
+            "trade_count": 4457
+          },
+          "I": {
+            "net_total": 50.36816507688918,
+            "trade_count": 3163
+          },
+          "M": {
+            "net_total": -23.169857038771337,
+            "trade_count": 3465
+          },
+          "MA": {
+            "net_total": 3.137473455735945,
+            "trade_count": 3034
+          },
+          "NI": {
+            "net_total": 25.47203266183383,
+            "trade_count": 4625
+          },
+          "P": {
+            "net_total": -11.044564808195325,
+            "trade_count": 3243
+          },
+          "RB": {
+            "net_total": 50.66376400685432,
+            "trade_count": 3188
+          },
+          "RU": {
+            "net_total": -62.603209379454405,
+            "trade_count": 3172
+          },
+          "SC": {
+            "net_total": -231.35434236845452,
+            "trade_count": 6157
+          },
+          "SN": {
+            "net_total": -69.67925791096148,
+            "trade_count": 4177
+          },
+          "TA": {
+            "net_total": 35.965437459445624,
+            "trade_count": 3101
+          }
+        },
+        "positive_symbol_count": 5,
+        "top3_profit_share": 0.8272444515260211
+      },
+      "GATEA": {
+        "n_decisions": 120180,
+        "n_trades": 61074,
+        "trade_rate": 0.5081877184223664,
+        "gross_total_ATR0": 65.56018324120387,
+        "net_total_ATR0": -545.1798167587963,
+        "gross_EV_per_decision": 0.0005455165854651679,
+        "net_EV_per_decision": -0.004536360598758498,
+        "net_EV_per_trade": -0.008926545121635984,
+        "win_rate": 0.47216491469365035,
+        "mean_win": 0.4288036088723468,
+        "mean_loss": -0.4004897938955443,
+        "payoff_ratio": 1.0706979688580711,
+        "profit_factor": 0.9577726627155194,
+        "break_even_cost": 0.0010734548783640154,
+        "daily_sharpe_annualized": -3.4647427675971385,
+        "max_drawdown_ATR0": -667.5653878917843,
+        "by_symbol": {
+          "AG": {
+            "net_total": -161.99443840333208,
+            "trade_count": 5497
+          },
+          "AL": {
+            "net_total": 2.3347634519109928,
+            "trade_count": 4536
+          },
+          "AU": {
+            "net_total": -142.95563379155783,
+            "trade_count": 5680
+          },
+          "CF": {
+            "net_total": 11.108983956312656,
+            "trade_count": 3078
+          },
+          "CU": {
+            "net_total": -29.900867237634962,
+            "trade_count": 4541
+          },
+          "I": {
+            "net_total": 58.382416495473215,
+            "trade_count": 3187
+          },
+          "M": {
+            "net_total": -22.499094532029986,
+            "trade_count": 3498
+          },
+          "MA": {
+            "net_total": 3.4706878049754852,
+            "trade_count": 3062
+          },
+          "NI": {
+            "net_total": 22.416749428548666,
+            "trade_count": 4681
+          },
+          "P": {
+            "net_total": 3.7015117653052343,
+            "trade_count": 3298
+          },
+          "RB": {
+            "net_total": 44.17395873880341,
+            "trade_count": 3229
+          },
+          "RU": {
+            "net_total": -49.91368472694704,
+            "trade_count": 3201
+          },
+          "SC": {
+            "net_total": -227.64748417022844,
+            "trade_count": 6176
+          },
+          "SN": {
+            "net_total": -106.19439199179956,
+            "trade_count": 4245
+          },
+          "TA": {
+            "net_total": 50.336706453404034,
+            "trade_count": 3165
+          }
+        },
+        "positive_symbol_count": 8,
+        "top3_profit_share": 0.7803622533720604
+      },
+      "FLIPA": {
+        "n_decisions": 120180,
+        "n_trades": 92893,
+        "trade_rate": 0.7729489099683807,
+        "gross_total_ATR0": 141.99567944458863,
+        "net_total_ATR0": -786.9343205554113,
+        "gross_EV_per_decision": 0.0011815250411431905,
+        "net_EV_per_decision": -0.006547964058540617,
+        "net_EV_per_trade": -0.008471406032267354,
+        "win_rate": 0.4605729172273476,
+        "mean_win": 0.46192671123459933,
+        "mean_loss": -0.41010610337497266,
+        "payoff_ratio": 1.1263590261963146,
+        "profit_factor": 0.9617063716454753,
+        "break_even_cost": 0.0015285939677326455,
+        "daily_sharpe_annualized": -5.070015044138564,
+        "max_drawdown_ATR0": -856.8970634416975,
+        "by_symbol": {
+          "AG": {
+            "net_total": -157.4983875649124,
+            "trade_count": 7682
+          },
+          "AL": {
+            "net_total": -21.845413594497757,
+            "trade_count": 6673
+          },
+          "AU": {
+            "net_total": -83.94553614255688,
+            "trade_count": 8044
+          },
+          "CF": {
+            "net_total": -55.11368063090911,
+            "trade_count": 5249
+          },
+          "CU": {
+            "net_total": -80.5243754590076,
+            "trade_count": 6670
+          },
+          "I": {
+            "net_total": 0.543163516686306,
+            "trade_count": 5383
+          },
+          "M": {
+            "net_total": -42.40270689417397,
+            "trade_count": 5483
+          },
+          "MA": {
+            "net_total": -49.80488385173641,
+            "trade_count": 5083
+          },
+          "NI": {
+            "net_total": 46.88854219471591,
+            "trade_count": 6874
+          },
+          "P": {
+            "net_total": -4.09038717155801,
+            "trade_count": 5188
+          },
+          "RB": {
+            "net_total": 49.142044775894064,
+            "trade_count": 5408
+          },
+          "RU": {
+            "net_total": -60.31209806577089,
+            "trade_count": 5344
+          },
+          "SC": {
+            "net_total": -264.7639310685466,
+            "trade_count": 8283
+          },
+          "SN": {
+            "net_total": -123.89326653471939,
+            "trade_count": 6418
+          },
+          "TA": {
+            "net_total": 60.6865959356812,
+            "trade_count": 5111
+          }
+        },
+        "positive_symbol_count": 4,
+        "top3_profit_share": 0.9965460872429633
+      }
+    },
+    "bootstrap": {
+      "BASE": {
+        "point": -0.008605876353035072,
+        "ci95_lower": -0.01459975864462848,
+        "ci95_upper": -0.003062665596413701,
+        "p_pos": 0.0015
+      },
+      "GATE0": {
+        "point": -0.005249116285599492,
+        "ci95_lower": -0.009495449972007264,
+        "ci95_upper": -0.001429439445205657,
+        "p_pos": 0.005
+      },
+      "GATEA": {
+        "point": -0.004536360598758498,
+        "ci95_lower": -0.008785380044660618,
+        "ci95_upper": -0.0009832170891980203,
+        "p_pos": 0.006
+      },
+      "FLIPA": {
+        "point": -0.006547964058540617,
+        "ci95_lower": -0.01071557810735472,
+        "ci95_upper": -0.0028947274500205193,
+        "p_pos": 0.0
+      },
+      "GATEA-BASE": {
+        "point": 0.004069515754276574,
+        "ci95_lower": 0.0008590055780616068,
+        "ci95_upper": 0.0071109300030698834,
+        "p_pos": 0.9915
+      },
+      "GATEA-GATE0": {
+        "point": 0.0007127556868409936,
+        "ci95_lower": -0.0001841846613347485,
+        "ci95_upper": 0.0016292866312051838,
+        "p_pos": 0.9445
+      },
+      "n_days": 102,
+      "n_boot": 2000
+    },
+    "cost_grid": {
+      "0.0": {
+        "BASE": {
+          "n_decisions": 120180,
+          "n_trades": 120180,
+          "trade_rate": 1.0,
+          "gross_total_ATR0": 167.54577989224506,
+          "net_total_ATR0": 167.54577989224506,
+          "gross_EV_per_decision": 0.0013941236469649282,
+          "net_EV_per_decision": 0.0013941236469649282,
+          "net_EV_per_trade": 0.0013941236469649282,
+          "win_rate": 0.4653186886337161,
+          "mean_win": 0.4600902777279398,
+          "mean_loss": -0.4880221224790867,
+          "payoff_ratio": 0.9427652078367741,
+          "profit_factor": 1.0065545830816005,
+          "break_even_cost": 0.0013941236469649282,
+          "daily_sharpe_annualized": 0.7317226583111991,
+          "max_drawdown_ATR0": -384.49166260922624,
+          "by_symbol": {
+            "AG": {
+              "net_total": -170.35326996511094,
+              "trade_count": 9723
+            },
+            "AL": {
+              "net_total": 55.01549224303939,
+              "trade_count": 8747
+            },
+            "AU": {
+              "net_total": -162.62421669929827,
+              "trade_count": 10375
+            },
+            "CF": {
+              "net_total": 88.50449799573467,
+              "trade_count": 6736
+            },
+            "CU": {
+              "net_total": 102.43861281417112,
+              "trade_count": 8708
+            },
+            "I": {
+              "net_total": 109.3145477124736,
+              "trade_count": 6964
+            },
+            "M": {
+              "net_total": 60.85961975853785,
+              "trade_count": 6960
+            },
+            "MA": {
+              "net_total": 42.89632378996353,
+              "trade_count": 6599
+            },
+            "NI": {
+              "net_total": 14.384261785192006,
+              "trade_count": 8966
+            },
+            "P": {
+              "net_total": 65.93947789318746,
+              "trade_count": 6811
+            },
+            "RB": {
+              "net_total": 91.45160435541004,
+              "trade_count": 6948
+            },
+            "RU": {
+              "net_total": -21.917945276943414,
+              "trade_count": 6955
+            },
+            "SC": {
+              "net_total": -121.74705160129497,
+              "trade_count": 10583
+            },
+            "SN": {
+              "net_total": -47.18903964437666,
+              "trade_count": 8536
+            },
+            "TA": {
+              "net_total": 60.572864731559534,
+              "trade_count": 6569
+            }
+          },
+          "positive_symbol_count": 10,
+          "top3_profit_share": 0.43855180598442517
+        },
+        "GATE0": {
+          "n_decisions": 120180,
+          "n_trades": 74680,
+          "trade_rate": 0.6214012314861042,
+          "gross_total_ATR0": 171.09695912770994,
+          "net_total_ATR0": 171.09695912770994,
+          "gross_EV_per_decision": 0.0014236724840049088,
+          "net_EV_per_decision": 0.0014236724840049088,
+          "net_EV_per_trade": 0.0022910680118868507,
+          "win_rate": 0.47209426888055706,
+          "mean_win": 0.43808475409156805,
+          "mean_loss": -0.4726603475514347,
+          "payoff_ratio": 0.926848965353278,
+          "profit_factor": 1.0112018295681624,
+          "break_even_cost": 0.00229106801188685,
+          "daily_sharpe_annualized": 0.9686957893219886,
+          "max_drawdown_ATR0": -215.04630986598647,
+          "by_symbol": {
+            "AG": {
+              "net_total": -136.44666100551854,
+              "trade_count": 6581
+            },
+            "AL": {
+              "net_total": 58.87295599499916,
+              "trade_count": 5586
+            },
+            "AU": {
+              "net_total": -98.6520031591154,
+              "trade_count": 6904
+            },
+            "CF": {
+              "net_total": 57.2547905924627,
+              "trade_count": 3799
+            },
+            "CU": {
+              "net_total": 45.600361044556095,
+              "trade_count": 5574
+            },
+            "I": {
+              "net_total": 88.13827462137488,
+              "trade_count": 3944
+            },
+            "M": {
+              "net_total": 70.64176083060592,
+              "trade_count": 4204
+            },
+            "MA": {
+              "net_total": 32.78925893454743,
+              "trade_count": 3783
+            },
+            "NI": {
+              "net_total": 58.44023769994604,
+              "trade_count": 5743
+            },
+            "P": {
+              "net_total": 59.46001760680026,
+              "trade_count": 4066
+            },
+            "RB": {
+              "net_total": 111.73498955282315,
+              "trade_count": 3975
+            },
+            "RU": {
+              "net_total": -23.39853198215114,
+              "trade_count": 3950
+            },
+            "SC": {
+              "net_total": -179.0061493206834,
+              "trade_count": 7439
+            },
+            "SN": {
+              "net_total": -38.50248775013705,
+              "trade_count": 5315
+            },
+            "TA": {
+              "net_total": 64.17014546719986,
+              "trade_count": 3817
+            }
+          },
+          "positive_symbol_count": 10,
+          "top3_profit_share": 0.41804026841603886
+        },
+        "GATEA": {
+          "n_decisions": 120180,
+          "n_trades": 75113,
+          "trade_rate": 0.6250041604260276,
+          "gross_total_ATR0": 225.15720706870664,
+          "net_total_ATR0": 225.15720706870664,
+          "gross_EV_per_decision": 0.0018734998091921005,
+          "net_EV_per_decision": 0.0018734998091921005,
+          "net_EV_per_trade": 0.002997579740773324,
+          "win_rate": 0.4720221532890445,
+          "mean_win": 0.43822560574359787,
+          "mean_loss": -0.4709541304884371,
+          "payoff_ratio": 0.9305059184619621,
+          "profit_factor": 1.0147044978645114,
+          "break_even_cost": 0.0029975797407733235,
+          "daily_sharpe_annualized": 1.2773489770582545,
+          "max_drawdown_ATR0": -230.25821130278817,
+          "by_symbol": {
+            "AG": {
+              "net_total": -119.00396543525113,
+              "trade_count": 6582
+            },
+            "AL": {
+              "net_total": 52.88531775376262,
+              "trade_count": 5598
+            },
+            "AU": {
+              "net_total": -96.68787511057928,
+              "trade_count": 6913
+            },
+            "CF": {
+              "net_total": 64.28773567174397,
+              "trade_count": 3838
+            },
+            "CU": {
+              "net_total": 61.89547998359118,
+              "trade_count": 5624
+            },
+            "I": {
+              "net_total": 97.61800467563552,
+              "trade_count": 3976
+            },
+            "M": {
+              "net_total": 54.53849360383062,
+              "trade_count": 4251
+            },
+            "MA": {
+              "net_total": 28.023229946306408,
+              "trade_count": 3820
+            },
+            "NI": {
+              "net_total": 72.30457276430083,
+              "trade_count": 5788
+            },
+            "P": {
+              "net_total": 45.13220817568711,
+              "trade_count": 4114
+            },
+            "RB": {
+              "net_total": 122.32832314040077,
+              "trade_count": 3998
+            },
+            "RU": {
+              "net_total": -16.038948192894882,
+              "trade_count": 3962
+            },
+            "SC": {
+              "net_total": -175.34421119944915,
+              "trade_count": 7432
+            },
+            "SN": {
+              "net_total": -54.83405753986819,
+              "trade_count": 5373
+            },
+            "TA": {
+              "net_total": 88.05289883149014,
+              "trade_count": 3844
+            }
+          },
+          "positive_symbol_count": 10,
+          "top3_profit_share": 0.4482816906324319
+        },
+        "FLIPA": {
+          "n_decisions": 120180,
+          "n_trades": 120180,
+          "trade_rate": 1.0,
+          "gross_total_ATR0": 282.76863424516813,
+          "net_total_ATR0": 282.76863424516813,
+          "gross_EV_per_decision": 0.002352875971419272,
+          "net_EV_per_decision": 0.002352875971419272,
+          "net_EV_per_trade": 0.002352875971419272,
+          "win_rate": 0.46030953569645533,
+          "mean_win": 0.46613846598478503,
+          "mean_loss": -0.4813894168371677,
+          "payoff_ratio": 0.9683188904471879,
+          "profit_factor": 1.0110872219618428,
+          "break_even_cost": 0.002352875971419272,
+          "daily_sharpe_annualized": 1.657229193947567,
+          "max_drawdown_ATR0": -220.89209064370544,
+          "by_symbol": {
+            "AG": {
+              "net_total": -67.65466090539137,
+              "trade_count": 9723
+            },
+            "AL": {
+              "net_total": 50.755143264485824,
+              "trade_count": 8747
+            },
+            "AU": {
+              "net_total": -30.751533521860324,
+              "trade_count": 10375
+            },
+            "CF": {
+              "net_total": 40.070973347753274,
+              "trade_count": 6736
+            },
+            "CU": {
+              "net_total": 21.352347153011237,
+              "trade_count": 8708
+            },
+            "I": {
+              "net_total": 85.92146163879742,
+              "trade_count": 6964
+            },
+            "M": {
+              "net_total": 48.21736744912337,
+              "trade_count": 6960
+            },
+            "MA": {
+              "net_total": 13.15013610264929,
+              "trade_count": 6599
+            },
+            "NI": {
+              "net_total": 130.2248837434097,
+              "trade_count": 8966
+            },
+            "P": {
+              "net_total": 24.32493845818677,
+              "trade_count": 6811
+            },
+            "RB": {
+              "net_total": 153.2050419253915,
+              "trade_count": 6948
+            },
+            "RU": {
+              "net_total": -10.159951108846371,
+              "trade_count": 6955
+            },
+            "SC": {
+              "net_total": -228.94137079760313,
+              "trade_count": 10583
+            },
+            "SN": {
+              "net_total": -62.479075435359725,
+              "trade_count": 8536
+            },
+            "TA": {
+              "net_total": 115.53293293142076,
+              "trade_count": 6569
+            }
+          },
+          "positive_symbol_count": 10,
+          "top3_profit_share": 0.5843424457243294
+        }
+      },
+      "0.01": {
+        "BASE": {
+          "n_decisions": 120180,
+          "n_trades": 120180,
+          "trade_rate": 1.0,
+          "gross_total_ATR0": 167.54577989224506,
+          "net_total_ATR0": -1034.254220107755,
+          "gross_EV_per_decision": 0.0013941236469649282,
+          "net_EV_per_decision": -0.008605876353035072,
+          "net_EV_per_trade": -0.008605876353035072,
+          "win_rate": 0.463954068896655,
+          "mean_win": 0.45142407287226943,
+          "mean_loss": -0.4067672173375516,
+          "payoff_ratio": 1.109784794917875,
+          "profit_factor": 0.9605318151412697,
+          "break_even_cost": 0.0013941236469649282,
+          "daily_sharpe_annualized": -4.497587122882724,
+          "max_drawdown_ATR0": -1172.8925726076475,
+          "by_symbol": {
+            "AG": {
+              "net_total": -267.5832699651109,
+              "trade_count": 9723
+            },
+            "AL": {
+              "net_total": -32.45450775696064,
+              "trade_count": 8747
+            },
+            "AU": {
+              "net_total": -266.3742166992983,
+              "trade_count": 10375
+            },
+            "CF": {
+              "net_total": 21.14449799573467,
+              "trade_count": 6736
+            },
+            "CU": {
+              "net_total": 15.358612814171096,
+              "trade_count": 8708
+            },
+            "I": {
+              "net_total": 39.67454771247363,
+              "trade_count": 6964
+            },
+            "M": {
+              "net_total": -8.740380241462105,
+              "trade_count": 6960
+            },
+            "MA": {
+              "net_total": -23.09367621003645,
+              "trade_count": 6599
+            },
+            "NI": {
+              "net_total": -75.27573821480802,
+              "trade_count": 8966
+            },
+            "P": {
+              "net_total": -2.17052210681255,
+              "trade_count": 6811
+            },
+            "RB": {
+              "net_total": 21.971604355410086,
+              "trade_count": 6948
+            },
+            "RU": {
+              "net_total": -91.4679452769434,
+              "trade_count": 6955
+            },
+            "SC": {
+              "net_total": -227.57705160129495,
+              "trade_count": 10583
+            },
+            "SN": {
+              "net_total": -132.5490396443767,
+              "trade_count": 8536
+            },
+            "TA": {
+              "net_total": -5.1171352684404425,
+              "trade_count": 6569
+            }
+          },
+          "positive_symbol_count": 4,
+          "top3_profit_share": 0.8435177976497402
+        },
+        "GATE0": {
+          "n_decisions": 120180,
+          "n_trades": 60368,
+          "trade_rate": 0.5023131968713597,
+          "gross_total_ATR0": -27.158795203346827,
+          "net_total_ATR0": -630.8387952033469,
+          "gross_EV_per_decision": -0.0002259843168858947,
+          "net_EV_per_decision": -0.005249116285599492,
+          "net_EV_per_trade": -0.010449887278083532,
+          "win_rate": 0.47089517625231914,
+          "mean_win": 0.42808712682969213,
+          "mean_loss": -0.4007411023321438,
+          "payoff_ratio": 1.068238631721094,
+          "profit_factor": 0.9507159946130533,
+          "break_even_cost": -0.0004498872780835347,
+          "daily_sharpe_annualized": -3.8273080801148116,
+          "max_drawdown_ATR0": -760.0038121675719,
+          "by_symbol": {
+            "AG": {
+              "net_total": -202.62471120522693,
+              "trade_count": 5467
+            },
+            "AL": {
+              "net_total": -1.5463515730823811,
+              "trade_count": 4511
+            },
+            "AU": {
+              "net_total": -158.65766094232265,
+              "trade_count": 5588
+            },
+            "CF": {
+              "net_total": -3.6187768353327385,
+              "trade_count": 3020
+            },
+            "CU": {
+              "net_total": -32.146935802303965,
+              "trade_count": 4457
+            },
+            "I": {
+              "net_total": 50.36816507688918,
+              "trade_count": 3163
+            },
+            "M": {
+              "net_total": -23.169857038771337,
+              "trade_count": 3465
+            },
+            "MA": {
+              "net_total": 3.137473455735945,
+              "trade_count": 3034
+            },
+            "NI": {
+              "net_total": 25.47203266183383,
+              "trade_count": 4625
+            },
+            "P": {
+              "net_total": -11.044564808195325,
+              "trade_count": 3243
+            },
+            "RB": {
+              "net_total": 50.66376400685432,
+              "trade_count": 3188
+            },
+            "RU": {
+              "net_total": -62.603209379454405,
+              "trade_count": 3172
+            },
+            "SC": {
+              "net_total": -231.35434236845452,
+              "trade_count": 6157
+            },
+            "SN": {
+              "net_total": -69.67925791096148,
+              "trade_count": 4177
+            },
+            "TA": {
+              "net_total": 35.965437459445624,
+              "trade_count": 3101
+            }
+          },
+          "positive_symbol_count": 5,
+          "top3_profit_share": 0.8272444515260211
+        },
+        "GATEA": {
+          "n_decisions": 120180,
+          "n_trades": 61074,
+          "trade_rate": 0.5081877184223664,
+          "gross_total_ATR0": 65.56018324120387,
+          "net_total_ATR0": -545.1798167587963,
+          "gross_EV_per_decision": 0.0005455165854651679,
+          "net_EV_per_decision": -0.004536360598758498,
+          "net_EV_per_trade": -0.008926545121635984,
+          "win_rate": 0.47216491469365035,
+          "mean_win": 0.4288036088723468,
+          "mean_loss": -0.4004897938955443,
+          "payoff_ratio": 1.0706979688580711,
+          "profit_factor": 0.9577726627155194,
+          "break_even_cost": 0.0010734548783640154,
+          "daily_sharpe_annualized": -3.4647427675971385,
+          "max_drawdown_ATR0": -667.5653878917843,
+          "by_symbol": {
+            "AG": {
+              "net_total": -161.99443840333208,
+              "trade_count": 5497
+            },
+            "AL": {
+              "net_total": 2.3347634519109928,
+              "trade_count": 4536
+            },
+            "AU": {
+              "net_total": -142.95563379155783,
+              "trade_count": 5680
+            },
+            "CF": {
+              "net_total": 11.108983956312656,
+              "trade_count": 3078
+            },
+            "CU": {
+              "net_total": -29.900867237634962,
+              "trade_count": 4541
+            },
+            "I": {
+              "net_total": 58.382416495473215,
+              "trade_count": 3187
+            },
+            "M": {
+              "net_total": -22.499094532029986,
+              "trade_count": 3498
+            },
+            "MA": {
+              "net_total": 3.4706878049754852,
+              "trade_count": 3062
+            },
+            "NI": {
+              "net_total": 22.416749428548666,
+              "trade_count": 4681
+            },
+            "P": {
+              "net_total": 3.7015117653052343,
+              "trade_count": 3298
+            },
+            "RB": {
+              "net_total": 44.17395873880341,
+              "trade_count": 3229
+            },
+            "RU": {
+              "net_total": -49.91368472694704,
+              "trade_count": 3201
+            },
+            "SC": {
+              "net_total": -227.64748417022844,
+              "trade_count": 6176
+            },
+            "SN": {
+              "net_total": -106.19439199179956,
+              "trade_count": 4245
+            },
+            "TA": {
+              "net_total": 50.336706453404034,
+              "trade_count": 3165
+            }
+          },
+          "positive_symbol_count": 8,
+          "top3_profit_share": 0.7803622533720604
+        },
+        "FLIPA": {
+          "n_decisions": 120180,
+          "n_trades": 92893,
+          "trade_rate": 0.7729489099683807,
+          "gross_total_ATR0": 141.99567944458863,
+          "net_total_ATR0": -786.9343205554113,
+          "gross_EV_per_decision": 0.0011815250411431905,
+          "net_EV_per_decision": -0.006547964058540617,
+          "net_EV_per_trade": -0.008471406032267354,
+          "win_rate": 0.4605729172273476,
+          "mean_win": 0.46192671123459933,
+          "mean_loss": -0.41010610337497266,
+          "payoff_ratio": 1.1263590261963146,
+          "profit_factor": 0.9617063716454753,
+          "break_even_cost": 0.0015285939677326455,
+          "daily_sharpe_annualized": -5.070015044138564,
+          "max_drawdown_ATR0": -856.8970634416975,
+          "by_symbol": {
+            "AG": {
+              "net_total": -157.4983875649124,
+              "trade_count": 7682
+            },
+            "AL": {
+              "net_total": -21.845413594497757,
+              "trade_count": 6673
+            },
+            "AU": {
+              "net_total": -83.94553614255688,
+              "trade_count": 8044
+            },
+            "CF": {
+              "net_total": -55.11368063090911,
+              "trade_count": 5249
+            },
+            "CU": {
+              "net_total": -80.5243754590076,
+              "trade_count": 6670
+            },
+            "I": {
+              "net_total": 0.543163516686306,
+              "trade_count": 5383
+            },
+            "M": {
+              "net_total": -42.40270689417397,
+              "trade_count": 5483
+            },
+            "MA": {
+              "net_total": -49.80488385173641,
+              "trade_count": 5083
+            },
+            "NI": {
+              "net_total": 46.88854219471591,
+              "trade_count": 6874
+            },
+            "P": {
+              "net_total": -4.09038717155801,
+              "trade_count": 5188
+            },
+            "RB": {
+              "net_total": 49.142044775894064,
+              "trade_count": 5408
+            },
+            "RU": {
+              "net_total": -60.31209806577089,
+              "trade_count": 5344
+            },
+            "SC": {
+              "net_total": -264.7639310685466,
+              "trade_count": 8283
+            },
+            "SN": {
+              "net_total": -123.89326653471939,
+              "trade_count": 6418
+            },
+            "TA": {
+              "net_total": 60.6865959356812,
+              "trade_count": 5111
+            }
+          },
+          "positive_symbol_count": 4,
+          "top3_profit_share": 0.9965460872429633
+        }
+      },
+      "0.02": {
+        "BASE": {
+          "n_decisions": 120180,
+          "n_trades": 120180,
+          "trade_rate": 1.0,
+          "gross_total_ATR0": 167.54577989224506,
+          "net_total_ATR0": -2236.054220107756,
+          "gross_EV_per_decision": 0.0013941236469649282,
+          "net_EV_per_decision": -0.01860587635303508,
+          "net_EV_per_trade": -0.01860587635303508,
+          "win_rate": 0.4607172574471626,
+          "mean_win": 0.44455949997073213,
+          "mean_loss": -0.41429493718639154,
+          "payoff_ratio": 1.073050766658837,
+          "profit_factor": 0.9167232090097844,
+          "break_even_cost": 0.0013941236469649282,
+          "daily_sharpe_annualized": -9.672041808013018,
+          "max_drawdown_ATR0": -2305.03902915078,
+          "by_symbol": {
+            "AG": {
+              "net_total": -364.813269965111,
+              "trade_count": 9723
+            },
+            "AL": {
+              "net_total": -119.9245077569607,
+              "trade_count": 8747
+            },
+            "AU": {
+              "net_total": -370.12421669929836,
+              "trade_count": 10375
+            },
+            "CF": {
+              "net_total": -46.2155020042654,
+              "trade_count": 6736
+            },
+            "CU": {
+              "net_total": -71.72138718582897,
+              "trade_count": 8708
+            },
+            "I": {
+              "net_total": -29.965452287526478,
+              "trade_count": 6964
+            },
+            "M": {
+              "net_total": -78.34038024146219,
+              "trade_count": 6960
+            },
+            "MA": {
+              "net_total": -89.0836762100365,
+              "trade_count": 6599
+            },
+            "NI": {
+              "net_total": -164.93573821480805,
+              "trade_count": 8966
+            },
+            "P": {
+              "net_total": -70.2805221068126,
+              "trade_count": 6811
+            },
+            "RB": {
+              "net_total": -47.508395644589996,
+              "trade_count": 6948
+            },
+            "RU": {
+              "net_total": -161.01794527694346,
+              "trade_count": 6955
+            },
+            "SC": {
+              "net_total": -333.407051601295,
+              "trade_count": 10583
+            },
+            "SN": {
+              "net_total": -217.90903964437672,
+              "trade_count": 8536
+            },
+            "TA": {
+              "net_total": -70.8071352684405,
+              "trade_count": 6569
+            }
+          },
+          "positive_symbol_count": 0,
+          "top3_profit_share": 0.0
+        },
+        "GATE0": {
+          "n_decisions": 120180,
+          "n_trades": 47169,
+          "trade_rate": 0.39248627059410884,
+          "gross_total_ATR0": -64.32380557939402,
+          "net_total_ATR0": -1007.7038055793944,
+          "gross_EV_per_decision": -0.0005352288698568315,
+          "net_EV_per_decision": -0.00838495428173901,
+          "net_EV_per_trade": -0.021363688133719062,
+          "win_rate": 0.4697576798320931,
+          "mean_win": 0.4217253791846951,
+          "mean_loss": -0.41390967004733403,
+          "payoff_ratio": 1.0188826444583121,
+          "profit_factor": 0.9026588955222614,
+          "break_even_cost": -0.001363688133719053,
+          "daily_sharpe_annualized": -6.708863541269251,
+          "max_drawdown_ATR0": -1070.3480008111537,
+          "by_symbol": {
+            "AG": {
+              "net_total": -193.52644383546726,
+              "trade_count": 4332
+            },
+            "AL": {
+              "net_total": -51.2766568138923,
+              "trade_count": 3518
+            },
+            "AU": {
+              "net_total": -161.2146786775843,
+              "trade_count": 4427
+            },
+            "CF": {
+              "net_total": -11.974152068193625,
+              "trade_count": 2346
+            },
+            "CU": {
+              "net_total": -26.54884895122704,
+              "trade_count": 3451
+            },
+            "I": {
+              "net_total": 35.00761584268144,
+              "trade_count": 2481
+            },
+            "M": {
+              "net_total": -36.164504879425536,
+              "trade_count": 2723
+            },
+            "MA": {
+              "net_total": -22.34778294099268,
+              "trade_count": 2384
+            },
+            "NI": {
+              "net_total": -16.862061825603547,
+              "trade_count": 3603
+            },
+            "P": {
+              "net_total": -25.753867767798212,
+              "trade_count": 2506
+            },
+            "RB": {
+              "net_total": 2.323674418855589,
+              "trade_count": 2467
+            },
+            "RU": {
+              "net_total": -73.34848636851117,
+              "trade_count": 2447
+            },
+            "SC": {
+              "net_total": -312.8964771553358,
+              "trade_count": 4938
+            },
+            "SN": {
+              "net_total": -107.49065091004434,
+              "trade_count": 3143
+            },
+            "TA": {
+              "net_total": -5.630483646855485,
+              "trade_count": 2403
+            }
+          },
+          "positive_symbol_count": 2,
+          "top3_profit_share": 1.0
+        },
+        "GATEA": {
+          "n_decisions": 120180,
+          "n_trades": 47819,
+          "trade_rate": 0.3978948244300216,
+          "gross_total_ATR0": 16.77232256574949,
+          "net_total_ATR0": -939.6076774342507,
+          "gross_EV_per_decision": 0.0001395600146925403,
+          "net_EV_per_decision": -0.007818336473907894,
+          "net_EV_per_trade": -0.019649254008537415,
+          "win_rate": 0.4692486250235262,
+          "mean_win": 0.4245026978536857,
+          "mean_loss": -0.41233347969161166,
+          "payoff_ratio": 1.0295130489311117,
+          "profit_factor": 0.9102144722208515,
+          "break_even_cost": 0.00035074599146258794,
+          "daily_sharpe_annualized": -6.23380613466636,
+          "max_drawdown_ATR0": -1020.7095595632888,
+          "by_symbol": {
+            "AG": {
+              "net_total": -162.06011108848693,
+              "trade_count": 4380
+            },
+            "AL": {
+              "net_total": -56.67057875156719,
+              "trade_count": 3558
+            },
+            "AU": {
+              "net_total": -148.1284701377955,
+              "trade_count": 4452
+            },
+            "CF": {
+              "net_total": -17.56068182714253,
+              "trade_count": 2412
+            },
+            "CU": {
+              "net_total": -27.40982492610238,
+              "trade_count": 3519
+            },
+            "I": {
+              "net_total": 34.26107584060398,
+              "trade_count": 2510
+            },
+            "M": {
+              "net_total": -24.436236083243696,
+              "trade_count": 2773
+            },
+            "MA": {
+              "net_total": -18.214277723809218,
+              "trade_count": 2435
+            },
+            "NI": {
+              "net_total": -27.3692850634042,
+              "trade_count": 3656
+            },
+            "P": {
+              "net_total": -21.689826916715568,
+              "trade_count": 2542
+            },
+            "RB": {
+              "net_total": 19.84075041507004,
+              "trade_count": 2519
+            },
+            "RU": {
+              "net_total": -81.98930317435233,
+              "trade_count": 2474
+            },
+            "SC": {
+              "net_total": -297.38772572592154,
+              "trade_count": 4941
+            },
+            "SN": {
+              "net_total": -112.25399576537126,
+              "trade_count": 3215
+            },
+            "TA": {
+              "net_total": 1.4608134939875832,
+              "trade_count": 2433
+            }
+          },
+          "positive_symbol_count": 3,
+          "top3_profit_share": 1.0
+        },
+        "FLIPA": {
+          "n_decisions": 120180,
+          "n_trades": 69039,
+          "trade_rate": 0.5744633050424364,
+          "gross_total_ATR0": 141.78787217160396,
+          "net_total_ATR0": -1238.9921278283966,
+          "gross_EV_per_decision": 0.0011797959075686801,
+          "net_EV_per_decision": -0.010309470193280051,
+          "net_EV_per_trade": -0.0179462641091035,
+          "win_rate": 0.45840756673764105,
+          "mean_win": 0.4623867372324707,
+          "mean_loss": -0.4245034256308104,
+          "payoff_ratio": 1.0892414744247725,
+          "profit_factor": 0.9219414881280309,
+          "break_even_cost": 0.0020537358908965073,
+          "daily_sharpe_annualized": -8.502219210738033,
+          "max_drawdown_ATR0": -1287.6728959742838,
+          "by_symbol": {
+            "AG": {
+              "net_total": -164.59879246073314,
+              "trade_count": 5849
+            },
+            "AL": {
+              "net_total": -93.16464693350164,
+              "trade_count": 4955
+            },
+            "AU": {
+              "net_total": -123.21376374770341,
+              "trade_count": 5951
+            },
+            "CF": {
+              "net_total": -84.99344747800754,
+              "trade_count": 3912
+            },
+            "CU": {
+              "net_total": -71.96035095259354,
+              "trade_count": 4912
+            },
+            "I": {
+              "net_total": -16.22726346076611,
+              "trade_count": 4035
+            },
+            "M": {
+              "net_total": -58.97271158170297,
+              "trade_count": 4151
+            },
+            "MA": {
+              "net_total": -71.91059119969673,
+              "trade_count": 3791
+            },
+            "NI": {
+              "net_total": 2.7239957465556373,
+              "trade_count": 5076
+            },
+            "P": {
+              "net_total": -28.741333630973777,
+              "trade_count": 3758
+            },
+            "RB": {
+              "net_total": 33.15203353151635,
+              "trade_count": 4014
+            },
+            "RU": {
+              "net_total": -95.53898275056258,
+              "trade_count": 3933
+            },
+            "SC": {
+              "net_total": -325.2709767891856,
+              "trade_count": 6295
+            },
+            "SN": {
+              "net_total": -131.77340901638553,
+              "trade_count": 4665
+            },
+            "TA": {
+              "net_total": -8.501887104656012,
+              "trade_count": 3742
+            }
+          },
+          "positive_symbol_count": 2,
+          "top3_profit_share": 1.0
+        }
+      },
+      "0.03": {
+        "BASE": {
+          "n_decisions": 120180,
+          "n_trades": 120180,
+          "trade_rate": 1.0,
+          "gross_total_ATR0": 167.54577989224506,
+          "net_total_ATR0": -3437.8542201077553,
+          "gross_EV_per_decision": 0.0013941236469649282,
+          "net_EV_per_decision": -0.028605876353035076,
+          "net_EV_per_trade": -0.028605876353035076,
+          "win_rate": 0.45677317357297387,
+          "mean_win": 0.43835522204908944,
+          "mean_loss": -0.42125088664306537,
+          "payoff_ratio": 1.040603678112889,
+          "profit_factor": 0.8749933202114887,
+          "break_even_cost": 0.0013941236469649282,
+          "daily_sharpe_annualized": -14.77630068345263,
+          "max_drawdown_ATR0": -3452.549029150779,
+          "by_symbol": {
+            "AG": {
+              "net_total": -462.043269965111,
+              "trade_count": 9723
+            },
+            "AL": {
+              "net_total": -207.39450775696065,
+              "trade_count": 8747
+            },
+            "AU": {
+              "net_total": -473.87421669929824,
+              "trade_count": 10375
+            },
+            "CF": {
+              "net_total": -113.57550200426536,
+              "trade_count": 6736
+            },
+            "CU": {
+              "net_total": -158.80138718582893,
+              "trade_count": 8708
+            },
+            "I": {
+              "net_total": -99.60545228752645,
+              "trade_count": 6964
+            },
+            "M": {
+              "net_total": -147.94038024146218,
+              "trade_count": 6960
+            },
+            "MA": {
+              "net_total": -155.0736762100365,
+              "trade_count": 6599
+            },
+            "NI": {
+              "net_total": -254.59573821480802,
+              "trade_count": 8966
+            },
+            "P": {
+              "net_total": -138.39052210681257,
+              "trade_count": 6811
+            },
+            "RB": {
+              "net_total": -116.98839564459001,
+              "trade_count": 6948
+            },
+            "RU": {
+              "net_total": -230.56794527694345,
+              "trade_count": 6955
+            },
+            "SC": {
+              "net_total": -439.2370516012951,
+              "trade_count": 10583
+            },
+            "SN": {
+              "net_total": -303.2690396443767,
+              "trade_count": 8536
+            },
+            "TA": {
+              "net_total": -136.4971352684405,
+              "trade_count": 6569
+            }
+          },
+          "positive_symbol_count": 0,
+          "top3_profit_share": 0.0
+        },
+        "GATE0": {
+          "n_decisions": 120180,
+          "n_trades": 35703,
+          "trade_rate": 0.2970793809286071,
+          "gross_total_ATR0": 78.09162841021087,
+          "net_total_ATR0": -992.9983715897895,
+          "gross_EV_per_decision": 0.0006497888867549582,
+          "net_EV_per_decision": -0.008262592541103257,
+          "net_EV_per_trade": -0.02781274323137522,
+          "win_rate": 0.46721564014228495,
+          "mean_win": 0.4190881774222512,
+          "mean_loss": -0.4197144495410767,
+          "payoff_ratio": 0.9985078614293355,
+          "profit_factor": 0.8756234694828484,
+          "break_even_cost": 0.00218725676862479,
+          "daily_sharpe_annualized": -11.384486796620674,
+          "max_drawdown_ATR0": -1044.013387578082,
+          "by_symbol": {
+            "AG": {
+              "net_total": -163.34250753711322,
+              "trade_count": 3309
+            },
+            "AL": {
+              "net_total": -85.7903382856706,
+              "trade_count": 2583
+            },
+            "AU": {
+              "net_total": -120.77755215425503,
+              "trade_count": 3365
+            },
+            "CF": {
+              "net_total": -34.337241883782205,
+              "trade_count": 1760
+            },
+            "CU": {
+              "net_total": -38.787570270093575,
+              "trade_count": 2595
+            },
+            "I": {
+              "net_total": 20.065991114725982,
+              "trade_count": 1891
+            },
+            "M": {
+              "net_total": -64.5029544170994,
+              "trade_count": 2091
+            },
+            "MA": {
+              "net_total": -37.44019714073571,
+              "trade_count": 1837
+            },
+            "NI": {
+              "net_total": -58.48424906874304,
+              "trade_count": 2732
+            },
+            "P": {
+              "net_total": -40.801906465061094,
+              "trade_count": 1887
+            },
+            "RB": {
+              "net_total": -0.009721072991758284,
+              "trade_count": 1860
+            },
+            "RU": {
+              "net_total": -70.65791068129126,
+              "trade_count": 1821
+            },
+            "SC": {
+              "net_total": -155.25350833278426,
+              "trade_count": 3798
+            },
+            "SN": {
+              "net_total": -128.2015849471208,
+              "trade_count": 2327
+            },
+            "TA": {
+              "net_total": -14.677120447773355,
+              "trade_count": 1847
+            }
+          },
+          "positive_symbol_count": 1,
+          "top3_profit_share": 1.0
+        },
+        "GATEA": {
+          "n_decisions": 120180,
+          "n_trades": 36369,
+          "trade_rate": 0.3026210683974039,
+          "gross_total_ATR0": 111.68791652364968,
+          "net_total_ATR0": -979.3820834763505,
+          "gross_EV_per_decision": 0.0009293386297524519,
+          "net_EV_per_decision": -0.008149293422169667,
+          "net_EV_per_trade": -0.026929035262898363,
+          "win_rate": 0.46589128103604716,
+          "mean_win": 0.420716427646647,
+          "mean_loss": -0.4174003209019891,
+          "payoff_ratio": 1.0079446674537573,
+          "profit_factor": 0.879207950853872,
+          "break_even_cost": 0.003070964737101644,
+          "daily_sharpe_annualized": -10.751191939894722,
+          "max_drawdown_ATR0": -1046.6008310018278,
+          "by_symbol": {
+            "AG": {
+              "net_total": -152.22551199264768,
+              "trade_count": 3363
+            },
+            "AL": {
+              "net_total": -76.01157916817247,
+              "trade_count": 2675
+            },
+            "AU": {
+              "net_total": -119.41167524916699,
+              "trade_count": 3411
+            },
+            "CF": {
+              "net_total": -31.102689553469443,
+              "trade_count": 1819
+            },
+            "CU": {
+              "net_total": -47.77012737291427,
+              "trade_count": 2642
+            },
+            "I": {
+              "net_total": 21.572371891677573,
+              "trade_count": 1927
+            },
+            "M": {
+              "net_total": -58.156847184857995,
+              "trade_count": 2126
+            },
+            "MA": {
+              "net_total": -25.13420510650917,
+              "trade_count": 1868
+            },
+            "NI": {
+              "net_total": -71.42382727707393,
+              "trade_count": 2788
+            },
+            "P": {
+              "net_total": -35.47788280309622,
+              "trade_count": 1938
+            },
+            "RB": {
+              "net_total": 10.262493635754423,
+              "trade_count": 1900
+            },
+            "RU": {
+              "net_total": -82.25587364340979,
+              "trade_count": 1849
+            },
+            "SC": {
+              "net_total": -170.46849865563257,
+              "trade_count": 3838
+            },
+            "SN": {
+              "net_total": -133.53316052489936,
+              "trade_count": 2366
+            },
+            "TA": {
+              "net_total": -8.245070471932591,
+              "trade_count": 1859
+            }
+          },
+          "positive_symbol_count": 2,
+          "top3_profit_share": 1.0
+        },
+        "FLIPA": {
+          "n_decisions": 120180,
+          "n_trades": 50453,
+          "trade_rate": 0.4198119487435513,
+          "gross_total_ATR0": 273.7594366691157,
+          "net_total_ATR0": -1239.8305633308846,
+          "gross_EV_per_decision": 0.002277911771252419,
+          "net_EV_per_decision": -0.010316446691054124,
+          "net_EV_per_trade": -0.024573971088555382,
+          "win_rate": 0.45695994291717046,
+          "mean_win": 0.46029624382848944,
+          "mean_loss": -0.4325848771733962,
+          "payoff_ratio": 1.0640599524333012,
+          "profit_factor": 0.8953902548853843,
+          "break_even_cost": 0.005426028911444626,
+          "daily_sharpe_annualized": -11.952669973078871,
+          "max_drawdown_ATR0": -1294.3071384282146,
+          "by_symbol": {
+            "AG": {
+              "net_total": -160.96744227968915,
+              "trade_count": 4350
+            },
+            "AL": {
+              "net_total": -99.34078368888918,
+              "trade_count": 3625
+            },
+            "AU": {
+              "net_total": -106.05361100779687,
+              "trade_count": 4386
+            },
+            "CF": {
+              "net_total": -80.38186745453697,
+              "trade_count": 2822
+            },
+            "CU": {
+              "net_total": -63.16677370915873,
+              "trade_count": 3532
+            },
+            "I": {
+              "net_total": -5.747473291040079,
+              "trade_count": 2952
+            },
+            "M": {
+              "net_total": -95.56182886319826,
+              "trade_count": 3031
+            },
+            "MA": {
+              "net_total": -71.95305334272896,
+              "trade_count": 2745
+            },
+            "NI": {
+              "net_total": -71.35569184563434,
+              "trade_count": 3751
+            },
+            "P": {
+              "net_total": -29.820277685625413,
+              "trade_count": 2704
+            },
+            "RB": {
+              "net_total": -6.227799359089762,
+              "trade_count": 2891
+            },
+            "RU": {
+              "net_total": -95.69489305608965,
+              "trade_count": 2811
+            },
+            "SC": {
+              "net_total": -187.9322758949391,
+              "trade_count": 4711
+            },
+            "SN": {
+              "net_total": -166.47699278214168,
+              "trade_count": 3371
+            },
+            "TA": {
+              "net_total": 0.8502009296735658,
+              "trade_count": 2771
+            }
+          },
+          "positive_symbol_count": 1,
+          "top3_profit_share": 1.0
+        }
+      },
+      "0.05": {
+        "BASE": {
+          "n_decisions": 120180,
+          "n_trades": 120180,
+          "trade_rate": 1.0,
+          "gross_total_ATR0": 167.54577989224506,
+          "net_total_ATR0": -5841.454220107756,
+          "gross_EV_per_decision": 0.0013941236469649282,
+          "net_EV_per_decision": -0.04860587635303508,
+          "net_EV_per_trade": -0.04860587635303508,
+          "win_rate": 0.44703777666833083,
+          "mean_win": 0.42767437475248415,
+          "mean_loss": -0.43372906105511444,
+          "payoff_ratio": 0.9860403951538287,
+          "profit_factor": 0.7973002457691473,
+          "break_even_cost": 0.0013941236469649282,
+          "daily_sharpe_annualized": -24.718968664748093,
+          "max_drawdown_ATR0": -5783.011577332675,
+          "by_symbol": {
+            "AG": {
+              "net_total": -656.503269965111,
+              "trade_count": 9723
+            },
+            "AL": {
+              "net_total": -382.33450775696065,
+              "trade_count": 8747
+            },
+            "AU": {
+              "net_total": -681.3742166992984,
+              "trade_count": 10375
+            },
+            "CF": {
+              "net_total": -248.29550200426536,
+              "trade_count": 6736
+            },
+            "CU": {
+              "net_total": -332.9613871858289,
+              "trade_count": 8708
+            },
+            "I": {
+              "net_total": -238.88545228752648,
+              "trade_count": 6964
+            },
+            "M": {
+              "net_total": -287.1403802414622,
+              "trade_count": 6960
+            },
+            "MA": {
+              "net_total": -287.05367621003654,
+              "trade_count": 6599
+            },
+            "NI": {
+              "net_total": -433.915738214808,
+              "trade_count": 8966
+            },
+            "P": {
+              "net_total": -274.6105221068126,
+              "trade_count": 6811
+            },
+            "RB": {
+              "net_total": -255.94839564458997,
+              "trade_count": 6948
+            },
+            "RU": {
+              "net_total": -369.66794527694344,
+              "trade_count": 6955
+            },
+            "SC": {
+              "net_total": -650.897051601295,
+              "trade_count": 10583
+            },
+            "SN": {
+              "net_total": -473.98903964437676,
+              "trade_count": 8536
+            },
+            "TA": {
+              "net_total": -267.8771352684405,
+              "trade_count": 6569
+            }
+          },
+          "positive_symbol_count": 0,
+          "top3_profit_share": 0.0
+        },
+        "GATE0": {
+          "n_decisions": 120180,
+          "n_trades": 18813,
+          "trade_rate": 0.15654018971542685,
+          "gross_total_ATR0": -12.902783974115657,
+          "net_total_ATR0": -953.5527839741158,
+          "gross_EV_per_decision": -0.00010736215654947294,
+          "net_EV_per_decision": -0.007934371642320817,
+          "net_EV_per_trade": -0.05068584404263625,
+          "win_rate": 0.45622707702120874,
+          "mean_win": 0.4198350367159001,
+          "mean_loss": -0.44558491288810853,
+          "payoff_ratio": 0.9422110681322047,
+          "profit_factor": 0.7907497406647808,
+          "break_even_cost": -0.0006858440426362439,
+          "daily_sharpe_annualized": -14.47087727226723,
+          "max_drawdown_ATR0": -971.0463524394919,
+          "by_symbol": {
+            "AG": {
+              "net_total": -141.85313809134365,
+              "trade_count": 1751
+            },
+            "AL": {
+              "net_total": -84.56607798439273,
+              "trade_count": 1313
+            },
+            "AU": {
+              "net_total": -110.35035655448843,
+              "trade_count": 1766
+            },
+            "CF": {
+              "net_total": -42.90941254497222,
+              "trade_count": 919
+            },
+            "CU": {
+              "net_total": -57.16287513449802,
+              "trade_count": 1319
+            },
+            "I": {
+              "net_total": -17.035994226623636,
+              "trade_count": 1019
+            },
+            "M": {
+              "net_total": -70.93596256861153,
+              "trade_count": 1181
+            },
+            "MA": {
+              "net_total": -27.95472153050852,
+              "trade_count": 922
+            },
+            "NI": {
+              "net_total": -95.95685474054491,
+              "trade_count": 1450
+            },
+            "P": {
+              "net_total": -21.867207499537763,
+              "trade_count": 984
+            },
+            "RB": {
+              "net_total": -7.849469022506348,
+              "trade_count": 1025
+            },
+            "RU": {
+              "net_total": -55.2483228579717,
+              "trade_count": 900
+            },
+            "SC": {
+              "net_total": -123.63866502654818,
+              "trade_count": 2128
+            },
+            "SN": {
+              "net_total": -83.17272363375548,
+              "trade_count": 1180
+            },
+            "TA": {
+              "net_total": -13.051002557812675,
+              "trade_count": 956
+            }
+          },
+          "positive_symbol_count": 0,
+          "top3_profit_share": 0.0
+        },
+        "GATEA": {
+          "n_decisions": 120180,
+          "n_trades": 19221,
+          "trade_rate": 0.15993509735396905,
+          "gross_total_ATR0": 72.99722392923458,
+          "net_total_ATR0": -888.0527760707655,
+          "gross_EV_per_decision": 0.0006073991007591494,
+          "net_EV_per_decision": -0.007389355766939304,
+          "net_EV_per_trade": -0.04620221508094093,
+          "win_rate": 0.45783257895010665,
+          "mean_win": 0.4250937501878005,
+          "mean_loss": -0.44431539429097805,
+          "payoff_ratio": 0.9567387393051039,
+          "profit_factor": 0.8081494438361408,
+          "break_even_cost": 0.00379778491905908,
+          "daily_sharpe_annualized": -12.647324700149724,
+          "max_drawdown_ATR0": -913.6958853008659,
+          "by_symbol": {
+            "AG": {
+              "net_total": -125.10955865657503,
+              "trade_count": 1780
+            },
+            "AL": {
+              "net_total": -88.1193269724228,
+              "trade_count": 1326
+            },
+            "AU": {
+              "net_total": -94.18471310960845,
+              "trade_count": 1827
+            },
+            "CF": {
+              "net_total": -33.480803369927116,
+              "trade_count": 975
+            },
+            "CU": {
+              "net_total": -50.959815918510316,
+              "trade_count": 1354
+            },
+            "I": {
+              "net_total": -27.970393590342205,
+              "trade_count": 1047
+            },
+            "M": {
+              "net_total": -70.4907800191943,
+              "trade_count": 1205
+            },
+            "MA": {
+              "net_total": -21.667515611116944,
+              "trade_count": 941
+            },
+            "NI": {
+              "net_total": -77.39320381161298,
+              "trade_count": 1468
+            },
+            "P": {
+              "net_total": -14.9752420248445,
+              "trade_count": 1010
+            },
+            "RB": {
+              "net_total": -19.818708451770053,
+              "trade_count": 1068
+            },
+            "RU": {
+              "net_total": -55.282550786833255,
+              "trade_count": 911
+            },
+            "SC": {
+              "net_total": -119.76417006970381,
+              "trade_count": 2138
+            },
+            "SN": {
+              "net_total": -90.75130141204596,
+              "trade_count": 1198
+            },
+            "TA": {
+              "net_total": 1.9153077337421927,
+              "trade_count": 973
+            }
+          },
+          "positive_symbol_count": 1,
+          "top3_profit_share": 1.0
+        },
+        "FLIPA": {
+          "n_decisions": 120180,
+          "n_trades": 25542,
+          "trade_rate": 0.21253120319520719,
+          "gross_total_ATR0": 157.13820182301794,
+          "net_total_ATR0": -1119.9617981769823,
+          "gross_EV_per_decision": 0.00130752372959742,
+          "net_EV_per_decision": -0.009319036430162941,
+          "net_EV_per_trade": -0.04384785052764005,
+          "win_rate": 0.4492600422832981,
+          "mean_win": 0.4634099549891745,
+          "mean_loss": -0.45776797494686483,
+          "payoff_ratio": 1.0123249776111238,
+          "profit_factor": 0.8260278118529224,
+          "break_even_cost": 0.006152149472359953,
+          "daily_sharpe_annualized": -13.94440631044822,
+          "max_drawdown_ATR0": -1131.6664796531106,
+          "by_symbol": {
+            "AG": {
+              "net_total": -126.4851526600925,
+              "trade_count": 2225
+            },
+            "AL": {
+              "net_total": -103.94859906769082,
+              "trade_count": 1754
+            },
+            "AU": {
+              "net_total": -81.36062641277807,
+              "trade_count": 2203
+            },
+            "CF": {
+              "net_total": -63.87894727863031,
+              "trade_count": 1433
+            },
+            "CU": {
+              "net_total": -70.65037461026103,
+              "trade_count": 1742
+            },
+            "I": {
+              "net_total": -67.06913676992211,
+              "trade_count": 1492
+            },
+            "M": {
+              "net_total": -93.11376191863832,
+              "trade_count": 1613
+            },
+            "MA": {
+              "net_total": -50.831164484623315,
+              "trade_count": 1341
+            },
+            "NI": {
+              "net_total": -90.80685297126813,
+              "trade_count": 1923
+            },
+            "P": {
+              "net_total": -18.25022128725184,
+              "trade_count": 1353
+            },
+            "RB": {
+              "net_total": -39.23682931543741,
+              "trade_count": 1519
+            },
+            "RU": {
+              "net_total": -74.51085442855685,
+              "trade_count": 1354
+            },
+            "SC": {
+              "net_total": -137.84744104342747,
+              "trade_count": 2537
+            },
+            "SN": {
+              "net_total": -110.68566715103157,
+              "trade_count": 1684
+            },
+            "TA": {
+              "net_total": 8.713831222627473,
+              "trade_count": 1369
+            }
+          },
+          "positive_symbol_count": 1,
+          "top3_profit_share": 1.0
+        }
+      },
+      "0.1": {
+        "BASE": {
+          "n_decisions": 120180,
+          "n_trades": 120180,
+          "trade_rate": 1.0,
+          "gross_total_ATR0": 167.54577989224506,
+          "net_total_ATR0": -11850.454220107757,
+          "gross_EV_per_decision": 0.0013941236469649282,
+          "net_EV_per_decision": -0.09860587635303508,
+          "net_EV_per_trade": -0.09860587635303508,
+          "win_rate": 0.41554335163920786,
+          "mean_win": 0.40808916642205095,
+          "mean_loss": -0.4593519160724718,
+          "payoff_ratio": 0.8884020119286209,
+          "profit_factor": 0.6323209075139362,
+          "break_even_cost": 0.0013941236469649282,
+          "daily_sharpe_annualized": -47.531932329633875,
+          "max_drawdown_ATR0": -11732.511577332672,
+          "by_symbol": {
+            "AG": {
+              "net_total": -1142.6532699651111,
+              "trade_count": 9723
+            },
+            "AL": {
+              "net_total": -819.6845077569606,
+              "trade_count": 8747
+            },
+            "AU": {
+              "net_total": -1200.1242166992984,
+              "trade_count": 10375
+            },
+            "CF": {
+              "net_total": -585.0955020042654,
+              "trade_count": 6736
+            },
+            "CU": {
+              "net_total": -768.3613871858289,
+              "trade_count": 8708
+            },
+            "I": {
+              "net_total": -587.0854522875266,
+              "trade_count": 6964
+            },
+            "M": {
+              "net_total": -635.1403802414621,
+              "trade_count": 6960
+            },
+            "MA": {
+              "net_total": -617.0036762100365,
+              "trade_count": 6599
+            },
+            "NI": {
+              "net_total": -882.2157382148081,
+              "trade_count": 8966
+            },
+            "P": {
+              "net_total": -615.1605221068126,
+              "trade_count": 6811
+            },
+            "RB": {
+              "net_total": -603.34839564459,
+              "trade_count": 6948
+            },
+            "RU": {
+              "net_total": -717.4179452769434,
+              "trade_count": 6955
+            },
+            "SC": {
+              "net_total": -1180.0470516012952,
+              "trade_count": 10583
+            },
+            "SN": {
+              "net_total": -900.7890396443767,
+              "trade_count": 8536
+            },
+            "TA": {
+              "net_total": -596.3271352684405,
+              "trade_count": 6569
+            }
+          },
+          "positive_symbol_count": 0,
+          "top3_profit_share": 0.0
+        },
+        "GATE0": {
+          "n_decisions": 120180,
+          "n_trades": 2623,
+          "trade_rate": 0.02182559494092195,
+          "gross_total_ATR0": -108.65966946043608,
+          "net_total_ATR0": -370.9596694604361,
+          "gross_EV_per_decision": -0.0009041410339527049,
+          "net_EV_per_decision": -0.0030867005280449,
+          "net_EV_per_trade": -0.1414257222494991,
+          "win_rate": 0.4041174227983225,
+          "mean_win": 0.454932800651622,
+          "mean_loss": -0.5462153893413286,
+          "payoff_ratio": 0.8328816974567804,
+          "profit_factor": 0.5652078100538971,
+          "break_even_cost": -0.04142572224949907,
+          "daily_sharpe_annualized": -11.440957826764313,
+          "max_drawdown_ATR0": -369.81720545012627,
+          "by_symbol": {
+            "AG": {
+              "net_total": -39.90714408405792,
+              "trade_count": 254
+            },
+            "AL": {
+              "net_total": -22.478240321368585,
+              "trade_count": 173
+            },
+            "AU": {
+              "net_total": -47.992081836931796,
+              "trade_count": 254
+            },
+            "CF": {
+              "net_total": -10.210655115104302,
+              "trade_count": 140
+            },
+            "CU": {
+              "net_total": -26.55303526335665,
+              "trade_count": 152
+            },
+            "I": {
+              "net_total": -20.324242630765834,
+              "trade_count": 207
+            },
+            "M": {
+              "net_total": -35.49634529250452,
+              "trade_count": 218
+            },
+            "MA": {
+              "net_total": -20.79145520106212,
+              "trade_count": 121
+            },
+            "NI": {
+              "net_total": -32.51220884334711,
+              "trade_count": 173
+            },
+            "P": {
+              "net_total": -21.88034507426383,
+              "trade_count": 117
+            },
+            "RB": {
+              "net_total": -8.061415834247903,
+              "trade_count": 145
+            },
+            "RU": {
+              "net_total": -22.252049075277256,
+              "trade_count": 100
+            },
+            "SC": {
+              "net_total": -30.516559245536968,
+              "trade_count": 289
+            },
+            "SN": {
+              "net_total": -27.293643099031286,
+              "trade_count": 134
+            },
+            "TA": {
+              "net_total": -4.690248543579999,
+              "trade_count": 146
+            }
+          },
+          "positive_symbol_count": 0,
+          "top3_profit_share": 0.0
+        },
+        "GATEA": {
+          "n_decisions": 120180,
+          "n_trades": 2691,
+          "trade_rate": 0.02239141288067898,
+          "gross_total_ATR0": -105.95933315317481,
+          "net_total_ATR0": -375.05933315317486,
+          "gross_EV_per_decision": -0.0008816719350405626,
+          "net_EV_per_decision": -0.003120813223108461,
+          "net_EV_per_trade": -0.13937544896067441,
+          "win_rate": 0.4065403195837978,
+          "mean_win": 0.4507719811246266,
+          "mean_loss": -0.5439873937991957,
+          "payoff_ratio": 0.8286441676091889,
+          "profit_factor": 0.5680054632609353,
+          "break_even_cost": -0.0393754489606744,
+          "daily_sharpe_annualized": -11.869465117511973,
+          "max_drawdown_ATR0": -374.7561013780835,
+          "by_symbol": {
+            "AG": {
+              "net_total": -37.24701919917953,
+              "trade_count": 260
+            },
+            "AL": {
+              "net_total": -16.727810518270367,
+              "trade_count": 176
+            },
+            "AU": {
+              "net_total": -50.87196257222441,
+              "trade_count": 265
+            },
+            "CF": {
+              "net_total": -12.953694449953982,
+              "trade_count": 151
+            },
+            "CU": {
+              "net_total": -22.597461816749174,
+              "trade_count": 152
+            },
+            "I": {
+              "net_total": -23.052614543025214,
+              "trade_count": 213
+            },
+            "M": {
+              "net_total": -41.93871964856963,
+              "trade_count": 224
+            },
+            "MA": {
+              "net_total": -24.315742238187475,
+              "trade_count": 126
+            },
+            "NI": {
+              "net_total": -33.48532997889569,
+              "trade_count": 184
+            },
+            "P": {
+              "net_total": -18.792690951415597,
+              "trade_count": 121
+            },
+            "RB": {
+              "net_total": -7.20028698673136,
+              "trade_count": 144
+            },
+            "RU": {
+              "net_total": -20.955331911817794,
+              "trade_count": 94
+            },
+            "SC": {
+              "net_total": -37.67002278253776,
+              "trade_count": 301
+            },
+            "SN": {
+              "net_total": -24.38233034053833,
+              "trade_count": 135
+            },
+            "TA": {
+              "net_total": -2.868315215078521,
+              "trade_count": 145
+            }
+          },
+          "positive_symbol_count": 0,
+          "top3_profit_share": 0.0
+        },
+        "FLIPA": {
+          "n_decisions": 120180,
+          "n_trades": 3322,
+          "trade_rate": 0.02764187052754202,
+          "gross_total_ATR0": -39.300339107607805,
+          "net_total_ATR0": -371.50033910760783,
+          "gross_EV_per_decision": -0.00032701230743557836,
+          "net_EV_per_decision": -0.0030911993601897805,
+          "net_EV_per_trade": -0.11183032483672722,
+          "win_rate": 0.397049969897652,
+          "mean_win": 0.5061931097972344,
+          "mean_loss": -0.5190654600050749,
+          "payoff_ratio": 0.9752009116389393,
+          "profit_factor": 0.6425024987271534,
+          "break_even_cost": -0.011830324836727215,
+          "daily_sharpe_annualized": -10.937902524264578,
+          "max_drawdown_ATR0": -367.96406336585954,
+          "by_symbol": {
+            "AG": {
+              "net_total": -29.306148527809803,
+              "trade_count": 334
+            },
+            "AL": {
+              "net_total": -7.044618350226827,
+              "trade_count": 227
+            },
+            "AU": {
+              "net_total": -57.55941789630338,
+              "trade_count": 287
+            },
+            "CF": {
+              "net_total": -8.04893185330495,
+              "trade_count": 175
+            },
+            "CU": {
+              "net_total": -30.075196117558722,
+              "trade_count": 188
+            },
+            "I": {
+              "net_total": -26.585063573295287,
+              "trade_count": 238
+            },
+            "M": {
+              "net_total": -48.037780699969304,
+              "trade_count": 253
+            },
+            "MA": {
+              "net_total": -26.264387379930955,
+              "trade_count": 168
+            },
+            "NI": {
+              "net_total": -20.779539861897632,
+              "trade_count": 236
+            },
+            "P": {
+              "net_total": -19.04259386653042,
+              "trade_count": 149
+            },
+            "RB": {
+              "net_total": -4.1248357218114595,
+              "trade_count": 178
+            },
+            "RU": {
+              "net_total": -19.971641940101513,
+              "trade_count": 123
+            },
+            "SC": {
+              "net_total": -44.292759001093216,
+              "trade_count": 380
+            },
+            "SN": {
+              "net_total": -29.122749705630792,
+              "trade_count": 210
+            },
+            "TA": {
+              "net_total": -1.2446746121435837,
+              "trade_count": 176
+            }
+          },
+          "positive_symbol_count": 0,
+          "top3_profit_share": 0.0
+        }
+      }
+    },
+    "quintile_edges": {
+      "a_burst_exhaustion": [
+        -Infinity,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        Infinity
+      ],
+      "a_conviction_burst": [
+        -Infinity,
+        0.0,
+        0.0,
+        0.0,
+        0.007342502019572902,
+        Infinity
+      ]
+    },
+    "quintiles": [
+      {
+        "block": "TB3",
+        "feature": "a_burst_exhaustion",
+        "bin": 4,
+        "n": 120180,
+        "H1_prevalence": 0.10601597603594608,
+        "harm_rate": 0.4358295889499085,
+        "mean_pi": 0.0013941236469649282
+      },
+      {
+        "block": "TB3",
+        "feature": "a_conviction_burst",
+        "bin": 3,
+        "n": 96000,
+        "H1_prevalence": 0.10494791666666667,
+        "harm_rate": 0.43483333333333335,
+        "mean_pi": 0.002282842413683268
+      },
+      {
+        "block": "TB3",
+        "feature": "a_conviction_burst",
+        "bin": 4,
+        "n": 24180,
+        "H1_prevalence": 0.11025641025641025,
+        "harm_rate": 0.4397849462365591,
+        "mean_pi": -0.0021342883300805894
+      }
+    ]
+  },
+  "information_verdict": "PGM_ACCELERATION_TERMINAL_OUTCOME_SUPPORTED_JOINTLY_EXPLORATORY",
+  "economic_verdict": "PGM_ACCELERATION_ECONOMIC_GATE_NOT_SUPPORTED_EXPLORATORY",
+  "quintile_frozen_edges": {
+    "TB2": {
+      "a_burst_exhaustion": [
+        -Infinity,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        Infinity
+      ],
+      "a_conviction_burst": [
+        -Infinity,
+        0.0,
+        0.0,
+        0.0,
+        0.007117059078294423,
+        Infinity
+      ]
+    },
+    "TB3": {
+      "a_burst_exhaustion": [
+        -Infinity,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        Infinity
+      ],
+      "a_conviction_burst": [
+        -Infinity,
+        0.0,
+        0.0,
+        0.0,
+        0.007342502019572902,
+        Infinity
+      ]
+    }
+  },
+  "artifact_files": [
+    "pgm_native0d1_outcome_metrics.csv",
+    "pgm_native0d1_information_bootstrap.csv",
+    "pgm_native0d1_strategy_metrics.csv",
+    "pgm_native0d1_economic_bootstrap.csv",
+    "pgm_native0d1_cost_grid.csv",
+    "pgm_native0d1_symbol_metrics.csv",
+    "pgm_native0d1_acceleration_quintiles.csv",
+    "pgm_native0d1_formal_summary.json"
+  ],
+  "known_limitations": [
+    "TB2/TB3 were previously inspected across multiple research rounds; this is exploratory strategy development, not a pristine holdout.",
+    "TB4 is forbidden; this experiment never touches TB4.",
+    "The frozen PGM sample excludes cross-block episodes.",
+    "event_mask==0 censored episodes are absent from the frozen sample.",
+    "Economic return is a single 5m next-open -> next-close bar.",
+    "Cost is ATR0-normalized friction, not a real contract commission/bid-ask/slippage model.",
+    "The H1 outcome head is fit only on realized H1 rows and then used as a conditional branch on all current states.",
+    "score_mu used by the outcome models comes from the same training-window production MC fit, not out-of-fold stacking.",
+    "Models stay fixed Logistic / Ridge; no nonlinear model search.",
+    "No threshold / symbol / holding / cost / feature tuning."
+  ]
+}
