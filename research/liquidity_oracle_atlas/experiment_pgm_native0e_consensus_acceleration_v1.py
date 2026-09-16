@@ -91,6 +91,18 @@ TB3_BLOCK = "TB3"
 # Formal evaluation windows (TB3 only decides the verdict).
 EVAL_BLOCKS = [TB2_BLOCK, TB3_BLOCK]
 
+
+def _derive_formal_windows() -> Dict[str, Any]:
+    """Derive the formal window train/eval mapping from the frozen pgm.WINDOWS.
+
+    A -> train [TB1], eval TB2 ; B -> train [TB1, TB2], eval TB3. No hand-written
+    second window science.
+    """
+    w: Dict[str, Any] = {}
+    for tag, spec in zip(("A", "B"), pgm.WINDOWS):
+        w[tag] = {"train": list(spec["train"]), "eval": spec["eval"]}
+    return w
+
 EPS = 1e-9
 CONSENSUS_LOOKBACK = 5
 CONSENSUS_MIN_PRIOR = 3
@@ -987,10 +999,16 @@ def assert_no_existing_prefixed_artifacts(out_dir: Path = OUT_DIR) -> None:
 
 
 def _collect_formal_meta(prep, scored_A, scored_B, fit_A, fit_B, head: str) -> Dict[str, Any]:
-    """Governance metadata for the summary (universe stats, hashes, window parity)."""
+    """Governance metadata for the summary (universe stats, hashes, window parity).
+
+    The universe is loaded exactly ONCE here; the ATR0 owner parity reuses that same
+    universe and the transition-truth audit (a distinct load, NOT a second universe load).
+    """
     universe = n0a.load_observed_decision_universe()
     aud = n0a.audit_decision_universe(universe)
     hashes = n0c.compute_artifact_hashes()
+    trans_aud = n0a.load_transition_truth_audit()
+    atr0_owner_err = float(n0a.audit_atr0_owner_parity(universe, trans_aud["cur"]))
     return dict(
         n_all_obs=aud["n_all_obs"], n_hazard0=aud["n_hazard0"], n_hazard1=aud["n_hazard1"],
         symbols=list(aud["symbols"]),
@@ -1001,6 +1019,7 @@ def _collect_formal_meta(prep, scored_A, scored_B, fit_A, fit_B, head: str) -> D
         winB_owner=d0.verify_window_score_owner(scored_B, fit_B, TB3_BLOCK),
         winA_finite=bool(d0.audit_acceleration_finite(scored_A)["all_finite"]),
         winB_finite=bool(d0.audit_acceleration_finite(scored_B)["all_finite"]),
+        atr0_owner_err=atr0_owner_err,
     )
 
 
@@ -1032,6 +1051,29 @@ COMP_DIAG_COLS = ["block", "component"] + COMP_COLS
 AGE_DIAG_COLS = ["block", "variable", "spearman_with_consensus"]
 BOOT_METRICS = ["Delta_LOW_pi", "Delta_HIGH_pi", "DID_pi", "Delta_LOW_harm", "Delta_HIGH_harm",
                 "DID_harm", "Delta_LOW_H1", "Delta_HIGH_H1", "DID_H1"]
+
+PRED_METRIC_KEYS = {
+    ("pi", "PAYOFF_M0"), ("pi", "PAYOFF_M1"),
+    ("harm_flag", "HARM_M0"), ("harm_flag", "HARM_M1"),
+    ("pi", "PAYOFF_DELTA"), ("harm_flag", "HARM_DELTA"),
+}
+PRED_BOOT_METRICS = {"Delta_MSE", "Delta_LogLoss"}
+PSYCH_POLICIES = {"BASE", "PSYCH_GATE", "PSYCH_GATE_MINUS_BASE"}
+
+# Exact composite-key sets the artifacts MUST contain (no dup, no missing).
+EXPECTED_CELL_KEYS = {(b, c) for b in EVAL_BLOCKS for c in PRIMARY_CELLS}
+EXPECTED_BOOT_KEYS = {(b, m) for b in EVAL_BLOCKS for m in BOOT_METRICS}
+EXPECTED_PRED_METRIC_KEYS = {(b, t, m) for b in EVAL_BLOCKS for (t, m) in PRED_METRIC_KEYS}
+EXPECTED_PRED_BOOT_KEYS = {(b, m) for b in EVAL_BLOCKS for m in PRED_BOOT_METRICS}
+EXPECTED_PSYCH_KEYS = {(b, p) for b in EVAL_BLOCKS for p in PSYCH_POLICIES}
+EXPECTED_COMP_KEYS = {(b, c) for b in EVAL_BLOCKS for c in CONSENSUS_RAW}
+
+
+def _composite(df: pd.DataFrame, cols):
+    """Return (set_of_composite_keys, row_count)."""
+    n = len(df)
+    keys = set(zip(*[df[c] for c in cols]))
+    return keys, n
 
 
 def build_known_limitations() -> List[str]:
@@ -1150,14 +1192,14 @@ def _assemble_artifacts(res_A, res_B, terr_A, terr_B, meta, head: str):
 
     # 7. age-zero diagnostics (one row per block x variable present in the frame)
     az_rows = []
-    age_vars: List[str] = []
+    az_by_block: Dict[str, List[str]] = {TB2_BLOCK: [], TB3_BLOCK: []}
     for blk, res, _ in pair:
         az = res["age_zero"]
         for var, val in az.items():
             az_rows.append(dict(block=blk, variable=var, spearman_with_consensus=float(val)))
-            if var not in age_vars:
-                age_vars.append(var)
+            az_by_block[blk].append(var)
     age_zero_diagnostics = pd.DataFrame(az_rows, columns=AGE_DIAG_COLS)
+    age_zero_union = sorted(set().union(*[set(v) for v in az_by_block.values()]))
 
     dfs = {
         ARTIFACT_FILES[0]: primary_cells,
@@ -1190,7 +1232,9 @@ def _assemble_artifacts(res_A, res_B, terr_A, terr_B, meta, head: str):
         sample_artifact_sha256=meta["sample_sha"],
         transition_artifact_sha256=meta["transition_sha"],
         n_all_obs=int(meta["n_all_obs"]), n_hazard0=int(meta["n_hazard0"]), n_hazard1=int(meta["n_hazard1"]),
-        symbols=list(meta["symbols"]), blocks=list(EVAL_BLOCKS),
+        symbols=list(meta["symbols"]), blocks=list(meta["blocks"]),
+        eval_blocks=list(EVAL_BLOCKS),
+        windows=_derive_formal_windows(),
         bootstrap_n=int(BOOTSTRAP_N), bootstrap_seed=int(BOOTSTRAP_SEED), cluster_owner=CLUSTER_OWNER,
         primary_cost_atr0=float(PRIMARY_COST_ATR0),
         consensus_raw=list(CONSENSUS_RAW),
@@ -1200,6 +1244,7 @@ def _assemble_artifacts(res_A, res_B, terr_A, terr_B, meta, head: str):
         windowB_score_owner_max_abs_diff=float(meta["winB_owner"]),
         windowA_acceleration_finite=bool(meta["winA_finite"]),
         windowB_acceleration_finite=bool(meta["winB_finite"]),
+        max_abs_atr0_owner_error=float(meta["atr0_owner_err"]),
         TB2=_block_stat(TB2_BLOCK, res_A, terr_A),
         TB3=_block_stat(TB3_BLOCK, res_B, terr_B),
         psychology_verdict=verdict,
@@ -1207,7 +1252,9 @@ def _assemble_artifacts(res_A, res_B, terr_A, terr_B, meta, head: str):
         known_limitations=build_known_limitations(),
         run_meta=dict(n_boot=int(BOOTSTRAP_N), model_train_cap=None, eval_cap=None),
         timing=dict(windowA=res_A["timing"], windowB=res_B["timing"]),
-        actual_age_zero_variables=sorted(age_vars),
+        actual_age_zero_variables=age_zero_union,
+        age_zero_variables_by_block={TB2_BLOCK: sorted(az_by_block[TB2_BLOCK]),
+                                    TB3_BLOCK: sorted(az_by_block[TB3_BLOCK])},
     )
     return dfs, summary
 
@@ -1235,20 +1282,42 @@ def validate_in_memory_results(dfs, summary) -> None:
     """Pre-disk structural / scientific sanity on the in-memory results."""
     if set(dfs.keys()) != set(ARTIFACT_FILES[:7]):
         raise SystemExit("STOP_PGM_NATIVE0E_INMEM_RESULT_KEYS")
-    if set(summary["blocks"]) != {"TB2", "TB3"}:
-        raise SystemExit("STOP_PGM_NATIVE0E_BLOCKS_NOT_TB2_TB3")
-    if len(dfs[ARTIFACT_FILES[0]]) != 8:
-        raise SystemExit("STOP_PGM_NATIVE0E_PRIMARY_CELLS_ROWS")
-    if len(dfs[ARTIFACT_FILES[1]]) != 18:
-        raise SystemExit("STOP_PGM_NATIVE0E_PRIMARY_BOOTSTRAP_ROWS")
-    if len(dfs[ARTIFACT_FILES[2]]) != 12:
-        raise SystemExit("STOP_PGM_NATIVE0E_PREDICTIVE_METRICS_ROWS")
-    if len(dfs[ARTIFACT_FILES[3]]) != 4:
-        raise SystemExit("STOP_PGM_NATIVE0E_PREDICTIVE_BOOTSTRAP_ROWS")
-    if len(dfs[ARTIFACT_FILES[4]]) != 6:
-        raise SystemExit("STOP_PGM_NATIVE0E_PSYCH_GATE_ROWS")
-    if len(dfs[ARTIFACT_FILES[5]]) != 8:
-        raise SystemExit("STOP_PGM_NATIVE0E_COMPONENT_ROWS")
+
+    # ---- exact composite-key schema (no duplicate, no missing) ----
+    k0, n0 = _composite(dfs[ARTIFACT_FILES[0]], ["block", "cell"])
+    if n0 != len(k0) or k0 != EXPECTED_CELL_KEYS:
+        raise SystemExit("STOP_PGM_NATIVE0E_PRIMARY_CELLS_SCHEMA")
+    k1, n1 = _composite(dfs[ARTIFACT_FILES[1]], ["block", "metric"])
+    if n1 != len(k1) or k1 != EXPECTED_BOOT_KEYS:
+        raise SystemExit("STOP_PGM_NATIVE0E_PRIMARY_BOOTSTRAP_SCHEMA")
+    k2, n2 = _composite(dfs[ARTIFACT_FILES[2]], ["block", "target", "model"])
+    if n2 != len(k2) or k2 != EXPECTED_PRED_METRIC_KEYS:
+        raise SystemExit("STOP_PGM_NATIVE0E_PREDICTIVE_METRICS_SCHEMA")
+    k3, n3 = _composite(dfs[ARTIFACT_FILES[3]], ["block", "metric"])
+    if n3 != len(k3) or k3 != EXPECTED_PRED_BOOT_KEYS:
+        raise SystemExit("STOP_PGM_NATIVE0E_PREDICTIVE_BOOTSTRAP_SCHEMA")
+    k4, n4 = _composite(dfs[ARTIFACT_FILES[4]], ["block", "policy"])
+    if n4 != len(k4) or k4 != EXPECTED_PSYCH_KEYS:
+        raise SystemExit("STOP_PGM_NATIVE0E_PSYCH_GATE_SCHEMA")
+    k5, n5 = _composite(dfs[ARTIFACT_FILES[5]], ["block", "component"])
+    if n5 != len(k5) or k5 != EXPECTED_COMP_KEYS:
+        raise SystemExit("STOP_PGM_NATIVE0E_COMPONENT_SCHEMA")
+    az = dfs[ARTIFACT_FILES[6]]
+    if set(az["block"].unique()) - {TB2_BLOCK, TB3_BLOCK}:
+        raise SystemExit("STOP_PGM_NATIVE0E_AGE_ZERO_BLOCK")
+    k6, n6 = _composite(az, ["block", "variable"])
+    if n6 != len(k6):
+        raise SystemExit("STOP_PGM_NATIVE0E_AGE_ZERO_DUPLICATE")
+
+    # ---- age-zero summary bookkeeping consistency (against in-memory CSV) ----
+    az_block_vars = {b: sorted(set(az[az["block"] == b]["variable"])) for b in EVAL_BLOCKS}
+    if summary.get("age_zero_variables_by_block") != {
+        TB2_BLOCK: az_block_vars[TB2_BLOCK], TB3_BLOCK: az_block_vars[TB3_BLOCK]}:
+        raise SystemExit("STOP_PGM_NATIVE0E_AGE_ZERO_BY_BLOCK")
+    if summary.get("actual_age_zero_variables") != \
+            sorted(set().union(*[set(v) for v in az_block_vars.values()])):
+        raise SystemExit("STOP_PGM_NATIVE0E_AGE_ZERO_UNION")
+
     # cell n >= MIN_CELL_N
     if int(dfs[ARTIFACT_FILES[0]]["n"].min()) < MIN_CELL_N:
         raise SystemExit("STOP_PGM_NATIVE0E_CELL_TOO_SMALL")
@@ -1287,6 +1356,81 @@ def validate_in_memory_results(dfs, summary) -> None:
     rm = summary["run_meta"]
     if rm["n_boot"] != 2000 or rm["model_train_cap"] is not None or rm["eval_cap"] is not None:
         raise SystemExit("STOP_PGM_NATIVE0E_RUN_META_CONTRACT")
+    # independent semantic validation of the summary itself
+    validate_summary_semantics(summary)
+
+
+def validate_summary_semantics(summary) -> None:
+    """Validate the summary against FROZEN constants / relationships.
+
+    This does NOT rely on disk-vs-memory mismatch: it checks the summary's own
+    governance fields directly, so even a disk JSON and an in-memory summary that
+    were BOTH edited to the same wrong value are still rejected.
+    """
+    if summary.get("experiment_name") != EXPERIMENT_NAME:
+        raise SystemExit("STOP_PGM_NATIVE0E_SUMMARY_EXPERIMENT_NAME")
+    if summary.get("experiment_scope") != EXPERIMENT_SCOPE:
+        raise SystemExit("STOP_PGM_NATIVE0E_SUMMARY_EXPERIMENT_SCOPE")
+    if summary.get("base_sha") != BASE_SHA:
+        raise SystemExit("STOP_PGM_NATIVE0E_SUMMARY_BASE_SHA")
+    if summary.get("blocks") != ["TB1", "TB2", "TB3"]:
+        raise SystemExit("STOP_PGM_NATIVE0E_SUMMARY_BLOCKS")
+    if summary.get("eval_blocks") != ["TB2", "TB3"]:
+        raise SystemExit("STOP_PGM_NATIVE0E_SUMMARY_EVAL_BLOCKS")
+    if summary.get("windows") != _derive_formal_windows():
+        raise SystemExit("STOP_PGM_NATIVE0E_SUMMARY_WINDOWS")
+    if summary.get("bootstrap_n") != BOOTSTRAP_N:
+        raise SystemExit("STOP_PGM_NATIVE0E_SUMMARY_BOOTSTRAP_N")
+    if summary.get("bootstrap_seed") != BOOTSTRAP_SEED:
+        raise SystemExit("STOP_PGM_NATIVE0E_SUMMARY_BOOTSTRAP_SEED")
+    if summary.get("cluster_owner") != CLUSTER_OWNER:
+        raise SystemExit("STOP_PGM_NATIVE0E_SUMMARY_CLUSTER_OWNER")
+    if summary.get("primary_cost_atr0") != PRIMARY_COST_ATR0:
+        raise SystemExit("STOP_PGM_NATIVE0E_SUMMARY_PRIMARY_COST")
+    if summary.get("consensus_raw") != CONSENSUS_RAW:
+        raise SystemExit("STOP_PGM_NATIVE0E_SUMMARY_CONSENSUS_RAW")
+    if summary.get("primary_acceleration_col") != PRIMARY_ACCELERATION_COL:
+        raise SystemExit("STOP_PGM_NATIVE0E_SUMMARY_ACCEL_COL")
+    if summary.get("consensus_time_contract") != "C_tminus1_to_A_t_to_pi_tplus1":
+        raise SystemExit("STOP_PGM_NATIVE0E_SUMMARY_TIME_CONTRACT")
+    if summary.get("artifact_files") != ARTIFACT_FILES:
+        raise SystemExit("STOP_PGM_NATIVE0E_SUMMARY_ARTIFACT_FILES")
+    if summary.get("known_limitations") != build_known_limitations():
+        raise SystemExit("STOP_PGM_NATIVE0E_SUMMARY_KNOWN_LIMITATIONS")
+    rm = summary.get("run_meta")
+    if rm != {"n_boot": 2000, "model_train_cap": None, "eval_cap": None}:
+        raise SystemExit("STOP_PGM_NATIVE0E_SUMMARY_RUN_META")
+    if summary.get("windowA_score_owner_max_abs_diff") > 1e-12:
+        raise SystemExit("STOP_PGM_NATIVE0E_SUMMARY_WINDOWA_OWNER")
+    if summary.get("windowB_score_owner_max_abs_diff") > 1e-12:
+        raise SystemExit("STOP_PGM_NATIVE0E_SUMMARY_WINDOWB_OWNER")
+    if not (summary.get("windowA_acceleration_finite") and summary.get("windowB_acceleration_finite")):
+        raise SystemExit("STOP_PGM_NATIVE0E_SUMMARY_ACCEL_FINITE")
+    if summary.get("max_abs_atr0_owner_error", 1e9) > 1e-12:
+        raise SystemExit("STOP_PGM_NATIVE0E_SUMMARY_ATR0_OWNER")
+    n0 = summary.get("n_all_obs"); n1 = summary.get("n_hazard0"); n2 = summary.get("n_hazard1")
+    if not (isinstance(n0, int) and isinstance(n1, int) and isinstance(n2, int)):
+        raise SystemExit("STOP_PGM_NATIVE0E_SUMMARY_COUNTS_TYPE")
+    if n0 != n1 + n2:
+        raise SystemExit("STOP_PGM_NATIVE0E_SUMMARY_COUNT_CONSERVATION")
+    if n0 <= 0 or n1 <= 0 or n2 <= 0:
+        raise SystemExit("STOP_PGM_NATIVE0E_SUMMARY_COUNTS_POSITIVE")
+    for bk in ("TB2", "TB3"):
+        blk = summary.get(bk)
+        if blk is None:
+            raise SystemExit(f"STOP_PGM_NATIVE0E_SUMMARY_BLOCK_MISSING:{bk}")
+        if blk["n_rank_train"] <= 0 or blk["n_train_primary"] <= 0 or blk["n_eval_primary"] <= 0:
+            raise SystemExit(f"STOP_PGM_NATIVE0E_SUMMARY_BLOCK_COUNTS:{bk}")
+        if blk["q_low"] >= blk["q_high"]:
+            raise SystemExit(f"STOP_PGM_NATIVE0E_SUMMARY_Q_ORDER:{bk}")
+        cc = blk["cell_counts"]
+        if set(cc.keys()) != set(PRIMARY_CELLS):
+            raise SystemExit(f"STOP_PGM_NATIVE0E_SUMMARY_CELL_KEYS:{bk}")
+        for k, v in cc.items():
+            if v < MIN_CELL_N:
+                raise SystemExit(f"STOP_PGM_NATIVE0E_SUMMARY_CELL_MIN:{bk}:{k}")
+    if summary.get("psychology_verdict") not in set(VERDICT.values()):
+        raise SystemExit("STOP_PGM_NATIVE0E_SUMMARY_VERDICT_VALUE")
 
 
 def _assert_csv_parity(disk: pd.DataFrame, exp: pd.DataFrame, name: str) -> None:
@@ -1368,6 +1512,16 @@ def _assert_disk_content_sanity(out_dir: Path) -> None:
     rm = summary["run_meta"]
     if rm["n_boot"] != 2000 or rm["model_train_cap"] is not None or rm["eval_cap"] is not None:
         raise SystemExit("STOP_PGM_NATIVE0E_RUN_META_DISK")
+    # ---- age-zero summary bookkeeping consistency (against re-read disk CSV) ----
+    az = pd.read_csv(out_dir / ARTIFACT_FILES[6])
+    az_block_vars = {b: sorted(set(az[az["block"] == b]["variable"])) for b in EVAL_BLOCKS}
+    if summary.get("age_zero_variables_by_block") != {
+        TB2_BLOCK: az_block_vars[TB2_BLOCK], TB3_BLOCK: az_block_vars[TB3_BLOCK]}:
+        raise SystemExit("STOP_PGM_NATIVE0E_AGE_ZERO_BY_BLOCK_DISK")
+    if summary.get("actual_age_zero_variables") != sorted(set().union(*[set(v) for v in az_block_vars.values()])):
+        raise SystemExit("STOP_PGM_NATIVE0E_AGE_ZERO_UNION_DISK")
+    # ---- independent semantic validation of the re-read summary ----
+    validate_summary_semantics(summary)
 
 
 def validate_output_artifacts(out_dir: Path, dfs, summary) -> None:
@@ -1388,6 +1542,9 @@ def validate_output_artifacts(out_dir: Path, dfs, summary) -> None:
     loaded = json.loads((out_dir / ARTIFACT_FILES[7]).read_text(encoding="utf-8"))
     if not _json_equal(loaded, summary):
         raise SystemExit("STOP_PGM_NATIVE0E_SUMMARY_JSON_PARITY_FAIL")
+    # Even if disk JSON and in-memory summary were BOTH edited to the same wrong value,
+    # the semantic validator must still reject it (independent of disk/memory parity).
+    validate_summary_semantics(loaded)
     _assert_disk_content_sanity(out_dir)
 
 

@@ -5,6 +5,7 @@ Round 1 tests for PGM-NATIVE-0E (architecture + audit + smoke ONLY).
 Full exploratory is HARD-BLOCKED in this round.
 """
 import contextlib
+import copy
 import inspect
 import io
 import os
@@ -1700,7 +1701,8 @@ def _fake_formal_res():
 def _fake_formal_meta():
     return dict(n_all_obs=359714, n_hazard0=321727, n_hazard1=37987, symbols=["A", "B"],
                 blocks=["TB1", "TB2", "TB3"], sample_sha="sa", transition_sha="tr",
-                winA_owner=0.0, winB_owner=0.0, winA_finite=True, winB_finite=True)
+                winA_owner=0.0, winB_owner=0.0, winA_finite=True, winB_finite=True,
+                atr0_owner_err=0.0)
 
 
 def _produce_artifacts(tmp_path):
@@ -1847,13 +1849,150 @@ def test_art_132_formal_summary_carries_required_keys(tmp_path):
     _, summary = _produce_artifacts(tmp_path)
     for k in ("experiment_name", "experiment_scope", "run_head", "base_sha",
               "sample_artifact_sha256", "transition_artifact_sha256", "n_all_obs",
-              "symbols", "blocks", "bootstrap_n", "bootstrap_seed", "cluster_owner",
-              "primary_cost_atr0", "consensus_raw", "primary_acceleration_col",
+              "symbols", "blocks", "eval_blocks", "windows", "bootstrap_n", "bootstrap_seed",
+              "cluster_owner", "primary_cost_atr0", "consensus_raw", "primary_acceleration_col",
               "consensus_time_contract", "windowA_score_owner_max_abs_diff",
               "windowB_score_owner_max_abs_diff", "windowA_acceleration_finite",
-              "windowB_acceleration_finite", "TB2", "TB3", "psychology_verdict",
-              "artifact_files", "known_limitations", "run_meta"):
+              "windowB_acceleration_finite", "max_abs_atr0_owner_error", "TB2", "TB3",
+              "psychology_verdict", "artifact_files", "known_limitations", "run_meta",
+              "actual_age_zero_variables", "age_zero_variables_by_block"):
         assert k in summary, k
+    assert summary["blocks"] == ["TB1", "TB2", "TB3"]
+    assert summary["eval_blocks"] == ["TB2", "TB3"]
+    assert summary["windows"] == {
+        "A": {"train": ["TB1"], "eval": "TB2"},
+        "B": {"train": ["TB1", "TB2"], "eval": "TB3"},
+    }
     assert summary["consensus_time_contract"] == "C_tminus1_to_A_t_to_pi_tplus1"
     assert summary["run_meta"] == dict(n_boot=2000, model_train_cap=None, eval_cap=None)
     assert set(summary["artifact_files"]) == set(e0.ARTIFACT_FILES)
+    # semantic validator must accept the correct summary
+    e0.validate_summary_semantics(summary)
+
+
+# ===========================================================================
+# 0E.2a: exact composite-key schema (row count preserved, key duplicated/missing)
+# ===========================================================================
+def _dup_row_in_memory(dfs, name, keycols, k_src, k_dst):
+    """Keep row count but make composite key k_dst a duplicate of k_src."""
+    df = dfs[name].copy()
+    m_src = np.ones(len(df), dtype=bool)
+    m_dst = np.ones(len(df), dtype=bool)
+    for c, v in zip(keycols, k_src):
+        m_src &= (df[c] == v).to_numpy()
+    for c, v in zip(keycols, k_dst):
+        m_dst &= (df[c] == v).to_numpy()
+    src = df[m_src].iloc[0]
+    for c in df.columns:
+        df.loc[m_dst, c] = src[c]
+    dfs[name] = df
+    return dfs
+
+
+def test_art_schema_dup_primary_cells_stops(tmp_path):
+    dfs, summary = _produce_artifacts(tmp_path)
+    _dup_row_in_memory(dfs, e0.ARTIFACT_FILES[0], ["block", "cell"],
+                       ("TB2", "LOW_ACCEL"), ("TB2", "LOW_OFF"))
+    with pytest.raises(SystemExit):
+        e0.validate_in_memory_results(dfs, summary)
+
+
+def test_art_schema_dup_primary_bootstrap_stops(tmp_path):
+    dfs, summary = _produce_artifacts(tmp_path)
+    _dup_row_in_memory(dfs, e0.ARTIFACT_FILES[1], ["block", "metric"],
+                       ("TB2", "Delta_LOW_pi"), ("TB2", "Delta_HIGH_pi"))
+    with pytest.raises(SystemExit):
+        e0.validate_in_memory_results(dfs, summary)
+
+
+def test_art_schema_dup_predictive_metrics_stops(tmp_path):
+    dfs, summary = _produce_artifacts(tmp_path)
+    _dup_row_in_memory(dfs, e0.ARTIFACT_FILES[2], ["block", "target", "model"],
+                       ("TB2", "pi", "PAYOFF_M0"), ("TB2", "pi", "PAYOFF_M1"))
+    with pytest.raises(SystemExit):
+        e0.validate_in_memory_results(dfs, summary)
+
+
+def test_art_schema_dup_psych_gate_stops(tmp_path):
+    dfs, summary = _produce_artifacts(tmp_path)
+    _dup_row_in_memory(dfs, e0.ARTIFACT_FILES[4], ["block", "policy"],
+                       ("TB2", "BASE"), ("TB2", "PSYCH_GATE"))
+    with pytest.raises(SystemExit):
+        e0.validate_in_memory_results(dfs, summary)
+
+
+def test_art_schema_dup_component_stops(tmp_path):
+    dfs, summary = _produce_artifacts(tmp_path)
+    _dup_row_in_memory(dfs, e0.ARTIFACT_FILES[5], ["block", "component"],
+                       ("TB2", "c_position"), ("TB2", "c_path_agreement"))
+    with pytest.raises(SystemExit):
+        e0.validate_in_memory_results(dfs, summary)
+
+
+# ===========================================================================
+# 0E.2a: disk + memory edited to the SAME wrong value (parity preserved)
+# The semantic validator must still STOP (independent of disk/memory parity).
+# ===========================================================================
+def _rewrite_disk_with(expr_name, bad_value, tmp_path, dfs, summary):
+    s = copy.deepcopy(summary)
+    s[expr_name] = bad_value
+    e0.write_artifacts(dfs, s, tmp_path)  # CSVs unchanged, JSON == mutated summary
+    return s
+
+
+def test_art_sem_14a_bootstrap_seed_disk_and_memory_stops(tmp_path):
+    dfs, summary = _produce_artifacts(tmp_path)
+    s = _rewrite_disk_with("bootstrap_seed", 999, tmp_path, dfs, summary)
+    with pytest.raises(SystemExit):
+        e0.validate_output_artifacts(tmp_path, dfs, s)
+
+
+def test_art_sem_14b_blocks_disk_and_memory_stops(tmp_path):
+    dfs, summary = _produce_artifacts(tmp_path)
+    s = _rewrite_disk_with("blocks", ["TB2", "TB3"], tmp_path, dfs, summary)
+    with pytest.raises(SystemExit):
+        e0.validate_output_artifacts(tmp_path, dfs, s)
+
+
+def test_art_sem_14c_eval_blocks_disk_and_memory_stops(tmp_path):
+    dfs, summary = _produce_artifacts(tmp_path)
+    s = _rewrite_disk_with("eval_blocks", ["TB1", "TB2"], tmp_path, dfs, summary)
+    with pytest.raises(SystemExit):
+        e0.validate_output_artifacts(tmp_path, dfs, s)
+
+
+def test_art_sem_14d_windows_disk_and_memory_stops(tmp_path):
+    dfs, summary = _produce_artifacts(tmp_path)
+    bad = {"A": {"train": ["TB2"], "eval": "TB2"},
+           "B": {"train": ["TB1", "TB2"], "eval": "TB3"}}
+    s = _rewrite_disk_with("windows", bad, tmp_path, dfs, summary)
+    with pytest.raises(SystemExit):
+        e0.validate_output_artifacts(tmp_path, dfs, s)
+
+
+def test_art_sem_14e_consensus_raw_disk_and_memory_stops(tmp_path):
+    dfs, summary = _produce_artifacts(tmp_path)
+    s = _rewrite_disk_with("consensus_raw", list(reversed(e0.CONSENSUS_RAW)), tmp_path, dfs, summary)
+    with pytest.raises(SystemExit):
+        e0.validate_output_artifacts(tmp_path, dfs, s)
+
+
+def test_art_sem_14f_artifact_files_disk_and_memory_stops(tmp_path):
+    dfs, summary = _produce_artifacts(tmp_path)
+    s = _rewrite_disk_with("artifact_files", list(reversed(e0.ARTIFACT_FILES)), tmp_path, dfs, summary)
+    with pytest.raises(SystemExit):
+        e0.validate_output_artifacts(tmp_path, dfs, s)
+
+
+def test_art_sem_14g_primary_cost_disk_and_memory_stops(tmp_path):
+    dfs, summary = _produce_artifacts(tmp_path)
+    s = _rewrite_disk_with("primary_cost_atr0", 0.02, tmp_path, dfs, summary)
+    with pytest.raises(SystemExit):
+        e0.validate_output_artifacts(tmp_path, dfs, s)
+
+
+def test_art_sem_14h_atr0_owner_error_disk_and_memory_stops(tmp_path):
+    dfs, summary = _produce_artifacts(tmp_path)
+    s = _rewrite_disk_with("max_abs_atr0_owner_error", 1.0, tmp_path, dfs, summary)
+    with pytest.raises(SystemExit):
+        e0.validate_output_artifacts(tmp_path, dfs, s)
