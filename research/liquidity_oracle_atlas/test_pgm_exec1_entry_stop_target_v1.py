@@ -955,10 +955,38 @@ def _make_mock_block_frame(
     return pd.DataFrame(rows)
 
 
+def _make_mock_obs_day_and_truth(n_per_block: int = 12) -> Any:
+    """构造 mock 全量决策宇宙帧与对应的 hazard==0 truth（用于 ATR0 universe 契约审计）。
+
+    obs_day 覆盖 TB1/TB2/TB3，其 hazard==0 键集合与 truth 严格相等，
+    因此满足 x1.assert_atr0_audit_universe 的契约。
+    """
+    rows = []
+    i = 0
+    for block in ("TB1", "TB2", "TB3"):
+        for sym in _MOCK_SYMBOLS:
+            for j in range(n_per_block):
+                i += 1
+                rows.append(
+                    dict(
+                        block=block,
+                        symbol=sym,
+                        episode_id=f"{block}_{sym}_{j}",
+                        bar_t=1000 + j,
+                        atr0=float(1.0 + 0.001 * i),
+                        hazard=(1 if i % 4 == 0 else 0),
+                    )
+                )
+    obs_day = pd.DataFrame(rows)
+    truth = obs_day.loc[obs_day["hazard"] == 0, ["symbol", "episode_id", "bar_t", "atr0"]].copy()
+    return obs_day, truth
+
+
 def _run_mocked_formal(
     monkeypatch,
     tmp_path,
     tb3_variant: int = 0,
+    obs_day_mode: str = "full",
 ) -> Dict[str, Any]:
     """在完全 mock 的数据所有者上运行正式管线，只审计调用计数与路由。
 
@@ -967,6 +995,12 @@ def _run_mocked_formal(
     - 绝不真实拟合 sampler（fit_samplers_for_window 被替换）
     - 绝不写真实 artifacts（写入器被替换为纯内存记录器）
     - TB2 与 TB3 数据严格来自不同 Window 所有者
+    - ATR0 审计 gate **不**被盲目 bypass：mock 只替换数值比较，输入契约由真实
+      x1.assert_atr0_audit_universe 校验（obs_day_mode="subset_tb2" 用于复现旧 bug）
+
+    obs_day_mode:
+      "full"       -> prep["obs_day"] 为全量决策宇宙（正确）
+      "subset_tb2" -> prep["obs_day"] 退化为 TB2 子样本（复现 14e3fc9 的正式失败形态）
     """
     bars_by_sym = _make_mock_bars()
     scored_A = _make_mock_block_frame(bars_by_sym, x1.TB2_BLOCK, "A", seed=101)
@@ -979,6 +1013,11 @@ def _run_mocked_formal(
         shift=(1 if tb3_variant == 1 else 0),
     )
     aligned = pd.DataFrame({"block": ["TB1", "TB2", "TB3"]})
+    obs_day_full, cur_truth = _make_mock_obs_day_and_truth()
+    if obs_day_mode == "subset_tb2":
+        obs_day = obs_day_full[obs_day_full["block"] == x1.TB2_BLOCK].reset_index(drop=True)
+    else:
+        obs_day = obs_day_full
 
     counters: Dict[str, Any] = {
         "load_prepared_frame": 0,
@@ -987,6 +1026,9 @@ def _run_mocked_formal(
         "prepare_tags": [],
         "owner_checks": [],
         "tensor_builds": [],
+        "atr0_audit_calls": 0,
+        "atr0_audit_rows": None,
+        "obs_day_rows": len(obs_day),
         "surface_calls": [],
         "select_calls": 0,
         "select_n_rows": None,
@@ -1006,7 +1048,7 @@ def _run_mocked_formal(
 
     def fake_load_prepared_frame():
         counters["load_prepared_frame"] += 1
-        return dict(aligned=aligned, bars_by_sym=bars_by_sym)
+        return dict(aligned=aligned, bars_by_sym=bars_by_sym, obs_day=obs_day)
 
     monkeypatch.setattr(x1.d0, "load_prepared_frame", fake_load_prepared_frame)
 
@@ -1037,8 +1079,17 @@ def _run_mocked_formal(
         "compute_artifact_hashes",
         lambda: {"sample_artifact_sha256": "s" * 8, "transition_artifact_sha256": "t" * 8},
     )
-    monkeypatch.setattr(x1.n0a, "load_transition_truth_audit", lambda: {"cur": None})
-    monkeypatch.setattr(x1.n0a, "audit_atr0_owner_parity", lambda s, cur_truth: 0.0)
+    monkeypatch.setattr(x1.n0a, "load_transition_truth_audit", lambda: {"cur": cur_truth})
+
+    def fake_audit_atr0_owner_parity(s, cur_truth_arg):
+        # 只替换数值比较（合成数据没有真实 0A atr0 owner）；
+        # 输入契约必须由真实 gate 校验，禁止无条件 bypass。
+        counters["atr0_audit_calls"] += 1
+        counters["atr0_audit_rows"] = len(s)
+        x1.assert_atr0_audit_universe(s, cur_truth_arg)
+        return 0.0
+
+    monkeypatch.setattr(x1.n0a, "audit_atr0_owner_parity", fake_audit_atr0_owner_parity)
 
     def spy_build_future_tensor(eval_df, bars_arg, n_future=x1.FUTURE_BARS):
         counters["tensor_builds"].append((str(eval_df["owner_tag"].iloc[0]), len(eval_df)))
@@ -1136,3 +1187,53 @@ def test_tb3_data_cannot_influence_frozen_selection(monkeypatch, tmp_path):
     pri_v0 = float(val_v0[val_v0["policy_name"] == "PRIMARY"]["net_EV_per_decision"].iloc[0])
     pri_v1 = float(val_v1[val_v1["policy_name"] == "PRIMARY"]["net_EV_per_decision"].iloc[0])
     assert pri_v0 != pri_v1
+
+
+# --- ATR0 审计 universe 契约回归 (复现并锁定 14e3fc9 formal 失败的形态) --------
+
+
+def test_atr0_audit_universe_contract_accepts_full_and_rejects_subsets():
+    """审计 D-1：ATR0 审计 gate 的输入契约必须只接受全量决策宇宙。"""
+    obs_day, truth = _make_mock_obs_day_and_truth()
+
+    # 正确版本：全量宇宙（覆盖 TB1/TB2/TB3，hazard==0 键集合 == truth）
+    x1.assert_atr0_audit_universe(obs_day, truth)
+
+    # 错误版本 1：只传 TB2 子样本（= 14e3fc9 正式运行的失败形态）
+    tb2_only = obs_day[obs_day["block"] == x1.TB2_BLOCK].reset_index(drop=True)
+    with pytest.raises(SystemExit) as exc_tb2:
+        x1.assert_atr0_audit_universe(tb2_only, truth)
+    assert "STOP_PGM_EXEC1_ATR0_AUDIT_UNIVERSE_INVALID" in str(exc_tb2.value)
+
+    # 错误版本 2：丢掉一个 block（覆盖面不足）
+    missing_block = obs_day[obs_day["block"] != x1.TB3_BLOCK].reset_index(drop=True)
+    with pytest.raises(SystemExit) as exc_block:
+        x1.assert_atr0_audit_universe(missing_block, truth)
+    assert "STOP_PGM_EXEC1_ATR0_AUDIT_UNIVERSE_INVALID" in str(exc_block.value)
+
+    # 错误版本 3：block 齐全但被抽稀（键覆盖不完整）
+    thinned = obs_day.iloc[::2].reset_index(drop=True)
+    with pytest.raises(SystemExit) as exc_thin:
+        x1.assert_atr0_audit_universe(thinned, truth)
+    assert "STOP_PGM_EXEC1_ATR0_AUDIT_UNIVERSE_INVALID" in str(exc_thin.value)
+
+
+def test_formal_path_atr0_audit_receives_full_universe(monkeypatch, tmp_path):
+    """审计 D-2：正式路径喂给 ATR0 gate 的必须是全量宇宙，而不是 TB2 评测子样本。"""
+    counters = _run_mocked_formal(monkeypatch, tmp_path)
+
+    assert counters["atr0_audit_calls"] == 1
+    assert counters["atr0_audit_rows"] == counters["obs_day_rows"]
+    # 严格大于 TB2 评测帧行数，证明不是 eval subset
+    tb2_eval_rows = [n for tag, n in counters["tensor_builds"] if tag == "A"][0]
+    assert counters["atr0_audit_rows"] > tb2_eval_rows
+
+
+def test_formal_path_stops_when_atr0_audit_receives_block_subset(monkeypatch, tmp_path):
+    """审计 D-3（regression）：若正式路径再次把 block 子样本传给 ATR0 gate，必须 STOP。
+
+    这是对 14e3fc9 formal 失败的端到端复现锁定：错误版本 STOP，正确版本 PASS。
+    """
+    with pytest.raises(SystemExit) as exc:
+        _run_mocked_formal(monkeypatch, tmp_path, obs_day_mode="subset_tb2")
+    assert "STOP_PGM_EXEC1_ATR0_AUDIT_UNIVERSE_INVALID" in str(exc.value)

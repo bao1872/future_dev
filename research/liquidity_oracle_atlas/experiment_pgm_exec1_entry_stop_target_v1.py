@@ -174,6 +174,66 @@ def assert_no_stale_artifacts() -> None:
         raise SystemExit(f"STOP_PGM_EXEC1_ARTIFACT_ALREADY_EXISTS: {stale_names}")
 
 
+# ATR0 所有者对齐审计的输入契约
+ATR0_AUDIT_KEY_COLS = ["symbol", "episode_id", "bar_t"]
+ATR0_AUDIT_REQUIRED_BLOCKS = ["TB1", "TB2", "TB3"]
+
+
+def assert_atr0_audit_universe(obs: pd.DataFrame, cur_truth: pd.DataFrame) -> None:
+    """硬性契约：ATR0 所有者对齐审计的输入必须是**全量决策宇宙**。
+
+    该 gate 校验的命题是「cur_truth 中每一条 hazard==0 记录都必须在 obs 中出现且 atr0 一致」，
+    因此传入 block 子样本（例如某个 window 的 TB2 path-valid 评测子集）时：
+    覆盖的键少于 truth，却仍会走完 inner merge 并返回一个看起来正常的 max_err ——
+    这正是「比较了不同 universe 却报告 PASS」的最危险形态。
+
+    因此任何不满足以下条件的输入必须 fail-closed：
+
+    1. 必需列存在（obs: symbol / episode_id / bar_t / atr0 / hazard / block）
+    2. obs 的 block 覆盖 TB1 / TB2 / TB3
+    3. (symbol, episode_id, bar_t) 在 obs[hazard==0] 与 cur_truth 两侧均唯一
+    4. obs[hazard==0] 的键集合与 cur_truth 的键集合完全相等
+    5. len(obs[hazard==0]) == len(cur_truth)
+
+    禁止用 block 子样本、path-valid 子样本或任何 derivative 帧替代本参数。
+    """
+    missing_obs = [
+        c for c in ATR0_AUDIT_KEY_COLS + ["atr0", "hazard", "block"] if c not in obs.columns
+    ]
+    if missing_obs:
+        raise SystemExit(
+            f"STOP_PGM_EXEC1_ATR0_AUDIT_UNIVERSE_INVALID: obs_missing_columns={missing_obs}"
+        )
+    missing_truth = [c for c in ATR0_AUDIT_KEY_COLS if c not in cur_truth.columns]
+    if missing_truth:
+        raise SystemExit(
+            f"STOP_PGM_EXEC1_ATR0_AUDIT_UNIVERSE_INVALID: cur_truth_missing_columns={missing_truth}"
+        )
+
+    blocks = sorted({str(b) for b in obs["block"].unique().tolist()})
+    if not set(ATR0_AUDIT_REQUIRED_BLOCKS).issubset(set(blocks)):
+        raise SystemExit(
+            "STOP_PGM_EXEC1_ATR0_AUDIT_UNIVERSE_INVALID: "
+            f"block_coverage={blocks} does not cover {ATR0_AUDIT_REQUIRED_BLOCKS}"
+        )
+
+    obs_h0 = obs.loc[obs["hazard"] == 0, ATR0_AUDIT_KEY_COLS]
+    truth_keys_df = cur_truth[ATR0_AUDIT_KEY_COLS]
+    if bool(obs_h0.duplicated().any()):
+        raise SystemExit("STOP_PGM_EXEC1_ATR0_AUDIT_UNIVERSE_INVALID: obs_hazard0_keys_not_unique")
+    if bool(truth_keys_df.duplicated().any()):
+        raise SystemExit("STOP_PGM_EXEC1_ATR0_AUDIT_UNIVERSE_INVALID: cur_truth_keys_not_unique")
+
+    obs_keys = set(map(tuple, obs_h0.to_numpy()))
+    truth_keys = set(map(tuple, truth_keys_df.to_numpy()))
+    if len(obs_h0) != len(cur_truth) or obs_keys != truth_keys:
+        raise SystemExit(
+            "STOP_PGM_EXEC1_ATR0_AUDIT_UNIVERSE_INVALID: "
+            f"obs_hazard0_len={len(obs_h0)} cur_truth_len={len(cur_truth)} "
+            f"missing_keys={len(truth_keys - obs_keys)} extra_keys={len(obs_keys - truth_keys)}"
+        )
+
+
 # ===========================================================================
 # 2. 数据加载与 Window 评分（全局仅 Fit 一次）
 # ===========================================================================
@@ -1494,9 +1554,10 @@ def run_audit_only() -> None:
     print(f"[AUDIT] symbols_count={len(aud['symbols'])}")
     print(f"[AUDIT] blocks={sorted(obs['block'].unique().tolist())}")
 
-    atr0_err = n0a.audit_atr0_owner_parity(
-        obs, n0a.load_transition_truth_audit()["cur"]
-    )
+    # ATR0 所有者对齐的输入契约必须先被证明是全量决策宇宙
+    cur_truth = n0a.load_transition_truth_audit()["cur"]
+    assert_atr0_audit_universe(obs, cur_truth)
+    atr0_err = n0a.audit_atr0_owner_parity(obs, cur_truth)
     print(f"[AUDIT] max_abs_atr0_owner_error={atr0_err:.2e}")
     if atr0_err > 1e-12:
         raise SystemExit("STOP_PGM_EXEC1_ATR0_PARITY_FAIL")
@@ -1719,6 +1780,15 @@ def run_full_exploratory() -> None:
     scored_B = bundle["scored_B"]
     bars_by_sym = bundle["bars_by_sym"]
 
+    # 4b. ATR0 所有者对齐审计
+    # 必须使用 prepared 全量决策宇宙（bundle["prep"]["obs_day"]），
+    # 绝不接受 block 子样本 / path-valid 子样本：那会导致「比较了不同 universe 却报告 PASS」。
+    # 该 gate 早于任何科学计算执行 (fail-closed before MAE/MFE, surface, selection, TB3)。
+    obs_full = bundle["prep"]["obs_day"]
+    cur_truth = n0a.load_transition_truth_audit()["cur"]
+    assert_atr0_audit_universe(obs_full, cur_truth)
+    err_atr0_parity = float(n0a.audit_atr0_owner_parity(obs_full, cur_truth))
+
     # 5. 提取决策宇宙
     eval_tb2 = extract_evaluation_sample(scored_A, TB2_BLOCK)
     eval_tb3 = extract_evaluation_sample(scored_B, TB3_BLOCK)
@@ -1851,7 +1921,7 @@ def run_full_exploratory() -> None:
             tb2_window_A_max_err=float(d0.verify_window_score_owner(scored_A, bundle["fit_A"], "TB2")),
             tb3_window_B_max_err=float(d0.verify_window_score_owner(scored_B, bundle["fit_B"], "TB3")),
         ),
-        atr0_parity=float(n0a.audit_atr0_owner_parity(eval_tb2, n0a.load_transition_truth_audit()["cur"])),
+        atr0_parity=float(err_atr0_parity),
         path_contract=dict(
             FUTURE_BARS=FUTURE_BARS,
             ENTRY_WAIT_BARS=ENTRY_WAIT_BARS,
