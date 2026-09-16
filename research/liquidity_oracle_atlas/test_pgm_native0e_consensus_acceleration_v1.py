@@ -1132,6 +1132,95 @@ def test_four_cells_include_gross_net_ev():
         assert abs(cells[k]["net_EV_at_0p01"] - (cells[k]["mean_pi"] - e0.PRIMARY_COST_ATR0)) < 1e-12
 
 
+# 104: primary_cell_counts exact synthetic counts (structure only)
+def test_primary_cell_counts_exact():
+    n = 240
+    rng = np.random.default_rng(40)
+    grp = rng.choice(["LOW", "MID", "HIGH"], size=n, p=[1 / 3, 1 / 3, 1 / 3])
+    acc = rng.random(n) < 0.5
+    sub = pd.DataFrame({"consensus_group": grp, "accel_positive": acc})
+    counts = e0.primary_cell_counts(sub)
+    for k in e0.PRIMARY_CELLS:
+        g, a = k.split("_")
+        expected = int(((grp == g) & (acc == (a == "ACCEL"))).sum())
+        assert counts[k] == expected, (k, counts[k], expected)
+    # MID rows excluded; only LOW/HIGH x ACCEL/OFF counted
+    assert sum(counts.values()) <= n
+
+
+# 105: primary_cell_counts works even when outcome columns are missing
+def test_primary_cell_counts_without_outcome_columns():
+    n = 120
+    rng = np.random.default_rng(41)
+    grp = rng.choice(["LOW", "HIGH"], size=n)
+    acc = rng.random(n) < 0.5
+    sub = pd.DataFrame({
+        "consensus_group": grp, "accel_positive": acc,
+        "pi": rng.normal(0, 1, n), "harm_flag": rng.integers(0, 2, n),
+        "hazard": rng.integers(0, 2, n), "r_trad_OC_ATR0": rng.normal(0, 1, n),
+    })
+    with_out = e0.primary_cell_counts(sub)
+    without = e0.primary_cell_counts(
+        sub.drop(columns=["pi", "harm_flag", "hazard", "r_trad_OC_ATR0"]))
+    assert with_out == without
+
+
+# 106: assert_min_cells uses the count-only helper (never _cells_with_group)
+def test_assert_min_cells_uses_count_only_helper(monkeypatch):
+    used = []
+    monkeypatch.setattr(e0, "_cells_with_group", lambda *a, **k: used.append(1) or {})
+    # one cell has MIN_CELL_N - 1 -> STOP expected
+    n = e0.MIN_CELL_N - 1
+    sub = pd.DataFrame({
+        "consensus_group": ["LOW"] * n + ["HIGH"] * n,
+        "accel_positive": [True] * n + [False] * n,
+    })
+    with pytest.raises(SystemExit):
+        e0.assert_min_cells(sub)
+    assert used == []   # the gate must NOT have computed outcomes
+
+
+# 107: audit stdout contains no outcome token
+def test_audit_stdout_no_outcome_token(capsys, reuse_windows):
+    e0.run_audit_only()
+    out = capsys.readouterr().out
+    for tok in ("mean_pi", "gross_EV", "net_EV", "harm_rate", "H1_prevalence",
+                "DID", "Delta_LOW", "Delta_HIGH", "MSE", "LogLoss", "payoff", "PSYCH_GATE"):
+        assert tok not in out, tok
+    for req in ("n_rank_train", "n_tercile_train", "LOW_ACCEL", "LOW_OFF",
+                "HIGH_ACCEL", "HIGH_OFF"):
+        assert req in out, req
+
+
+# 108: audit must not actually call any scientific metric function
+def test_audit_forbids_scientific_functions(monkeypatch, reuse_windows):
+    def boom(*a, **k):
+        raise AssertionError("audit called a scientific metric function")
+
+    for fn in ("_cells_with_group", "primary_effects", "bootstrap_did",
+               "_predict_ridge", "_predict_logistic", "paired_day_loss_bootstrap",
+               "psych_gate_diagnostic", "run_window_complete"):
+        monkeypatch.setattr(e0, fn, boom)
+    e0.run_audit_only()   # must still complete successfully
+
+
+# 109: smoke still uses _cells_with_group + scientific wiring (behavior unchanged)
+def test_smoke_uses_cells_with_group_and_scientific_wiring(monkeypatch, reuse_windows, capsys):
+    seen = {"cells": 0}
+    orig = e0._cells_with_group
+
+    def spy(sub, group_col):
+        seen["cells"] += 1
+        return orig(sub, group_col)
+
+    monkeypatch.setattr(e0, "_cells_with_group", spy)
+    e0.run_smoke_test()
+    out = capsys.readouterr().out
+    assert seen["cells"] > 0           # smoke routes through the scientific cell helper
+    assert "DID" in out
+    assert "PSYCH_GATE" in out
+
+
 # 98: smoke passes n_boot=200 to the predictive (payoff/harm) paired bootstrap
 def test_smoke_predictive_n_boot_200(monkeypatch, reuse_windows):
     seen = {}
@@ -1169,12 +1258,18 @@ def test_audit_does_not_call_run_window_complete(monkeypatch, reuse_windows):
 
 
 # 101: audit-only emits no scientific metric (DID / payoff / PSYCH_GATE / bootstrap)
+#      AND no four-cell outcome (mean_pi / gross_EV / net_EV / harm_rate / H1_prevalence)
 def test_audit_emits_no_scientific_metric(capsys, reuse_windows):
     e0.run_audit_only()
     out = capsys.readouterr().out
-    for tok in ("DID", "payoff", "PSYCH_GATE", "Delta_LOW", "Delta_HIGH", "MSE",
-                "LogLoss", "Log Loss"):
+    for tok in ("DID", "Delta_LOW", "Delta_HIGH", "MSE", "LogLoss", "payoff",
+                "PSYCH_GATE", "mean_pi", "gross_EV", "net_EV", "harm_rate",
+                "H1_prevalence"):
         assert tok not in out, tok
+    # governance structure tokens MUST be present
+    for req in ("n_rank_train", "n_tercile_train", "LOW_ACCEL", "LOW_OFF",
+                "HIGH_ACCEL", "HIGH_OFF"):
+        assert req in out, req
 
 
 # 102: in the real-pipeline test group, production Window A/B samplers each fit ONCE

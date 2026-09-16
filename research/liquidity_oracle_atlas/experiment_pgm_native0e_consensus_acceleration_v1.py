@@ -334,11 +334,28 @@ def primary_effects(cells: Dict[str, Dict[str, float]]) -> Dict[str, float]:
     )
 
 
+def primary_cell_counts(sub: pd.DataFrame, group_col: str = "consensus_group") -> Dict[str, int]:
+    """Pure STRUCTURE count of the four primary cells.
+
+    Reads ONLY consensus_group and accel_positive. Never touches pi / harm_flag /
+    hazard / r_trad_OC_ATR0, so cell-count auditing does not depend on outcomes.
+    """
+    gv = sub[group_col].to_numpy()
+    acc = sub["accel_positive"].to_numpy(bool)
+    out: Dict[str, int] = {}
+    for grp in ["LOW", "HIGH"]:
+        for a in [True, False]:
+            key = f"{grp}_{'ACCEL' if a else 'OFF'}"
+            out[key] = int(((gv == grp) & (acc == a)).sum())
+    return out
+
+
 def assert_min_cells(ev_full: pd.DataFrame) -> None:
-    cells = _cells_with_group(ev_full, "consensus_group")
+    # count-only gate: must NOT call _cells_with_group (which would compute outcomes)
+    cells = primary_cell_counts(ev_full)
     for k in PRIMARY_CELLS:
-        if cells[k]["n"] < MIN_CELL_N:
-            raise SystemExit(f"STOP_PGM_NATIVE0E_PRIMARY_CELL_TOO_SMALL: {k}={cells[k]['n']}")
+        if cells[k] < MIN_CELL_N:
+            raise SystemExit(f"STOP_PGM_NATIVE0E_PRIMARY_CELL_TOO_SMALL: {k}={cells[k]}")
 
 
 # ===========================================================================
@@ -720,6 +737,13 @@ def run_audit_only() -> None:
     # formulas, acceleration, the threshold rule, or the verdict rule. 0E remains
     # EXPLORATORY. Audit-only is GOVERNANCE ONLY: it never calls run_window_complete,
     # never computes DID / Ridge / Logistic / PSYCH_GATE, and emits no scientific metrics.
+    # Round-1.1a ACK: SHA c37dc3e790ec2619a5bce007bf196220e5eb92dd still exposed the
+    # full-eval four-cell mean_pi / gross_EV / net_EV_0p01 under the "NO SCIENTIFIC
+    # METRICS" label (the cell helper computed pi/harm/H1 under the hood). Those
+    # observed numbers are ALSO not used to change CONSENSUS_RAW / formula /
+    # acceleration / threshold / verdict. Audit-only now uses primary_cell_counts
+    # (structure-only; reads neither pi, harm_flag, hazard nor r_trad_OC_ATR0) for the
+    # MIN_CELL_N gate and prints only row counts.
     print("=" * 60, flush=True)
     print("PGM-NATIVE-0E: AUDIT-ONLY", flush=True)
     print("=" * 60, flush=True)
@@ -778,11 +802,10 @@ def run_audit_only() -> None:
         print(f"[AUDIT] {blk}: n_rank_train={n_rank_train} n_tercile_train={n_rank_train} "
               f"q_low={ql:.4f} q_high={qh:.4f}")
         print(f"[AUDIT] {blk}: n_train_primary={len(tr_primary)} n_eval_primary={len(ev_primary)}")
-        cells = _cells_with_group(ev_primary, "consensus_group")
+        # structure-only counts: NO outcome (pi / gross_EV / net_EV / harm / H1) is read or printed
+        cells = primary_cell_counts(ev_primary)
         for k in PRIMARY_CELLS:
-            c = cells[k]
-            print(f"[AUDIT]   {k}: n={c['n']} mean_pi={c['mean_pi']:.5f} "
-                  f"gross_EV={c['gross_EV']:.5f} net_EV_0p01={c['net_EV_at_0p01']:.5f}")
+            print(f"[AUDIT]   {k}: n={cells[k]}")
         assert_min_cells(ev_primary)  # MIN_CELL_N gate on the real eval (pre-cap)
         print(f"[AUDIT] {blk}: MIN_CELL_N gate PASS (>= {MIN_CELL_N})")
 
