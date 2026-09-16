@@ -98,6 +98,10 @@ BOOTSTRAP_N = 2000
 BOOTSTRAP_SEED = 20260916
 SMOKE_BOOTSTRAP_N = 200
 SMOKE_EVAL_CAP = 2048
+# Smoke trains predictive models on a fixed deterministic evenly-spaced subset of the
+# train set (wiring-only; rank-map + tercile still use the FULL train). Formal path
+# keeps model_train_cap=None (full train).
+SMOKE_MODEL_TRAIN_CAP = 8192
 CLUSTER_OWNER = "entry_day"
 
 # The 4 interpretable psychology primitives (each from t-1 or earlier only)
@@ -135,7 +139,15 @@ def add_consensus_primitives(df: pd.DataFrame) -> pd.DataFrame:
     x = df.sort_values(["symbol", "episode_id", "bar_t"], kind="stable").copy()
     g = x.groupby(["symbol", "episode_id"], sort=False, group_keys=False)
 
-    x["lag1_score_mu"] = g["score_mu"].shift(1)
+    # All t-1 features in ONE group-aware shift (groupby().shift is C-vectorized and
+    # restarts at each (symbol, episode_id) boundary -- no per-group Python callback).
+    _lagcols = [
+        "score_mu", "cur_up_distance_R", "cur_down_distance_R",
+        "upper_newest_log_age", "lower_newest_log_age",
+        "upper_n_active_identities", "lower_n_active_identities",
+    ]
+    _lag1 = g[_lagcols].shift(1)
+    x["lag1_score_mu"] = _lag1["score_mu"].to_numpy(float)
     d_now = np.sign(x["score_mu"].to_numpy(float))
     d_prev = np.sign(x["lag1_score_mu"].to_numpy(float))
 
@@ -144,12 +156,12 @@ def add_consensus_primitives(df: pd.DataFrame) -> pd.DataFrame:
         np.isfinite(d_prev) & (d_now != 0) & (d_prev == d_now)
     )
 
-    up = g["cur_up_distance_R"].shift(1).to_numpy(float)
-    dn = g["cur_down_distance_R"].shift(1).to_numpy(float)
-    up_age = g["upper_newest_log_age"].shift(1).to_numpy(float)
-    dn_age = g["lower_newest_log_age"].shift(1).to_numpy(float)
-    up_n = g["upper_n_active_identities"].shift(1).to_numpy(float)
-    dn_n = g["lower_n_active_identities"].shift(1).to_numpy(float)
+    up = _lag1["cur_up_distance_R"].to_numpy(float)
+    dn = _lag1["cur_down_distance_R"].to_numpy(float)
+    up_age = _lag1["upper_newest_log_age"].to_numpy(float)
+    dn_age = _lag1["lower_newest_log_age"].to_numpy(float)
+    up_n = _lag1["upper_n_active_identities"].to_numpy(float)
+    dn_n = _lag1["lower_n_active_identities"].to_numpy(float)
 
     front = np.where(d_prev > 0, up, dn)
     back = np.where(d_prev > 0, dn, up)
@@ -162,11 +174,21 @@ def add_consensus_primitives(df: pd.DataFrame) -> pd.DataFrame:
     x["c_position"] = (back - front) / (back + front + EPS)
 
     # 2. Path agreement: did the recent path mostly walk along the current direction?
-    prior_sum = g["path_last_return_R"].transform(
-        lambda s: s.shift(1).rolling(CONSENSUS_LOOKBACK, min_periods=CONSENSUS_MIN_PRIOR).sum())
-    prior_abs = g["path_last_return_R"].transform(
-        lambda s: s.abs().shift(1).rolling(CONSENSUS_LOOKBACK, min_periods=CONSENSUS_MIN_PRIOR).sum())
-    x["c_path_agreement"] = d_prev * prior_sum.to_numpy(float) / (prior_abs.to_numpy(float) + EPS)
+    # Vectorized fixed 5-lag sum. groupby().shift(k) restarts at group boundaries;
+    # np.nansum over the 5 lags with min_periods==CONSENSUS_MIN_PRIOR replicates
+    # shift(1).rolling(CONSENSUS_LOOKBACK, min_periods=CONSENSUS_MIN_PRIOR).sum()
+    # EXACTLY (verified parity), but with zero per-group Python callbacks.
+    gshift = g["path_last_return_R"].shift
+    _lags = np.column_stack([
+        gshift(1).to_numpy(float), gshift(2).to_numpy(float), gshift(3).to_numpy(float),
+        gshift(4).to_numpy(float), gshift(5).to_numpy(float),
+    ])
+    _valid = np.isfinite(_lags).sum(axis=1)
+    prior_sum = np.nansum(_lags, axis=1)
+    prior_abs = np.nansum(np.abs(_lags), axis=1)
+    prior_sum[_valid < CONSENSUS_MIN_PRIOR] = np.nan
+    prior_abs[_valid < CONSENSUS_MIN_PRIOR] = np.nan
+    x["c_path_agreement"] = d_prev * prior_sum / (prior_abs + EPS)
 
     # 3. Boundary freshness: is the back boundary newer than the front boundary?
     x["c_boundary_freshness"] = front_age - back_age
@@ -395,44 +417,14 @@ def bootstrap_did(eval_sub: pd.DataFrame, n_boot: int = BOOTSTRAP_N,
 
     CELLS = ["LOW_OFF", "LOW_ACCEL", "HIGH_OFF", "HIGH_ACCEL"]
     cidx = {c: i for i, c in enumerate(CELLS)}
-    count = np.zeros((D, 4))
-    spi = np.zeros((D, 4))
-    sharm = np.zeros((D, 4))
-    shaz = np.zeros((D, 4))
-
-    def _ci(g: str, a: bool) -> int:
-        return cidx[f"{g}_{'ACCEL' if a else 'OFF'}"]
-
-    for i in range(len(pos)):
-        c = _ci(grp[i], acc[i])
-        d = pos[i]
-        count[d, c] += 1
-        spi[d, c] += pi[i]
-        sharm[d, c] += harm[i]
-        shaz[d, c] += haz[i]
-
-    def _means_from(w: np.ndarray):
-        cnt = w @ count
-        mp = w @ spi
-        mh = w @ sharm
-        mz = w @ shaz
-        mpi = np.where(cnt > 0, mp / cnt, np.nan)
-        mh_ = np.where(cnt > 0, mh / cnt, np.nan)
-        mz_ = np.where(cnt > 0, mz / cnt, np.nan)
-        return dict(
-            dl=mpi[cidx["LOW_ACCEL"]] - mpi[cidx["LOW_OFF"]],
-            dh=mpi[cidx["HIGH_ACCEL"]] - mpi[cidx["HIGH_OFF"]],
-            did=(mpi[cidx["HIGH_ACCEL"]] - mpi[cidx["HIGH_OFF"]])
-            - (mpi[cidx["LOW_ACCEL"]] - mpi[cidx["LOW_OFF"]]),
-            dlh=mh_[cidx["LOW_ACCEL"]] - mh_[cidx["LOW_OFF"]],
-            dhh=mh_[cidx["HIGH_ACCEL"]] - mh_[cidx["HIGH_OFF"]],
-            didh=(mh_[cidx["HIGH_ACCEL"]] - mh_[cidx["HIGH_OFF"]])
-            - (mh_[cidx["LOW_ACCEL"]] - mh_[cidx["LOW_OFF"]]),
-            dlz=mz_[cidx["LOW_ACCEL"]] - mz_[cidx["LOW_OFF"]],
-            dhz=mz_[cidx["HIGH_ACCEL"]] - mz_[cidx["HIGH_OFF"]],
-            didz=(mz_[cidx["HIGH_ACCEL"]] - mz_[cidx["HIGH_OFF"]])
-            - (mz_[cidx["LOW_ACCEL"]] - mz_[cidx["LOW_OFF"]]),
-        )
+    # Vectorized day x cell aggregation. bincount accumulates in row order, so this is
+    # bit-identical to the old per-row loop. cell encodes (HIGH?, ACCEL?) in CELLS order.
+    cell = 2 * (grp == "HIGH").astype(np.int8) + acc.astype(np.int8)
+    flat = pos * 4 + cell
+    count = np.bincount(flat, minlength=D * 4).reshape(D, 4).astype(float)
+    spi = np.bincount(flat, weights=pi, minlength=D * 4).reshape(D, 4)
+    sharm = np.bincount(flat, weights=harm.astype(float), minlength=D * 4).reshape(D, 4)
+    shaz = np.bincount(flat, weights=haz.astype(float), minlength=D * 4).reshape(D, 4)
 
     # point estimate: row-weighted full-sample means
     om = _overall_cell_means(sub)
@@ -452,14 +444,33 @@ def bootstrap_did(eval_sub: pd.DataFrame, n_boot: int = BOOTSTRAP_N,
     )
 
     rng = np.random.default_rng(seed)
-    dist: Dict[str, list] = {k: [] for k in point}
-    for _ in range(n_boot):
-        w = rng.multinomial(D, np.full(D, 1.0 / D))
-        r = _means_from(w)
-        for k in point:
-            dist[k].append(r[k])
-
-    res = {k: _summ(float(point[k]), np.array(dist[k], float)) for k in point}
+    # Vectorized multinomial: rng.multinomial(..., size=n_boot) is bit-identical to
+    # n_boot sequential draws, so the per-bootstrap cell means match the old loop exactly.
+    W = rng.multinomial(D, np.full(D, 1.0 / D), size=n_boot)  # (n_boot, D)
+    cnt = W @ count
+    mp = W @ spi
+    mh = W @ sharm
+    mz = W @ shaz
+    mpi = np.where(cnt > 0, mp / cnt, np.nan)
+    mh_ = np.where(cnt > 0, mh / cnt, np.nan)
+    mz_ = np.where(cnt > 0, mz / cnt, np.nan)
+    LOFF, LACC, HOFF, HACC = (cidx["LOW_OFF"], cidx["LOW_ACCEL"],
+                              cidx["HIGH_OFF"], cidx["HIGH_ACCEL"])
+    dl = mpi[:, LACC] - mpi[:, LOFF]
+    dh = mpi[:, HACC] - mpi[:, HOFF]
+    did = dh - dl
+    dlh = mh_[:, LACC] - mh_[:, LOFF]
+    dhh = mh_[:, HACC] - mh_[:, HOFF]
+    didh = dhh - dlh
+    dlz = mz_[:, LACC] - mz_[:, LOFF]
+    dhz = mz_[:, HACC] - mz_[:, HOFF]
+    didz = dhz - dlz
+    dist = {
+        "dl": dl, "dh": dh, "did": did,
+        "dlh": dlh, "dhh": dhh, "didh": didh,
+        "dlz": dlz, "dhz": dhz, "didz": didz,
+    }
+    res = {k: _summ(float(point[k]), np.asarray(dist[k], float)) for k in point}
     return {
         "Delta_LOW_pi": res["dl"], "Delta_HIGH_pi": res["dh"], "DID_pi": res["did"],
         "Delta_LOW_harm": res["dlh"], "Delta_HIGH_harm": res["dhh"], "DID_harm": res["didh"],
@@ -533,19 +544,17 @@ def paired_day_loss_bootstrap(entry_day, loss0, loss1, n_boot: int = BOOTSTRAP_N
     pos = np.array([didx[x] for x in day])
     delta = np.asarray(loss0, float) - np.asarray(loss1, float)
 
-    S = np.zeros(D)
-    C = np.zeros(D)
-    for i, p in enumerate(pos):
-        S[p] += delta[i]
-        C[p] += 1.0
+    # Vectorized per-day aggregation (bincount accumulates in row order -> bit-identical
+    # to the old per-row loop).
+    S = np.bincount(pos, weights=delta, minlength=D)
+    C = np.bincount(pos, minlength=D).astype(float)
 
     point = float(np.mean(delta))
     rng = np.random.default_rng(seed)
-    dist = np.empty(n_boot)
-    for b in range(n_boot):
-        w = rng.multinomial(D, np.full(D, 1.0 / D))
-        denom = w @ C
-        dist[b] = (w @ S) / denom if denom > 0 else float("nan")
+    # Vectorized multinomial: bit-identical to n_boot sequential draws.
+    W = rng.multinomial(D, np.full(D, 1.0 / D), size=n_boot)  # (n_boot, D)
+    denom = W @ C
+    dist = np.where(denom > 0, (W @ S) / denom, float("nan"))
     return _summ(point, dist)
 
 
@@ -651,7 +660,9 @@ def determine_psych_verdict(did_pi: Dict[str, float], dlow_pi: Dict[str, float],
 # Full window runner (Round 1: no artifacts; audit/smoke only)
 # ===========================================================================
 def run_window_complete(scored: pd.DataFrame, w: Dict[str, Any], n_boot: int,
-                         eval_cap: Optional[int] = None) -> Tuple[Dict[str, Any], Tuple[float, float], Dict[str, np.ndarray]]:
+                         eval_cap: Optional[int] = None,
+                         model_train_cap: Optional[int] = None) -> Tuple[Dict[str, Any], Tuple[float, float], Dict[str, np.ndarray]]:
+    t_prep = time.perf_counter()
     x, maps = prepare_consensus(scored, w["train"])
 
     # terciles trained ONLY on train-block PRIMARY-ELIGIBLE rows (same universe
@@ -673,14 +684,26 @@ def run_window_complete(scored: pd.DataFrame, w: Dict[str, Any], n_boot: int,
     cells = _cells_with_group(ev, "consensus_group")
     effects = primary_effects(cells)
     boot = bootstrap_did(ev, n_boot=n_boot, seed=BOOTSTRAP_SEED)
+    consensus_s = time.perf_counter() - t_prep
 
+    # Predictive training uses the FULL train set by default (model_train_cap=None).
+    # Smoke passes a fixed deterministic evenly-spaced subset (wiring-only) to cut cost.
     tr = sub[sub["block"].isin(w["train"])].copy()
+    if model_train_cap is not None:
+        n_tr = len(tr)
+        if n_tr > model_train_cap:
+            idx = np.linspace(0, n_tr - 1, model_train_cap, dtype=np.int64)
+            tr = tr.iloc[idx].copy()
+
+    t_model = time.perf_counter()
     pay0, m0m, sq0 = _predict_ridge(tr, ev, m0_num(), PRED_CAT, "pi")
     pay1, m1m, sq1 = _predict_ridge(tr, ev, m1_num(), PRED_CAT, "pi")
     h0p, h0m, ll0 = _predict_logistic(tr, ev, m0_num(), PRED_CAT, "harm_flag")
     h1p, h1m, ll1 = _predict_logistic(tr, ev, m1_num(), PRED_CAT, "harm_flag")
+    model_s = time.perf_counter() - t_model
 
     # predictive falsification via ENTRY-DAY PAIRED bootstrap (not point estimate alone)
+    t_boot = time.perf_counter()
     payoff_boot = paired_day_loss_bootstrap(ev["entry_day"].to_numpy(), sq0, sq1,
                                            n_boot=n_boot, seed=BOOTSTRAP_SEED)
     harm_boot = paired_day_loss_bootstrap(ev["entry_day"].to_numpy(), ll0, ll1,
@@ -690,6 +713,7 @@ def run_window_complete(scored: pd.DataFrame, w: Dict[str, Any], n_boot: int,
     psych = psych_gate_diagnostic(ev, PRIMARY_COST_ATR0, n_boot, BOOTSTRAP_SEED)
     comp = component_diagnostics(ev, maps)
     age = age_zero_diagnostic(ev)
+    bootstrap_s = time.perf_counter() - t_boot
 
     return dict(
         cells=cells, effects=effects, bootstrap=boot,
@@ -698,6 +722,7 @@ def run_window_complete(scored: pd.DataFrame, w: Dict[str, Any], n_boot: int,
         payoff_bootstrap=payoff_boot, harm_bootstrap=harm_boot,
         psych=psych, component=comp, age_zero=age,
         n_rank_train=n_rank_train, n_train=len(tr), n_eval=len(ev),
+        timing=dict(consensus_s=consensus_s, model_s=model_s, bootstrap_s=bootstrap_s),
     ), terciles, maps
 
 
@@ -823,15 +848,28 @@ def run_smoke_test() -> None:
     print("=" * 60, flush=True)
     t0 = time.perf_counter()
     prep, fit_A, scored_A, fit_B, scored_B = _load_and_score()
+    load_s = time.perf_counter() - t0
     dA = d0.verify_window_score_owner(scored_A, fit_A, TB2_BLOCK)
     dB = d0.verify_window_score_owner(scored_B, fit_B, TB3_BLOCK)
     print(f"[SMOKE] score-owner parity: WindowA(TB2)={dA:.3e} WindowB(TB3)={dB:.3e}")
+    print(f"[SMOKE] load_and_score_seconds={load_s:.2f}")
 
+    cons_a = cons_b = model_a = model_b = boot_total = 0.0
     for blk, w, sc in [(TB2_BLOCK, pgm.WINDOWS[0], scored_A),
                        (TB3_BLOCK, pgm.WINDOWS[1], scored_B)]:
         print(f"[SMOKE] --- window {blk} ---")
-        r, _, _ = run_window_complete(sc, w, n_boot=SMOKE_BOOTSTRAP_N, eval_cap=SMOKE_EVAL_CAP)
+        r, _, _ = run_window_complete(sc, w, n_boot=SMOKE_BOOTSTRAP_N,
+                                     eval_cap=SMOKE_EVAL_CAP,
+                                     model_train_cap=SMOKE_MODEL_TRAIN_CAP)
+        t = r.get("timing", {})
         print(f"  n_train_primary={r['n_train']} n_eval_primary(cap)={r['n_eval']}")
+        print(f"  [timing] consensus={t.get('consensus_s', 0):.2f}s "
+              f"model={t.get('model_s', 0):.2f}s bootstrap={t.get('bootstrap_s', 0):.2f}s")
+        if blk == TB2_BLOCK:
+            cons_a += t.get("consensus_s", 0); model_a += t.get("model_s", 0)
+        else:
+            cons_b += t.get("consensus_s", 0); model_b += t.get("model_s", 0)
+        boot_total += t.get("bootstrap_s", 0)
         for k in PRIMARY_CELLS:
             print(f"    {k}: n={r['cells'][k]['n']}")
         e = r["effects"]
@@ -863,8 +901,12 @@ def run_smoke_test() -> None:
         if pg:
             print(f"  PSYCH_GATE-BASE netEV point={pg['point']:.6f} "
                   f"CI=[{pg['ci95_lower']:.6f},{pg['ci95_upper']:.6f}]")
+    total_s = time.perf_counter() - t0
     print("[SMOKE] SMOKE ONLY / NO SCIENTIFIC VERDICT", flush=True)
-    print(f"[SMOKE COMPLETE] {time.perf_counter() - t0:.2f}s", flush=True)
+    print(f"[SMOKE] consensus_A_seconds={cons_a:.2f} consensus_B_seconds={cons_b:.2f} "
+          f"model_A_seconds={model_a:.2f} model_B_seconds={model_b:.2f} "
+          f"bootstrap_seconds={boot_total:.2f} total_smoke_seconds={total_s:.2f}", flush=True)
+    print(f"[SMOKE COMPLETE] {total_s:.2f}s", flush=True)
 
 
 def _causal_prefix_invariant() -> bool:

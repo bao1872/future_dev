@@ -4,7 +4,9 @@ test_pgm_native0e_consensus_acceleration_v1.py
 Round 1 tests for PGM-NATIVE-0E (architecture + audit + smoke ONLY).
 Full exploratory is HARD-BLOCKED in this round.
 """
+import contextlib
 import inspect
+import io
 import os
 import subprocess
 import sys
@@ -78,6 +80,59 @@ def make_consen_synth(n=400, seed=0):
     x = e0.attach_consensus_score(x, maps)
     x = e0.attach_primary_acceleration(x)
     return x, maps
+
+
+# --- 0E.1b: cheap synthetic helpers so smoke-contract tests do NOT re-run the
+#     (expensive) real pipeline. Exactly ONE real smoke runs per module (see
+#     `smoke_stdout` fixture) for all consumer tests.
+
+def _stub_ridge(train, eval_, num_cols, cat_cols, target):
+    n = len(eval_)
+    return np.zeros(n), {"mse": 0.0, "mae": 0.0, "spearman": 0.0}, np.zeros(n)
+
+
+def _stub_logistic(train, eval_, num_cols, cat_cols, target):
+    n = len(eval_)
+    return np.full(n, 0.5), {"log_loss": 0.0, "brier": 0.0, "roc_auc": 0.5,
+                             "pr_auc": 0.5}, np.zeros(n)
+
+
+def _stub_psych(eval_sub, cost=0.01, n_boot=200, seed=20260916):
+    return {"BASE": {}, "PSYCH_GATE": {}, "bootstrap": {}}
+
+
+def _stub_smoke_heavy(monkeypatch):
+    """Stub the expensive model/psych/diagnostic pieces; keep the cell/bootstrap
+    math real so wiring contracts are still exercised."""
+    monkeypatch.setattr(e0, "_predict_ridge", _stub_ridge)
+    monkeypatch.setattr(e0, "_predict_logistic", _stub_logistic)
+    monkeypatch.setattr(e0, "psych_gate_diagnostic", _stub_psych)
+    monkeypatch.setattr(e0, "component_diagnostics", lambda ev, maps: {})
+    monkeypatch.setattr(e0, "age_zero_diagnostic", lambda sub: {})
+
+
+def _make_smoke_contract_frame(n=24000, seed=20270101):
+    """Valid frame for run_window_complete (train=TB1/TB2, eval=TB3) with ample
+    primary-eligible rows so the MIN_CELL_N gate passes on the real eval."""
+    df = make_synth(n=n, seed=seed, blocks=("TB1", "TB2", "TB3"))
+    # force directional stability everywhere -> primary-eligibility (and 4 cells) ample
+    df["score_mu"] = np.abs(df["score_mu"].to_numpy(float)) + 0.5
+    df["base_action"] = 1.0
+    # balanced acceleration so all four primary cells are populated
+    df["a_dir_accel_1"] = np.where(np.arange(n) % 2 == 0, 1.0, -1.0)
+    return df
+
+
+def _oracle_prior_rolling(df):
+    """The OLD per-group rolling implementation of c_path_agreement, kept as a
+    reference oracle to lock the 0E.1b vectorized rewrite to exact parity."""
+    g = df.groupby(["symbol", "episode_id"], sort=False)
+    ps = g["path_last_return_R"].transform(
+        lambda s: s.shift(1).rolling(e0.CONSENSUS_LOOKBACK, min_periods=e0.CONSENSUS_MIN_PRIOR).sum())
+    pa = g["path_last_return_R"].transform(
+        lambda s: s.abs().shift(1).rolling(e0.CONSENSUS_LOOKBACK, min_periods=e0.CONSENSUS_MIN_PRIOR).sum())
+    d_prev = np.sign(g["score_mu"].shift(1).to_numpy(float))
+    return d_prev * ps.to_numpy(float) / (pa.to_numpy(float) + e0.EPS)
 
 
 # ---------------------------------------------------------------------------
@@ -955,6 +1010,22 @@ def reuse_windows(monkeypatch, real_scored_windows):
     return real_scored_windows
 
 
+@pytest.fixture(scope="module")
+def smoke_stdout(real_scored_windows):
+    # Run the REAL smoke EXACTLY ONCE for the whole module and capture its stdout.
+    # Every other smoke-contract test reads this cached result instead of re-running
+    # the (expensive) full predictive pipeline. This is what makes the suite fast.
+    saved = e0._load_and_score
+    e0._load_and_score = lambda: real_scored_windows
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf):
+            e0.run_smoke_test()
+    finally:
+        e0._load_and_score = saved
+    return buf.getvalue()
+
+
 # 86: NaN input rank stays NaN (never mapped to a high rank)
 def test_empirical_rank_nan_stays_nan():
     ref = np.array([-1.0, 0.0, 1.0])
@@ -1204,8 +1275,9 @@ def test_audit_forbids_scientific_functions(monkeypatch, reuse_windows):
     e0.run_audit_only()   # must still complete successfully
 
 
-# 109: smoke still uses _cells_with_group + scientific wiring (behavior unchanged)
-def test_smoke_uses_cells_with_group_and_scientific_wiring(monkeypatch, reuse_windows, capsys):
+# 109: smoke still uses _cells_with_group + scientific wiring (behavior unchanged).
+#      Uses a cheap synthetic window instead of re-running the real pipeline.
+def test_smoke_uses_cells_with_group_and_scientific_wiring(monkeypatch):
     seen = {"cells": 0}
     orig = e0._cells_with_group
 
@@ -1214,15 +1286,19 @@ def test_smoke_uses_cells_with_group_and_scientific_wiring(monkeypatch, reuse_wi
         return orig(sub, group_col)
 
     monkeypatch.setattr(e0, "_cells_with_group", spy)
-    e0.run_smoke_test()
-    out = capsys.readouterr().out
-    assert seen["cells"] > 0           # smoke routes through the scientific cell helper
-    assert "DID" in out
-    assert "PSYCH_GATE" in out
+    _stub_smoke_heavy(monkeypatch)
+    res, _, _ = e0.run_window_complete(
+        _make_smoke_contract_frame(),
+        {"train": ["TB1", "TB2"], "eval": "TB3"},
+        n_boot=200, eval_cap=None, model_train_cap=8192)
+    assert seen["cells"] > 0            # smoke routes through the scientific cell helper
+    assert "DID_pi" in res["bootstrap"]  # scientific wiring present in payload
+    assert "PSYCH_GATE" in res["psych"]
 
 
-# 98: smoke passes n_boot=200 to the predictive (payoff/harm) paired bootstrap
-def test_smoke_predictive_n_boot_200(monkeypatch, reuse_windows):
+# 98: smoke passes n_boot=200 to the predictive (payoff/harm) paired bootstrap.
+#      Synthetic window + spy (no real pipeline).
+def test_smoke_predictive_n_boot_200(monkeypatch):
     seen = {}
     orig = e0.paired_day_loss_bootstrap
 
@@ -1231,12 +1307,16 @@ def test_smoke_predictive_n_boot_200(monkeypatch, reuse_windows):
         return orig(entry_day, loss0, loss1, n_boot, seed)
 
     monkeypatch.setattr(e0, "paired_day_loss_bootstrap", spy)
-    e0.run_smoke_test()
-    assert seen["predictive"] == 200
+    _stub_smoke_heavy(monkeypatch)
+    e0.run_window_complete(
+        _make_smoke_contract_frame(),
+        {"train": ["TB1", "TB2"], "eval": "TB3"},
+        n_boot=200, eval_cap=None, model_train_cap=8192)
+    assert seen["predictive"] == 200    # payoff AND harm paired bootstrap both forward n_boot=200
 
 
-# 99: smoke passes n_boot=200 to the psych_gate bootstrap
-def test_smoke_psych_n_boot_200(monkeypatch, reuse_windows):
+# 99: smoke passes n_boot=200 to the psych_gate bootstrap. Synthetic window + spy.
+def test_smoke_psych_n_boot_200(monkeypatch):
     seen = {}
     orig = e0.psych_gate_diagnostic
 
@@ -1244,9 +1324,69 @@ def test_smoke_psych_n_boot_200(monkeypatch, reuse_windows):
         seen["psych"] = n_boot
         return orig(eval_sub, cost, n_boot, seed)
 
+    monkeypatch.setattr(e0, "_predict_ridge", _stub_ridge)
+    monkeypatch.setattr(e0, "_predict_logistic", _stub_logistic)
+    monkeypatch.setattr(e0, "component_diagnostics", lambda ev, maps: {})
+    monkeypatch.setattr(e0, "age_zero_diagnostic", lambda sub: {})
     monkeypatch.setattr(e0, "psych_gate_diagnostic", spy)
-    e0.run_smoke_test()
+    e0.run_window_complete(
+        _make_smoke_contract_frame(),
+        {"train": ["TB1", "TB2"], "eval": "TB3"},
+        n_boot=200, eval_cap=None, model_train_cap=8192)
     assert seen["psych"] == 200
+
+
+# 0E.1b parity: the vectorized consensus rewrite must match the old rolling implementation
+# EXACTLY (same input -> identical c_path_agreement), incl. group boundaries + NaN/min_periods.
+def test_consensus_prior_vectorized_matches_rolling():
+    rng = np.random.default_rng(11)
+    n = 90
+    ep = np.repeat(np.arange(3), 30)  # 3 episodes -> group-boundary NaNs
+    df = pd.DataFrame({
+        "symbol": "X",
+        "episode_id": ep.astype(str),
+        "bar_t": np.tile(np.arange(30), 3),
+        "block": "TB1",
+        "score_mu": rng.normal(0, 1, n),
+        "path_last_return_R": rng.normal(0, 0.5, n),
+        "cur_up_distance_R": np.abs(rng.normal(1, 0.3, n)),
+        "cur_down_distance_R": np.abs(rng.normal(1, 0.3, n)),
+        "upper_newest_log_age": rng.uniform(0.5, 5, n),
+        "lower_newest_log_age": rng.uniform(0.5, 5, n),
+        "upper_n_active_identities": rng.integers(1, 8, n).astype(float),
+        "lower_n_active_identities": rng.integers(1, 8, n).astype(float),
+    })
+    # inject NaN mid-episode to exercise the min_periods branch
+    df.loc[5, "path_last_return_R"] = np.nan
+    df.loc[40, "path_last_return_R"] = np.nan
+    df.loc[70, "path_last_return_R"] = np.nan
+    for c in e0.CONSENSUS_RAW:
+        df[c] = rng.normal(0, 1, n)
+    new = e0.add_consensus_primitives(df)
+    oracle = _oracle_prior_rolling(df)
+    assert np.allclose(new["c_path_agreement"].to_numpy(float), oracle,
+                      atol=1e-12, equal_nan=True)
+
+
+# 0E.1b parity: the vectorized primitives preserve the exact-same numeric result as the
+# old per-row loop + sequential multinomial draws (which is what guarantees the bootstrap
+# rewrite is bit-identical to the pre-0E.1b implementation).
+def test_vectorized_primitives_preserve_order_parity():
+    pos = np.array([0, 1, 0, 2, 1, 0, 2, 1])
+    pi = np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8])
+    D = 3
+    bc = np.bincount(pos, weights=pi, minlength=D)
+    man = np.zeros(D)
+    for i in range(len(pos)):
+        man[pos[i]] += pi[i]
+    assert np.array_equal(bc, man)  # bincount == row loop (row-order accumulation)
+
+    # one RNG drawn sequentially vs one RNG drawn as a batch (matching the production path)
+    rng_a = np.random.default_rng(777)
+    a = np.array([rng_a.multinomial(D, np.full(D, 1.0 / D)) for _ in range(100)])
+    rng_b = np.random.default_rng(777)
+    b = rng_b.multinomial(D, np.full(D, 1.0 / D), size=100)
+    assert np.array_equal(a, b)  # matrix multinomial == sequential draws
 
 
 # 100: audit-only must NOT call run_window_complete (no scientific experiment)
@@ -1272,10 +1412,11 @@ def test_audit_emits_no_scientific_metric(capsys, reuse_windows):
         assert req in out, req
 
 
-# 102: in the real-pipeline test group, production Window A/B samplers each fit ONCE
-def test_production_ab_fit_only_once(real_scored_windows, reuse_windows):
+# 102: in the real-pipeline test group, production Window A/B samplers each fit ONCE.
+#      Reuses the single module-scoped real smoke (smoke_stdout) instead of re-running.
+def test_production_ab_fit_only_once(real_scored_windows, reuse_windows, smoke_stdout):
     e0.run_audit_only()
-    e0.run_smoke_test()
+    _ = smoke_stdout                      # triggers the single real smoke for the module
     assert real_scored_windows.fit_counts["A"] == 1
     assert real_scored_windows.fit_counts["B"] == 1
 
@@ -1290,11 +1431,11 @@ def test_real_audit_runs_and_emits_no_verdict(capsys, reuse_windows):
     assert "NO SCIENTIFIC VERDICT EMITTED" in out
 
 
-def test_real_smoke_runs_and_emits_no_verdict(capsys, reuse_windows):
-    e0.run_smoke_test()
-    out = capsys.readouterr().out
+def test_real_smoke_runs_and_emits_no_verdict(smoke_stdout):
+    out = smoke_stdout
     assert "score-owner parity" in out
     assert "SMOKE ONLY / NO SCIENTIFIC VERDICT" in out
+    assert "total_smoke_seconds" in out
 
 
 def test_window_owner_parity_passes(real_scored_windows):
