@@ -38,12 +38,18 @@ REUSE
   n0a = experiment_pgm_native0a_one_step_alpha_v1              (universe, audit, atr0 parity)
 
 ROUND 1 (this file): architecture + audit + smoke ONLY.
-`--full-exploratory` is HARD-BLOCKED (STOP_PGM_NATIVE0E_FULL_NOT_AUTHORIZED_ROUND1).
+`--full-exploratory` is HARD-BLOCKED.
+
+ROUND 2: the formal runner (`run_full_exploratory`), the authorization token gate,
+the 8 frozen artifacts (CSV/JSON), the in-memory validator and the disk-parity
+validator are implemented. The actual `--full-exploratory` run is still gated by
+AUTHORIZE_PGM_NATIVE0E_FULL_EXPLORATORY=1 and is NOT executed during Round 2.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -82,6 +88,8 @@ PREFIX = "pgm_native0e1"
 ALLOWED_BLOCKS = ["TB1", "TB2", "TB3"]
 TB2_BLOCK = "TB2"
 TB3_BLOCK = "TB3"
+# Formal evaluation windows (TB3 only decides the verdict).
+EVAL_BLOCKS = [TB2_BLOCK, TB3_BLOCK]
 
 EPS = 1e-9
 CONSENSUS_LOOKBACK = 5
@@ -103,6 +111,27 @@ SMOKE_EVAL_CAP = 2048
 # keeps model_train_cap=None (full train).
 SMOKE_MODEL_TRAIN_CAP = 8192
 CLUSTER_OWNER = "entry_day"
+
+# ---------------------------------------------------------------------------
+# Round 2: formal artifact contract
+# ---------------------------------------------------------------------------
+# Environment token that authorizes the ONE-SHOT formal full run. Only the exact
+# value "1" authorizes; anything else (unset / "0" / other) hard-stops.
+AUTHORIZE_ENV = "AUTHORIZE_PGM_NATIVE0E_FULL_EXPLORATORY"
+
+# The 8 frozen formal artifacts (no more, no fewer).
+ARTIFACT_FILES = [
+    "pgm_native0e1_primary_cells.csv",
+    "pgm_native0e1_primary_bootstrap.csv",
+    "pgm_native0e1_predictive_metrics.csv",
+    "pgm_native0e1_predictive_bootstrap.csv",
+    "pgm_native0e1_psych_gate.csv",
+    "pgm_native0e1_component_diagnostics.csv",
+    "pgm_native0e1_age_zero_diagnostics.csv",
+    "pgm_native0e1_formal_summary.json",
+]
+
+OUT_DIR = _REPO_ROOT / "research" / "analysis_results" / "local_liquidity_transition_v0"
 
 # The 4 interpretable psychology primitives (each from t-1 or earlier only)
 CONSENSUS_RAW = [
@@ -747,8 +776,13 @@ def _load_and_score():
 
 
 def require_full_authorization() -> None:
-    # Round 1: full is ALWAYS blocked, even if the token is present.
-    raise SystemExit("STOP_PGM_NATIVE0E_FULL_NOT_AUTHORIZED_ROUND1")
+    """Token gate for the one-shot formal full run.
+
+    Only the exact environment value "1" authorizes; anything else (unset, "0",
+    or any other string) hard-stops BEFORE any load / sampler fit / recompute.
+    """
+    if os.environ.get(AUTHORIZE_ENV) != "1":
+        raise SystemExit("STOP_PGM_NATIVE0E_FULL_NOT_AUTHORIZED")
 
 
 # ===========================================================================
@@ -937,6 +971,463 @@ def _causal_prefix_invariant() -> bool:
     return True
 
 
+# ===========================================================================
+# Round 2: formal artifact contract (pre-run closure / assembly / validators)
+# ===========================================================================
+def assert_no_existing_prefixed_artifacts(out_dir: Path = OUT_DIR) -> None:
+    """Pre-run closure: refuse if ANY pgm_native0e1_* artifact already exists.
+
+    Catches known artifacts, unknown extra artifacts, temp files, and partial runs.
+    Never deletes anything automatically.
+    """
+    existing = {p.name for p in out_dir.glob(f"{PREFIX}_*")}
+    if existing:
+        raise SystemExit(
+            f"STOP_PGM_NATIVE0E_FORMAL_ARTIFACT_ALREADY_EXISTS: {sorted(existing)}")
+
+
+def _collect_formal_meta(prep, scored_A, scored_B, fit_A, fit_B, head: str) -> Dict[str, Any]:
+    """Governance metadata for the summary (universe stats, hashes, window parity)."""
+    universe = n0a.load_observed_decision_universe()
+    aud = n0a.audit_decision_universe(universe)
+    hashes = n0c.compute_artifact_hashes()
+    return dict(
+        n_all_obs=aud["n_all_obs"], n_hazard0=aud["n_hazard0"], n_hazard1=aud["n_hazard1"],
+        symbols=list(aud["symbols"]),
+        blocks=sorted(universe["block"].unique().tolist()),
+        sample_sha=hashes["sample_artifact_sha256"],
+        transition_sha=hashes["transition_artifact_sha256"],
+        winA_owner=d0.verify_window_score_owner(scored_A, fit_A, TB2_BLOCK),
+        winB_owner=d0.verify_window_score_owner(scored_B, fit_B, TB3_BLOCK),
+        winA_finite=bool(d0.audit_acceleration_finite(scored_A)["all_finite"]),
+        winB_finite=bool(d0.audit_acceleration_finite(scored_B)["all_finite"]),
+    )
+
+
+def _formal_run_windows(scored_A: pd.DataFrame, scored_B: pd.DataFrame):
+    """Window A -> TB2, Window B -> TB3. Each window runs exactly ONCE with the
+    frozen formal contract (n_boot=2000, eval_cap=None, model_train_cap=None)."""
+    res_A, terr_A, maps_A = run_window_complete(
+        scored_A, pgm.WINDOWS[0], n_boot=BOOTSTRAP_N, eval_cap=None, model_train_cap=None)
+    res_B, terr_B, maps_B = run_window_complete(
+        scored_B, pgm.WINDOWS[1], n_boot=BOOTSTRAP_N, eval_cap=None, model_train_cap=None)
+    return res_A, res_B, terr_A, terr_B, maps_A, maps_B
+
+
+PRIMARY_CELL_COLS = ["block", "cell", "n", "mean_pi", "gross_EV", "net_EV_at_0p01",
+                     "harm_rate", "H1_prevalence"]
+PRIMARY_BOOT_COLS = ["block", "metric", "point", "ci95_lower", "ci95_upper", "p_pos"]
+PRED_METRIC_COLS = ["block", "target", "model", "mse", "mae", "spearman",
+                    "log_loss", "brier", "roc_auc", "pr_auc"]
+PRED_BOOT_COLS = ["block", "metric", "point", "ci95_lower", "ci95_upper", "p_pos"]
+PSYCH_COLS = ["n_decisions", "n_trades", "trade_rate", "gross_total_ATR0", "net_total_ATR0",
+              "gross_EV_per_decision", "net_EV_per_decision", "net_EV_per_trade",
+              "win_rate", "mean_win", "mean_loss", "payoff_ratio", "profit_factor",
+              "break_even_cost", "daily_sharpe_annualized", "max_drawdown_ATR0",
+              "positive_symbol_count", "top3_profit_share"]
+PSYCH_COLS_FULL = ["block", "policy"] + PSYCH_COLS + ["point", "ci95_lower", "ci95_upper", "p_pos"]
+COMP_COLS = ["Delta_LOW_pi", "Delta_HIGH_pi", "DID_pi", "Delta_LOW_harm", "Delta_HIGH_harm",
+             "DID_harm", "Delta_LOW_H1", "Delta_HIGH_H1", "DID_H1"]
+COMP_DIAG_COLS = ["block", "component"] + COMP_COLS
+AGE_DIAG_COLS = ["block", "variable", "spearman_with_consensus"]
+BOOT_METRICS = ["Delta_LOW_pi", "Delta_HIGH_pi", "DID_pi", "Delta_LOW_harm", "Delta_HIGH_harm",
+                "DID_harm", "Delta_LOW_H1", "Delta_HIGH_H1", "DID_H1"]
+
+
+def build_known_limitations() -> List[str]:
+    return [
+        "TB3 is exploratory / previously inspected, not pristine OOS.",
+        "TB4 untouched.",
+        "Frozen PGM sample exclusions remain.",
+        "Psychology is a structural proxy, not observed human sentiment.",
+        "H1 means episode termination, not structural reversal.",
+        "harm means one-bar continuation harm, not structural reversal.",
+        "Consensus score is equal-weight, train-ranked structural proxy.",
+        "Formal outcome is one-bar next-open to next-close payoff.",
+        "Primary economic cost is normalized 0.01 ATR0, not a market-specific execution model.",
+        "No new data added.",
+        "No threshold / feature / symbol tuning.",
+        "Earlier exploratory audit leakage at 33a338f and c37dc3e was observed, "
+        "but not used to alter the frozen science.",
+    ]
+
+
+def _assemble_artifacts(res_A, res_B, terr_A, terr_B, meta, head: str):
+    """Build the 7 CSV DataFrames + summary dict from run_window_complete outputs.
+
+    Pure record-to-DataFrame assembly (no per-row DataFrame.append / iterrows /
+    concat-in-loop). Every artifact is expanded directly from results already
+    produced by run_window_complete — no repeated fit or recompute.
+    """
+    pair = [(TB2_BLOCK, res_A, terr_A), (TB3_BLOCK, res_B, terr_B)]
+
+    # 1. primary cells (exact 8 rows)
+    cell_rows = []
+    for blk, res, _ in pair:
+        for cell in PRIMARY_CELLS:
+            c = res["cells"][cell]
+            cell_rows.append(dict(
+                block=blk, cell=cell, n=int(c["n"]), mean_pi=float(c["mean_pi"]),
+                gross_EV=float(c["gross_EV"]), net_EV_at_0p01=float(c["net_EV_at_0p01"]),
+                harm_rate=float(c["harm_rate"]), H1_prevalence=float(c["H1_prevalence"])))
+    primary_cells = pd.DataFrame(cell_rows, columns=PRIMARY_CELL_COLS)
+
+    # 2. primary bootstrap (exact 18 rows)
+    boot_rows = []
+    for blk, res, _ in pair:
+        for m in BOOT_METRICS:
+            b = res["bootstrap"][m]
+            boot_rows.append(dict(
+                block=blk, metric=m, point=float(b["point"]),
+                ci95_lower=float(b["ci95_lower"]), ci95_upper=float(b["ci95_upper"]),
+                p_pos=float(b["p_pos"])))
+    primary_bootstrap = pd.DataFrame(boot_rows, columns=PRIMARY_BOOT_COLS)
+
+    # 3. predictive metrics (exact 12 rows: PAYOFF_M0/M1, HARM_M0/M1, +2 delta rows)
+    nan = float("nan")
+    pred_rows = []
+    for blk, res, _ in pair:
+        m0, m1 = res["payoff_m0"], res["payoff_m1"]
+        h0, h1 = res["harm_m0"], res["harm_m1"]
+        pred_rows += [
+            dict(block=blk, target="pi", model="PAYOFF_M0", mse=m0["mse"], mae=m0["mae"],
+                 spearman=m0["spearman"], log_loss=nan, brier=nan, roc_auc=nan, pr_auc=nan),
+            dict(block=blk, target="pi", model="PAYOFF_M1", mse=m1["mse"], mae=m1["mae"],
+                 spearman=m1["spearman"], log_loss=nan, brier=nan, roc_auc=nan, pr_auc=nan),
+            dict(block=blk, target="harm_flag", model="HARM_M0", mse=nan, mae=nan, spearman=nan,
+                 log_loss=h0["log_loss"], brier=h0["brier"], roc_auc=h0["roc_auc"], pr_auc=h0["pr_auc"]),
+            dict(block=blk, target="harm_flag", model="HARM_M1", mse=nan, mae=nan, spearman=nan,
+                 log_loss=h1["log_loss"], brier=h1["brier"], roc_auc=h1["roc_auc"], pr_auc=h1["pr_auc"]),
+            dict(block=blk, target="pi", model="PAYOFF_DELTA", mse=res["delta_mse"], mae=nan,
+                 spearman=nan, log_loss=nan, brier=nan, roc_auc=nan, pr_auc=nan),
+            dict(block=blk, target="harm_flag", model="HARM_DELTA", mse=nan, mae=nan, spearman=nan,
+                 log_loss=res["delta_logloss"], brier=nan, roc_auc=nan, pr_auc=nan),
+        ]
+    predictive_metrics = pd.DataFrame(pred_rows, columns=PRED_METRIC_COLS)
+
+    # 4. predictive bootstrap (exact 4 rows)
+    pb_rows = []
+    for blk, res, _ in pair:
+        p, h = res["payoff_bootstrap"], res["harm_bootstrap"]
+        pb_rows += [
+            dict(block=blk, metric="Delta_MSE", point=float(p["point"]),
+                 ci95_lower=float(p["ci95_lower"]), ci95_upper=float(p["ci95_upper"]), p_pos=float(p["p_pos"])),
+            dict(block=blk, metric="Delta_LogLoss", point=float(h["point"]),
+                 ci95_lower=float(h["ci95_lower"]), ci95_upper=float(h["ci95_upper"]), p_pos=float(h["p_pos"])),
+        ]
+    predictive_bootstrap = pd.DataFrame(pb_rows, columns=PRED_BOOT_COLS)
+
+    # 5. psych gate (exact 6 rows: BASE / PSYCH_GATE / PSYCH_GATE_MINUS_BASE)
+    pg_rows = []
+    for blk, res, _ in pair:
+        psy = res["psych"]
+        for pol in ["BASE", "PSYCH_GATE"]:
+            sm = psy[pol]
+            row = {"block": blk, "policy": pol}
+            for c in PSYCH_COLS:
+                row[c] = sm[c]
+            row.update(point=nan, ci95_lower=nan, ci95_upper=nan, p_pos=nan)
+            pg_rows.append(row)
+        diff = psy["bootstrap"]["PSYCH_GATE-BASE"]
+        row = {"block": blk, "policy": "PSYCH_GATE_MINUS_BASE"}
+        for c in PSYCH_COLS:
+            row[c] = nan
+        row.update(point=float(diff["point"]), ci95_lower=float(diff["ci95_lower"]),
+                   ci95_upper=float(diff["ci95_upper"]), p_pos=float(diff["p_pos"]))
+        pg_rows.append(row)
+    psych_gate = pd.DataFrame(pg_rows, columns=PSYCH_COLS_FULL)
+
+    # 6. component diagnostics (exact 8 rows; secondary only, never enters verdict)
+    comp_rows = []
+    for blk, res, _ in pair:
+        for comp in CONSENSUS_RAW:
+            eff = res["component"][comp]
+            row = {"block": blk, "component": comp}
+            for c in COMP_COLS:
+                row[c] = float(eff[c])
+            comp_rows.append(row)
+    component_diagnostics = pd.DataFrame(comp_rows, columns=COMP_DIAG_COLS)
+
+    # 7. age-zero diagnostics (one row per block x variable present in the frame)
+    az_rows = []
+    age_vars: List[str] = []
+    for blk, res, _ in pair:
+        az = res["age_zero"]
+        for var, val in az.items():
+            az_rows.append(dict(block=blk, variable=var, spearman_with_consensus=float(val)))
+            if var not in age_vars:
+                age_vars.append(var)
+    age_zero_diagnostics = pd.DataFrame(az_rows, columns=AGE_DIAG_COLS)
+
+    dfs = {
+        ARTIFACT_FILES[0]: primary_cells,
+        ARTIFACT_FILES[1]: primary_bootstrap,
+        ARTIFACT_FILES[2]: predictive_metrics,
+        ARTIFACT_FILES[3]: predictive_bootstrap,
+        ARTIFACT_FILES[4]: psych_gate,
+        ARTIFACT_FILES[5]: component_diagnostics,
+        ARTIFACT_FILES[6]: age_zero_diagnostics,
+    }
+
+    # TB3-only verdict from the TB3 primary bootstrap.
+    tb3 = res_B["bootstrap"]
+    verdict = determine_psych_verdict(tb3["DID_pi"], tb3["Delta_LOW_pi"], tb3["Delta_HIGH_pi"])
+
+    def _block_stat(blk, res, terr):
+        return dict(
+            n_rank_train=int(res["n_rank_train"]),
+            n_train_primary=int(res["n_rank_train"]),
+            n_eval_primary=int(res["n_eval"]),
+            q_low=float(terr[0]), q_high=float(terr[1]),
+            cell_counts={k: int(res["cells"][k]["n"]) for k in PRIMARY_CELLS},
+        )
+
+    summary = dict(
+        experiment_name=EXPERIMENT_NAME,
+        experiment_scope=EXPERIMENT_SCOPE,
+        run_head=head,
+        base_sha=BASE_SHA,
+        sample_artifact_sha256=meta["sample_sha"],
+        transition_artifact_sha256=meta["transition_sha"],
+        n_all_obs=int(meta["n_all_obs"]), n_hazard0=int(meta["n_hazard0"]), n_hazard1=int(meta["n_hazard1"]),
+        symbols=list(meta["symbols"]), blocks=list(EVAL_BLOCKS),
+        bootstrap_n=int(BOOTSTRAP_N), bootstrap_seed=int(BOOTSTRAP_SEED), cluster_owner=CLUSTER_OWNER,
+        primary_cost_atr0=float(PRIMARY_COST_ATR0),
+        consensus_raw=list(CONSENSUS_RAW),
+        primary_acceleration_col=PRIMARY_ACCELERATION_COL,
+        consensus_time_contract="C_tminus1_to_A_t_to_pi_tplus1",
+        windowA_score_owner_max_abs_diff=float(meta["winA_owner"]),
+        windowB_score_owner_max_abs_diff=float(meta["winB_owner"]),
+        windowA_acceleration_finite=bool(meta["winA_finite"]),
+        windowB_acceleration_finite=bool(meta["winB_finite"]),
+        TB2=_block_stat(TB2_BLOCK, res_A, terr_A),
+        TB3=_block_stat(TB3_BLOCK, res_B, terr_B),
+        psychology_verdict=verdict,
+        artifact_files=list(ARTIFACT_FILES),
+        known_limitations=build_known_limitations(),
+        run_meta=dict(n_boot=int(BOOTSTRAP_N), model_train_cap=None, eval_cap=None),
+        timing=dict(windowA=res_A["timing"], windowB=res_B["timing"]),
+        actual_age_zero_variables=sorted(age_vars),
+    )
+    return dfs, summary
+
+
+def _json_default(o):
+    if isinstance(o, (np.floating,)):
+        return float(o)
+    if isinstance(o, (np.integer,)):
+        return int(o)
+    if isinstance(o, np.ndarray):
+        return o.tolist()
+    return str(o)
+
+
+def write_artifacts(dfs, summary, out_dir: Path = OUT_DIR) -> None:
+    """Write 7 CSVs + 1 JSON to disk. The JSON carries the exact in-memory summary."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for name, df in dfs.items():
+        df.to_csv(out_dir / name, index=False)
+    (out_dir / ARTIFACT_FILES[7]).write_text(
+        json.dumps(summary, indent=2, default=_json_default), encoding="utf-8")
+
+
+def validate_in_memory_results(dfs, summary) -> None:
+    """Pre-disk structural / scientific sanity on the in-memory results."""
+    if set(dfs.keys()) != set(ARTIFACT_FILES[:7]):
+        raise SystemExit("STOP_PGM_NATIVE0E_INMEM_RESULT_KEYS")
+    if set(summary["blocks"]) != {"TB2", "TB3"}:
+        raise SystemExit("STOP_PGM_NATIVE0E_BLOCKS_NOT_TB2_TB3")
+    if len(dfs[ARTIFACT_FILES[0]]) != 8:
+        raise SystemExit("STOP_PGM_NATIVE0E_PRIMARY_CELLS_ROWS")
+    if len(dfs[ARTIFACT_FILES[1]]) != 18:
+        raise SystemExit("STOP_PGM_NATIVE0E_PRIMARY_BOOTSTRAP_ROWS")
+    if len(dfs[ARTIFACT_FILES[2]]) != 12:
+        raise SystemExit("STOP_PGM_NATIVE0E_PREDICTIVE_METRICS_ROWS")
+    if len(dfs[ARTIFACT_FILES[3]]) != 4:
+        raise SystemExit("STOP_PGM_NATIVE0E_PREDICTIVE_BOOTSTRAP_ROWS")
+    if len(dfs[ARTIFACT_FILES[4]]) != 6:
+        raise SystemExit("STOP_PGM_NATIVE0E_PSYCH_GATE_ROWS")
+    if len(dfs[ARTIFACT_FILES[5]]) != 8:
+        raise SystemExit("STOP_PGM_NATIVE0E_COMPONENT_ROWS")
+    # cell n >= MIN_CELL_N
+    if int(dfs[ARTIFACT_FILES[0]]["n"].min()) < MIN_CELL_N:
+        raise SystemExit("STOP_PGM_NATIVE0E_CELL_TOO_SMALL")
+    # all formal CI ordered
+    for nm in (ARTIFACT_FILES[1], ARTIFACT_FILES[3]):
+        df = dfs[nm]
+        if (df["ci95_lower"] > df["ci95_upper"]).any():
+            raise SystemExit(f"STOP_PGM_NATIVE0E_CI_UNORDERED:{nm}")
+    diff = dfs[ARTIFACT_FILES[4]]
+    diff = diff[diff["policy"] == "PSYCH_GATE_MINUS_BASE"]
+    if (diff["ci95_lower"] > diff["ci95_upper"]).any():
+        raise SystemExit("STOP_PGM_NATIVE0E_PSYCH_CI_UNORDERED")
+    # all P>0 in [0,1]
+    for nm in (ARTIFACT_FILES[1], ARTIFACT_FILES[3]):
+        p = dfs[nm]["p_pos"].to_numpy(float)
+        if (p < 0).any() or (p > 1).any():
+            raise SystemExit(f"STOP_PGM_NATIVE0E_P_POS_RANGE:{nm}")
+    # window owner <= 1e-12
+    if summary["windowA_score_owner_max_abs_diff"] > 1e-12:
+        raise SystemExit("STOP_PGM_NATIVE0E_WINDOWA_OWNER_PARITY")
+    if summary["windowB_score_owner_max_abs_diff"] > 1e-12:
+        raise SystemExit("STOP_PGM_NATIVE0E_WINDOWB_OWNER_PARITY")
+    # acceleration finite
+    if not summary["windowA_acceleration_finite"] or not summary["windowB_acceleration_finite"]:
+        raise SystemExit("STOP_PGM_NATIVE0E_ACCELERATION_NON_FINITE")
+    # TB3-only verdict equals determine_psych_verdict recomputed from disk-ready data
+    pb = dfs[ARTIFACT_FILES[1]]
+    tb3 = pb[pb["block"] == TB3_BLOCK].set_index("metric")
+    def _bd(m):
+        return dict(point=tb3.loc[m, "point"], ci95_lower=tb3.loc[m, "ci95_lower"],
+                    ci95_upper=tb3.loc[m, "ci95_upper"], p_pos=tb3.loc[m, "p_pos"])
+    v = determine_psych_verdict(_bd("DID_pi"), _bd("Delta_LOW_pi"), _bd("Delta_HIGH_pi"))
+    if v != summary["psychology_verdict"]:
+        raise SystemExit("STOP_PGM_NATIVE0E_VERDICT_INCONSISTENT")
+    # formal full-fit contract
+    rm = summary["run_meta"]
+    if rm["n_boot"] != 2000 or rm["model_train_cap"] is not None or rm["eval_cap"] is not None:
+        raise SystemExit("STOP_PGM_NATIVE0E_RUN_META_CONTRACT")
+
+
+def _assert_csv_parity(disk: pd.DataFrame, exp: pd.DataFrame, name: str) -> None:
+    if list(disk.columns) != list(exp.columns):
+        raise SystemExit(f"STOP_PGM_NATIVE0E_CSV_COLS:{name}")
+    if len(disk) != len(exp):
+        raise SystemExit(f"STOP_PGM_NATIVE0E_CSV_ROWS:{name}:{len(disk)}!={len(exp)}")
+    sortkeys = {
+        ARTIFACT_FILES[0]: ["block", "cell"],
+        ARTIFACT_FILES[1]: ["block", "metric"],
+        ARTIFACT_FILES[2]: ["block", "target", "model"],
+        ARTIFACT_FILES[3]: ["block", "metric"],
+        ARTIFACT_FILES[4]: ["block", "policy"],
+        ARTIFACT_FILES[5]: ["block", "component"],
+        ARTIFACT_FILES[6]: ["block", "variable"],
+    }
+    sk = sortkeys[name]
+    d = disk.sort_values(sk).reset_index(drop=True)
+    e = exp.sort_values(sk).reset_index(drop=True)
+    for col in e.columns:
+        ev = e[col].to_numpy()
+        dv = d[col].to_numpy()
+        if pd.api.types.is_numeric_dtype(e[col]) and pd.api.types.is_numeric_dtype(d[col]):
+            if not np.allclose(ev, dv, rtol=0, atol=1e-12, equal_nan=True):
+                raise SystemExit(f"STOP_PGM_NATIVE0E_CSV_NUMERIC:{name}:{col}")
+        else:
+            if not (pd.Series(ev).astype(str).to_numpy() == pd.Series(dv).astype(str).to_numpy()).all():
+                raise SystemExit(f"STOP_PGM_NATIVE0E_CSV_STRING:{name}:{col}")
+
+
+def _json_equal(a, b, atol: float = 1e-12) -> bool:
+    if isinstance(a, dict) and isinstance(b, dict):
+        if set(a.keys()) != set(b.keys()):
+            return False
+        return all(_json_equal(a[k], b[k], atol) for k in a)
+    if isinstance(a, list) and isinstance(b, list):
+        if len(a) != len(b):
+            return False
+        return all(_json_equal(x, y, atol) for x, y in zip(a, b))
+    if isinstance(a, bool) or isinstance(b, bool):
+        return a == b
+    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+        return abs(float(a) - float(b)) <= atol
+    return a == b
+
+
+def _assert_disk_content_sanity(out_dir: Path) -> None:
+    """Independent scientific sanity on the RE-READ disk data (not the in-memory dict)."""
+    pc = pd.read_csv(out_dir / ARTIFACT_FILES[0])
+    if int(pc["n"].min()) < MIN_CELL_N:
+        raise SystemExit("STOP_PGM_NATIVE0E_CELL_TOO_SMALL_DISK")
+    for nm in (ARTIFACT_FILES[1], ARTIFACT_FILES[3]):
+        df = pd.read_csv(out_dir / nm)
+        if (df["ci95_lower"] > df["ci95_upper"]).any():
+            raise SystemExit(f"STOP_PGM_NATIVE0E_CI_UNORDERED_DISK:{nm}")
+    pg = pd.read_csv(out_dir / ARTIFACT_FILES[4])
+    diff = pg[pg["policy"] == "PSYCH_GATE_MINUS_BASE"]
+    if (diff["ci95_lower"] > diff["ci95_upper"]).any():
+        raise SystemExit("STOP_PGM_NATIVE0E_PSYCH_CI_UNORDERED_DISK")
+    for nm in (ARTIFACT_FILES[1], ARTIFACT_FILES[3]):
+        p = pd.read_csv(out_dir / nm)["p_pos"].to_numpy(float)
+        if (p < 0).any() or (p > 1).any():
+            raise SystemExit(f"STOP_PGM_NATIVE0E_P_POS_RANGE_DISK:{nm}")
+    summary = json.loads((out_dir / ARTIFACT_FILES[7]).read_text(encoding="utf-8"))
+    if summary["windowA_score_owner_max_abs_diff"] > 1e-12:
+        raise SystemExit("STOP_PGM_NATIVE0E_WINDOWA_OWNER_DISK")
+    if summary["windowB_score_owner_max_abs_diff"] > 1e-12:
+        raise SystemExit("STOP_PGM_NATIVE0E_WINDOWB_OWNER_DISK")
+    if not (summary["windowA_acceleration_finite"] and summary["windowB_acceleration_finite"]):
+        raise SystemExit("STOP_PGM_NATIVE0E_ACCELERATION_DISK")
+    pb = pd.read_csv(out_dir / ARTIFACT_FILES[1])
+    tb3 = pb[pb["block"] == TB3_BLOCK].set_index("metric")
+    def _bd(m):
+        return dict(point=tb3.loc[m, "point"], ci95_lower=tb3.loc[m, "ci95_lower"],
+                    ci95_upper=tb3.loc[m, "ci95_upper"], p_pos=tb3.loc[m, "p_pos"])
+    v = determine_psych_verdict(_bd("DID_pi"), _bd("Delta_LOW_pi"), _bd("Delta_HIGH_pi"))
+    if v != summary["psychology_verdict"]:
+        raise SystemExit("STOP_PGM_NATIVE0E_VERDICT_DISK")
+    rm = summary["run_meta"]
+    if rm["n_boot"] != 2000 or rm["model_train_cap"] is not None or rm["eval_cap"] is not None:
+        raise SystemExit("STOP_PGM_NATIVE0E_RUN_META_DISK")
+
+
+def validate_output_artifacts(out_dir: Path, dfs, summary) -> None:
+    """Re-read ALL 8 artifacts from disk and compare to the in-memory truth.
+
+    Checks: (1) exact artifact set, (2) per-CSV row/column/value parity (rtol=0,
+    atol<=1e-12, strings exact), (3) JSON item-by-item, (4) independent scientific
+    sanity on the re-read disk data.
+    """
+    actual = {p.name for p in out_dir.glob(f"{PREFIX}_*")}
+    expected = set(ARTIFACT_FILES)
+    if actual != expected:
+        raise SystemExit(
+            f"STOP_PGM_NATIVE0E_OUTPUT_PARITY_FAIL: actual={sorted(actual)} expected={sorted(expected)}")
+    for name in ARTIFACT_FILES[:7]:
+        disk = pd.read_csv(out_dir / name)
+        _assert_csv_parity(disk, dfs[name], name)
+    loaded = json.loads((out_dir / ARTIFACT_FILES[7]).read_text(encoding="utf-8"))
+    if not _json_equal(loaded, summary):
+        raise SystemExit("STOP_PGM_NATIVE0E_SUMMARY_JSON_PARITY_FAIL")
+    _assert_disk_content_sanity(out_dir)
+
+
+def run_full_exploratory(out_dir: Path = OUT_DIR) -> None:
+    """One-shot formal full run. GATED by AUTHORIZE_PGM_NATIVE0E_FULL_EXPLORATORY=1.
+
+    Pre-flight: auth -> clean tree -> clean index -> no existing artifacts -> HEAD.
+    Then a SINGLE _load_and_score(), windows A(TB2)/B(TB3) each once (n_boot=2000,
+    eval_cap=None, model_train_cap=None), assemble artifacts, validate in-memory,
+    write, then disk-parity validate.
+    """
+    # ---- pre-flight ----
+    require_full_authorization()
+    if subprocess.run(["git", "diff", "--exit-code"], cwd=str(_REPO_ROOT),
+                      capture_output=True).returncode != 0:
+        raise SystemExit("STOP_PGM_NATIVE0E_FORMAL_TREE_NOT_CLEAN")
+    if subprocess.run(["git", "diff", "--cached", "--exit-code"], cwd=str(_REPO_ROOT),
+                      capture_output=True).returncode != 0:
+        raise SystemExit("STOP_PGM_NATIVE0E_FORMAL_INDEX_NOT_CLEAN")
+    assert_no_existing_prefixed_artifacts(out_dir)
+    head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=str(_REPO_ROOT), text=True).strip()
+
+    # ---- single load + score ----
+    prep, fit_A, scored_A, fit_B, scored_B = _load_and_score()
+
+    # ---- windows (each exactly once) ----
+    res_A, res_B, terr_A, terr_B, maps_A, maps_B = _formal_run_windows(scored_A, scored_B)
+
+    # ---- metadata ----
+    meta = _collect_formal_meta(prep, scored_A, scored_B, fit_A, fit_B, head)
+
+    # ---- assemble ----
+    dfs, summary = _assemble_artifacts(res_A, res_B, terr_A, terr_B, meta, head)
+
+    # ---- validate in-memory, write, then disk parity ----
+    validate_in_memory_results(dfs, summary)
+    write_artifacts(dfs, summary, out_dir)
+    validate_output_artifacts(out_dir, dfs, summary)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=EXPERIMENT_NAME)
     ap.add_argument("--audit-only", action="store_true")
@@ -945,6 +1436,7 @@ def main() -> None:
     args = ap.parse_args()
     if args.full_exploratory:
         require_full_authorization()
+        run_full_exploratory()
     elif args.smoke:
         run_smoke_test()
     else:

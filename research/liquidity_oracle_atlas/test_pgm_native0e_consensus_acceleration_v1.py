@@ -741,16 +741,29 @@ def test_full_blocked_without_token():
         e0.require_full_authorization()
 
 
-def test_full_blocked_even_with_token():
-    # require_full_authorization blocks unconditionally (token is irrelevant by design)
+def test_full_blocked_even_with_token(monkeypatch):
+    # token present but NOT exactly "1" -> still blocked
+    monkeypatch.setenv(e0.AUTHORIZE_ENV, "0")
     with pytest.raises(SystemExit):
         e0.require_full_authorization()
 
 
-def test_module_has_no_run_full_exploratory_def():
-    src = inspect.getsource(e0)
-    assert "def run_full_exploratory" not in src
-    assert "run_full_exploratory(" not in src
+def test_formal_runner_wires_window_A_to_TB2_and_B_to_TB3(monkeypatch):
+    calls = []
+    def _fake_rwc(scored, w, n_boot, eval_cap=None, model_train_cap=None):
+        # recorder only; the real production sampler fit is NEVER entered
+        calls.append((w, n_boot, eval_cap, model_train_cap))
+        return {}, (0.1, 0.3), {}
+    monkeypatch.setattr(e0, "run_window_complete", _fake_rwc)
+    # direct routing call: no _load_and_score, no sampler fit, each window exactly once
+    e0._formal_run_windows(pd.DataFrame(), pd.DataFrame())
+    assert len(calls) == 2
+    assert calls[0][0] == pgm.WINDOWS[0]
+    assert calls[1][0] == pgm.WINDOWS[1]
+    for w, nb, ec, mt in calls:
+        assert nb == e0.BOOTSTRAP_N
+        assert ec is None
+        assert mt is None
 
 
 def test_governance_regression_no_authorized_full_in_tests():
@@ -1619,3 +1632,228 @@ def test_window_owner_parity_passes(real_scored_windows):
     dA = d0.verify_window_score_owner(scored_A, fit_A, e0.TB2_BLOCK)
     dB = d0.verify_window_score_owner(scored_B, fit_B, e0.TB3_BLOCK)
     assert dA < 1e-6 and dB < 1e-6
+
+
+# ===========================================================================
+# Round 2: formal artifact contract (authorization / pre-run / mutation / set)
+# These tests NEVER call run_full_exploratory(); they exercise the lower-level
+# assembly + disk-parity validators directly with synthetic but consistent data.
+# ===========================================================================
+def test_authorization_absent_stops(monkeypatch):
+    monkeypatch.delenv(e0.AUTHORIZE_ENV, raising=False)
+    with pytest.raises(SystemExit):
+        e0.require_full_authorization()
+
+
+def test_authorization_exact_one_passes(monkeypatch):
+    monkeypatch.setenv(e0.AUTHORIZE_ENV, "1")
+    assert e0.require_full_authorization() is None
+
+
+def test_prerun_no_stale_artifact_on_empty_dir_passes(tmp_path):
+    e0.assert_no_existing_prefixed_artifacts(tmp_path)  # must not raise
+
+
+def test_prerun_unknown_stale_artifact_stops(tmp_path):
+    (tmp_path / "pgm_native0e1_unknown_junk.csv").write_text("x")
+    with pytest.raises(SystemExit):
+        e0.assert_no_existing_prefixed_artifacts(tmp_path)
+
+
+def test_prerun_one_known_stale_artifact_stops(tmp_path):
+    (tmp_path / e0.ARTIFACT_FILES[0]).write_text("x")
+    with pytest.raises(SystemExit):
+        e0.assert_no_existing_prefixed_artifacts(tmp_path)
+
+
+def _fake_formal_res():
+    cells = {c: dict(n=700, mean_pi=0.01, gross_EV=0.01, net_EV_at_0p01=0.0,
+                     harm_rate=0.3, H1_prevalence=0.4) for c in e0.PRIMARY_CELLS}
+    boot = {m: dict(point=0.01, ci95_lower=-0.05, ci95_upper=0.07, p_pos=0.6)
+            for m in e0.BOOT_METRICS}
+    pm = dict(mse=0.1, mae=0.2, spearman=0.3)
+    hm = dict(log_loss=0.5, brier=0.25, roc_auc=0.6, pr_auc=0.55)
+    psy = dict(n_decisions=1000, n_trades=800, trade_rate=0.8, gross_total_ATR0=5.0,
+               net_total_ATR0=3.0, gross_EV_per_decision=0.005, net_EV_per_decision=0.003,
+               net_EV_per_trade=0.00375, win_rate=0.55, mean_win=0.02, mean_loss=-0.015,
+               payoff_ratio=1.33, profit_factor=1.2, break_even_cost=0.00625,
+               daily_sharpe_annualized=0.7, max_drawdown_ATR0=-0.4,
+               positive_symbol_count=12, top3_profit_share=0.5)
+    return dict(
+        cells=cells, bootstrap=boot,
+        payoff_m0=pm, payoff_m1=dict(mse=0.09, mae=0.19, spearman=0.31), delta_mse=0.01,
+        harm_m0=hm, harm_m1=dict(log_loss=0.48, brier=0.24, roc_auc=0.61, pr_auc=0.56),
+        delta_logloss=0.02,
+        payoff_bootstrap=dict(point=0.01, ci95_lower=-0.05, ci95_upper=0.07, p_pos=0.6),
+        harm_bootstrap=dict(point=0.01, ci95_lower=-0.05, ci95_upper=0.07, p_pos=0.6),
+        psych=dict(BASE=dict(psy), PSYCH_GATE=dict(psy),
+                   bootstrap={"PSYCH_GATE-BASE": dict(point=0.01, ci95_lower=-0.05,
+                                                      ci95_upper=0.07, p_pos=0.6)}),
+        component={comp: {c: 0.01 for c in e0.COMP_COLS} for comp in e0.CONSENSUS_RAW},
+        age_zero=dict(abs_score_mu=0.2, u_log_age=-0.1, upper_current_newest_age_zero=0.3,
+                      lower_current_newest_age_zero=0.25),
+        n_rank_train=15000, n_eval=6000,
+        timing=dict(consensus_s=5.0, model_s=1.0, bootstrap_s=0.1),
+    )
+
+
+def _fake_formal_meta():
+    return dict(n_all_obs=359714, n_hazard0=321727, n_hazard1=37987, symbols=["A", "B"],
+                blocks=["TB1", "TB2", "TB3"], sample_sha="sa", transition_sha="tr",
+                winA_owner=0.0, winB_owner=0.0, winA_finite=True, winB_finite=True)
+
+
+def _produce_artifacts(tmp_path):
+    resA = _fake_formal_res(); resB = _fake_formal_res()
+    terr = (0.1, 0.3)
+    dfs, summary = e0._assemble_artifacts(resA, resB, terr, terr, _fake_formal_meta(), "HEADXYZ")
+    e0.write_artifacts(dfs, summary, tmp_path)
+    return dfs, summary
+
+
+def _corrupt_csv(tmp_path, name, mutate):
+    p = tmp_path / name
+    df = pd.read_csv(p)
+    mutate(df)
+    df.to_csv(p, index=False)
+
+
+def test_art_mut_116_primary_cell_n_stops(tmp_path):
+    dfs, summary = _produce_artifacts(tmp_path)
+    def _m(df):
+        df.loc[0, "n"] = 1
+    _corrupt_csv(tmp_path, e0.ARTIFACT_FILES[0], _m)
+    with pytest.raises(SystemExit):
+        e0.validate_output_artifacts(tmp_path, dfs, summary)
+
+
+def test_art_mut_117_did_point_stops(tmp_path):
+    dfs, summary = _produce_artifacts(tmp_path)
+    def _m(df):
+        i = df.index[df["metric"] == "DID_pi"][0]
+        df.loc[i, "point"] = 9.99
+    _corrupt_csv(tmp_path, e0.ARTIFACT_FILES[1], _m)
+    with pytest.raises(SystemExit):
+        e0.validate_output_artifacts(tmp_path, dfs, summary)
+
+
+def test_art_mut_118_predictive_bootstrap_ci_stops(tmp_path):
+    dfs, summary = _produce_artifacts(tmp_path)
+    def _m(df):
+        df.loc[0, "ci95_upper"] = -9.99
+    _corrupt_csv(tmp_path, e0.ARTIFACT_FILES[3], _m)
+    with pytest.raises(SystemExit):
+        e0.validate_output_artifacts(tmp_path, dfs, summary)
+
+
+def test_art_mut_119_psych_gate_netEV_stops(tmp_path):
+    dfs, summary = _produce_artifacts(tmp_path)
+    def _m(df):
+        i = df.index[df["policy"] == "BASE"][0]
+        df.loc[i, "net_EV_per_decision"] = 123.0
+    _corrupt_csv(tmp_path, e0.ARTIFACT_FILES[4], _m)
+    with pytest.raises(SystemExit):
+        e0.validate_output_artifacts(tmp_path, dfs, summary)
+
+
+def test_art_mut_120_component_did_stops(tmp_path):
+    dfs, summary = _produce_artifacts(tmp_path)
+    def _m(df):
+        i = df.index[df["component"] == e0.CONSENSUS_RAW[0]][0]
+        df.loc[i, "DID_pi"] = 5.5
+    _corrupt_csv(tmp_path, e0.ARTIFACT_FILES[5], _m)
+    with pytest.raises(SystemExit):
+        e0.validate_output_artifacts(tmp_path, dfs, summary)
+
+
+def test_art_mut_121_age_zero_correlation_stops(tmp_path):
+    dfs, summary = _produce_artifacts(tmp_path)
+    def _m(df):
+        df.loc[0, "spearman_with_consensus"] = 0.999
+    _corrupt_csv(tmp_path, e0.ARTIFACT_FILES[6], _m)
+    with pytest.raises(SystemExit):
+        e0.validate_output_artifacts(tmp_path, dfs, summary)
+
+
+def test_art_mut_122_run_head_stops(tmp_path):
+    dfs, summary = _produce_artifacts(tmp_path)
+    s = dict(summary); s["run_head"] = "WRONG"
+    with pytest.raises(SystemExit):
+        e0.validate_output_artifacts(tmp_path, dfs, s)
+
+
+def test_art_mut_123_bootstrap_seed_stops(tmp_path):
+    dfs, summary = _produce_artifacts(tmp_path)
+    s = dict(summary); s["bootstrap_seed"] = 999
+    with pytest.raises(SystemExit):
+        e0.validate_output_artifacts(tmp_path, dfs, s)
+
+
+def test_art_mut_124_consensus_raw_stops(tmp_path):
+    dfs, summary = _produce_artifacts(tmp_path)
+    s = dict(summary); s["consensus_raw"] = ["x"]
+    with pytest.raises(SystemExit):
+        e0.validate_output_artifacts(tmp_path, dfs, s)
+
+
+def test_art_mut_125_windowA_owner_diff_stops(tmp_path):
+    dfs, summary = _produce_artifacts(tmp_path)
+    s = dict(summary); s["windowA_score_owner_max_abs_diff"] = 1.0
+    with pytest.raises(SystemExit):
+        e0.validate_output_artifacts(tmp_path, dfs, s)
+
+
+def test_art_mut_126_tb3_q_high_stops(tmp_path):
+    dfs, summary = _produce_artifacts(tmp_path)
+    s = dict(summary); s["TB3"] = dict(summary["TB3"]); s["TB3"]["q_high"] = 0.999
+    with pytest.raises(SystemExit):
+        e0.validate_output_artifacts(tmp_path, dfs, s)
+
+
+def test_art_mut_127_verdict_stops(tmp_path):
+    dfs, summary = _produce_artifacts(tmp_path)
+    s = dict(summary); s["psychology_verdict"] = "WRONG_VERDICT"
+    with pytest.raises(SystemExit):
+        e0.validate_output_artifacts(tmp_path, dfs, s)
+
+
+def test_art_mut_128_extra_prefixed_artifact_stops(tmp_path):
+    dfs, summary = _produce_artifacts(tmp_path)
+    (tmp_path / "pgm_native0e1_extra_junk.csv").write_text("x")
+    with pytest.raises(SystemExit):
+        e0.validate_output_artifacts(tmp_path, dfs, summary)
+
+
+def test_art_mut_129_missing_artifact_stops(tmp_path):
+    dfs, summary = _produce_artifacts(tmp_path)
+    (tmp_path / e0.ARTIFACT_FILES[2]).unlink()
+    with pytest.raises(SystemExit):
+        e0.validate_output_artifacts(tmp_path, dfs, summary)
+
+
+def test_art_130_exact_eight_artifacts_pass(tmp_path):
+    dfs, summary = _produce_artifacts(tmp_path)
+    e0.validate_output_artifacts(tmp_path, dfs, summary)  # must not raise
+    actual = {p.name for p in tmp_path.glob("pgm_native0e1_*")}
+    assert actual == set(e0.ARTIFACT_FILES)
+
+
+def test_art_131_in_memory_validation_passes(tmp_path):
+    dfs, summary = _produce_artifacts(tmp_path)
+    e0.validate_in_memory_results(dfs, summary)  # must not raise
+
+
+def test_art_132_formal_summary_carries_required_keys(tmp_path):
+    _, summary = _produce_artifacts(tmp_path)
+    for k in ("experiment_name", "experiment_scope", "run_head", "base_sha",
+              "sample_artifact_sha256", "transition_artifact_sha256", "n_all_obs",
+              "symbols", "blocks", "bootstrap_n", "bootstrap_seed", "cluster_owner",
+              "primary_cost_atr0", "consensus_raw", "primary_acceleration_col",
+              "consensus_time_contract", "windowA_score_owner_max_abs_diff",
+              "windowB_score_owner_max_abs_diff", "windowA_acceleration_finite",
+              "windowB_acceleration_finite", "TB2", "TB3", "psychology_verdict",
+              "artifact_files", "known_limitations", "run_meta"):
+        assert k in summary, k
+    assert summary["consensus_time_contract"] == "C_tminus1_to_A_t_to_pi_tplus1"
+    assert summary["run_meta"] == dict(n_boot=2000, model_train_cap=None, eval_cap=None)
+    assert set(summary["artifact_files"]) == set(e0.ARTIFACT_FILES)
