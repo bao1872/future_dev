@@ -1,0 +1,157 @@
+{
+  "experiment_name": "PGM-NATIVE-0E -- Directional Consensus x Acceleration Interaction",
+  "experiment_scope": "EXPLORATORY_PGM_CONSENSUS_ACCELERATION_INTERACTION_ON_TB1_TB2_TB3",
+  "run_head": "b3d23b94d9cd42f273c14037b9f89b026b82357b",
+  "base_sha": "f76b10e724848bfd34076652bf3c76f4cd1ef696",
+  "sample_artifact_sha256": "12cb5c109039f068535bd156278897df5e4a3179c73e8f792e9d3ca674e80f55",
+  "transition_artifact_sha256": "efdce8122e355d8f1407ddc3c9be3273fad998e2ecbad4372d159ccfa780c6b4",
+  "n_all_obs": 359714,
+  "n_hazard0": 321727,
+  "n_hazard1": 37987,
+  "symbols": [
+    "AG",
+    "AL",
+    "AU",
+    "CF",
+    "CU",
+    "I",
+    "M",
+    "MA",
+    "NI",
+    "P",
+    "RB",
+    "RU",
+    "SC",
+    "SN",
+    "TA"
+  ],
+  "blocks": [
+    "TB1",
+    "TB2",
+    "TB3"
+  ],
+  "eval_blocks": [
+    "TB2",
+    "TB3"
+  ],
+  "windows": {
+    "A": {
+      "train": [
+        "TB1"
+      ],
+      "eval": "TB2"
+    },
+    "B": {
+      "train": [
+        "TB1",
+        "TB2"
+      ],
+      "eval": "TB3"
+    }
+  },
+  "bootstrap_n": 2000,
+  "bootstrap_seed": 20260916,
+  "cluster_owner": "entry_day",
+  "primary_cost_atr0": 0.01,
+  "consensus_raw": [
+    "c_position",
+    "c_path_agreement",
+    "c_boundary_freshness",
+    "c_boundary_density"
+  ],
+  "primary_acceleration_col": "a_dir_accel_1",
+  "consensus_time_contract": "C_tminus1_to_A_t_to_pi_tplus1",
+  "windowA_score_owner_max_abs_diff": 0.0,
+  "windowB_score_owner_max_abs_diff": 0.0,
+  "windowA_acceleration_finite": true,
+  "windowB_acceleration_finite": true,
+  "max_abs_atr0_owner_error": 0.0,
+  "TB2": {
+    "n_rank_train": 61095,
+    "n_train_primary": 61095,
+    "n_eval_primary": 67393,
+    "q_low": -0.012390336519575754,
+    "q_high": 0.23970472698703676,
+    "cell_counts": {
+      "LOW_ACCEL": 13976,
+      "LOW_OFF": 10163,
+      "HIGH_ACCEL": 8343,
+      "HIGH_OFF": 12899
+    }
+  },
+  "TB3": {
+    "n_rank_train": 128792,
+    "n_train_primary": 128792,
+    "n_eval_primary": 64745,
+    "q_low": -0.020183550348233204,
+    "q_high": 0.23350259719084113,
+    "cell_counts": {
+      "LOW_ACCEL": 12620,
+      "LOW_OFF": 8585,
+      "HIGH_ACCEL": 9075,
+      "HIGH_OFF": 12884
+    }
+  },
+  "psychology_verdict": "PGM_CONSENSUS_ACCELERATION_NOT_SUPPORTED_EXPLORATORY",
+  "artifact_files": [
+    "pgm_native0e1_primary_cells.csv",
+    "pgm_native0e1_primary_bootstrap.csv",
+    "pgm_native0e1_predictive_metrics.csv",
+    "pgm_native0e1_predictive_bootstrap.csv",
+    "pgm_native0e1_psych_gate.csv",
+    "pgm_native0e1_component_diagnostics.csv",
+    "pgm_native0e1_age_zero_diagnostics.csv",
+    "pgm_native0e1_formal_summary.json"
+  ],
+  "known_limitations": [
+    "TB3 is exploratory / previously inspected, not pristine OOS.",
+    "TB4 untouched.",
+    "Frozen PGM sample exclusions remain.",
+    "Psychology is a structural proxy, not observed human sentiment.",
+    "H1 means episode termination, not structural reversal.",
+    "harm means one-bar continuation harm, not structural reversal.",
+    "Consensus score is equal-weight, train-ranked structural proxy.",
+    "Formal outcome is one-bar next-open to next-close payoff.",
+    "Primary economic cost is normalized 0.01 ATR0, not a market-specific execution model.",
+    "No new data added.",
+    "No threshold / feature / symbol tuning.",
+    "Earlier exploratory audit leakage at 33a338f and c37dc3e was observed, but not used to alter the frozen science."
+  ],
+  "run_meta": {
+    "n_boot": 2000,
+    "model_train_cap": null,
+    "eval_cap": null
+  },
+  "timing": {
+    "windowA": {
+      "consensus_s": 2.077602916979231,
+      "model_s": 3.371792124991771,
+      "bootstrap_s": 0.5529023749986663
+    },
+    "windowB": {
+      "consensus_s": 1.7129489170038141,
+      "model_s": 6.557792708044872,
+      "bootstrap_s": 0.40525750000961125
+    }
+  },
+  "actual_age_zero_variables": [
+    "abs_score_mu",
+    "lower_current_newest_age_zero",
+    "u_log_age",
+    "upper_current_newest_age_zero"
+  ],
+  "age_zero_variables_by_block": {
+    "TB2": [
+      "abs_score_mu",
+      "lower_current_newest_age_zero",
+      "u_log_age",
+      "upper_current_newest_age_zero"
+    ],
+    "TB3": [
+      "abs_score_mu",
+      "lower_current_newest_age_zero",
+      "u_log_age",
+      "upper_current_newest_age_zero"
+    ]
+  }
+}
