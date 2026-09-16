@@ -720,9 +720,9 @@ def _run_window(scored: pd.DataFrame, w: Dict[str, Any], n_boot: int,
 
     day_h1 = h1_ev["entry_day"].to_numpy()
     d_ll = n0c.fast_cluster_bootstrap_delta(day_h1, harm0["row_logloss"], harmA["row_logloss"],
-                                            n_boot=n_boot)
+                                            n_boot=n_boot, seed=BOOTSTRAP_SEED)
     d_mse = n0c.fast_cluster_bootstrap_delta(day_h1, payoff0["sqerr"], payoffA["sqerr"],
-                                             n_boot=n_boot)
+                                             n_boot=n_boot, seed=BOOTSTRAP_SEED)
 
     beta0 = calibrate_mu0(h0_tr)
     # hazard owner (frozen 0C structure: T2 + U + E) scored on the economic eval rows
@@ -751,7 +751,7 @@ def _run_window(scored: pd.DataFrame, w: Dict[str, Any], n_boot: int,
     net = {k: net_return(a, r_trad, PRIMARY_COST_ATR0) for k, a in policies.items()}
     metrics = {k: strategy_metrics(a, r_trad, PRIMARY_COST_ATR0, day, sym)
                for k, a in policies.items()}
-    boot = economic_bootstrap(day, net, n_boot=n_boot)
+    boot = economic_bootstrap(day, net, n_boot=n_boot, seed=BOOTSTRAP_SEED)
 
     # Cost grid: gates MUST be recomputed at each cost (the threshold IS the cost).
     cost_grid = {}
@@ -786,7 +786,10 @@ def _run_window(scored: pd.DataFrame, w: Dict[str, Any], n_boot: int,
     return dict(harm_metrics=dict(O0=m0, OA=mA), payoff_metrics=dict(O0=p0, OA=pA),
                 delta_harm_logloss=d_ll, delta_payoff_mse=d_mse,
                 beta0=beta0, n_h1_train=len(h1_tr), n_h1_eval=len(h1_ev),
-                n_h0_train=len(h0_tr), n_h0_eval=len(econ_ev),
+                n_h0_train=len(h0_tr),
+                n_econ_eval=len(econ_ev),
+                n_h0_eval=int(((econ_ev["hazard"] == 0)
+                               & (econ_ev["base_action"] != 0)).sum()),
                 p_h_mean=float(np.mean(p_h_UE)),
                 V0_mean=float(np.mean(V0)), VA_mean=float(np.mean(VA)),
                 metrics=metrics, bootstrap=boot, cost_grid=cost_grid,
@@ -994,6 +997,14 @@ def _write_full_artifacts(summary: Dict[str, Any], out_dir: Path) -> None:
 # ===========================================================================
 # Final artifact parity (fail-closed)
 # ===========================================================================
+def assert_no_existing_prefixed_artifacts(out_dir: Path) -> None:
+    """Pre-run closure: ANY pre-existing prefixed artifact aborts (not only the 8 known names)."""
+    out = Path(out_dir)
+    existing = sorted(p.name for p in out.glob(f"{PREFIX}_*")) if out.exists() else []
+    if existing:
+        raise SystemExit(f"STOP_PGM_NATIVE0D_FORMAL_ARTIFACT_ALREADY_EXISTS: {existing}")
+
+
 def validate_output_artifacts(summary: Dict[str, Any], out_dir: Path) -> bool:
     out = Path(out_dir)
     ATOL = 1e-12
@@ -1009,18 +1020,44 @@ def validate_output_artifacts(summary: Dict[str, Any], out_dir: Path) -> bool:
         if (not p.exists()) or p.stat().st_size == 0:
             _fail(f"missing/empty {fn}")
 
+    # Exact artifact-set closure: ONLY the 8 declared artifacts may carry this prefix.
+    actual = {p.name for p in out.glob(f"{PREFIX}_*")}
+    expected = set(ARTIFACT_FILES)
+    if actual != expected:
+        _fail(f"artifact set mismatch extra={sorted(actual - expected)} "
+              f"missing={sorted(expected - actual)}")
+
     # governance JSON parity
     js = json.loads((out / f"{PREFIX}_formal_summary.json").read_text())
     for k in ["EXPERIMENT_NAME", "EXPERIMENT_SCOPE", "base_sha", "run_head",
               "sample_artifact_sha256", "transition_artifact_sha256",
               "n_all_obs", "n_H0", "n_H1", "symbols", "blocks",
+              "same_block_entry_counts", "raw_block_counts",
               "max_abs_atr0_owner_error", "A_COLS", "OUTCOME_BASE_NUM", "OUTCOME_CAT",
               "PRIMARY_COST_ATR0", "COST_GRID", "BOOTSTRAP_N", "BOOTSTRAP_SEED",
-              "information_verdict", "economic_verdict"]:
+              "cluster_owner", "WindowA_score_owner_max_abs_diff",
+              "WindowB_score_owner_max_abs_diff", "WindowA_acceleration_finite",
+              "WindowB_acceleration_finite", "quintile_frozen_edges", "artifact_files",
+              "known_limitations", "information_verdict", "economic_verdict"]:
         if k not in summary:
             _fail(f"summary missing {k}")
         if k not in js or js[k] != summary[k]:
             _fail(f"formal_summary mismatch on {k}")
+
+    # governance hard constraints
+    if js["cluster_owner"] != "entry_day":
+        _fail("cluster_owner must be entry_day")
+    if js["WindowA_acceleration_finite"] is not True or js["WindowB_acceleration_finite"] is not True:
+        _fail("acceleration finite flags must be True")
+    for k in ["WindowA_score_owner_max_abs_diff", "WindowB_score_owner_max_abs_diff"]:
+        if not _close(js[k], summary[k]):
+            _fail(f"score-owner diff mismatch {k}")
+
+    # per-block sample-count parity (JSON vs in-memory), incl. the corrected n_h0_eval
+    for blk in ["TB2", "TB3"]:
+        for k in ["n_h1_train", "n_h1_eval", "n_h0_train", "n_h0_eval", "n_econ_eval"]:
+            if int(js[blk][k]) != int(summary[blk][k]):
+                _fail(f"sample count mismatch {blk}.{k}")
 
     # outcome metrics: 8 rows
     om = pd.read_csv(out / f"{PREFIX}_outcome_metrics.csv")
@@ -1148,9 +1185,7 @@ def run_full_exploratory(output_dir: Optional[Path] = None) -> Dict[str, Any]:
     require_full_authorization()
 
     out_dir = Path(output_dir) if output_dir is not None else FULL_RESULT_DIR
-    for fn in ARTIFACT_FILES:
-        if (out_dir / fn).exists():
-            raise SystemExit("STOP_PGM_NATIVE0D_FORMAL_ARTIFACT_ALREADY_EXISTS")
+    assert_no_existing_prefixed_artifacts(out_dir)
 
     prep = load_prepared_frame()
     obs = n0a.load_observed_decision_universe()

@@ -913,7 +913,7 @@ def _synth_bundle():
                               "OA": dict(mse=0.9, mae=0.7, spearman=0.2)},
               delta_harm_logloss=dict(point=0.01, ci95_lower=0.001, ci95_upper=0.02, p_pos=0.9),
               delta_payoff_mse=dict(point=0.01, ci95_lower=0.001, ci95_upper=0.02, p_pos=0.9),
-              n_h1_eval=10, n_h1_train=100, n_h0_train=1000,
+              n_h1_eval=10, n_h1_train=100, n_h0_train=1000, n_h0_eval=990, n_econ_eval=1000,
               metrics=r2_metrics, bootstrap=_synth_bootstrap(),
               cost_grid=grid_for(r2_metrics), quintiles=quint,
               quintile_edges={f: [-1.0, 0.0, 1.0] for f in d0.QUINTILE_FEATURES})
@@ -923,7 +923,7 @@ def _synth_bundle():
                               "OA": dict(mse=0.9, mae=0.7, spearman=0.2)},
               delta_harm_logloss=dict(point=0.01, ci95_lower=0.002, ci95_upper=0.02, p_pos=0.9),
               delta_payoff_mse=dict(point=0.01, ci95_lower=0.003, ci95_upper=0.02, p_pos=0.9),
-              n_h1_eval=10, n_h1_train=100, n_h0_train=1000,
+              n_h1_eval=10, n_h1_train=100, n_h0_train=1000, n_h0_eval=990, n_econ_eval=1000,
               metrics=r3_metrics, bootstrap=_synth_bootstrap(),
               cost_grid=grid_for(r3_metrics), quintiles=quint,
               quintile_edges={f: [-1.0, 0.0, 1.0] for f in d0.QUINTILE_FEATURES})
@@ -933,6 +933,7 @@ def _synth_bundle():
         sample_artifact_sha256="a" * 64, transition_artifact_sha256="b" * 64,
         n_all_obs=100, n_H0=90, n_H1=10, symbols=_SYMS, blocks=["TB1", "TB2", "TB3"],
         same_block_entry_counts={"TB1": 10, "TB2": 10, "TB3": 10},
+        raw_block_counts={"TB1": 10, "TB2": 10, "TB3": 10},
         max_abs_atr0_owner_error=0.0,
         A_COLS=list(d0.A_COLS), OUTCOME_BASE_NUM=d0.outcome_base_num(),
         OUTCOME_CAT=d0.outcome_cat(), PRIMARY_COST_ATR0=d0.PRIMARY_COST_ATR0,
@@ -944,7 +945,8 @@ def _synth_bundle():
         information_verdict=d0.determine_information_verdict(r3["delta_harm_logloss"],
                                                              r3["delta_payoff_mse"]),
         economic_verdict=d0.determine_economic_verdict(r2["bootstrap"], r3["bootstrap"]),
-        quintile_frozen_edges={}, known_limitations=["x"],
+        quintile_frozen_edges={}, artifact_files=list(d0.ARTIFACT_FILES),
+        known_limitations=["x"],
     )
     return summary
 
@@ -1134,6 +1136,200 @@ def test_100_flipa_cannot_alter_primary_verdict():
     bad3b = _synth_bootstrap()
     bad3b["GATEA-BASE"] = dict(point=-9.0, ci95_lower=-9.0, ci95_upper=-8.0, p_pos=0.0)
     assert d0.determine_economic_verdict(good2, bad3b) == v
+
+
+# --- 103-105 explicit bootstrap seed ownership ---------------------------
+_SEED_CAP = None
+
+
+def seed_cap():
+    global _SEED_CAP
+    if _SEED_CAP is None:
+        cap = {"info": [], "econ": []}
+        orig_i = d0.n0c.fast_cluster_bootstrap_delta
+        orig_e = d0.economic_bootstrap
+
+        def spy_i(day, base, aug, n_boot=2000, seed=None, **kw):
+            cap["info"].append(seed)
+            return orig_i(day, base, aug, n_boot=n_boot, seed=seed)
+
+        def spy_e(day, net, n_boot=2000, seed=None, **kw):
+            cap["econ"].append(seed)
+            return orig_e(day, net, n_boot=n_boot, seed=seed)
+
+        d0.n0c.fast_cluster_bootstrap_delta = spy_i
+        d0.economic_bootstrap = spy_e
+        try:
+            d0._run_window(scored_A(), d0.pgm.WINDOWS[0], n_boot=20, eval_cap=200)
+        finally:
+            d0.n0c.fast_cluster_bootstrap_delta = orig_i
+            d0.economic_bootstrap = orig_e
+        _SEED_CAP = cap
+    return _SEED_CAP
+
+
+def test_103_harm_information_bootstrap_explicit_seed():
+    cap = seed_cap()
+    assert len(cap["info"]) >= 1
+    assert cap["info"][0] == d0.BOOTSTRAP_SEED == 20260916
+
+
+def test_104_payoff_information_bootstrap_explicit_seed():
+    cap = seed_cap()
+    assert len(cap["info"]) >= 2
+    assert cap["info"][1] == d0.BOOTSTRAP_SEED == 20260916
+
+
+def test_105_economic_bootstrap_explicit_seed():
+    cap = seed_cap()
+    assert len(cap["econ"]) >= 1
+    assert all(s == d0.BOOTSTRAP_SEED for s in cap["econ"])
+
+
+# --- 106/107 sample-count semantics --------------------------------------
+def _expected_counts():
+    wA = d0.pgm.WINDOWS[0]
+    sc = scored_A()
+    ev = sc[sc["block"] == wA["eval"]]
+    econ = ev[ev["same_block_entry_valid"]].head(300)
+    n_econ = len(econ)
+    n_h0 = int(((econ["hazard"] == 0) & (econ["base_action"] != 0)).sum())
+    n_h1 = int(((econ["hazard"] == 1) & (econ["base_action"] != 0)).sum())
+    return n_econ, n_h0, n_h1
+
+
+def test_106_n_econ_eval_semantics():
+    r = win_A_run()
+    n_econ, _, _ = _expected_counts()
+    assert r["n_econ_eval"] == n_econ
+
+
+def test_107_n_h0_eval_semantics():
+    r = win_A_run()
+    n_econ, n_h0, n_h1 = _expected_counts()
+    assert r["n_h0_eval"] == n_h0
+    assert r["n_h1_eval"] == n_h1
+    # non-vacuous: n_h0_eval must NOT be the whole economic eval count
+    assert r["n_h0_eval"] != n_econ or n_h1 == 0
+
+
+# --- 108-115 final JSON governance mutations ----------------------------
+def _mutate_json(td, mutator):
+    p = td / f"{d0.PREFIX}_formal_summary.json"
+    js = json.loads(p.read_text())
+    mutator(js)
+    p.write_text(json.dumps(js, indent=2, default=str))
+
+
+def test_108_mutate_cluster_owner_stops():
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        summary, td = _write_synth(tmp)
+        _mutate_json(td, lambda js: js.__setitem__("cluster_owner", "episode_start_day"))
+        _expect_fail(summary, td)
+
+
+def test_109_mutate_window_a_owner_diff_stops():
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        summary, td = _write_synth(tmp)
+        _mutate_json(td, lambda js: js.__setitem__("WindowA_score_owner_max_abs_diff", 0.5))
+        _expect_fail(summary, td)
+
+
+def test_110_mutate_window_b_accel_finite_stops():
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        summary, td = _write_synth(tmp)
+        _mutate_json(td, lambda js: js.__setitem__("WindowB_acceleration_finite", False))
+        _expect_fail(summary, td)
+
+
+def test_111_mutate_same_block_entry_counts_stops():
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        summary, td = _write_synth(tmp)
+        _mutate_json(td, lambda js: js.__setitem__("same_block_entry_counts",
+                                                   {"TB1": 999, "TB2": 10, "TB3": 10}))
+        _expect_fail(summary, td)
+
+
+def test_112_mutate_quintile_frozen_edges_stops():
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        summary, td = _write_synth(tmp)
+        _mutate_json(td, lambda js: js.__setitem__("quintile_frozen_edges", {"TB2": {"x": [1]}}))
+        _expect_fail(summary, td)
+
+
+def test_113_mutate_artifact_files_stops():
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        summary, td = _write_synth(tmp)
+        _mutate_json(td, lambda js: js["artifact_files"].append("bogus.csv"))
+        _expect_fail(summary, td)
+
+
+def test_114_mutate_known_limitations_stops():
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        summary, td = _write_synth(tmp)
+        _mutate_json(td, lambda js: js["known_limitations"].append("tampered"))
+        _expect_fail(summary, td)
+
+
+def test_115_mutate_tb2_n_h0_eval_stops():
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        summary, td = _write_synth(tmp)
+        _mutate_json(td, lambda js: js["TB2"].__setitem__("n_h0_eval", 12345))
+        _expect_fail(summary, td)
+
+
+# --- 116-118 artifact-set closure ----------------------------------------
+def test_116_extra_prefixed_artifact_stops():
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        summary, td = _write_synth(tmp)
+        (td / f"{d0.PREFIX}_stray.csv").write_text("x\n1\n")
+        _expect_fail(summary, td)
+
+
+def test_117_pre_run_guard_blocks_existing_artifact():
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        td = Path(tmp)
+        d0.assert_no_existing_prefixed_artifacts(td)  # empty dir -> OK
+        (td / f"{d0.PREFIX}_stray.csv").write_text("x\n1\n")
+        raised = None
+        try:
+            d0.assert_no_existing_prefixed_artifacts(td)
+        except SystemExit as e:
+            raised = str(e)
+        assert raised is not None
+        assert "STOP_PGM_NATIVE0D_FORMAL_ARTIFACT_ALREADY_EXISTS" in raised
+
+
+def test_118_exact_artifact_set_eight_passes():
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        summary, td = _write_synth(tmp)
+        assert d0.validate_output_artifacts(summary, td) is True
+        got = {p.name for p in td.glob(f"{d0.PREFIX}_*")}
+        assert got == set(d0.ARTIFACT_FILES)
+        assert len(got) == 8
+
+
+# --- 119 governance-incident regression ----------------------------------
+def test_119_no_test_authorizes_heavy_full():
+    src = Path(__file__).read_text()
+    # No unit test may invoke the heavy full runner at all (build the needle so this
+    # assertion cannot match its own literal).
+    needle = "run_full_exploratory" + "()"
+    assert needle not in src
+    # the runner must be gated before any heavy work
+    rsrc = inspect.getsource(d0.run_full_exploratory)
+    assert rsrc.index("require_full_authorization()") < rsrc.index("load_prepared_frame()")
 
 
 # --- runner --------------------------------------------------------------
