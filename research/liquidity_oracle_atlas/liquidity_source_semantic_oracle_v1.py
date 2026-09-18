@@ -21,9 +21,25 @@ The implementation mirrors the Pine state machine literally:
                       scan ``break`` on out-of-band old node, ``count > 2`` gate,
                       ``center = (cluster_max + cluster_min) / 2``.
   * level objects   : ``start_bar`` equality -> update top/bottom, else insert;
-                      visible cap ``visLiq = 3`` (oldest evicted).
+                      visible cap ``visLiq = 3`` (oldest evicted). Each real
+                      level keeps its own ``brL`` / ``brZ`` (breach / post-break
+                      zone) flags.
   * breach          : strict ``high > top`` (high) / ``low < bottom`` (low).
-  * post-break zone : strict ``low > level - 2.3*atr and high < level + 2.3*atr``.
+                      On the breach bar ``brL`` and ``brZ`` are both set and the
+                      post-break zone is NOT tested (literal ``else if x.brZ``).
+  * post-break zone : strict ``low > level - 2.3*atr and high < level + 2.3*atr``,
+                      evaluated per level on subsequent bars only.
+  * pivot truthiness: pinned source consumes pivots via independent ``if ph`` /
+                      ``if pl`` numeric conditions; Pine v5 coerces to bool, so
+                      ``0 / 0.0 / na`` is false. ``pine_v5_truthy_float`` enforces this.
+
+Dummy sentinel abstraction
+---------------------------
+Pinned Pine initialises ``b_liq_B`` / ``b_liq_S`` with ONE dummy ``liq`` object, so
+``array.size()`` is never the literal real-level count. This Oracle keeps ONLY real
+levels (``PINE_DUMMY_SENTINEL_ABSTRACTED = True``): the dummy participates in no
+breach / geometry, affects only the raw ``array.size()`` which source parity does
+NOT use. Counts are reported as ``visible_real_*_count`` / ``active_unbroken_*_count``.
 
 No fix recommendation, no production bug judgement. Observations only.
 """
@@ -59,6 +75,11 @@ SOURCE_MODE_UI_DEFAULT = "Present"
 RESEARCH_COMPARISON_MODE = "Historical"
 
 SOURCE_MARKERS: dict = {}
+
+# Dummy sentinel abstraction: pinned Pine seeds b_liq_B / b_liq_S with one dummy
+# liq object, so raw array.size() is never the literal real-level count. This
+# Oracle keeps only real levels; the dummy is abstracted away (see module docstring).
+PINE_DUMMY_SENTINEL_ABSTRACTED = True
 
 
 # ===========================================================================
@@ -169,6 +190,18 @@ def pine_rma(x: np.ndarray, length: int) -> np.ndarray:
 
 def atr_pine(high, low, close, length: int = ATR_LEN) -> np.ndarray:
     return pine_rma(true_range(high, low, close), length)
+
+
+def pine_v5_truthy_float(x) -> bool:
+    """Pine v5 numeric truthiness for ``if ph`` / ``if pl``.
+
+    TradingView Pine v5 coerces a numeric condition to bool: ``0 / 0.0 / na``
+    -> false, any other (non-zero, finite) value -> true. The pinned Liquidity
+    source consumes pivots via two independent ``if ph`` / ``if pl`` conditions,
+    NOT a strict-uniqueness gate. Production uses ``np.isfinite(...)`` which would
+    wrongly treat ``0.0`` as a pivot -- this helper closes that gap.
+    """
+    return np.isfinite(x) and float(x) != 0.0
 
 
 # ===========================================================================
@@ -301,7 +334,8 @@ def cluster_level_literal(zz, side, pivot, atr_i):
         "top": float(center + margin),
         "bottom": float(center - margin),
         "side": side,
-        "broken": False,
+        "brL": False,   # breached? (literal x.brL)
+        "brZ": False,   # post-break zone active? (literal x.brZ)
         "breach_i": None,
     }
 
@@ -323,10 +357,16 @@ def update_level_objects_literal(levels, obj):
 def run_liquidity_state_machine(high, low, close, atr, ph, pl, mode=RESEARCH_COMPARISON_MODE):
     """Run the literal liquidity state machine.
 
-    Returns a list (length n) of per-bar dicts with source-exact fields:
-      breach_up, breach_down, up_count, down_count, zone_active
-    plus compact diagnostics (zz_dir, zz_len, vis_up, vis_down) for the
-    mismatch bundle.
+    Returns a list (length n) of per-bar dicts. Source-exact fields:
+      breach_up, breach_down, zone_active (zone_active is each-level brZ OR).
+    Real-level diagnostics (NOT literal Pine array.size):
+      visible_real_up_count / visible_real_down_count  = len(real levels)
+      active_unbroken_up_count / active_unbroken_down_count = count(brL == False)
+    plus compact diagnostics (zz_dir, zz_len, vis_up, vis_down) for the bundle.
+
+    Pivot consumption uses ``pine_v5_truthy_float`` (``if ph`` / ``if pl`` truthiness).
+    Each real level keeps its own ``brL`` / ``brZ``; on the breach bar both are set
+    and the post-break zone is NOT tested (literal ``else if x.brZ``).
     """
     n = len(close)
     high = np.asarray(high, dtype=float)
@@ -337,16 +377,17 @@ def run_liquidity_state_machine(high, low, close, atr, ph, pl, mode=RESEARCH_COM
     pl = np.asarray(pl, dtype=float)
 
     zz = []
-    levels_up = []    # newest-first
-    levels_down = []  # newest-first
-    last_breach = None  # {"side","level","i","zone_active"}
+    real_levels_up = []    # newest-first, real levels only (dummy abstracted)
+    real_levels_down = []  # newest-first
+    last_breach = None  # informational most-recent breach (NOT used for zone logic)
 
     out = []
     for i in range(n):
         # Zigzag always updated (Pine builds it before the per-gated block).
-        if np.isfinite(ph[i]):
+        # Two independent truthy conditions (not ph-priority): high block then low block.
+        if pine_v5_truthy_float(ph[i]):
             update_zigzag_literal(zz, +1, i - LIQ_RIGHT, ph[i])
-        if np.isfinite(pl[i]):
+        if pine_v5_truthy_float(pl[i]):
             update_zigzag_literal(zz, -1, i - LIQ_RIGHT, pl[i])
 
         # per gate (Historical comparison => always True)
@@ -358,48 +399,66 @@ def run_liquidity_state_machine(high, low, close, atr, ph, pl, mode=RESEARCH_COM
 
         if do_state:
             # cluster high
-            if np.isfinite(ph[i]):
+            if pine_v5_truthy_float(ph[i]):
                 obj = cluster_level_literal(zz, +1, ph[i], atr[i])
                 if obj is not None:
-                    update_level_objects_literal(levels_up, obj)
+                    update_level_objects_literal(real_levels_up, obj)
             # cluster low
-            if np.isfinite(pl[i]):
+            if pine_v5_truthy_float(pl[i]):
                 obj = cluster_level_literal(zz, -1, pl[i], atr[i])
                 if obj is not None:
-                    update_level_objects_literal(levels_down, obj)
-            # breach (literal, strict)
-            for lev in levels_up:
-                if (not lev["broken"]) and high[i] > lev["top"]:
-                    lev["broken"] = True
+                    update_level_objects_literal(real_levels_down, obj)
+
+            # breach (literal, strict). Sets brL=brZ=True; zone NOT tested this bar.
+            newly_breached = []
+            for lev in real_levels_up:
+                if (not lev["brL"]) and high[i] > lev["top"]:
+                    lev["brL"] = True
+                    lev["brZ"] = True
                     lev["breach_i"] = i
                     breach_up_i = 1
-                    last_breach = {"side": +1, "level": lev["level"], "i": i, "zone_active": True}
-            for lev in levels_down:
-                if (not lev["broken"]) and low[i] < lev["bottom"]:
-                    lev["broken"] = True
+                    newly_breached.append(lev)
+                    last_breach = {"side": +1, "level": lev["level"], "i": i}
+            for lev in real_levels_down:
+                if (not lev["brL"]) and low[i] < lev["bottom"]:
+                    lev["brL"] = True
+                    lev["brZ"] = True
                     lev["breach_i"] = i
                     breach_down_i = 1
-                    last_breach = {"side": -1, "level": lev["level"], "i": i, "zone_active": True}
-            # post-break zone (strict band)
-            if last_breach is not None and last_breach["zone_active"]:
-                level = last_breach["level"]
-                ai = atr[i]
-                if np.isfinite(ai) and ai > 0:
-                    inside = (low[i] > level - POSTBREAK_ATR * ai) and (high[i] < level + POSTBREAK_ATR * ai)
-                    if not inside:
-                        last_breach["zone_active"] = False
-                zone_active_i = 1 if last_breach["zone_active"] else 0
+                    newly_breached.append(lev)
+                    last_breach = {"side": -1, "level": lev["level"], "i": i}
+
+            # post-break zone (per level, subsequent bars only)
+            any_brZ = False
+            for lev in real_levels_up + real_levels_down:
+                if lev in newly_breached:
+                    # breach bar: brZ already True, skip exit test (literal else if brZ)
+                    if lev["brZ"]:
+                        any_brZ = True
+                    continue
+                if lev["brL"] and lev["brZ"]:
+                    ai = atr[i]
+                    if np.isfinite(ai) and ai > 0:
+                        inside = (low[i] > lev["level"] - POSTBREAK_ATR * ai) and (
+                            high[i] < lev["level"] + POSTBREAK_ATR * ai)
+                        if not inside:
+                            lev["brZ"] = False
+                    if lev["brZ"]:
+                        any_brZ = True
+            zone_active_i = 1 if any_brZ else 0
 
         out.append({
             "breach_up": breach_up_i,
             "breach_down": breach_down_i,
-            "up_count": int(len(levels_up)),   # literal b_liq_B.size() (incl. broken)
-            "down_count": int(len(levels_down)),
+            "visible_real_up_count": int(len(real_levels_up)),
+            "visible_real_down_count": int(len(real_levels_down)),
+            "active_unbroken_up_count": int(sum(1 for x in real_levels_up if not x["brL"])),
+            "active_unbroken_down_count": int(sum(1 for x in real_levels_down if not x["brL"])),
             "zone_active": zone_active_i,
             "zz_dir": zz[0]["dir"] if zz else 0,
             "zz_len": int(len(zz)),
-            "vis_up": [dict(lv) for lv in levels_up],
-            "vis_down": [dict(lv) for lv in levels_down],
+            "vis_up": [dict(lv) for lv in real_levels_up],
+            "vis_down": [dict(lv) for lv in real_levels_down],
         })
     return out
 
@@ -484,32 +543,32 @@ def run_self_tests():
     ph, pl = _inj(80, [(10, "high", 100.0), (20, "low", 50.0), (30, "high", 103.0)])
     h, l, c = _flat(80)
     sm = run_liquidity_state_machine(h, l, c, atr, ph, pl)
-    ok = (sm[-1]["up_count"] == 0)
-    rec("L07", ok, "up_count=%d (expect 0, count=2)" % sm[-1]["up_count"])
+    ok = (sm[-1]["visible_real_up_count"] == 0)
+    rec("L07", ok, "up_count=%d (expect 0, count=2)" % sm[-1]["visible_real_up_count"])
 
     # ---- L08 cluster count = 3 -> level created ----
     ph, pl = _inj(80, [(10, "high", 100.0), (20, "low", 50.0), (30, "high", 102.0),
                       (40, "low", 50.0), (50, "high", 98.0)])
     h, l, c = _flat(80)
     sm = run_liquidity_state_machine(h, l, c, atr, ph, pl)
-    ok = (sm[-1]["up_count"] == 1 and len(sm[-1]["vis_up"]) == 1)
-    rec("L08", ok, "up_count=%d (expect 1)" % sm[-1]["up_count"])
+    ok = (sm[-1]["visible_real_up_count"] == 1 and len(sm[-1]["vis_up"]) == 1)
+    rec("L08", ok, "up_count=%d (expect 1)" % sm[-1]["visible_real_up_count"])
 
     # ---- L09 lower margin equality (y == pivot - margin excluded) ----
     ph, pl = _inj(80, [(10, "high", 103.0), (20, "low", 50.0), (30, "high", 93.1),
                       (40, "low", 50.0), (50, "high", 100.0)])
     h, l, c = _flat(80)
     sm = run_liquidity_state_machine(h, l, c, atr, ph, pl)
-    ok = (sm[-1]["up_count"] == 0)
-    rec("L09", ok, "up_count=%d (expect 0; 93.1 == pivot-margin excluded)" % sm[-1]["up_count"])
+    ok = (sm[-1]["visible_real_up_count"] == 0)
+    rec("L09", ok, "up_count=%d (expect 0; 93.1 == pivot-margin excluded)" % sm[-1]["visible_real_up_count"])
 
     # ---- L10 upper margin equality (y == pivot + margin excluded) ----
     ph, pl = _inj(80, [(10, "high", 97.0), (20, "low", 50.0), (30, "high", 106.9),
                       (40, "low", 50.0), (50, "high", 100.0)])
     h, l, c = _flat(80)
     sm = run_liquidity_state_machine(h, l, c, atr, ph, pl)
-    ok = (sm[-1]["up_count"] == 0)
-    rec("L10", ok, "up_count=%d (expect 0; 106.9 == pivot+margin excluded)" % sm[-1]["up_count"])
+    ok = (sm[-1]["visible_real_up_count"] == 0)
+    rec("L10", ok, "up_count=%d (expect 0; 106.9 == pivot+margin excluded)" % sm[-1]["visible_real_up_count"])
 
     # ---- L11 high-side scan break (literal: out-of-band old node stops scan) ----
     # zz newest-first: in-band(98), out-of-band(200), in-band(100,102).
@@ -571,8 +630,8 @@ def run_self_tests():
     h, l, c = _flat(300)
     atrL = np.full(300, 10.0, dtype=float)
     sm = run_liquidity_state_machine(h, l, c, atrL, ph, pl)
-    ok = (sm[-1]["up_count"] == VIS_LIQ)
-    rec("L15", ok, "up_count=%d (expect visible cap %d)" % (sm[-1]["up_count"], VIS_LIQ))
+    ok = (sm[-1]["visible_real_up_count"] == VIS_LIQ)
+    rec("L15", ok, "up_count=%d (expect visible cap %d)" % (sm[-1]["visible_real_up_count"], VIS_LIQ))
 
     # ---- L16 high breach strictness ----
     ph, pl = _inj(80, [(10, "high", 100.0), (20, "low", 50.0), (30, "high", 102.0),
@@ -604,9 +663,9 @@ def run_self_tests():
     atrL = np.full(120, 10.0, dtype=float)
     sm = run_liquidity_state_machine(h, l, c, atrL, ph, pl)
     vu = sm[110]["vis_up"]
-    both_broken = len(vu) >= 2 and all(lv["broken"] for lv in vu)
+    both_broken = len(vu) >= 2 and all(lv["brL"] for lv in vu)
     ok = (sm[110]["breach_up"] == 1 and both_broken)
-    rec("L18", ok, "breach_up=%d both_broken=%s (expect 1 / True)" % (sm[110]["breach_up"], both_broken))
+    rec("L18", ok, "breach_up=%d both_brL=%s (expect 1 / True)" % (sm[110]["breach_up"], both_broken))
 
     # ---- L19 post-break zone (strict band) ----
     ph, pl = _inj(80, [(10, "high", 100.0), (20, "low", 50.0), (30, "high", 102.0),
@@ -629,9 +688,57 @@ def run_self_tests():
     sm0 = run_liquidity_state_machine(h, l, c, atr0, ph, pl)
     atr_nan = np.full(80, np.nan, dtype=float)
     sm_nan = run_liquidity_state_machine(h, l, c, atr_nan, ph, pl)
-    ok = (sm0[-1]["up_count"] == 0 and sm_nan[-1]["up_count"] == 0)
-    rec("L20", ok, "up_count atr=0:%d atr=nan:%d (expect 0 / 0; OUTPUT_MATCH vs prod guard)" % (
-        sm0[-1]["up_count"], sm_nan[-1]["up_count"]))
+    ok = (sm0[-1]["visible_real_up_count"] == 0 and sm_nan[-1]["visible_real_up_count"] == 0)
+    rec("L20", ok, "visible_real_up_count atr=0:%d atr=nan:%d (expect 0 / 0; OUTPUT_MATCH vs prod guard)" % (
+        sm0[-1]["visible_real_up_count"], sm_nan[-1]["visible_real_up_count"]))
+
+    # ---- L21 zero HIGH pivot truthiness (Pine v5: if ph -> 0.0 is false) ----
+    ph, pl = _inj(40, [(10, "high", 0.0)])
+    h, l, c = _flat(40)
+    sm = run_liquidity_state_machine(h, l, c, np.full(40, 10.0, dtype=float), ph, pl)
+    ok = (sm[-1]["zz_len"] == 0 and sm[-1]["visible_real_up_count"] == 0)
+    rec("L21", ok, "zero high pivot 0.0 -> no zigzag high node (zz_len=%d vis_up=%d)" % (
+        sm[-1]["zz_len"], sm[-1]["visible_real_up_count"]))
+
+    # ---- L22 zero LOW pivot truthiness ----
+    ph, pl = _inj(40, [(10, "low", 0.0)])
+    h, l, c = _flat(40)
+    sm = run_liquidity_state_machine(h, l, c, np.full(40, 10.0, dtype=float), ph, pl)
+    ok = (sm[-1]["zz_len"] == 0 and sm[-1]["visible_real_down_count"] == 0)
+    rec("L22", ok, "zero low pivot 0.0 -> no zigzag low node (zz_len=%d vis_down=%d)" % (
+        sm[-1]["zz_len"], sm[-1]["visible_real_down_count"]))
+
+    # ---- L23 breach-bar brZ (literal: breach bar sets brL+brZ, no zone exit test) ----
+    ph, pl = _inj(80, [(10, "high", 100.0), (20, "low", 50.0), (30, "high", 102.0),
+                      (40, "low", 50.0), (50, "high", 98.0)])
+    h, l, c = _flat(80)
+    h[60] = 130.0; l[60] = 50.0   # breach bar; high far outside level's post-break zone
+    sm = run_liquidity_state_machine(h, l, c, atr, ph, pl)
+    lv = sm[60]["vis_up"][0] if sm[60]["vis_up"] else None
+    ok = (lv is not None and lv["brL"] is True and lv["brZ"] is True)
+    rec("L23", ok, "breach bar brL=%s brZ=%s (expect True/True; zone not tested on breach bar)" % (
+        lv["brL"] if lv else None, lv["brZ"] if lv else None))
+
+    # ---- L24 next-bar zone exit (subsequent bar outside zone -> brZ false) ----
+    h[61] = 130.0; l[61] = 50.0
+    sm = run_liquidity_state_machine(h, l, c, atr, ph, pl)
+    lv = sm[61]["vis_up"][0] if sm[61]["vis_up"] else None
+    ok = (lv is not None and lv["brL"] is True and lv["brZ"] is False)
+    rec("L24", ok, "next bar outside zone brL=%s brZ=%s (expect True/False)" % (
+        lv["brL"] if lv else None, lv["brZ"] if lv else None))
+
+    # ---- L25 multiple simultaneous breaches (each level keeps own brL/brZ) ----
+    ph, pl = _inj(120, [(10, "high", 200.0), (20, "low", 50.0), (30, "high", 202.0),
+                       (40, "low", 50.0), (50, "high", 198.0),
+                       (60, "high", 300.0), (70, "low", 50.0), (80, "high", 302.0),
+                       (90, "low", 50.0), (100, "high", 298.0)])
+    h, l, c = _flat(120)
+    h[110] = 400.0  # breaches both tops
+    atrL = np.full(120, 10.0, dtype=float)
+    sm = run_liquidity_state_machine(h, l, c, atrL, ph, pl)
+    vu = sm[110]["vis_up"]
+    ok = (len(vu) >= 2 and all(lv["brL"] and lv["brZ"] for lv in vu))
+    rec("L25", ok, "two simultaneous breaches: both brL/brZ True (n_up=%d)" % len(vu))
 
     all_pass = all(r["pass"] for r in results)
     return results, all_pass
