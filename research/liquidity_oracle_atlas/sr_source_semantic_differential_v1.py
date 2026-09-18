@@ -88,6 +88,14 @@ from sr_source_semantic_oracle_v1 import (  # noqa: E402
     PINNED_SHA256 as EXPECTED_SR_SHA,
 )
 
+# Canonical AG owner (audited): real production data entry, not inferred.
+from research.export_ob_trigger_execution_v21 import (  # noqa: E402
+    load_raw_5m as canonical_load_raw_5m,
+)
+from research.phase1_tradability.phase1_contract_v1 import (  # noqa: E402
+    discontinuity_flags as canonical_discontinuity_flags,
+)
+
 # Task Base SHA (the Oracle commit = current HEAD).
 BASE_SHA = "3ddb5e7de0c20094bfda8fa559153d7afe9eaa7b"
 ORACLE_PATH = os.path.join(
@@ -332,11 +340,13 @@ def compare_state_full(oracle_per_bar, prod_feat, mask):
 # ===========================================================================
 # Layer A: pivot differential (Oracle exact vs production confirmed_pivots)
 # ===========================================================================
-def layer_a_pivot_diff(high, low, open_, close, dataset: str, case: str = ""):
-    """Compare Oracle exact pivots vs production confirmed_pivots.
+def compare_pivots_core(high, low, open_, close):
+    """Compare Oracle exact pivots vs production confirmed_pivots on ONE array
+    (single segment). Only Oracle exact pivots are the verdict domain;
+    production-only pivots (ties) are counted as tie_unverified.
 
-    Returns counts + mismatch rows. Only Oracle exact pivots are the verdict
-    domain; production-only pivots (ties) are counted as tie_unverified.
+    Returns counts + per-row mismatch records keyed by (mode, bar). The caller
+    is responsible for stamping segment_id / global_bar / time.
     """
     oph, opl, tie = unique_confirmed_pivots(high, low, open_, close)
     pph = prod_confirmed_pivots(high, PRD, PRD, "high")
@@ -345,13 +355,11 @@ def layer_a_pivot_diff(high, low, open_, close, dataset: str, case: str = ""):
     n = len(high)
     n_exact = 0
     n_mismatch = 0
-    n_tie_unverified = 0
-    n_float_boundary_unverified = 0
     first_mismatch = None
     rows = []
 
     def tally(o_arr, p_arr, mode):
-        nonlocal n_exact, n_mismatch, n_tie_unverified, first_mismatch
+        nonlocal n_exact, n_mismatch, first_mismatch
         for b in range(n):
             o = o_arr[b]
             p = p_arr[b]
@@ -363,13 +371,11 @@ def layer_a_pivot_diff(high, low, open_, close, dataset: str, case: str = ""):
                     n_mismatch += 1
                     if first_mismatch is None:
                         first_mismatch = {
-                            "dataset": dataset, "case": case, "mode": mode,
-                            "bar": int(b), "oracle_value": float(o),
-                            "production_value": float(p),
+                            "mode": mode, "bar": int(b),
+                            "oracle_value": float(o), "production_value": float(p),
                         }
                     rows.append({
-                        "dataset": dataset, "case": case, "mode": mode,
-                        "bar": int(b),
+                        "mode": mode, "bar": int(b),
                         "oracle_value": None if isnan(o) else float(o),
                         "production_value": None if isnan(p) else float(p),
                         "reason": "EXACT_PIVOT_VALUE_MISMATCH",
@@ -379,18 +385,16 @@ def layer_a_pivot_diff(high, low, open_, close, dataset: str, case: str = ""):
                 n_mismatch += 1
                 if first_mismatch is None:
                     first_mismatch = {
-                        "dataset": dataset, "case": case, "mode": mode,
-                        "bar": int(b), "oracle_value": float(o),
-                        "production_value": None,
+                        "mode": mode, "bar": int(b),
+                        "oracle_value": float(o), "production_value": None,
                     }
                 rows.append({
-                    "dataset": dataset, "case": case, "mode": mode,
-                    "bar": int(b),
+                    "mode": mode, "bar": int(b),
                     "oracle_value": float(o), "production_value": None,
                     "reason": "PROD_MISSING_EXACT_PIVOT",
                 })
             elif (not o_present) and p_present:
-                n_tie_unverified += 1
+                pass  # production-only pivot -> tie unverified (counted below)
             # both absent -> nothing
 
     tally(oph, pph, "high")
@@ -402,8 +406,6 @@ def layer_a_pivot_diff(high, low, open_, close, dataset: str, case: str = ""):
     n_float_boundary_unverified = fb_h + fb_l
 
     return {
-        "dataset": dataset,
-        "case": case,
         "n_exact_pivot_points": n_exact,
         "n_exact_pivot_mismatch": n_mismatch,
         "n_tie_unverified": n_tie_unverified,
@@ -412,6 +414,17 @@ def layer_a_pivot_diff(high, low, open_, close, dataset: str, case: str = ""):
         "first_exact_mismatch": first_mismatch,
         "rows": rows,
     }
+
+
+def layer_a_pivot_diff(high, low, open_, close, dataset: str, case: str = ""):
+    """Full-array pivot differential wrapper (used by Boundary/Random)."""
+    r = compare_pivots_core(high, low, open_, close)
+    for row in r["rows"]:
+        row["dataset"] = dataset
+        row["case"] = case
+    r["dataset"] = dataset
+    r["case"] = case
+    return r
 
 
 def _classify_ties(high, low):
@@ -808,134 +821,209 @@ def layer_c_random(seed: int = 20260918, n_series: int = 12, n_bars: int = 2600)
 
 
 # ===========================================================================
-# Layer D: real AG
+# Layer D: real AG (canonical owner)
 # ===========================================================================
-def load_ag_raw():
-    """Canonical owner: research.export_ob_trigger_execution_v21.load_raw_5m("AG").
-    Falls back to a byte-identical direct CSV read if the export module cannot
-    be imported in this environment."""
-    try:
-        import export_ob_trigger_execution_v21 as exp  # noqa: F401
-        five = exp.load_raw_5m("AG")
-        owner = "export_ob_trigger_execution_v21.load_raw_5m"
-    except Exception:
-        csv_path = os.path.join(
-            REPO_ROOT, "research", "exports", "v3r_5m", "AG_5m.csv"
-        )
-        five = pd.read_csv(
-            csv_path,
-            parse_dates=["bar_start_time", "bar_end_time",
-                         "availability_time", "trading_day"],
-        )
-        five = five.sort_values("bar_start_time").reset_index(drop=True)
-        if five["bar_start_time"].duplicated().any():
-            raise RuntimeError("AG: duplicate 5m bars")
-        five["volume"] = five["trade"].astype(float)
-        owner = "csv-replica(load_raw_5m)"
-    return five, owner
+def load_ag_canonical_bars():
+    """Canonical production data entry for AG.
 
+    Owner is the real pipeline: load_raw_5m("AG") -> discontinuity_flags("AG").
+    Normal session breaks / trading-day changes are NOT discontinuities; only
+    abnormal time gaps and abnormal price jumps are. No CSV fallback is allowed
+    (the canonical owner must not be inferred or substituted).
+    """
+    raw = (
+        canonical_load_raw_5m("AG")
+        .sort_values("bar_start_time")
+        .reset_index(drop=True)
+    )
 
-def build_ag_bars(five):
-    t = pd.to_datetime(five["bar_start_time"]).to_numpy()
-    day = pd.to_datetime(five["trading_day"]).to_numpy()
-    n = len(five)
-    disc = np.zeros(n, dtype=bool)
-    disc[0] = True
-    gaps = np.diff(t).astype("timedelta64[s]").astype(float)
-    disc[1:] = gaps > (6.0 * 60.0)
-    daychange = np.diff(day).astype(bool)
-    disc[1:] = disc[1:] | daychange
+    disc = np.asarray(canonical_discontinuity_flags("AG"), dtype=bool)
+
+    if len(raw) != len(disc):
+        raise SystemExit("STOP_SR_DIFF_CANONICAL_DISC_LENGTH_MISMATCH")
+
+    if raw["bar_start_time"].duplicated().any():
+        raise SystemExit("STOP_SR_DIFF_AG_DUPLICATE_TIME")
+
     bars = {
-        "o": five["open"].to_numpy(float),
-        "h": five["high"].to_numpy(float),
-        "l": five["low"].to_numpy(float),
-        "c": five["close"].to_numpy(float),
-        "t": t,
-        "day": day,
+        "o": raw["open"].to_numpy(float),
+        "h": raw["high"].to_numpy(float),
+        "l": raw["low"].to_numpy(float),
+        "c": raw["close"].to_numpy(float),
+        "t": pd.to_datetime(raw["bar_start_time"]).to_numpy(),
+        "day": pd.to_datetime(raw["trading_day"]).to_numpy(),
         "disc": disc,
-        "n": n,
+        "n": len(raw),
     }
-    return bars
+    return raw, bars
 
 
 def layer_d_ag():
-    five, owner = load_ag_raw()
-    bars = build_ag_bars(five)
-    raw = prod_raw_frame_from_owner(bars)
-    tf15 = prod_resample_causal(raw, 15)
-    high = tf15["high"].to_numpy(float)
-    low = tf15["low"].to_numpy(float)
-    close = tf15["close"].to_numpy(float)
-    open_ = tf15["open"].to_numpy(float)
+    raw5, bars = load_ag_canonical_bars()
+    raw_frame = prod_raw_frame_from_owner(bars)
+    tf15 = prod_resample_causal(raw_frame, 15)
 
-    # Layer A pivot (exact domain, per window) on full 15m (pivot windows are
-    # local; segment boundaries are far apart so full-array is faithful here).
-    a = layer_a_pivot_diff(high, low, open_, close, "AG", "D")
+    disc_true = int(bars["disc"].sum())
+    n_5m = len(raw5)
+    n_15m = len(tf15)
+    seg_sizes = tf15.groupby("segment").size()
+    seg_count = int(seg_sizes.shape[0])
+    seg_len = {
+        "min": int(seg_sizes.min()),
+        "median": float(seg_sizes.median()),
+        "mean": float(seg_sizes.mean()),
+        "max": int(seg_sizes.max()),
+    }
+    segment_stats = {
+        "n_5m_rows": n_5m,
+        "canonical_disc_true": disc_true,
+        "n_15m_rows": n_15m,
+        "segment_count": seg_count,
+        "seg_len_min": seg_len["min"],
+        "seg_len_median": seg_len["median"],
+        "seg_len_mean": seg_len["mean"],
+        "seg_len_max": seg_len["max"],
+    }
 
-    # Oracle state machine PER SEGMENT. Production resets SR at every
-    # trading-day segment boundary (compute_tf_features groups by "segment"
-    # and runs build_sr_features fresh per segment); the Oracle must do the
-    # same or every boundary would look like a divergence.
-    oracle_per_bar_all = []
-    mask_all = []
-    tie_confirm_all = []
-    n_tie_events_total = 0
-    for _seg_id, seg in tf15.groupby("segment", sort=False):
+    # --- per-segment pivot + state (no cross-segment index mixing) ---
+    pivot_agg = {
+        "n_exact_pivot_points": 0,
+        "n_exact_pivot_mismatch": 0,
+        "n_tie_unverified": 0,
+        "n_float_boundary_unverified": 0,
+        "n_tie_events": 0,
+    }
+    pivot_rows = []
+    state_field_mismatch = {f: 0 for f in STATE_FIELDS}
+    state_first_mismatch = {f: None for f in STATE_FIELDS}
+    state_rows = []
+    cov_n_exact = 0
+    cov_n_unverified = 0
+    cov_n_tie_contam = 0
+    cov_n_startup = 0
+
+    global_off = 0
+    for seg_id, seg in tf15.groupby("segment", sort=False):
         sh = seg["high"].to_numpy(float)
         sl = seg["low"].to_numpy(float)
         sc = seg["close"].to_numpy(float)
         so = seg["open"].to_numpy(float)
-        sph, spl, stie = unique_confirmed_pivots(sh, sl, so, sc)
-        spb = run_sr_state_machine(sph, spl, sh, sl, sc)
-        smask = compute_state_exact_mask(
-            len(sh), sph, spl, [t["confirm_bar"] for t in stie]
-        )
-        oracle_per_bar_all.extend(spb)
-        mask_all.extend(smask)
-        tie_confirm_all.extend(t["confirm_bar"] for t in stie)
-        n_tie_events_total += len(stie)
+        times = seg["available_time"].to_numpy()
+        L = len(seg)
+        seg_tag = int(seg_id) if isinstance(seg_id, (int, np.integer)) else str(seg_id)
 
-    # Production REAL SR state on AG (genuine pipeline output)
-    prod_feat = prod_compute_tf_features(tf15, PROD_PINE_DEFAULT, True)
+        # pivot differential (exact domain only; production-only = tie unverified)
+        pr = compare_pivots_core(sh, sl, so, sc)
+        pivot_agg["n_exact_pivot_points"] += pr["n_exact_pivot_points"]
+        pivot_agg["n_exact_pivot_mismatch"] += pr["n_exact_pivot_mismatch"]
+        pivot_agg["n_tie_unverified"] += pr["n_tie_unverified"]
+        pivot_agg["n_float_boundary_unverified"] += pr["n_float_boundary_unverified"]
+        pivot_agg["n_tie_events"] += pr["n_tie_events"]
+        for row in pr["rows"]:
+            pivot_rows.append({
+                "segment_id": seg_tag,
+                "local_bar": int(row["bar"]),
+                "global_bar": int(global_off + row["bar"]),
+                "time": str(times[row["bar"]]),
+                "mode": row["mode"],
+                "oracle_value": row["oracle_value"],
+                "production_value": row["production_value"],
+                "reason": row["reason"],
+            })
 
-    mask = np.asarray(mask_all, dtype=bool)
-    cmp = compare_state_full(oracle_per_bar_all, prod_feat, mask)
+        # Oracle state machine (strict-unique exact pivots) within segment
+        oph, opl, tie = unique_confirmed_pivots(sh, sl, so, sc)
+        oracle_per_bar = run_sr_state_machine(oph, opl, sh, sl, sc)
+        tie_confirm = [t["confirm_bar"] for t in tie]
+        mask = compute_state_exact_mask(L, oph, opl, tie_confirm)
 
-    n = len(high)
-    n_tie_contaminated_rows = int(np.sum(
-        [not mask[b] and _tie_in_window(b, tie_confirm_all) for b in range(n)]
-    ))
+        # Production REAL SR state on this segment (genuine pipeline output)
+        prod_seg = prod_compute_segment_features(seg, PROD_PINE_DEFAULT, True)
+        cmp = compare_state_full(oracle_per_bar, prod_seg, mask)
+
+        cov_n_exact += cmp["n_exact_state_rows"]
+        cov_n_unverified += cmp["n_unverified_state_rows"]
+        n_tie_contam = int(np.sum(
+            [not mask[b] and _tie_in_window(b, tie_confirm) for b in range(L)]
+        ))
+        cov_n_tie_contam += n_tie_contam
+        cov_n_startup += int((~mask).sum()) - n_tie_contam
+        for f in STATE_FIELDS:
+            state_field_mismatch[f] += cmp["field_stats"][f]["mismatch"]
+            if state_field_mismatch[f] > 0 and state_first_mismatch[f] is None:
+                fb = cmp["field_stats"][f]["first_mismatch_bar"]
+                state_first_mismatch[f] = int(global_off + fb) if fb is not None else None
+        for row in cmp["rows"]:
+            state_rows.append({
+                "segment_id": seg_tag,
+                "local_bar": int(row["bar"]),
+                "global_bar": int(global_off + row["bar"]),
+                "time": str(times[row["bar"]]),
+                "field": row["field"],
+                "oracle_value": row["oracle_value"],
+                "production_value": row["production_value"],
+                "reason": row["uncertainty_reason"],
+            })
+
+        global_off += L
+
+    state_total_mismatch = sum(state_field_mismatch[f] for f in STATE_FIELDS)
+
+    # --- Full pipeline parity: per-segment concat vs compute_tf_features ---
+    full_prod = prod_compute_tf_features(tf15, PROD_PINE_DEFAULT, True)
+    per_seg_list = [
+        prod_compute_segment_features(seg, PROD_PINE_DEFAULT, True)
+        for _, seg in tf15.groupby("segment", sort=False)
+    ]
+    per_seg = pd.concat(per_seg_list, ignore_index=True)
+    per_seg = per_seg.sort_values("available_time", kind="stable").reset_index(drop=True)
+    full = full_prod.sort_values("available_time", kind="stable").reset_index(drop=True)
+    parity_mismatch = 0
+    for col in ["sr_n_channels", "sr_in_zone", "sr_broken_up", "sr_broken_down"]:
+        parity_mismatch += int(np.sum(per_seg[col].to_numpy() != full[col].to_numpy()))
+
     coverage = {
-        "owner": owner,
-        "n_total_rows": int(n),
-        "n_startup_unverified": int((~mask).sum()) - n_tie_contaminated_rows,
-        "n_tie_events": n_tie_events_total,
-        "n_tie_contaminated_rows": n_tie_contaminated_rows,
-        "n_exact_state_rows": cmp["n_exact_state_rows"],
-        "exact_state_coverage_pct": cmp["exact_state_coverage_pct"],
-        "note": (
-            "AG 15m sessions are far shorter than the 300-bar SR width lookback "
-            "(~9 bars/segment), so production never forms an SR channel in the "
-            "exact domain (both sides 0). Pivot exact domain fully matched "
-            "(922 points, 0 mismatch). State machine is instead validated on the "
-            "long random series (28903 exact-state rows, 0 mismatch) and the "
-            "boundary matrix. This 0 coverage is a faithful property, not a bug."
+        "owner": "load_raw_5m + discontinuity_flags (canonical)",
+        "n_total_rows": int(n_15m),
+        "n_startup_unverified": int(cov_n_startup),
+        "n_tie_events": int(pivot_agg["n_tie_events"]),
+        "n_tie_contaminated_rows": int(cov_n_tie_contam),
+        "n_exact_state_rows": int(cov_n_exact),
+        "exact_state_coverage_pct": (100.0 * cov_n_exact / n_15m) if n_15m else 0.0,
+        "n_mismatch_n_channels": state_field_mismatch["n_channels"],
+        "n_mismatch_in_zone": state_field_mismatch["in_zone"],
+        "n_mismatch_break_up": state_field_mismatch["break_up"],
+        "n_mismatch_break_down": state_field_mismatch["break_down"],
+        "first_mismatch_n_channels": state_first_mismatch["n_channels"],
+        "first_mismatch_in_zone": state_first_mismatch["in_zone"],
+        "first_mismatch_break_up": state_first_mismatch["break_up"],
+        "first_mismatch_break_down": state_first_mismatch["break_down"],
+        "max_consec_mismatch": _max_consec(
+            [{"bar": r["global_bar"]} for r in state_rows]
         ),
-        "n_mismatch_n_channels": cmp["field_stats"]["n_channels"]["mismatch"],
-        "n_mismatch_in_zone": cmp["field_stats"]["in_zone"]["mismatch"],
-        "n_mismatch_break_up": cmp["field_stats"]["break_up"]["mismatch"],
-        "n_mismatch_break_down": cmp["field_stats"]["break_down"]["mismatch"],
-        "first_mismatch_n_channels": cmp["field_stats"]["n_channels"]["first_mismatch_bar"],
-        "first_mismatch_in_zone": cmp["field_stats"]["in_zone"]["first_mismatch_bar"],
-        "first_mismatch_break_up": cmp["field_stats"]["break_up"]["first_mismatch_bar"],
-        "first_mismatch_break_down": cmp["field_stats"]["break_down"]["first_mismatch_bar"],
-        "max_consec_mismatch": _max_consec(cmp["rows"]),
+        "note": (
+            "Canonical AG (load_raw_5m + discontinuity_flags) yields disc_true=%d, "
+            "so AG 15m is %d segment(s) of length up to %d bars. With the 300-bar "
+            "SR width lookback this gives real exact-state coverage. Pivot exact "
+            "domain and state exact domain are compared per canonical segment."
+            % (disc_true, seg_count, seg_len["max"])
+        ),
     }
+
     return {
-        "pivot": a,
-        "state": cmp,
+        "segment_stats": segment_stats,
+        "pivot_agg": pivot_agg,
+        "pivot_rows": pivot_rows,
+        "state_agg": {
+            "compared": int(cov_n_exact),
+            "mismatch": int(state_total_mismatch),
+        },
+        "state_field_mismatch": state_field_mismatch,
+        "state_first_mismatch": state_first_mismatch,
+        "state_rows": state_rows,
         "coverage": coverage,
-        "tf15_len": int(len(high)),
+        "parity_mismatch": int(parity_mismatch),
+        "tf15_len": int(n_15m),
     }
 
 
@@ -961,10 +1049,11 @@ def _max_consec(rows):
 # Real call-chain proof (AG)
 # ===========================================================================
 def call_chain_proof():
-    five, _ = load_ag_raw()
-    bars = build_ag_bars(five)
+    raw5, bars = load_ag_canonical_bars()
     raw = prod_raw_frame_from_owner(bars)
     tf15 = prod_resample_causal(raw, 15)
+    disc_true = int(bars["disc"].sum())
+    seg_count = int(tf15.groupby("segment").size().shape[0])
 
     counters = {
         "compute_tf_features": {"n": 0},
@@ -1003,6 +1092,8 @@ def call_chain_proof():
     return {
         "counters": {k: counters[k]["n"] for k in counters},
         "all_calls_positive": bool(all_positive),
+        "canonical_disc_true": disc_true,
+        "canonical_segment_count": seg_count,
     }
 
 
@@ -1082,26 +1173,59 @@ def main():
     if not t0["ok"]:
         sys.exit("T0 FAIL: %s" % t0["notes"])
 
-    # ---- Layer A is folded into each layer; run boundary matrix ----
+    # ---- Layer A folded into each layer; run boundary matrix ----
     print("[Layer B] boundary matrix B01-B16 ...")
     bm = build_boundary_matrix()
     bm_mismatch = sum(1 for r in bm if not r["exact_match"])
+    boundary_mismatch_ids = sorted(r["case_id"] for r in bm if not r["exact_match"])
 
     # ---- Layer C random ----
     print("[Layer C] random continuous ...")
     c_agg, c_res = layer_c_random()
 
-    # ---- Layer D AG ----
-    print("[Layer D] real AG ...")
+    # ---- Layer D AG (canonical owner, per-segment) ----
+    print("[Layer D] canonical AG ...")
     d = layer_d_ag()
 
-    # ---- call-chain proof ----
-    print("[Chain] AG call-chain proof ...")
+    # ---- call-chain proof (canonical) ----
+    print("[Chain] canonical AG call-chain proof ...")
     chain = call_chain_proof()
 
     # ---- prefix causality ----
     print("[Prefix] causality ...")
     prefix = prefix_causality()
+
+    # ---- Hard gate (Phase A -> Phase B transition) ----
+    gate_boundary_ok = set(boundary_mismatch_ids) == {"B03", "B04", "B06"}
+    gate_random_ok = (
+        c_agg["pivot_exact_mismatch"] == 0 and c_agg["state_total_mismatch"] == 0
+    )
+    gate_ag_pivot_ok = (
+        d["pivot_agg"]["n_exact_pivot_points"] > 0
+        and d["pivot_agg"]["n_exact_pivot_mismatch"] == 0
+    )
+    gate_ag_state_ok = (
+        d["coverage"]["n_exact_state_rows"] > 0 and d["state_agg"]["mismatch"] == 0
+    )
+    gate_parity_ok = d["parity_mismatch"] == 0
+    gate_pass = all(
+        [gate_boundary_ok, gate_random_ok, gate_ag_pivot_ok,
+         gate_ag_state_ok, gate_parity_ok]
+    )
+    hard_gate = {
+        "boundary_mismatch_ids": boundary_mismatch_ids,
+        "gate_boundary_ok": bool(gate_boundary_ok),
+        "gate_random_ok": bool(gate_random_ok),
+        "gate_ag_pivot_ok": bool(gate_ag_pivot_ok),
+        "gate_ag_state_ok": bool(gate_ag_state_ok),
+        "gate_parity_ok": bool(gate_parity_ok),
+        "gate_pass": bool(gate_pass),
+        "note": (
+            "gate_pass=True authorizes Phase B (only the pre-authorized "
+            "B03/B04/B06 divergences remain). Any new exact-domain mismatch, "
+            "AG state exact rows == 0, or pipeline parity > 0 => STOP."
+        ),
+    }
 
     # ---- mismatch bundle (cap 20 per dataset+field) ----
     bundle = []
@@ -1117,7 +1241,6 @@ def main():
         row["dataset"] = dataset
         bundle.append(row)
 
-    # boundary matrix pivot-value mismatches -> tie into bundle via state rows
     for r in bm:
         if not r["exact_match"]:
             add({
@@ -1126,35 +1249,45 @@ def main():
                 "production_value": r["production_n_channels"],
                 "reason": "SOURCE_EXACT_DOMAIN",
             }, "boundary_%s" % r["case_id"], "state")
-    # random state mismatches
-    # (aggregate only; per-row captured in cmp via compare_state rows not kept
-    #  for random to limit memory; record first mismatch)
     if c_agg["first_mismatch"] is not None:
         add({
             "layer": "C", "case_id": "random", "field": "state",
             "reason": "SOURCE_EXACT_DOMAIN",
             **{k: v for k, v in (c_agg["first_mismatch"] or {}).items() if k not in ("dataset",)},
         }, "random", "state")
-    # AG state mismatches
-    for row in d["state"]["rows"]:
+    for row in d["state_rows"]:
         add({
-            "layer": "D", "case_id": "AG", "bar": row["bar"],
-            "field": row["field"],
+            "layer": "D", "case_id": "AG", "field": row["field"],
             "oracle_value": row["oracle_value"],
             "production_value": row["production_value"],
-            "reason": row["uncertainty_reason"],
+            "reason": row["reason"],
+            "seg_id": row["segment_id"],
+            "global_bar": row["global_bar"],
+            "time": row["time"],
+            "bar": row["global_bar"],
         }, "AG", row["field"])
+    for row in d["pivot_rows"]:
+        add({
+            "layer": "D", "case_id": "AG", "field": "pivot_%s" % row["mode"],
+            "oracle_value": row["oracle_value"],
+            "production_value": row["production_value"],
+            "reason": row["reason"],
+            "seg_id": row["segment_id"],
+            "global_bar": row["global_bar"],
+            "time": row["time"],
+            "bar": row["global_bar"],
+        }, "AG", "pivot_%s" % row["mode"])
 
     # ---- verdict ----
     total_source_mismatch = (
         bm_mismatch
         + c_agg["state_total_mismatch"]
-        + d["state"]["total_mismatch"]
-        + (0 if d["pivot"]["n_exact_pivot_mismatch"] == 0 else d["pivot"]["n_exact_pivot_mismatch"])
+        + d["state_agg"]["mismatch"]
+        + d["pivot_agg"]["n_exact_pivot_mismatch"]
     )
     any_unverified = (
-        d["pivot"]["n_tie_unverified"] > 0
-        or d["pivot"]["n_float_boundary_unverified"] > 0
+        d["pivot_agg"]["n_tie_unverified"] > 0
+        or d["pivot_agg"]["n_float_boundary_unverified"] > 0
         or d["coverage"]["n_startup_unverified"] > 0
         or d["coverage"]["n_tie_events"] > 0
         or c_agg["n_series"] == 0
@@ -1186,9 +1319,11 @@ def main():
             "sr_triple_match": t0["sr_triple_match"],
             "notes": t0["notes"],
         },
+        "hard_gate": hard_gate,
         "boundary_matrix": {
             "n_cases": len(bm),
             "n_exact_mismatch": bm_mismatch,
+            "boundary_all_match": bm_mismatch == 0,
         },
         "random": {
             "n_series": c_agg["n_series"],
@@ -1200,33 +1335,38 @@ def main():
             "first_mismatch": c_agg["first_mismatch"],
         },
         "ag": {
-            "pivot_exact_points": d["pivot"]["n_exact_pivot_points"],
-            "pivot_exact_mismatch": d["pivot"]["n_exact_pivot_mismatch"],
-            "tie_unverified": d["pivot"]["n_tie_unverified"],
-            "float_boundary_unverified": d["pivot"]["n_float_boundary_unverified"],
+            "segment_stats": d["segment_stats"],
+            "pivot_exact_points": d["pivot_agg"]["n_exact_pivot_points"],
+            "pivot_exact_mismatch": d["pivot_agg"]["n_exact_pivot_mismatch"],
+            "pivot_exact_compared": d["pivot_agg"]["n_exact_pivot_points"],
+            "tie_unverified": d["pivot_agg"]["n_tie_unverified"],
+            "float_boundary_unverified": d["pivot_agg"]["n_float_boundary_unverified"],
             "coverage": d["coverage"],
-            "state_total_mismatch": d["state"]["total_mismatch"],
+            "state_total_mismatch": d["state_agg"]["mismatch"],
+            "state_field_mismatch": d["state_field_mismatch"],
+            "state_first_mismatch": d["state_first_mismatch"],
+            "parity_mismatch": d["parity_mismatch"],
         },
         "call_chain": chain,
         "prefix_causality": prefix,
         "verdict": verdict,
         "classification": {
             "pivot_exact_domain": {
-                "ag_mismatch": d["pivot"]["n_exact_pivot_mismatch"],
+                "ag_mismatch": d["pivot_agg"]["n_exact_pivot_mismatch"],
                 "random_mismatch": c_agg["pivot_exact_mismatch"],
                 "boundary_n_mismatch": bm_mismatch,
             },
             "state_exact_domain": {
-                "ag_mismatch": d["state"]["total_mismatch"],
+                "ag_mismatch": d["state_agg"]["mismatch"],
                 "random_mismatch": c_agg["state_total_mismatch"],
                 "boundary_n_mismatch": bm_mismatch,
             },
             "random_exact_domain": {"state_exact_rows": c_agg["state_exact_rows"]},
-            "ag_exact_domain": {"state_exact_rows": d["state"]["n_exact_state_rows"]},
-            "unverified_pivot_tie": {"ag_tie_unverified": d["pivot"]["n_tie_unverified"]},
+            "ag_exact_domain": {"state_exact_rows": d["coverage"]["n_exact_state_rows"]},
+            "unverified_pivot_tie": {"ag_tie_unverified": d["pivot_agg"]["n_tie_unverified"]},
             "unverified_startup": {"ag_startup_unverified": d["coverage"]["n_startup_unverified"]},
             "unverified_float_boundary": {
-                "ag_float_boundary_unverified": d["pivot"]["n_float_boundary_unverified"]
+                "ag_float_boundary_unverified": d["pivot_agg"]["n_float_boundary_unverified"]
             },
             "research_extensions": [
                 "sr_support_dist_atr", "sr_resistance_dist_atr",
@@ -1250,48 +1390,61 @@ def main():
                "break_down_mismatch", "diagnostic_zone_strength", "note"]
     write_csv(os.path.join(ARTIFACT_DIR, "sr_boundary_matrix.csv"), bm, bm_cols)
 
-    # pivot diff (random + AG)
-    pivot_rows = []
-    pivot_rows.append({
-        "dataset": "random", "case": "C", "n_exact_pivot_points": c_agg["pivot_exact_points"],
+    # AG segment stats
+    write_csv(os.path.join(ARTIFACT_DIR, "sr_ag_segment_stats.csv"),
+              [d["segment_stats"]],
+              ["n_5m_rows", "canonical_disc_true", "n_15m_rows", "segment_count",
+               "seg_len_min", "seg_len_median", "seg_len_mean", "seg_len_max"])
+
+    # AG per-segment pivot detail
+    write_csv(os.path.join(ARTIFACT_DIR, "sr_ag_pivot_per_segment.csv"), d["pivot_rows"],
+              ["segment_id", "local_bar", "global_bar", "time", "mode",
+               "oracle_value", "production_value", "reason"])
+
+    # pivot diff (random + AG aggregate)
+    pivot_rows = [{
+        "dataset": "random", "case": "C",
+        "n_exact_pivot_points": c_agg["pivot_exact_points"],
         "n_exact_pivot_mismatch": c_agg["pivot_exact_mismatch"],
         "n_tie_unverified": "", "n_float_boundary_unverified": "",
         "first_exact_mismatch": json.dumps(c_agg["first_mismatch"], default=str),
-    })
-    pivot_rows.append({
-        "dataset": "AG", "case": "D", "n_exact_pivot_points": d["pivot"]["n_exact_pivot_points"],
-        "n_exact_pivot_mismatch": d["pivot"]["n_exact_pivot_mismatch"],
-        "n_tie_unverified": d["pivot"]["n_tie_unverified"],
-        "n_float_boundary_unverified": d["pivot"]["n_float_boundary_unverified"],
-        "first_exact_mismatch": json.dumps(d["pivot"]["first_exact_mismatch"], default=str),
-    })
+    }, {
+        "dataset": "AG", "case": "D",
+        "n_exact_pivot_points": d["pivot_agg"]["n_exact_pivot_points"],
+        "n_exact_pivot_mismatch": d["pivot_agg"]["n_exact_pivot_mismatch"],
+        "n_tie_unverified": d["pivot_agg"]["n_tie_unverified"],
+        "n_float_boundary_unverified": d["pivot_agg"]["n_float_boundary_unverified"],
+        "first_exact_mismatch": json.dumps(None, default=str),
+    }]
     write_csv(os.path.join(ARTIFACT_DIR, "sr_pivot_diff.csv"), pivot_rows,
               ["dataset", "case", "n_exact_pivot_points", "n_exact_pivot_mismatch",
                "n_tie_unverified", "n_float_boundary_unverified", "first_exact_mismatch"])
 
-    # state diff
-    state_rows = []
-    for r in c_res:
-        state_rows.append(r)
+    # state diff (random + AG aggregate)
+    state_rows = list(c_res)
     state_rows.append({
-        "series": "AG", "n_rows": d["state"]["n_bars"],
-        "pivot_exact_points": d["pivot"]["n_exact_pivot_points"],
-        "pivot_exact_mismatch": d["pivot"]["n_exact_pivot_mismatch"],
-        "state_exact_rows": d["state"]["n_exact_state_rows"],
-        "state_total_mismatch": d["state"]["total_mismatch"],
-        "n_channels_mismatch": d["state"]["field_stats"]["n_channels"]["mismatch"],
-        "in_zone_mismatch": d["state"]["field_stats"]["in_zone"]["mismatch"],
-        "break_up_mismatch": d["state"]["field_stats"]["break_up"]["mismatch"],
-        "break_down_mismatch": d["state"]["field_stats"]["break_down"]["mismatch"],
+        "series": "AG", "n_rows": d["tf15_len"],
+        "pivot_exact_points": d["pivot_agg"]["n_exact_pivot_points"],
+        "pivot_exact_mismatch": d["pivot_agg"]["n_exact_pivot_mismatch"],
+        "state_exact_rows": d["coverage"]["n_exact_state_rows"],
+        "state_total_mismatch": d["state_agg"]["mismatch"],
+        "n_channels_mismatch": d["state_field_mismatch"]["n_channels"],
+        "in_zone_mismatch": d["state_field_mismatch"]["in_zone"],
+        "break_up_mismatch": d["state_field_mismatch"]["break_up"],
+        "break_down_mismatch": d["state_field_mismatch"]["break_down"],
     })
     write_csv(os.path.join(ARTIFACT_DIR, "sr_state_diff.csv"), state_rows,
               ["series", "n_rows", "pivot_exact_points", "pivot_exact_mismatch",
                "state_exact_rows", "state_total_mismatch", "n_channels_mismatch",
                "in_zone_mismatch", "break_up_mismatch", "break_down_mismatch"])
 
+    # AG per-segment state detail
+    write_csv(os.path.join(ARTIFACT_DIR, "sr_ag_state_per_segment.csv"), d["state_rows"],
+              ["segment_id", "local_bar", "global_bar", "time", "field",
+               "oracle_value", "production_value", "reason"])
+
     # AG coverage
-    cov = d["coverage"]
-    write_csv(os.path.join(ARTIFACT_DIR, "sr_ag_coverage.csv"), [cov],
+    write_csv(os.path.join(ARTIFACT_DIR, "sr_ag_coverage.csv"), [d["coverage"]],
               ["owner", "n_total_rows", "n_startup_unverified", "n_tie_events",
                "n_tie_contaminated_rows", "n_exact_state_rows",
                "exact_state_coverage_pct", "n_mismatch_n_channels",
@@ -1300,18 +1453,73 @@ def main():
                "first_mismatch_break_up", "first_mismatch_break_down",
                "max_consec_mismatch"])
 
+    # Full pipeline parity
+    write_csv(os.path.join(ARTIFACT_DIR, "sr_pipeline_parity.csv"), [{
+        "per_segment_vs_compute_tf_features_mismatch": d["parity_mismatch"],
+        "compute_tf_features_calls": chain["counters"]["compute_tf_features"],
+        "compute_segment_features_calls": chain["counters"]["compute_segment_features"],
+        "build_sr_features_calls": chain["counters"]["build_sr_features"],
+        "confirmed_pivots_calls": chain["counters"]["confirmed_pivots"],
+    }],
+              ["per_segment_vs_compute_tf_features_mismatch", "compute_tf_features_calls",
+               "compute_segment_features_calls", "build_sr_features_calls",
+               "confirmed_pivots_calls"])
+
+    # Call chain
+    write_csv(os.path.join(ARTIFACT_DIR, "sr_call_chain.csv"), [{
+        "compute_tf_features": chain["counters"]["compute_tf_features"],
+        "compute_segment_features": chain["counters"]["compute_segment_features"],
+        "build_sr_features": chain["counters"]["build_sr_features"],
+        "confirmed_pivots": chain["counters"]["confirmed_pivots"],
+        "all_calls_positive": chain["all_calls_positive"],
+        "canonical_disc_true": chain["canonical_disc_true"],
+        "canonical_segment_count": chain["canonical_segment_count"],
+    }],
+              ["compute_tf_features", "compute_segment_features", "build_sr_features",
+               "confirmed_pivots", "all_calls_positive", "canonical_disc_true",
+               "canonical_segment_count"])
+
     # mismatch bundle
     write_csv(os.path.join(ARTIFACT_DIR, "sr_mismatch_samples.csv"), bundle,
               ["dataset", "layer", "case_id", "bar", "field", "oracle_value",
-               "production_value", "reason"])
+               "production_value", "reason", "seg_id", "global_bar", "time"])
+
+    # optional snapshot (pre_fix / post_fix)
+    snap_tag = os.environ.get("SR_SNAPSHOT")
+    if snap_tag:
+        man = snapshot(snap_tag)
+        print("[SNAPSHOT] %s -> %d files" % (snap_tag, len(man)))
 
     print("[VERDICT] %s" % verdict)
+    print("[HARD_GATE] pass=%s  boundary_ids=%s" % (gate_pass, boundary_mismatch_ids))
     print("[SUMMARY] boundary_n_mismatch=%d  random_state_mismatch=%d  "
-          "ag_state_mismatch=%d  ag_pivot_mismatch=%d  chain=%s  prefix_prod=%s oracle=%s" % (
-              bm_mismatch, c_agg["state_total_mismatch"], d["state"]["total_mismatch"],
-              d["pivot"]["n_exact_pivot_mismatch"], chain["all_calls_positive"],
+          "ag_state_mismatch=%d  ag_pivot_mismatch=%d  ag_state_rows=%d  "
+          "parity=%d  chain=%s  prefix_prod=%s oracle=%s" % (
+              bm_mismatch, c_agg["state_total_mismatch"], d["state_agg"]["mismatch"],
+              d["pivot_agg"]["n_exact_pivot_mismatch"], d["coverage"]["n_exact_state_rows"],
+              d["parity_mismatch"], chain["all_calls_positive"],
               prefix["prod_prefix_unchanged"], prefix["oracle_prefix_unchanged"]))
     print("[ARTIFACTS] %s" % ARTIFACT_DIR)
+
+
+def snapshot(tag: str):
+    """Copy all artifacts into artifacts/.../<tag>/ and record SHA256 of each."""
+    dest = os.path.join(ARTIFACT_DIR, tag)
+    os.makedirs(dest, exist_ok=True)
+    files = sorted(
+        f for f in os.listdir(ARTIFACT_DIR)
+        if f.endswith((".csv", ".json")) and os.path.isfile(os.path.join(ARTIFACT_DIR, f))
+    )
+    manifest = []
+    for f in files:
+        src = os.path.join(ARTIFACT_DIR, f)
+        data = open(src, "rb").read()
+        open(os.path.join(dest, f), "wb").write(data)
+        manifest.append((f, hashlib.sha256(data).hexdigest()))
+    with open(os.path.join(dest, "SHA256SUMS.txt"), "w") as fh:
+        for f, h in manifest:
+            fh.write("%s  %s\n" % (h, f))
+    return manifest
 
 
 if __name__ == "__main__":
