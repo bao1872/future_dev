@@ -88,6 +88,80 @@ from sr_source_semantic_oracle_v1 import (  # noqa: E402
     PINNED_SHA256 as EXPECTED_SR_SHA,
 )
 
+# ===========================================================================
+# Faithful production pivot-value capture hook
+# ---------------------------------------------------------------------------
+# The differential must compare Oracle's *stored* pivot value against
+# PRODUCTION'S ACTUAL per-bar stored pivot value -- not the displayed channel
+# price (sr_resistance_price / sr_support_price), which is a derivative of the
+# channel selection and produces false positives (e.g. B08/B10/B12).
+#
+# We exec the live production `build_sr_features` source (so the hook always
+# mirrors current production, correct both pre- and post Fix A/B) with a small
+# injection that records the real `pivot_value` written into production's
+# `pivots` list into a new output field `sr_captured_pivot`.
+# ===========================================================================
+def _inject_pivot_capture(src: str) -> str:
+    """Return a modified copy of the production module source whose
+    build_sr_features records its ACTUAL per-bar stored pivot value into a new
+    output field `sr_captured_pivot`. The production algorithm is otherwise
+    untouched (only observation is added)."""
+    out = src
+    idx_def = out.index("def build_sr_features(")
+
+    # allocate the capture buffer right after `n = len(close)` inside the fn
+    anchor_n = "    n = len(close)"
+    i_n = out.index(anchor_n, idx_def)
+    out = (
+        out[:i_n]
+        + anchor_n
+        + "\n    _CAPTURE = np.full(n, np.nan, dtype=np.float64)\n"
+        + out[i_n + len(anchor_n):]
+    )
+
+    # reset capture to NaN at the top of the per-bar loop
+    anchor_loop = "for i in range(n):"
+    i_loop = out.index(anchor_loop, idx_def)
+    out = (
+        out[:i_loop]
+        + anchor_loop
+        + "\n        _CAPTURE[i] = float('nan')\n"
+        + out[i_loop + len(anchor_loop):]
+    )
+
+    # record production's actual stored pivot value right after it is computed
+    anchor_pv = "            pivot_value = ("
+    i_pv = out.index(anchor_pv)
+    close_idx = out.index("            )\n", i_pv)
+    out = (
+        out[:close_idx]
+        + "            )\n            _CAPTURE[i] = pivot_value\n"
+        + out[close_idx + len("            )\n"):]
+    )
+
+    # expose the capture buffer through the returned feature dict
+    anchor_ret = '            n_channels,\n    }'
+    i_ret = out.index(anchor_ret, idx_def)
+    out = (
+        out[:i_ret]
+        + '            n_channels,\n        "sr_captured_pivot":\n            _CAPTURE,\n    }'
+        + out[i_ret + len(anchor_ret):]
+    )
+    return out
+
+
+def _make_captured_build_sr_features():
+    with open(PROD_PATH, "r", encoding="utf-8") as f:
+        src = f.read()
+    modified = _inject_pivot_capture(src)
+    cap_ns = dict(prod.__dict__)
+    try:
+        exec(compile(modified, PROD_PATH, "exec"), cap_ns)
+    except Exception as e:  # pragma: no cover
+        raise SystemExit("STOP_SR_DIFF_CAPTURE_HOOK_FAIL: %s" % e)
+    return cap_ns, cap_ns["build_sr_features"]
+
+
 # Canonical AG owner (audited): real production data entry, not inferred.
 from research.export_ob_trigger_execution_v21 import (  # noqa: E402
     load_raw_5m as canonical_load_raw_5m,
@@ -106,6 +180,11 @@ PROD_PATH = os.path.join(
 )
 SR_SOURCE_PATH = os.path.join(REPO_ROOT, "ref", "SRchannel.pine")
 ARTIFACT_DIR = os.path.join(REPO_ROOT, "artifacts", "sr_source_semantic_differential")
+
+# Build the faithful capture variant of production build_sr_features now that
+# PROD_PATH is defined (mirrors live production, correct pre/post Fix A/B).
+_CAP_NS, CAPTURED_BUILD_SR = _make_captured_build_sr_features()
+_CAP_ORIG_CONFIRMED = _CAP_NS["confirmed_pivots"]
 
 # Source-exact field mapping between Oracle per_bar and production feature dict.
 STATE_FIELDS = ["n_channels", "in_zone", "break_up", "break_down"]
@@ -204,10 +283,11 @@ def _as_arr(x) -> np.ndarray:
 # ===========================================================================
 def run_prod_sr_with_injected_pivots(high, low, close, ph, pl) -> dict:
     """Monkeypatch prod.confirmed_pivots to return prepared ph/pl, then call the
-    REAL production build_sr_features. The state machine itself is untouched."""
+    REAL production build_sr_features (captured variant that also exposes the
+    actual per-bar stored pivot value). The state machine itself is untouched."""
     n = len(close)
     atr = np.ones(n, dtype=float)
-    original = prod.confirmed_pivots
+    original = _CAP_NS["confirmed_pivots"]
 
     ph_a = _as_arr(ph)
     pl_a = _as_arr(pl)
@@ -219,13 +299,13 @@ def run_prod_sr_with_injected_pivots(high, low, close, ph, pl) -> dict:
             return pl_a.copy()
         raise AssertionError("unexpected mode %r" % (mode,))
 
-    prod.confirmed_pivots = injected
+    _CAP_NS["confirmed_pivots"] = injected
     try:
-        return prod_build_sr_features(
+        return CAPTURED_BUILD_SR(
             _as_arr(high), _as_arr(low), _as_arr(close), atr, PROD_PINE_DEFAULT
         )
     finally:
-        prod.confirmed_pivots = original
+        _CAP_NS["confirmed_pivots"] = original
 
 
 # ===========================================================================
@@ -510,23 +590,39 @@ def _case_record(case_id, source_domain, ph, pl, high, low, close, open_,
 
     cmp = compare_state_full(oracle_per_bar, prod_feat, mask)
 
-    # Pivot-value selection divergence (production uses isfinite, not Pine bool).
+    # Pivot-value selection divergence: compare Oracle's stored pivot value
+    # against PRODUCTION'S ACTUAL per-bar stored pivot value (captured from the
+    # live pipeline via sr_captured_pivot). This is faithful both pre- and
+    # post Fix A/B and avoids the displayed-channel-price false positives.
+    captured = prod_feat.get("sr_captured_pivot")
     pivot_value_mismatch = 0
     pv_rows = []
     for b in range(n):
-        if (not isnan(ph[b])) or (not isnan(pl[b])):
-            o_stored = store_pivot_value(
-                None if isnan(ph[b]) else ph[b], None if isnan(pl[b]) else pl[b]
-            )
-            p_stored = ph[b] if (not isnan(ph[b])) else pl[b]
-            o_stored = np.nan if o_stored is None else float(o_stored)
-            if not approx_eq(o_stored, p_stored):
+        o_stored = store_pivot_value(
+            None if isnan(ph[b]) else ph[b], None if isnan(pl[b]) else pl[b]
+        )
+        if isnan(o_stored):
+            # Oracle confirms no pivot at b; production must also have none.
+            if captured is not None and not isnan(captured[b]):
                 pivot_value_mismatch += 1
                 pv_rows.append({
                     "bar": int(b),
-                    "oracle_stored": None if isnan(o_stored) else float(o_stored),
-                    "production_stored": None if isnan(p_stored) else float(p_stored),
+                    "oracle_stored": None,
+                    "production_stored": (
+                        None if isnan(captured[b]) else float(captured[b])
+                    ),
                 })
+            continue  # no Oracle exact pivot at this bar
+        if captured is None or isnan(captured[b]) or not approx_eq(o_stored, captured[b]):
+            pivot_value_mismatch += 1
+            pv_rows.append({
+                "bar": int(b),
+                "oracle_stored": None if isnan(o_stored) else float(o_stored),
+                "production_stored": (
+                    None if (captured is None or isnan(captured[b]))
+                    else float(captured[b])
+                ),
+            })
 
     exact_match = (cmp["total_mismatch"] == 0) and (pivot_value_mismatch == 0)
     first_mismatch_field = None
@@ -596,8 +692,8 @@ def build_boundary_matrix():
     ph, pl = inject_pivots(N, [(310, "high", 0.0), (310, "low", 90.0),
                                (350, "high", 450.0)])
     rec, _, _ = _case_record("B03", "exact", ph, pl, h, l, c, o,
-                             "ph=0,pl=90 -> Pine bool(0)=false stores 90; "
-                             "prod isfinite(0)=true stores 0")
+                             "ph=0,pl=90 -> Pine/Oracle bool(0)=false stores 90; "
+                             "prod Fix A matches (no phantom 0)")
     cases.append(rec)
 
     # B04 zero ph only (ph=0, pl=NaN)
@@ -607,7 +703,8 @@ def build_boundary_matrix():
     ph, pl = inject_pivots(N, [(310, "high", 0.0), (310, "low", np.nan),
                                (350, "high", 450.0)])
     rec, _, _ = _case_record("B04", "exact", ph, pl, h, l, c, o,
-                             "ph=0,pl=NaN -> Pine no pivot; prod phantom pivot 0")
+                             "ph=0,pl=NaN -> Pine/Oracle no pivot; "
+                             "prod Fix A matches (no phantom pivot)")
     cases.append(rec)
 
     # B05 normal positive-width channel
@@ -1195,8 +1292,13 @@ def main():
     print("[Prefix] causality ...")
     prefix = prefix_causality()
 
-    # ---- Hard gate (Phase A -> Phase B transition) ----
-    gate_boundary_ok = set(boundary_mismatch_ids) == {"B03", "B04", "B06"}
+    # ---- Hard gate (Phase B: post-fix verification) ----
+    # Fix A (Pine bool pivot truthiness) and Fix B (zero-width channels) make
+    # production match the Oracle on every pre-authorized divergence, so the
+    # post-fix expectation is ALL 16 boundary cases MATCH (empty mismatch set).
+    # Any non-empty boundary mismatch set => the fix regressed or introduced a
+    # new exact-domain divergence => STOP.
+    gate_boundary_ok = (len(boundary_mismatch_ids) == 0)
     gate_random_ok = (
         c_agg["pivot_exact_mismatch"] == 0 and c_agg["state_total_mismatch"] == 0
     )
@@ -1221,9 +1323,11 @@ def main():
         "gate_parity_ok": bool(gate_parity_ok),
         "gate_pass": bool(gate_pass),
         "note": (
-            "gate_pass=True authorizes Phase B (only the pre-authorized "
-            "B03/B04/B06 divergences remain). Any new exact-domain mismatch, "
-            "AG state exact rows == 0, or pipeline parity > 0 => STOP."
+            "Phase B post-fix gate: gate_pass=True requires ALL 16 boundary "
+            "cases to MATCH (Fix A + Fix B resolve the pre-authorized B03/B04/B06 "
+            "divergences) and no AG pivot/state divergence or pipeline parity > 0. "
+            "Any non-empty boundary mismatch set, AG state exact rows == 0, or "
+            "pipeline parity > 0 => STOP."
         ),
     }
 

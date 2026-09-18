@@ -1011,18 +1011,24 @@ def build_sr_features(
 
     for i in range(n):
 
-        new_pivot = (
+        ph_truthy = (
             np.isfinite(ph[i])
-            or np.isfinite(pl[i])
+            and float(ph[i]) != 0.0
         )
+        pl_truthy = (
+            np.isfinite(pl[i])
+            and float(pl[i]) != 0.0
+        )
+
+        new_pivot = ph_truthy or pl_truthy
 
         if new_pivot:
 
-            # 对齐 Pine：
+            # 对齐 Pine：bool(0.0) == false，只有非零且有限才视为有效 pivot
             # 同一确认 bar 上 ph 优先
             pivot_value = (
                 float(ph[i])
-                if np.isfinite(ph[i])
+                if ph_truthy
                 else float(pl[i])
             )
 
@@ -1055,7 +1061,6 @@ def build_sr_features(
 
             if (
                 np.isfinite(width_i)
-                and width_i > 0
                 and pivots
             ):
 
