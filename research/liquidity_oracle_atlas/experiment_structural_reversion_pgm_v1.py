@@ -835,47 +835,57 @@ def trend_state_from_score(
         dtype=np.float64,
     )
 
-    out = np.zeros(
+    # Pine v6: `var trend = bool(na)` -> bool(na) == false.
+    # Numeric encoding:  false -> -1,  true -> +1.
+    out = np.full(
         len(score),
+        -1,
         dtype=np.int8,
     )
 
-    state = 0
-    prev = np.nan
+    state = -1
 
-    for i, cur in enumerate(score):
+    for i in range(len(score)):
 
-        if (
-            np.isfinite(cur)
-            and np.isfinite(prev)
-        ):
+        cur = score[i]
 
-            cross_up = (
-                prev <= switch
-                and cur > switch
-            )
+        # Pine ta.crossover / ta.crossunder compare against the
+        # IMMEDIATE previous bar. Never reuse an older finite value
+        # across a NaN gap.
+        if i > 0:
 
-            cross_down = (
-                prev >= -switch
-                and cur < -switch
-            )
+            prev = score[i - 1]
 
             if (
-                cross_up
-                and state <= 0
+                np.isfinite(cur)
+                and np.isfinite(prev)
             ):
-                state = 1
 
-            elif (
-                cross_down
-                and state >= 0
-            ):
-                state = -1
+                cross_up = (
+                    prev <= switch
+                    and cur > switch
+                )
+
+                cross_down = (
+                    prev >= -switch
+                    and cur < -switch
+                )
+
+                # else-if semantics: crossover has priority (matches
+                # `ta.crossover(...) and not trend` / `ta.crossunder(...) and trend`)
+                if (
+                    cross_up
+                    and state == -1
+                ):
+                    state = +1
+
+                elif (
+                    cross_down
+                    and state == +1
+                ):
+                    state = -1
 
         out[i] = state
-
-        if np.isfinite(cur):
-            prev = cur
 
     return out
 
@@ -6619,36 +6629,73 @@ def dtp_source_contract_synthetic() -> None:
             f"denom[504]={denom[504]}",
         )
 
-    # ---- trend state: 初始 state=0 (Pine 初始 na -> MISMATCH; 见 summary) ----
-    score = np.concatenate(
-        [
-            np.full(20, -0.5),
-            np.full(20, 0.3),
-            np.full(20, -0.3),
-        ]
+    # ---- trend state: Pine v6 bool(na) -> false -> encode -1 ----
+    # 用例 A: 初始 false 编码
+    #   [nan, nan, 0.0] -> [-1, -1, -1]
+    a = np.array(
+        [np.nan, np.nan, 0.0]
     )
 
-    state = trend_state_from_score(
-        score,
+    sa = trend_state_from_score(
+        a,
         0.10,
     )
 
-    if state[0] != 0:
+    if list(sa) != [-1, -1, -1]:
         _source_fail(
-            "TREND_INIT",
-            f"initial state={state[0]}",
+            "TREND_INIT_FALSE",
+            f"A={list(sa)}",
         )
 
-    if state[20] != 1:
+    # 用例 B: crossover 等号边界 (prev <= switch, cur > switch)
+    #   prev=+0.10, cur=+0.11 -> -1 -> +1
+    b = np.array(
+        [0.05, 0.10, 0.11]
+    )
+
+    sb = trend_state_from_score(
+        b,
+        0.10,
+    )
+
+    if list(sb) != [-1, -1, +1]:
         _source_fail(
-            "TREND_UP",
-            f"state[20]={state[20]}",
+            "TREND_EQ_CROSSUP",
+            f"B={list(sb)}",
         )
 
-    if state[40] != -1:
+    # 用例 C: crossunder 等号边界 (prev >= -switch, cur < -switch)
+    #   已处 +1: prev=-0.10, cur=-0.11 -> +1 -> -1
+    c = np.array(
+        [0.05, 0.10, 0.11, -0.10, -0.11]
+    )
+
+    sc = trend_state_from_score(
+        c,
+        0.10,
+    )
+
+    if list(sc) != [-1, -1, +1, +1, -1]:
         _source_fail(
-            "TREND_DOWN",
-            f"state[40]={state[40]}",
+            "TREND_EQ_CROSSDOWN",
+            f"C={list(sc)}",
+        )
+
+    # 用例 D: NaN gap -> 不得跨过 NaN 使用更早有限值
+    #   [-0.2, nan, +0.2] -> 最后一根不得 crossover
+    d = np.array(
+        [-0.2, np.nan, +0.2]
+    )
+
+    sd = trend_state_from_score(
+        d,
+        0.10,
+    )
+
+    if list(sd) != [-1, -1, -1]:
+        _source_fail(
+            "TREND_NAN_GAP",
+            f"D={list(sd)}",
         )
 
     print(
@@ -7033,113 +7080,233 @@ def liquidity_source_contract_synthetic() -> None:
     )
 
 
+# =============================================================================
+# 17c. Pine source reference pinning (R2A.1)
+#
+# --pine-source-audit 必须先证明它审核的正是这三份本地 Pine 源文件,
+# 而不是任何手写字符串。三份文件的 SHA256 在 commit 时刻被钉死;
+# 若文件缺失或被改动, audit 立即 STOP。
+# Pine 文件只读, 不提交。
+# =============================================================================
+
+PINE_SOURCE_REFS = {
+    "DeviationTrendProfile.pine": (
+        "7132bf12844dd09c9c18fb0745d20c8f66f6bb1ef07f297698b566e3ad9d4745"
+    ),
+    "SRchannel.pine": (
+        "9d8ee4af1e2c9a05c361c2e7883dc418b2d575e5cd8bcfaa0e652a13e395a87a"
+    ),
+    "Liquidity.pine": (
+        "ccd13991b4b96eeed55651ff13b2541ca4a53c91aa68a54e888b1b2b4513a408"
+    ),
+}
+
+
+def verify_pine_source_refs() -> None:
+
+    import hashlib
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parents[2]
+
+    for name, expected in PINE_SOURCE_REFS.items():
+
+        path = repo_root / "ref" / name
+
+        if not path.exists():
+            raise SystemExit(
+                f"STOP_STRUCTREV_PINE_SOURCE_MISSING:{name}"
+            )
+
+        actual = hashlib.sha256(
+            path.read_bytes()
+        ).hexdigest()
+
+        if actual != expected:
+            raise SystemExit(
+                "STOP_STRUCTREV_PINE_SOURCE_HASH_MISMATCH:"
+                f"{name}:expected={expected}:actual={actual}"
+            )
+
+        print(
+            f"[AUDIT] pine source pinned: {name} sha256={actual}",
+            flush=True,
+        )
+
+
 def print_pine_source_contract_summary() -> None:
     """
     静态 Source Contract 事实表 + 计数。
 
     状态只允许: EXACT / INTENTIONAL_RESEARCH_EXTENSION /
                 UNVERIFIED / MISMATCH
+
+    Pine 派生与研究派生在此明确分开。
     """
 
     dtp_rows = [
-        ("sma", "ta.sma(close,50)",
-         "rolling_sma(close,50): rolling(50).mean()",
+        ("sma", "ta.sma(close, 50)  (length=50)",
+         "rolling_sma(close, 50): rolling(50, min_periods=50).mean()",
          "EXACT"),
         ("atr", "ta.atr(200)",
-         "pine_rma(true_range,200): SMA seed + Wilder",
+         "pine_rma(true_range, 200): SMA seed + Wilder",
          "EXACT"),
-        ("deviation", "(close-avg)/atr",
-         "(close-sma)/atr",
+        ("avg_diff", "avg - avg[5]",
+         "sma - roll(sma, 5)",
          "EXACT"),
-        ("trend slope", "avg - avg[5]",
-         "sma - roll(sma,5)",
-         "EXACT"),
-        ("trend normalization",
-         "avg_diff / ta.percentile_linear_interpolation(avg_diff,500,100)",
-         "slope / rolling(slope,500).max()",
+        ("avg_col (norm)",
+         "avg_diff / ta.percentile_linear_interpolation(avg_diff, 500, 100)",
+         "slope / rolling(slope, 500).max()  (100th pct == max by math)",
          "UNVERIFIED"),
-        ("trend state",
-         "var trend=bool(na); crossover(avg_col,0.1)/crossunder(avg_col,-0.1)",
-         "trend_state_from_score: init state=0; prev<=sw&cur>sw",
-         "MISMATCH"),
+        ("trend bool/state",
+         "var trend = bool(na) -> false; "
+         "ta.crossover(avg_col,0.1)/ta.crossunder(avg_col,-0.1); "
+         "encode false=-1, true=+1",
+         "trend_state_from_score: init=-1; immediate prev; "
+         "prev<=sw&cur>sw / prev>=-sw&cur<-sw",
+         "EXACT"),
+        ("dev (research)",
+         "Pine 无 dev 变量 (仅 avg/atr/stdv/avg_diff/avg_col)",
+         "dev = (close - avg) / atr  派生自 avg+atr",
+         "INTENTIONAL_RESEARCH_EXTENSION"),
+        ("slope_atr (research)",
+         "Pine 无 slope_atr 变量",
+         "slope_atr = avg_diff / atr  派生自 avg_diff+atr",
+         "INTENTIONAL_RESEARCH_EXTENSION"),
     ]
 
     sr_rows = [
-        ("pivot", "ta.pivothigh(high,10,10)/ta.pivotlow(low,10,10)",
+        ("pivot", "ta.pivothigh(src1,prd,prd)/ta.pivotlow(src2,prd,prd)  prd=10",
          "confirmed_pivots: center>=extrema (接受 tie)",
          "UNVERIFIED"),
         ("channel width",
-         "(ta.highest(300)-ta.lowest(300))*ChannelW/100",
-         "(rolling.max(300)-rolling.min(300))*5/100",
+         "(ta.highest(300)-ta.lowest(300)) * ChannelW / 100  (ChannelW=5)",
+         "(rolling.max(300)-rolling.min(300)) * 5 / 100",
          "EXACT"),
         ("strength",
-         "pivot_count*20 + touches; >= minstrength*20",
+         "get_sr_vals: +20 / pivot; +touches; >= minstrength*20",
          "pivot_count*20 + touches; >= minstrength*20",
          "EXACT"),
-        ("overlap selection",
-         "greedy strongest-first; zero included pivots; repeat",
-         "greedy argmax strength; zero overlap; repeat; [:max_channels]",
+        ("overlap/select",
+         "greedy strongest-first; 含入 pivot 置 -1; repeat; "
+         "draw 0..min(9, maxnumsr)",
+         "greedy argmax strength; 含入 pivot 置 -1; repeat; [:max_channels]",
          "UNVERIFIED"),
-        ("support/resistance",
-         "channel top/bottom vs close (in zone / nearest above / below)",
-         "containing / nearest above / below by close",
+        ("in-channel",
+         "close <= top and close >= bottom  (L175)",
+         "containing (close within [bottom, top])",
          "EXACT"),
         ("break",
-         "close[1]<=top & close>top / close[1]>=bottom & close<bottom",
-         "prev<=hi & close>hi / prev>=lo & close<lo",
+         "close[1] <= top and close > top / "
+         "close[1] >= bottom and close < bottom  (L182-186)",
+         "prev <= hi & close > hi / prev >= lo & close < lo",
          "EXACT"),
         ("max channels",
-         "input=6 then maxnumsr=6-1=5; loop 0..min(9,5)=6 channels",
-         "sr_max_channels=6; selected[:6]",
+         "maxnumsr = input.int(6)-1 = 5; for x=0..min(9,5) -> 6 channels",
+         "sr_max_channels = 6; selected[:6]",
          "EXACT"),
+        ("nearest S/R (research)",
+         "Pine 仅分类全部 channel, 不输出最近 S/R 距离节点",
+         "sr_support_price/resistance_price; nearest above/below by close; "
+         "in-channel 时 price=close dist=0",
+         "INTENTIONAL_RESEARCH_EXTENSION"),
+        ("distance in ATR (research)",
+         "Pine 无",
+         "sr_support_dist_atr / sr_resistance_dist_atr",
+         "INTENTIONAL_RESEARCH_EXTENSION"),
+        ("orientation (research)",
+         "Pine 无",
+         "sr_support_* / sr_resistance_* 定向 same/opp 节点",
+         "INTENTIONAL_RESEARCH_EXTENSION"),
     ]
 
     liq_rows = [
-        ("pivot", "ta.pivothigh(liqLen,1)/ta.pivotlow(liqLen,1)",
-         "confirmed_pivots(high,7,1)/low; tie UNVERIFIED (shared)",
-         "EXACT"),
+        ("pivot", "ta.pivothigh(liqLen,1)/ta.pivotlow(liqLen,1)  liqLen=7",
+         "confirmed_pivots(high, 7, 1) / low",
+         "UNVERIFIED"),
         ("zigzag",
-         "dir<1->insert(1); dir==1&ph>y1->replace; newest-first; cap 50",
-         "update_zz: empty/diff->insert; better->replace; zz[:50]",
+         "in_out prepend+pop (newest-first, cap 50); "
+         "dir<1 -> insert(1); dir==1 & ph>y1 -> replace",
+         "update_zz: empty/diff -> insert; better -> replace; zz[:50]",
          "EXACT"),
         ("cluster",
-         "margin=atr/liqMar; break if y>ph+margin; count>2->level",
-         "margin=atr/liq_mar; break if y>pivot+margin; count>2->level",
+         "margin = atr / liqMar; if y > ph+margin break; count > 2",
+         "margin = atr / liq_mar; break if y > pivot+margin; count > 2",
          "EXACT"),
         ("zone",
-         "top=avg(minP,maxP)+margin; bottom=avg-minP,maxP)-margin",
-         "top=center+margin; bottom=center-margin",
+         "top = avg(minP,maxP) + margin; bottom = avg(minP,maxP) - margin",
+         "top = center + margin; bottom = center - margin",
          "EXACT"),
         ("breach",
-         "high>zone_top (buyside) / low<zone_bottom (sellside)",
-         "high>lev.top / low<lev.bottom",
+         "b.h > bx.top (buyside) / b.l < bx.bottom (sellside) -> "
+         "brL/brZ = true  (L259-285)",
+         "high > lev.top / low < lev.bottom",
          "EXACT"),
+        ("Mode (research)",
+         "mode='Present'; per = last_bar_index - bar_index <= 500 "
+         "(默认仅最后 ~500 bar)",
+         "Python 计算完整历史",
+         "INTENTIONAL_RESEARCH_EXTENSION"),
     ]
 
     ext_rows = [
-        ("liq_last_accept", "Pine: 无此定义",
+        ("liq_last_accept", "Pine 无 accept 标签",
          "close 仍在突破方向",
          "INTENTIONAL_RESEARCH_EXTENSION"),
-        ("liq_last_reclaim", "Pine: 无此定义",
+        ("liq_last_reclaim", "Pine 无 reclaim 标签",
          "close 回到 level 另一侧",
          "INTENTIONAL_RESEARCH_EXTENSION"),
-        ("liq_last_zone_active", "Pine: 无此定义",
-         "breach 后 post-break margin 内",
+        ("liq_last_zone_active",
+         "Pine 概念: 每 liquidity object 各自 brZ (L80/261/285); "
+         "breach bar 设 brZ=true, 之后 bar 才 else-if brZ",
+         "last_breach 汇总的 zone_active 研究态; "
+         "可能 breach bar 即判 inside_zone",
+         "INTENTIONAL_RESEARCH_EXTENSION"),
+        ("liq up/down dist ATR", "Pine 无",
+         "liq_up_dist_atr / liq_down_dist_atr",
+         "INTENTIONAL_RESEARCH_EXTENSION"),
+        ("liq orientation", "Pine 无",
+         "against/target side 定向节点",
+         "INTENTIONAL_RESEARCH_EXTENSION"),
+        ("liq last_breach_side", "Pine 无",
+         "last_breach 方向",
+         "INTENTIONAL_RESEARCH_EXTENSION"),
+        ("liq last_breach_age", "Pine 无",
+         "last_breach 距当前 bar 数",
+         "INTENTIONAL_RESEARCH_EXTENSION"),
+        ("cross-timeframe", "Pine 无 (Pine 单 TF)",
+         "trend_align / state_align / reversion_pressure",
          "INTENTIONAL_RESEARCH_EXTENSION"),
     ]
 
     unverified_rows = [
+        ("DTP percentile runtime",
+         "ta.percentile_linear_interpolation(avg_diff,500,100) 精确 warmup/seed",
+         "Python rolling.max(500) (100th pct == max by math, 未运行时验证)",
+         "UNVERIFIED"),
+        ("SR pivot tie",
+         "ta.pivothigh/low 相等高点/低点 tie 选择",
+         "confirmed_pivots center>=extrema (接受 tie)",
+         "UNVERIFIED"),
+        ("Liquidity pivot tie",
+         "ta.pivothigh/low 相等高点/低点 tie 选择",
+         "confirmed_pivots center>=extrema (接受 tie)",
+         "UNVERIFIED"),
         ("15m aggregation",
-         "TradingView 15m futures session bar",
+         "TradingView 15m futures session bar boundary",
          "Python time.dt.floor('15min')",
          "UNVERIFIED"),
         ("1H aggregation",
-         "TradingView 1H futures session bar",
+         "TradingView 1H futures session bar boundary",
          "Python time.dt.floor('1H')",
          "UNVERIFIED"),
         ("4H aggregation",
-         "TradingView 4H futures session bar",
+         "TradingView 4H futures session bar boundary",
          "Python time.dt.floor('4H')",
+         "UNVERIFIED"),
+        ("runtime numeric parity",
+         "TradingView Pine 实际运行数值",
+         "Python implementation 输出",
          "UNVERIFIED"),
     ]
 
@@ -7182,7 +7349,7 @@ def print_pine_source_contract_summary() -> None:
 
     for name, pine, py, st in dtp_rows:
         print(
-            f"  {name:18s} {st:28s} {pine}  ->  {py}",
+            f"  {name:22s} {st:28s} {pine}  ->  {py}",
             flush=True,
         )
 
@@ -7193,7 +7360,7 @@ def print_pine_source_contract_summary() -> None:
 
     for name, pine, py, st in sr_rows:
         print(
-            f"  {name:18s} {st:28s} {pine}  ->  {py}",
+            f"  {name:22s} {st:28s} {pine}  ->  {py}",
             flush=True,
         )
 
@@ -7204,7 +7371,7 @@ def print_pine_source_contract_summary() -> None:
 
     for name, pine, py, st in liq_rows:
         print(
-            f"  {name:18s} {st:28s} {pine}  ->  {py}",
+            f"  {name:22s} {st:28s} {pine}  ->  {py}",
             flush=True,
         )
 
@@ -7215,7 +7382,7 @@ def print_pine_source_contract_summary() -> None:
 
     for name, pine, py, st in ext_rows:
         print(
-            f"  {name:18s} {st:28s} {pine}  ->  {py}",
+            f"  {name:22s} {st:28s} {pine}  ->  {py}",
             flush=True,
         )
 
@@ -7226,7 +7393,7 @@ def print_pine_source_contract_summary() -> None:
 
     for name, pine, py, st in unverified_rows:
         print(
-            f"  {name:18s} {st:28s} {pine}  ->  {py}",
+            f"  {name:22s} {st:28s} {pine}  ->  {py}",
             flush=True,
         )
 
@@ -7253,6 +7420,31 @@ def print_pine_source_contract_summary() -> None:
                 flush=True,
             )
 
+    # ---- R2B 参考配置 (R2B 必须按此运行 TradingView) ----
+    print(
+        "=== R2B REFERENCE SETTINGS ===",
+        flush=True,
+    )
+
+    print(
+        "  DTP:     SMA Length = 50;  ATR Length = 200",
+        flush=True,
+    )
+
+    print(
+        "  SR:      Pivot Period = 10;  Source = High/Low;  "
+        "Maximum Channel Width = 5;  Minimum Strength = 1;  "
+        "Maximum Number S/R = 6;  Loopback = 290",
+        flush=True,
+    )
+
+    print(
+        "  Liquidity: Detection Length = 7;  Margin input = 6.9 "
+        "(liqMar = 10/6.9);  Mode = Historical;  Visible Levels = 3;  "
+        "Buyside post-break margin = 2.3;  Sellside post-break margin = 2.3",
+        flush=True,
+    )
+
     print(
         "TradingView runtime numeric parity: NOT VERIFIED (R2B)",
         flush=True,
@@ -7276,12 +7468,17 @@ def run_pine_source_audit() -> None:
         flush=True,
     )
 
+    # 1) 先证明审核的正是这三份本地 Pine 源文件
+    verify_pine_source_refs()
+
+    # 2) source-contract synthetics
     dtp_source_contract_synthetic()
 
     sr_source_contract_synthetic()
 
     liquidity_source_contract_synthetic()
 
+    # 3) contract summary
     print_pine_source_contract_summary()
 
 
