@@ -1718,9 +1718,17 @@ def build_liquidity_features(
         # confirmed swing
         # ---------------------------------------------------------------------
 
-        if np.isfinite(
-            ph[i]
-        ):
+        ph_truthy = (
+            np.isfinite(ph[i])
+            and float(ph[i]) != 0.0
+        )
+
+        pl_truthy = (
+            np.isfinite(pl[i])
+            and float(pl[i]) != 0.0
+        )
+
+        if ph_truthy:
 
             update_zz(
                 +1,
@@ -1734,9 +1742,7 @@ def build_liquidity_features(
                 atr_i,
             )
 
-        if np.isfinite(
-            pl[i]
-        ):
+        if pl_truthy:
 
             update_zz(
                 -1,
