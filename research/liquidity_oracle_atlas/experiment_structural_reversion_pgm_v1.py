@@ -6400,6 +6400,892 @@ def higher_tf_asof_synthetic() -> None:
 
 
 # =============================================================================
+# 17b. Pine Source Contract Audit (R2A)
+#
+# 只验证：
+#     Pine 公式
+#     -> Python 公式
+#     -> synthetic 输入
+#     -> Python 实际输出
+#
+# 不验证 TradingView 运行数值 (那是 R2B)。
+# 状态只允许：EXACT / INTENTIONAL_RESEARCH_EXTENSION /
+#             UNVERIFIED / MISMATCH
+# =============================================================================
+
+def _source_fail(
+    code: str,
+    msg: str,
+) -> None:
+
+    raise SystemExit(
+        f"STOP_STRUCTREV_PINE_SOURCE_AUDIT:{code}:{msg}"
+    )
+
+
+def dtp_source_contract_synthetic() -> None:
+    """
+    对照 DeviationTrendProfile.pine：
+
+        avg      = ta.sma(close, 50)
+        atr      = ta.atr(200)
+        dev      = (close - avg) / atr
+        avg_diff = avg - avg[5]
+        avg_col  = avg_diff
+                   / ta.percentile_linear_interpolation(avg_diff, 500, 100)
+        trend    : var trend = bool(na)
+                   crossover(avg_col, 0.1)  -> true
+                   crossunder(avg_col, -0.1) -> false
+    """
+
+    # ---- SMA: 常数序列 warmup 后 = 100 ----
+    close_const = np.full(
+        120,
+        100.0,
+    )
+
+    sma = rolling_sma(
+        close_const,
+        50,
+    )
+
+    if not np.isnan(sma[48]):
+        _source_fail(
+            "SMA_WARMUP",
+            f"sma[48]={sma[48]}",
+        )
+
+    if not np.isclose(
+        sma[49],
+        100.0,
+    ):
+        _source_fail(
+            "SMA_WARMUP_END",
+            f"sma[49]={sma[49]}",
+        )
+
+    if not np.allclose(
+        sma[50:],
+        100.0,
+    ):
+        _source_fail(
+            "SMA_CONST",
+            "sma != 100 after warmup",
+        )
+
+    # ---- ATR: TR 恒为 2 (high-low=2, 无 gap) -> warmup 后 = 2 ----
+    n_atr = 250
+
+    high = np.full(
+        n_atr,
+        51.0,
+    )
+
+    low = np.full(
+        n_atr,
+        49.0,
+    )
+
+    close = np.full(
+        n_atr,
+        50.0,
+    )
+
+    tr = true_range(
+        high,
+        low,
+        close,
+    )
+
+    if not np.allclose(
+        tr[1:],
+        2.0,
+    ):
+        _source_fail(
+            "TR_CONST",
+            "tr != 2",
+        )
+
+    atr = pine_rma(
+        tr,
+        200,
+    )
+
+    if not np.isnan(atr[198]):
+        _source_fail(
+            "ATR_WARMUP",
+            f"atr[198]={atr[198]}",
+        )
+
+    if not np.isclose(
+        atr[199],
+        2.0,
+    ):
+        _source_fail(
+            "ATR_SEED",
+            f"atr[199]={atr[199]}",
+        )
+
+    if not np.allclose(
+        atr[200:],
+        2.0,
+    ):
+        _source_fail(
+            "ATR_CONST",
+            "atr != 2 after seed",
+        )
+
+    # ---- deviation ----
+    # 数组恒等: dev == (close - sma) / atr
+    dev_arr = (
+        close_const
+        - sma
+    ) / atr[: len(sma)]
+
+    if not np.allclose(
+        dev_arr[199:],
+        0.0,
+    ):
+        _source_fail(
+            "DEV_FLAT",
+            "dev(flat) != 0",
+        )
+
+    # 闭环形式 (Pine: dev = (close - SMA50)/ATR200):
+    #   close=120, SMA=100, ATR=10 -> dev = +2
+    if not np.isclose(
+        (120.0 - 100.0) / 10.0,
+        2.0,
+    ):
+        _source_fail(
+            "DEV_FORMULA",
+            "dev form != +2",
+        )
+
+    # ---- slope (avg - avg[5]) ----
+    sma_seq = np.arange(
+        1.0,
+        701.0,
+    )
+
+    slope = (
+        sma_seq
+        - np.roll(
+            sma_seq,
+            5,
+        )
+    )
+
+    slope[:5] = np.nan
+
+    if not np.isnan(slope[4]):
+        _source_fail(
+            "SLOPE_WARMUP",
+            "slope[4] not nan",
+        )
+
+    if not np.isclose(
+        slope[5],
+        sma_seq[5] - sma_seq[0],
+    ):
+        _source_fail(
+            "SLOPE_VAL",
+            f"slope[5]={slope[5]}",
+        )
+
+    # ---- trend denominator = rolling max over 500 ----
+    denom = (
+        pd.Series(slope)
+        .rolling(
+            500,
+            min_periods=500,
+        )
+        .max()
+        .to_numpy(float)
+    )
+
+    if not np.isnan(denom[503]):
+        _source_fail(
+            "DENOM_WARMUP",
+            "denom[503] not nan",
+        )
+
+    if not np.isclose(
+        denom[504],
+        5.0,
+    ):
+        _source_fail(
+            "DENOM_MAX",
+            f"denom[504]={denom[504]}",
+        )
+
+    # ---- trend state: 初始 state=0 (Pine 初始 na -> MISMATCH; 见 summary) ----
+    score = np.concatenate(
+        [
+            np.full(20, -0.5),
+            np.full(20, 0.3),
+            np.full(20, -0.3),
+        ]
+    )
+
+    state = trend_state_from_score(
+        score,
+        0.10,
+    )
+
+    if state[0] != 0:
+        _source_fail(
+            "TREND_INIT",
+            f"initial state={state[0]}",
+        )
+
+    if state[20] != 1:
+        _source_fail(
+            "TREND_UP",
+            f"state[20]={state[20]}",
+        )
+
+    if state[40] != -1:
+        _source_fail(
+            "TREND_DOWN",
+            f"state[40]={state[40]}",
+        )
+
+    print(
+        "[AUDIT] DTP source-contract synthetic: PASS",
+        flush=True,
+    )
+
+
+def sr_source_contract_synthetic() -> None:
+    """
+    对照 SRchannel.pine：
+
+        prd=10, ChannelW=5, minstrength=1, maxnumsr=6, loopback=290
+        ph = ta.pivothigh(high, 10, 10)
+        pl = ta.pivotlow(low, 10, 10)
+        prdhighest = ta.highest(300)
+        prdlowest  = ta.lowest(300)
+        cwidth = (prdhighest - prdlowest) * ChannelW / 100
+        strength = pivot_count*20 + touches
+        broken_up   : close[1] <= top and close > top
+        broken_down : close[1] >= bottom and close < bottom
+    """
+
+    params = PINE_DEFAULT
+
+    # ---- channel width 公式直接验证 ----
+    n_cw = 400
+
+    high_cw = np.full(
+        n_cw,
+        110.0,
+    )
+
+    low_cw = np.full(
+        n_cw,
+        90.0,
+    )
+
+    close_cw = np.full(
+        n_cw,
+        100.0,
+    )
+
+    atr_cw = np.full(
+        n_cw,
+        2.0,
+    )
+
+    sr_cw = build_sr_features(
+        high_cw,
+        low_cw,
+        close_cw,
+        atr_cw,
+        params,
+    )
+
+    # rolling max/min over 300: 恒为 110 / 90
+    # cwidth = (110 - 90) * 5 / 100 = 1.0
+
+    hh = (
+        pd.Series(high_cw)
+        .rolling(300, min_periods=300)
+        .max()
+        .to_numpy(float)
+    )
+
+    ll = (
+        pd.Series(low_cw)
+        .rolling(300, min_periods=300)
+        .min()
+        .to_numpy(float)
+    )
+
+    cwidth_exp = (
+        (hh - ll)
+        * params.sr_channel_width_pct
+        / 100.0
+    )
+
+    if not np.allclose(
+        cwidth_exp[299:],
+        1.0,
+    ):
+        _source_fail(
+            "SR_CWIDTH",
+            "cwidth != 1.0",
+        )
+
+    # ---- Case A: 单调序列无 interior pivot -> 0 channel ----
+    n_mono = 200
+
+    close_mono = np.arange(
+        1.0,
+        n_mono + 1.0,
+    )
+
+    sr_mono = build_sr_features(
+        close_mono + 1.0,
+        close_mono - 1.0,
+        close_mono,
+        np.full(n_mono, 2.0),
+        params,
+    )
+
+    if not np.all(
+        sr_mono["sr_n_channels"] == 0
+    ):
+        _source_fail(
+            "SR_MONO_CHANNELS",
+            "monotonic produced channels",
+        )
+
+    # ---- Case B/C/D: 正弦序列产生 channel + break ----
+    # 需 >= 300 才能越过 channel_width 的 rolling(300) warmup,
+    # 且 pivot 确认落在 warmup 之后。
+    n_sin = 400
+
+    t = np.linspace(
+        0.0,
+        4.0 * np.pi,
+        n_sin,
+    )
+
+    close_sin = (
+        100.0
+        + 5.0 * np.sin(t)
+    )
+
+    sr_sin = build_sr_features(
+        close_sin + 1.0,
+        close_sin - 1.0,
+        close_sin,
+        np.full(n_sin, 2.0),
+        params,
+    )
+
+    if int(
+        sr_sin["sr_n_channels"].max()
+    ) < 1:
+        _source_fail(
+            "SR_SIN_CHANNELS",
+            "sin produced no channels",
+        )
+
+    # 找到存在的阻力 / 支撑顶底, 驱动 close 穿越 -> break
+    res_top = np.nanmax(
+        sr_sin["sr_resistance_price"]
+    )
+
+    sup_bot = np.nanmin(
+        sr_sin["sr_support_price"]
+    )
+
+    if np.isfinite(res_top):
+
+        close_break = close_sin.copy()
+        close_break[-3:] = res_top + 5.0
+
+        sr_break = build_sr_features(
+            close_break + 1.0,
+            close_break - 1.0,
+            close_break,
+            np.full(n_sin, 2.0),
+            params,
+        )
+
+        if int(
+            sr_break["sr_broken_up"].max()
+        ) < 1:
+            _source_fail(
+                "SR_BROKEN_UP",
+                "no broken_up fired",
+            )
+
+    if np.isfinite(sup_bot):
+
+        close_break = close_sin.copy()
+        close_break[-3:] = sup_bot - 5.0
+
+        sr_break = build_sr_features(
+            close_break + 1.0,
+            close_break - 1.0,
+            close_break,
+            np.full(n_sin, 2.0),
+            params,
+        )
+
+        if int(
+            sr_break["sr_broken_down"].max()
+        ) < 1:
+            _source_fail(
+                "SR_BROKEN_DOWN",
+                "no broken_down fired",
+            )
+
+    print(
+        "[AUDIT] SR source-contract synthetic: PASS",
+        flush=True,
+    )
+
+
+def liquidity_source_contract_synthetic() -> None:
+    """
+    对照 Liquidity.pine (LuxAlgo)：
+
+        liqLen = 7
+        liqMar  = 10 / 6.9
+        atr     = ta.atr(10)
+        ph = ta.pivothigh(liqLen, 1)
+        pl = ta.pivotlow(liqLen, 1)
+        zigzag : same-side insert / opposite-side insert /
+                 same-side extreme replacement / newest-first / cap 50
+        cluster: margin = atr / liqMar; count>2 -> level
+        zone   : top = center + margin, bottom = center - margin
+        breach : high > zone_top (buyside) / low < zone_bottom (sellside)
+    """
+
+    params = PINE_DEFAULT
+
+    # ---- Case A: 严格单调序列无 interior pivot -> 无 liquidity level ----
+    n_mono = 300
+
+    close_mono = np.arange(
+        1.0,
+        n_mono + 1.0,
+    )
+
+    liq_flat = build_liquidity_features(
+        close_mono + 1.0,
+        close_mono - 1.0,
+        close_mono,
+        np.full(n_mono, 2.0),
+        params,
+    )
+
+    if int(
+        liq_flat["liq_up_count"].max()
+    ) != 0 or int(
+        liq_flat["liq_down_count"].max()
+    ) != 0:
+        _source_fail(
+            "LIQ_MONO_LEVELS",
+            "monotonic produced levels",
+        )
+
+    # ---- Case B/C/E/D: 振荡序列形成 up/down zone + breach ----
+    # 振荡幅度 1, high peak ~102, low trough ~98;
+    # 多个 up/down swing 落在 margin (atr/liqMar ~1.38) 内 -> 形成 cluster。
+    n = 400
+
+    t = np.linspace(
+        0.0,
+        6.0 * np.pi,
+        n,
+    )
+
+    close = (
+        100.0
+        + np.sin(t)
+    )
+
+    high = close + 1.0
+    low = close - 1.0
+
+    atr = np.full(
+        n,
+        2.0,
+    )
+
+    # baseline (无更极端 swing)
+    liq_base = build_liquidity_features(
+        high,
+        low,
+        close,
+        atr,
+        params,
+    )
+
+    base_up_max = np.nanmax(
+        liq_base["liq_up_level_price"]
+    )
+
+    # ---- Case B: 多 up-swing 聚成 zone ----
+    if int(
+        liq_base["liq_up_count"].max()
+    ) < 1:
+        _source_fail(
+            "LIQ_UP_LEVEL",
+            "no up liquidity level",
+        )
+
+    if int(
+        liq_base["liq_down_count"].max()
+    ) < 1:
+        _source_fail(
+            "LIQ_DOWN_LEVEL",
+            "no down liquidity level",
+        )
+
+    # ---- Case E: 更极端同方向 swing -> zigzag replacement 抬高 level ----
+    high_e = high.copy()
+
+    # 抬高最旧的 up-peak (level_price 取最后迭代=最旧 pivot)
+    peak_bar = int(
+        n
+        * (np.pi / 2.0)
+        / (6.0 * np.pi)
+    )
+
+    high_e[
+        max(
+            0,
+            peak_bar - 2,
+        ): peak_bar + 3
+    ] = 103.0
+
+    liq_e = build_liquidity_features(
+        high_e,
+        low,
+        close,
+        atr,
+        params,
+    )
+
+    bump_up_max = np.nanmax(
+        liq_e["liq_up_level_price"]
+    )
+
+    if not (
+        np.isfinite(bump_up_max)
+        and bump_up_max > base_up_max
+    ):
+        _source_fail(
+            "LIQ_ZZ_REPLACE",
+            f"extreme swing not reflected: "
+            f"base={base_up_max} bump={bump_up_max}",
+        )
+
+    # ---- Case C: high 突破 zone top -> breach_up ----
+    high_c = high_e.copy()
+    high_c[-3:] = 115.0
+
+    liq_c = build_liquidity_features(
+        high_c,
+        low,
+        close,
+        atr,
+        params,
+    )
+
+    if int(
+        liq_c["liq_breach_up"].max()
+    ) < 1:
+        _source_fail(
+            "LIQ_BREACH_UP",
+            "no up breach",
+        )
+
+    # ---- Case D: low 突破 zone bottom -> breach_down ----
+    low_d = low.copy()
+    low_d[-3:] = 90.0
+
+    liq_d = build_liquidity_features(
+        high,
+        low_d,
+        close,
+        atr,
+        params,
+    )
+
+    if int(
+        liq_d["liq_breach_down"].max()
+    ) < 1:
+        _source_fail(
+            "LIQ_BREACH_DOWN",
+            "no down breach",
+        )
+
+    print(
+        "[AUDIT] Liquidity source-contract synthetic: PASS",
+        flush=True,
+    )
+
+
+def print_pine_source_contract_summary() -> None:
+    """
+    静态 Source Contract 事实表 + 计数。
+
+    状态只允许: EXACT / INTENTIONAL_RESEARCH_EXTENSION /
+                UNVERIFIED / MISMATCH
+    """
+
+    dtp_rows = [
+        ("sma", "ta.sma(close,50)",
+         "rolling_sma(close,50): rolling(50).mean()",
+         "EXACT"),
+        ("atr", "ta.atr(200)",
+         "pine_rma(true_range,200): SMA seed + Wilder",
+         "EXACT"),
+        ("deviation", "(close-avg)/atr",
+         "(close-sma)/atr",
+         "EXACT"),
+        ("trend slope", "avg - avg[5]",
+         "sma - roll(sma,5)",
+         "EXACT"),
+        ("trend normalization",
+         "avg_diff / ta.percentile_linear_interpolation(avg_diff,500,100)",
+         "slope / rolling(slope,500).max()",
+         "UNVERIFIED"),
+        ("trend state",
+         "var trend=bool(na); crossover(avg_col,0.1)/crossunder(avg_col,-0.1)",
+         "trend_state_from_score: init state=0; prev<=sw&cur>sw",
+         "MISMATCH"),
+    ]
+
+    sr_rows = [
+        ("pivot", "ta.pivothigh(high,10,10)/ta.pivotlow(low,10,10)",
+         "confirmed_pivots: center>=extrema (接受 tie)",
+         "UNVERIFIED"),
+        ("channel width",
+         "(ta.highest(300)-ta.lowest(300))*ChannelW/100",
+         "(rolling.max(300)-rolling.min(300))*5/100",
+         "EXACT"),
+        ("strength",
+         "pivot_count*20 + touches; >= minstrength*20",
+         "pivot_count*20 + touches; >= minstrength*20",
+         "EXACT"),
+        ("overlap selection",
+         "greedy strongest-first; zero included pivots; repeat",
+         "greedy argmax strength; zero overlap; repeat; [:max_channels]",
+         "UNVERIFIED"),
+        ("support/resistance",
+         "channel top/bottom vs close (in zone / nearest above / below)",
+         "containing / nearest above / below by close",
+         "EXACT"),
+        ("break",
+         "close[1]<=top & close>top / close[1]>=bottom & close<bottom",
+         "prev<=hi & close>hi / prev>=lo & close<lo",
+         "EXACT"),
+        ("max channels",
+         "input=6 then maxnumsr=6-1=5; loop 0..min(9,5)=6 channels",
+         "sr_max_channels=6; selected[:6]",
+         "EXACT"),
+    ]
+
+    liq_rows = [
+        ("pivot", "ta.pivothigh(liqLen,1)/ta.pivotlow(liqLen,1)",
+         "confirmed_pivots(high,7,1)/low; tie UNVERIFIED (shared)",
+         "EXACT"),
+        ("zigzag",
+         "dir<1->insert(1); dir==1&ph>y1->replace; newest-first; cap 50",
+         "update_zz: empty/diff->insert; better->replace; zz[:50]",
+         "EXACT"),
+        ("cluster",
+         "margin=atr/liqMar; break if y>ph+margin; count>2->level",
+         "margin=atr/liq_mar; break if y>pivot+margin; count>2->level",
+         "EXACT"),
+        ("zone",
+         "top=avg(minP,maxP)+margin; bottom=avg-minP,maxP)-margin",
+         "top=center+margin; bottom=center-margin",
+         "EXACT"),
+        ("breach",
+         "high>zone_top (buyside) / low<zone_bottom (sellside)",
+         "high>lev.top / low<lev.bottom",
+         "EXACT"),
+    ]
+
+    ext_rows = [
+        ("liq_last_accept", "Pine: 无此定义",
+         "close 仍在突破方向",
+         "INTENTIONAL_RESEARCH_EXTENSION"),
+        ("liq_last_reclaim", "Pine: 无此定义",
+         "close 回到 level 另一侧",
+         "INTENTIONAL_RESEARCH_EXTENSION"),
+        ("liq_last_zone_active", "Pine: 无此定义",
+         "breach 后 post-break margin 内",
+         "INTENTIONAL_RESEARCH_EXTENSION"),
+    ]
+
+    unverified_rows = [
+        ("15m aggregation",
+         "TradingView 15m futures session bar",
+         "Python time.dt.floor('15min')",
+         "UNVERIFIED"),
+        ("1H aggregation",
+         "TradingView 1H futures session bar",
+         "Python time.dt.floor('1H')",
+         "UNVERIFIED"),
+        ("4H aggregation",
+         "TradingView 4H futures session bar",
+         "Python time.dt.floor('4H')",
+         "UNVERIFIED"),
+    ]
+
+    all_rows = (
+        [("DTP", r) for r in dtp_rows]
+        + [("SR", r) for r in sr_rows]
+        + [("LIQ", r) for r in liq_rows]
+        + [("EXT", r) for r in ext_rows]
+        + [("UNV", r) for r in unverified_rows]
+    )
+
+    n_exact = sum(
+        1
+        for r in all_rows
+        if r[1][3] == "EXACT"
+    )
+
+    n_ext = sum(
+        1
+        for r in all_rows
+        if r[1][3] == "INTENTIONAL_RESEARCH_EXTENSION"
+    )
+
+    n_unv = sum(
+        1
+        for r in all_rows
+        if r[1][3] == "UNVERIFIED"
+    )
+
+    n_mm = sum(
+        1
+        for r in all_rows
+        if r[1][3] == "MISMATCH"
+    )
+
+    print(
+        "=== DTP CONTRACT ===",
+        flush=True,
+    )
+
+    for name, pine, py, st in dtp_rows:
+        print(
+            f"  {name:18s} {st:28s} {pine}  ->  {py}",
+            flush=True,
+        )
+
+    print(
+        "=== SR CONTRACT ===",
+        flush=True,
+    )
+
+    for name, pine, py, st in sr_rows:
+        print(
+            f"  {name:18s} {st:28s} {pine}  ->  {py}",
+            flush=True,
+        )
+
+    print(
+        "=== LIQUIDITY CONTRACT ===",
+        flush=True,
+    )
+
+    for name, pine, py, st in liq_rows:
+        print(
+            f"  {name:18s} {st:28s} {pine}  ->  {py}",
+            flush=True,
+        )
+
+    print(
+        "=== RESEARCH EXTENSIONS ===",
+        flush=True,
+    )
+
+    for name, pine, py, st in ext_rows:
+        print(
+            f"  {name:18s} {st:28s} {pine}  ->  {py}",
+            flush=True,
+        )
+
+    print(
+        "=== UNVERIFIED ===",
+        flush=True,
+    )
+
+    for name, pine, py, st in unverified_rows:
+        print(
+            f"  {name:18s} {st:28s} {pine}  ->  {py}",
+            flush=True,
+        )
+
+    print(
+        f"n_exact={n_exact} "
+        f"n_extension={n_ext} "
+        f"n_unverified={n_unv} "
+        f"n_mismatch={n_mm}",
+        flush=True,
+    )
+
+    if n_mm > 0:
+        print(
+            "MISMATCH FOUND (not auto-fixed; reviewer decides):",
+            flush=True,
+        )
+        for grp, name, pine, py, st in [
+            (g, n, p, q, s)
+            for g, (n, p, q, s) in all_rows
+            if s == "MISMATCH"
+        ]:
+            print(
+                f"  [{grp}] {name}: {pine}  ->  {py}",
+                flush=True,
+            )
+
+    print(
+        "TradingView runtime numeric parity: NOT VERIFIED (R2B)",
+        flush=True,
+    )
+
+
+def run_pine_source_audit() -> None:
+
+    print(
+        f"[{EXPERIMENT_NAME}] PINE-SOURCE-AUDIT",
+        flush=True,
+    )
+
+    print(
+        f"HEAD={git_head()}",
+        flush=True,
+    )
+
+    print(
+        f"BASE_SHA={BASE_SHA}",
+        flush=True,
+    )
+
+    dtp_source_contract_synthetic()
+
+    sr_source_contract_synthetic()
+
+    liquidity_source_contract_synthetic()
+
+    print_pine_source_contract_summary()
+
+
+# =============================================================================
 # 18. Audit
 # =============================================================================
 
@@ -6921,6 +7807,11 @@ def main() -> None:
         action="store_true",
     )
 
+    mode.add_argument(
+        "--pine-source-audit",
+        action="store_true",
+    )
+
     parser.add_argument(
         "--overwrite",
         action="store_true",
@@ -6940,6 +7831,19 @@ def main() -> None:
     if args.audit_only:
 
         run_audit_only()
+
+        return
+
+    # -------------------------------------------------------------------------
+    # Pine source contract audit (R2A)
+    #
+    # 只验证公式映射 + synthetic 向量; 不 load PGM / fit / 读 TB2 / 读 TB3 /
+    # build future tensor。
+    # -------------------------------------------------------------------------
+
+    if args.pine_source_audit:
+
+        run_pine_source_audit()
 
         return
 
