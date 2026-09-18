@@ -2141,6 +2141,8 @@ def compute_segment_features(
         .to_numpy(float)
     )
 
+    # Pine 源码语义：分母恰好为 0 时结果为 na；
+    # 任意非零有限分母均正常相除，不使用 epsilon 阈值。
     trend_score = np.divide(
 
         slope_raw,
@@ -2158,10 +2160,8 @@ def compute_segment_features(
             )
             &
             (
-                np.abs(
-                    trend_denominator
-                )
-                > 1e-12
+                trend_denominator
+                != 0.0
             )
         ),
     )

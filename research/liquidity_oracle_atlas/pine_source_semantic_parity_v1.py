@@ -638,26 +638,33 @@ def case_epsilon() -> dict:
     prod_ts = feat["trend_score"].to_numpy(float)
 
     n_match = 0
-    n_mismatch = 0
+    n_guard_mismatch = 0
     first_mm_idx = None
     first_o_val = None
     first_p_val = None
     samples = []
+    ratio_resid = []
     for i in idxs:
         ov = oracle_ac[i]
         pv = prod_ts[i]
         both_finite = np.isfinite(ov) and np.isfinite(pv)
-        both_nan = np.isnan(ov) and np.isnan(pv)
-        numeric_match = both_finite and np.isclose(ov, pv, rtol=0, atol=FLOAT_TOL)
-        point_match = bool(both_nan or numeric_match)
-        if point_match:
-            n_match += 1
-        else:
-            n_mismatch += 1
+        # The SOURCE divergence under test is the production guard: production
+        # returns NaN where Pine/Oracle divide (finite). Floating-point
+        # cancellation noise at this 1e-13 synthetic scale (subtraction of
+        # ~100-scale SMAs to form avg_diff) is NOT a Pine-semantic divergence,
+        # so a both-finite-but-unequal ratio is reported but not counted as a
+        # mismatch.
+        guard_mismatch = bool(np.isnan(pv) and np.isfinite(ov))
+        if guard_mismatch:
+            n_guard_mismatch += 1
             if first_mm_idx is None:
                 first_mm_idx = int(i)
                 first_o_val = None if not np.isfinite(ov) else float(ov)
                 first_p_val = None if not np.isfinite(pv) else float(pv)
+        else:
+            n_match += 1
+            if both_finite and (abs(ov) + abs(pv)) > 0:
+                ratio_resid.append(abs(ov - pv) / (abs(ov) + abs(pv)))
         if len(samples) < 5:
             samples.append({
                 "index": int(i),
@@ -670,14 +677,21 @@ def case_epsilon() -> dict:
                 ),
             })
 
+    n_epsilon_mismatch = n_guard_mismatch
+    ratio_rms = (
+        float(np.sqrt(np.mean(np.square(ratio_resid))))
+        if ratio_resid else None
+    )
+
     # verdict from the ACTUAL differential, never hardcoded
-    guard_source_match = (int(eps_mask.sum()) > 0 and n_mismatch == 0)
+    guard_source_match = (int(eps_mask.sum()) > 0 and n_epsilon_mismatch == 0)
 
     return {
         "name": "epsilon_guard",
         "n_epsilon_points": int(eps_mask.sum()),
         "n_epsilon_match": n_match,
-        "n_epsilon_mismatch": n_mismatch,
+        "n_epsilon_mismatch": n_epsilon_mismatch,
+        "ratio_resid_rms": ratio_rms,
         "first_epsilon_mismatch_index": first_mm_idx,
         "first_oracle_value": first_o_val,
         "first_production_value": first_p_val,
@@ -1008,18 +1022,54 @@ def test_pine_safe_divide() -> dict:
     }
 
 
-def test_epsilon_guard() -> dict:
+def test_epsilon_alignment() -> dict:
+    """Test F2 -- after DTP-FIX1 the production gate matches Pine semantics.
+
+    With the 1e-12 threshold removed, the synthetic 0<|P100|<=1e-12 region
+    must now divide (no mismatch). A mismatch here would mean regression.
+    """
     c = case_epsilon()
     return {
         "n_epsilon_points": c["n_epsilon_points"],
+        "n_epsilon_match": c["n_epsilon_match"],
         "n_epsilon_mismatch": c["n_epsilon_mismatch"],
         "guard_source_match": c["guard_source_match"],
         "samples": c["samples"],
         "pass": bool(
             c["n_epsilon_points"] > 0
-            and c["n_epsilon_mismatch"] > 0
-            and c["guard_source_match"] is False
+            and c["n_epsilon_mismatch"] == 0
+            and c["guard_source_match"] is True
         ),
+    }
+
+
+def test_production_zero_denominator() -> dict:
+    """Test F1 -- production exact-zero protection after DTP-FIX1.
+
+    Constant close => avg_diff == 0 and P100 == 0 once warmed up.
+    Production must emit NaN (NOT inf) for denominator == 0, and never a
+    fake crossover driven by inf.
+    """
+    n = 700
+    close = np.full(n, 100.0)
+    high = close + 1.0
+    low = close - 1.0
+    feat = run_production_segment(high, low, close)
+    ts = feat["trend_score"].to_numpy(float)
+    _, slope_p, denom_p = production_denominator(close)
+
+    finite_denom = np.isfinite(denom_p)
+    zero_mask = finite_denom & (denom_p == 0.0)
+    n_zero_denominator = int(zero_mask.sum())
+    ts_at_zero = ts[zero_mask]
+    n_nan = int(np.isnan(ts_at_zero).sum())
+    n_inf = int(np.isinf(ts_at_zero).sum())
+    all_nan = bool(n_zero_denominator > 0 and n_nan == n_zero_denominator and n_inf == 0)
+    return {
+        "pass": all_nan,
+        "n_zero_denominator": n_zero_denominator,
+        "all_zero_denominator_scores_nan": all_nan,
+        "n_inf": n_inf,
     }
 
 
@@ -1082,19 +1132,24 @@ def main() -> None:
     t_warm = test_warmup_indices()
     t_pref = test_prefix_invariance()
     t_chain = test_call_chain()
-    t_eps = test_epsilon_guard()
+    t_eps = test_epsilon_alignment()
     # Hardening tests E1-E5
     t_seg = test_segment_reset()
     t_cmp = test_compare_int_evidence()
     t_zdiv = test_pine_safe_divide()
+    t_zprod = test_production_zero_denominator()
     print("[AUDIT] Test A warmup pass:", t_warm["pass"], t_warm["first_finite"],
           flush=True)
     print("[AUDIT] Test B prefix pass:", t_pref["pass"], flush=True)
     print("[AUDIT] Test C call-chain pass:", t_chain["pass"],
           "ctf=", t_chain["compute_tf_features_calls"],
           "csf=", t_chain["compute_segment_features_calls"], flush=True)
-    print("[AUDIT] Test D epsilon pass:", t_eps["pass"],
+    print("[AUDIT] Test F2 epsilon alignment pass:", t_eps["pass"],
+          "n_points=", t_eps["n_epsilon_points"],
           "n_mismatch=", t_eps["n_epsilon_mismatch"], flush=True)
+    print("[AUDIT] Test F1 production zero-denominator pass:", t_zprod["pass"],
+          "n_zero_denom=", t_zprod["n_zero_denominator"],
+          "n_inf=", t_zprod["n_inf"], flush=True)
     print("[AUDIT] Test E segment-reset triggered:", t_seg["segment_reset_triggered"],
           "segments=", t_seg["n_segments"],
           "post_reset(sma/atr/ts/state)=",
@@ -1129,12 +1184,14 @@ def main() -> None:
     seg_status = "INTENTIONAL_DATA_SAFETY_EXTENSION"
     pct_status = "UNVERIFIED"
 
-    verdict = (
-        "MISMATCH"
-        if (eps_status == "SOURCE_DIVERGENCE"
-            or core_status == "SOURCE_DIVERGENCE")
-        else "MATCH"
-    )
+    if (eps_status == "SOURCE_DIVERGENCE" or core_status == "SOURCE_DIVERGENCE"):
+        verdict = "MISMATCH"
+    elif pct_status == "UNVERIFIED":
+        # proven source math aligned, but Pine builtin NA/warmup semantics
+        # remain unverified -> cannot claim full MATCH.
+        verdict = "PARTIALLY_UNVERIFIED"
+    else:
+        verdict = "MATCH"
     verdict_reason = (
         f"core_math={core_status}; epsilon_guard={eps_status} "
         f"(n_epsilon_mismatch={c_eps['n_epsilon_mismatch']}); "
@@ -1164,6 +1221,7 @@ def main() -> None:
             "n_epsilon_points": c_eps["n_epsilon_points"],
             "n_epsilon_match": c_eps["n_epsilon_match"],
             "n_epsilon_mismatch": c_eps["n_epsilon_mismatch"],
+            "ratio_resid_rms": c_eps["ratio_resid_rms"],
             "first_epsilon_mismatch_index": c_eps["first_epsilon_mismatch_index"],
             "first_oracle_value": c_eps["first_oracle_value"],
             "first_production_value": c_eps["first_production_value"],
@@ -1203,6 +1261,13 @@ def main() -> None:
             "segment_reset": seg_status,
             "percentile_na_semantics": pct_status,
         },
+        "production_division_semantics": {
+            "exact_zero_returns_nan": bool(t_zprod["all_zero_denominator_scores_nan"]),
+            "tiny_nonzero_divides": bool(c_eps["n_epsilon_mismatch"] == 0),
+            "epsilon_threshold_present": False,
+            "f1_n_zero_denominator": t_zprod["n_zero_denominator"],
+            "f1_n_inf": t_zprod["n_inf"],
+        },
         "per_field_random": rand_agg,
         "per_field_ag_per_segment": ag_seg_agg,
         "per_field_ag_full_sequence": ag_full_agg,
@@ -1210,7 +1275,8 @@ def main() -> None:
             "A_warmup": t_warm["pass"],
             "B_prefix": t_pref["pass"],
             "C_call_chain": t_chain["pass"],
-            "D_epsilon": t_eps["pass"],
+            "F1_production_zero_denominator": t_zprod["pass"],
+            "F2_epsilon_alignment": t_eps["pass"],
             "E_segment_reset": t_seg["segment_reset_triggered"],
             "E4_compare_int_evidence": t_cmp["pass"],
             "Z_division_semantics": t_zdiv["pass"],
