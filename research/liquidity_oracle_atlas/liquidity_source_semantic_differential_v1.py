@@ -590,7 +590,11 @@ def layer_d_ag(tf_minutes, samples):
     total_rows = 0
     cov_rows = 0
     exact_pivot_points = 0
-    pivot_mismatch = 0
+    # plateau/tie domain (production non-strict >= detects pivots Oracle strict does not)
+    pivot_unverified_difference_count = 0
+    # source-exact strict-unique pivot mismatch (Oracle strict pivot absent in production,
+    # or same-bar pivot value differs) -- genuine exact-domain disagreement
+    exact_pivot_mismatch = 0
     tie_events = 0
     float_boundary_events = 0
     mm_counts = {f: 0 for f in AG_FIELD_MAP}
@@ -612,32 +616,44 @@ def layer_d_ag(tf_minutes, samples):
         pph = prod.confirmed_pivots(sh, oracle.LIQ_LEN, oracle.LIQ_RIGHT, "high")
         ppl = prod.confirmed_pivots(sl, oracle.LIQ_LEN, oracle.LIQ_RIGHT, "low")
         mask = np.ones(n, dtype=bool)
-        first_tie = None
+        uncertain_idx = []
+        # high scan
         for i in range(n):
             ov = np.isfinite(oph[i]); pv = np.isfinite(pph[i])
             if ov and pv and abs(oph[i] - pph[i]) < FLOAT_BOUNDARY:
                 exact_pivot_points += 1
-            elif (ov and not pv) or (not ov and pv):
-                pivot_mismatch += 1
-                if first_tie is None:
-                    first_tie = i
+            elif ov and not pv:
+                # Oracle strict pivot absent in production -> exact-domain miss
+                exact_pivot_mismatch += 1
+                uncertain_idx.append(i)
+            elif not ov and pv:
+                # production non-strict plateau pivot -> UNVERIFIED tie domain
+                pivot_unverified_difference_count += 1
+                uncertain_idx.append(i)
             elif ov and pv and abs(oph[i] - pph[i]) >= FLOAT_BOUNDARY:
                 float_boundary_events += 1
-                if first_tie is None:
-                    first_tie = i
+                exact_pivot_mismatch += 1
+                uncertain_idx.append(i)
+        # low scan
         for i in range(n):
             ov = np.isfinite(opl[i]); pv = np.isfinite(ppl[i])
-            if (ov and not pv) or (not ov and pv):
-                pivot_mismatch += 1
-                if first_tie is None:
-                    first_tie = i
+            if ov and pv and abs(opl[i] - ppl[i]) < FLOAT_BOUNDARY:
+                exact_pivot_points += 1
+            elif ov and not pv:
+                exact_pivot_mismatch += 1
+                uncertain_idx.append(i)
+            elif not ov and pv:
+                pivot_unverified_difference_count += 1
+                uncertain_idx.append(i)
             elif ov and pv and abs(opl[i] - ppl[i]) >= FLOAT_BOUNDARY:
                 float_boundary_events += 1
-                if first_tie is None:
-                    first_tie = i
-        if first_tie is not None:
+                exact_pivot_mismatch += 1
+                uncertain_idx.append(i)
+        # conservative: UNVERIFIED from the EARLIEST uncertainty of EITHER side
+        first_unverified = min(uncertain_idx) if uncertain_idx else None
+        if first_unverified is not None:
             tie_events += 1
-            mask[first_tie:] = False  # conservative: tie -> rest of segment UNVERIFIED
+            mask[first_unverified:] = False
 
         compare_state_full_masked(o_per, pfeat, mask, field_map=AG_FIELD_MAP,
                                   first_mis=first_mis, max_consec=max_consec)
@@ -672,7 +688,8 @@ def layer_d_ag(tf_minutes, samples):
         "exact_rows": cov_rows,
         "coverage_pct": round(100.0 * cov_rows / total_rows, 3) if total_rows else 0.0,
         "exact_pivot_points": exact_pivot_points,
-        "pivot_mismatch": pivot_mismatch,
+        "pivot_unverified_difference_count": pivot_unverified_difference_count,
+        "exact_pivot_mismatch": exact_pivot_mismatch,
         "tie_events": tie_events,
         "float_boundary_events": float_boundary_events,
         "breach_up_mm": mm_counts["breach_up"],
@@ -753,20 +770,32 @@ def _sha256_text(text):
 
 
 def snapshot(tag, summary):
-    """Copy all artifacts into ART_DIR/<tag>/ with its own SHA256SUMS.txt.
+    """Self-contained snapshot (no manual assembly after the run).
+
+    1. create <ART_DIR>/<tag>/
+    2. copy every current top-level artifact file into it
+    3. write the snapshot-local summary.json
+    4. recompute SHA256 of EVERY file inside the snapshot directory
+    5. write the snapshot-local SHA256SUMS.txt
 
     Called only when LIQ_SNAPSHOT_TAG is set (pre_fix / post_fix runs).
     """
     d = os.path.join(ART_DIR, tag)
     os.makedirs(d, exist_ok=True)
-    _write_json(os.path.join(d, "summary.json"), summary)
-    sums = []
     for fn in sorted(os.listdir(ART_DIR)):
         fp = os.path.join(ART_DIR, fn)
         if os.path.isfile(fp):
+            data = open(fp, "rb").read()
+            open(os.path.join(d, fn), "wb").write(data)
+    _write_json(os.path.join(d, "summary.json"), summary)
+    sums = []
+    for fn in sorted(os.listdir(d)):
+        fp = os.path.join(d, fn)
+        if os.path.isfile(fp) and fn != "SHA256SUMS.txt":
             sums.append("%s  %s" % (_sha256_file(fp), fn))
     with open(os.path.join(d, "SHA256SUMS.txt"), "w") as f:
         f.write("\n".join(sums) + "\n")
+    return sums
 
 
 # ===========================================================================
@@ -927,7 +956,8 @@ def main():
             "postbreak_exact_domain": "per-level brZ; breach bar sets brL+brZ and does NOT test zone",
             "pivot_truthiness_exact_domain": "Pine v5 if ph / if pl: 0/0.0/na is false (pine_v5_truthy_float)",
             "dummy_sentinel": "PINE_DUMMY_SENTINEL_ABSTRACTED=%s; source parity does NOT use raw array.size()" % oracle.PINE_DUMMY_SENTINEL_ABSTRACTED,
-            "unverified_pivot_tie": "plateau / equal-extrema handled as UNVERIFIED (see AG tie mask)",
+            "unverified_pivot_tie": "plateau/equal-extrema counted as pivot_unverified_difference_count; AG tie mask starts at the EARLIEST uncertainty of EITHER side (min of high/low)",
+            "exact_pivot_mismatch": "source-exact strict-unique pivot disagreement (Oracle strict pivot absent in production, or same-bar pivot value differs)",
             "unverified_float_boundary": "extrema within %.1e treated as UNVERIFIED" % FLOAT_BOUNDARY,
             "unverified_mode_or_builtin": "Mode/per implemented literally; research_comparison_mode=Historical",
             "research_extensions": sorted(RESEARCH_EXTENSION),
@@ -977,9 +1007,13 @@ def main():
     for tfm, ag in (("ag5", ag5), ("ag15", ag15)):
         _write_csv(os.path.join(ART_DIR, "liq_%s_pivot_diff.csv" % tfm),
                    [{"timeframe": ag["timeframe"], "rows": ag["rows"], "segments": ag["segments"],
-                     "exact_pivot_points": ag["exact_pivot_points"], "pivot_mismatch": ag["pivot_mismatch"],
+                     "exact_pivot_points": ag["exact_pivot_points"],
+                     "pivot_unverified_difference_count": ag["pivot_unverified_difference_count"],
+                     "exact_pivot_mismatch": ag["exact_pivot_mismatch"],
                      "tie_events": ag["tie_events"], "float_boundary_events": ag["float_boundary_events"]}],
-                   ["timeframe", "rows", "segments", "exact_pivot_points", "pivot_mismatch", "tie_events", "float_boundary_events"])
+                   ["timeframe", "rows", "segments", "exact_pivot_points",
+                    "pivot_unverified_difference_count", "exact_pivot_mismatch",
+                    "tie_events", "float_boundary_events"])
         _write_csv(os.path.join(ART_DIR, "liq_%s_state_diff.csv" % tfm),
                    [{"timeframe": ag["timeframe"], "rows": ag["rows"], "exact_rows": ag["exact_rows"],
                      "coverage_pct": ag["coverage_pct"], "breach_up_mm": ag["breach_up_mm"],
