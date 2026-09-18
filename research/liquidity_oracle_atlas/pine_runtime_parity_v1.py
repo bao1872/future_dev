@@ -16,7 +16,11 @@ CSV 冒充 TradingView CSV。
 
 复用（不得重新实现）来自 experiment_structural_reversion_pgm_v1:
     rolling_sma, true_range, pine_rma, trend_state_from_score,
-    resample_causal, PINE_SOURCE_REFS, verify_pine_source_refs, git_head
+    PINE_SOURCE_REFS, verify_pine_source_refs, git_head
+
+raw 5m bars 复用仓库官方 owner:
+    research.export_ob_trigger_execution_v21.load_raw_5m
+    (路径合同 research/exports/v3r_5m/{SYMBOL}_5m.csv; R2B 用 bar_start_time)
 
 DTP 指标 (5m 真实 raw bars):
     SMA50 / ATR200 / avg_diff / p100(rolling max 500) / avg_col / trend
@@ -35,6 +39,7 @@ import argparse
 import hashlib
 import json
 import sys
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -48,15 +53,16 @@ from experiment_structural_reversion_pgm_v1 import (
     true_range,
     pine_rma,
     trend_state_from_score,
-    resample_causal,
 )
+
+# 仓库官方 raw 5m owner (唯一 raw loader; 禁止第三套).
+from research.export_ob_trigger_execution_v21 import load_raw_5m
 
 # ---------------------------------------------------------------------------
 # paths / constants
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SILVER_5M = REPO_ROOT / "silver_main_data" / "silver_main_5m.csv"
 DTP_SOURCE_SHA = PINE_SOURCE_REFS["DeviationTrendProfile.pine"]
 
 SMA_LEN = 50
@@ -152,21 +158,30 @@ def find_col(
 
 def load_python_5m(symbol: str) -> pd.DataFrame:
     """
-    5m 数据直接使用项目真实 raw bars (silver_main_5m.csv)。
+    复用仓库官方 raw 5m owner (export_ob_trigger_execution_v21.load_raw_5m)。
+
+    该 owner 读取 research/exports/v3r_5m/{SYMBOL}_5m.csv, 并负责
+    parse bar_start_time / duplicate 5m gate / sort。
+    symbol 找不到 -> owner 抛 FileNotFoundError (fail, 不吞)。
+
+    R2B K 线 identity 使用 bar_start_time 作为 chart bar timestamp
+    (TDX 合同: bar_start_time = interval_end - period)。
+    naive -> Asia/Shanghai localize -> UTC。
     """
 
-    df = pd.read_csv(SILVER_5M)
+    five = load_raw_5m(symbol.upper())
 
-    if "symbol" in df.columns:
-        want = f"KQ.m@SHFE.{symbol.lower()}"
-        if want in set(df["symbol"].astype(str)):
-            df = df[df["symbol"].astype(str) == want]
+    idx = to_utc_timestamp(five["bar_start_time"], PY_TZ)
 
-    df["time"] = to_utc_timestamp(df["datetime"], PY_TZ)
-
-    df = df.sort_values("time").set_index("time")
-
-    return df[OHLC_COLS]
+    return pd.DataFrame(
+        {
+            "open": five["open"].to_numpy(dtype=float),
+            "high": five["high"].to_numpy(dtype=float),
+            "low": five["low"].to_numpy(dtype=float),
+            "close": five["close"].to_numpy(dtype=float),
+        },
+        index=idx,
+    )
 
 
 def load_tv_csv(
@@ -175,6 +190,10 @@ def load_tv_csv(
 ) -> pd.DataFrame:
     """
     读取 TradingView 导出 CSV, 规范化 OHLC + indicator 列到 UTC index。
+
+    timeline gate 顺序 (fail-closed):
+        parse timestamp -> check duplicate -> check monotonic -> set_index
+    禁止先 sort 再检查 (否则 NON_MONOTONIC 永远抓不到)。
     """
 
     df = pd.read_csv(path)
@@ -184,7 +203,11 @@ def load_tv_csv(
         raise SystemExit("STOP_R2B_TV_MISSING_TIME_COLUMN")
 
     df["time"] = to_utc_timestamp(df[time_col], tv_timezone)
-    df = df.sort_values("time").set_index("time")
+
+    # timeline gate BEFORE any sort / set_index
+    check_timeline(df["time"])
+
+    df = df.set_index("time")
 
     out = pd.DataFrame(index=df.index)
 
@@ -200,34 +223,6 @@ def load_tv_csv(
             out[canon] = df[c]
 
     return out
-
-
-def build_htf_raw(py5m: pd.DataFrame) -> pd.DataFrame:
-    """
-    HTF resample 需要的 raw frame (time/trading_day/segment/open/high/low/close/disc)。
-
-    注意: trading_day / segment 为占位实现 (HTF_DAY_SEGMENT_CANONICAL=False)。
-    segment = 时间间隙 > 5min 处断开; trading_day = bar 日历日期。
-    真实 parity 前必须与 experiment 规范交易日历对齐。
-    """
-
-    if not HTF_DAY_SEGMENT_CANONICAL:
-        print(
-            "[WARN] HTF trading_day/segment is PLACEHOLDER; "
-            "do NOT claim HTF parity until reconciled with canonical calendar.",
-            file=sys.stderr,
-        )
-
-    raw = py5m.reset_index()[["time"] + OHLC_COLS].copy()
-
-    gap = raw["time"].diff()
-    disc = (gap != pd.Timedelta(minutes=5)).fillna(False).to_numpy(bool)
-
-    raw["disc"] = disc
-    raw["segment"] = np.cumsum(disc.astype("int64"))
-    raw["trading_day"] = raw["time"].dt.floor("D")
-
-    return raw
 
 
 # ---------------------------------------------------------------------------
@@ -304,6 +299,11 @@ def identity_gate(
     """
     TradingView OHLC == Python raw OHLC ?
     比较 key = UTC timestamp. 默认严格 isclose(rtol=0, atol=1e-9)。
+
+    timestamp contract (防止 false PASS):
+        TV 是 Python 历史的子区间, 允许 Python 拥有更多历史。
+        但 TV 的每一根 bar 都必须存在于 Python: n_overlap == n_tv。
+        TV 出现 Python 不存在的 timestamp -> FAIL (比较交集却声称身份一致)。
     """
 
     n_python = len(py)
@@ -311,21 +311,49 @@ def identity_gate(
     overlap = py.index.intersection(tv.index)
     n_overlap = len(overlap)
 
+    only_tv = tv.index.difference(py.index)
+    only_py = py.index.difference(tv.index)
+
+    n_tv_only = len(only_tv)
+    n_python_only = len(only_py)
+
+    tv_timestamp_coverage = (n_overlap / n_tv) if n_tv else 0.0
+    python_timestamp_coverage = (n_overlap / n_python) if n_python else 0.0
+
+    first_ts_mismatch = None
+    if n_tv_only:
+        first_ts_mismatch = str(only_tv.min())
+    elif n_python_only:
+        first_ts_mismatch = str(only_py.min())
+
     out = {
         "n_python": n_python,
         "n_tv": n_tv,
         "n_timestamp_overlap": n_overlap,
         "timestamp_overlap_rate": n_overlap / max(n_python, n_tv, 1),
+        "n_python_only": n_python_only,
+        "n_tv_only": n_tv_only,
+        "tv_timestamp_coverage": tv_timestamp_coverage,
+        "python_timestamp_coverage": python_timestamp_coverage,
+        "first_timestamp_mismatch": first_ts_mismatch,
     }
 
-    only_py = py.index.difference(tv.index)
-    only_tv = tv.index.difference(py.index)
-    first_ts_mismatch = None
-    if len(only_py):
-        first_ts_mismatch = str(only_py.min())
-    elif len(only_tv):
-        first_ts_mismatch = str(only_tv.min())
-    out["first_timestamp_mismatch"] = first_ts_mismatch
+    # TV -> Python positional continuity (report only; 不因正常休市自动 FAIL)
+    positions = py.index.get_indexer(tv.index)
+    pos_ok = positions[positions >= 0]
+    if len(pos_ok) > 1:
+        tv_python_position_monotonic = bool(np.all(np.diff(pos_ok) >= 0))
+        n_internal_skipped = int(
+            np.sum(np.maximum(np.diff(pos_ok) - 1, 0))
+        )
+    else:
+        tv_python_position_monotonic = True
+        n_internal_skipped = 0
+    out["tv_python_position_monotonic"] = tv_python_position_monotonic
+    out["n_internal_python_rows_skipped"] = n_internal_skipped
+
+    # TV 每一根都必须能在 Python 找到; Python 额外历史允许.
+    timestamp_pass = (n_tv > 0) and (n_overlap == n_tv)
 
     if n_overlap == 0:
         for col in OHLC_COLS:
@@ -357,22 +385,19 @@ def identity_gate(
         )
         mm = mm | one_nan
 
-        cnt = int(mm.sum())
-        out[f"{col}_mismatch"] = cnt
+        out[f"{col}_mismatch"] = int(mm.sum())
 
         if both.any():
             out[f"max_abs_{col}_error"] = float(diff[both].max())
         else:
             out[f"max_abs_{col}_error"] = None
 
-        if cnt and first_ohlc is None:
+        if out[f"{col}_mismatch"] and first_ohlc is None:
             first_ohlc = str(overlap[int(np.argmax(mm))])
 
     out["first_ohlc_mismatch"] = first_ohlc
-    out["data_identity_pass"] = all(
-        out[f"{col}_mismatch"] == 0
-        for col in OHLC_COLS
-    )
+    ohlc_pass = all(out[f"{col}_mismatch"] == 0 for col in OHLC_COLS)
+    out["data_identity_pass"] = bool(timestamp_pass and ohlc_pass)
 
     return out
 
@@ -426,7 +451,9 @@ def compare_field(
     mm = mm | one_nan
 
     n_mismatch = int(mm.sum())
-    mismatch_rate = n_mismatch / max(n_both_finite, 1)
+    evaluable = both | one_nan
+    n_evaluable = int(evaluable.sum())
+    mismatch_rate = (n_mismatch / n_evaluable) if n_evaluable else np.nan
 
     first_ts = None
     py_val = None
@@ -457,6 +484,7 @@ def compare_field(
         "name": name,
         "n_compared": n_compared,
         "n_both_finite": n_both_finite,
+        "n_evaluable": n_evaluable,
         "n_mismatch": n_mismatch,
         "mismatch_rate": mismatch_rate,
         "max_abs_error": max_abs,
@@ -483,21 +511,21 @@ def run_parity(
     output_dir: str,
 ) -> None:
 
+    # 0) HTF 当前硬阻断: canonical trading_day/segment/disc 未接, 不得 PASS
+    if timeframe != 5 and not HTF_DAY_SEGMENT_CANONICAL:
+        raise SystemExit(
+            f"STOP_R2B_HTF_CANONICAL_CALENDAR_NOT_READY:{timeframe}"
+        )
+
     # 1) 先证明审核的正是 pin 住的 DTP 源文件
     verify_pine_source_refs()
 
-    # 2) Python 参考 (5m raw bars)
+    # 2) Python 参考 (5m raw bars, 复用官方 owner)
     py = load_python_5m(symbol)
     check_timeline(py.index.to_series())
 
-    if timeframe == 5:
-        py_ohlc = py[OHLC_COLS]
-        py_dtp = compute_dtp(py)
-    else:
-        raw = build_htf_raw(py)
-        res = resample_causal(raw, timeframe)
-        py_ohlc = res[OHLC_COLS]
-        py_dtp = compute_dtp(res)
+    py_ohlc = py[OHLC_COLS]
+    py_dtp = compute_dtp(py)
 
     # 3) TradingView CSV
     tv = load_tv_csv(tv_csv, tv_timezone)
@@ -511,41 +539,35 @@ def run_parity(
 
     summary = {
         "source_sha": DTP_SOURCE_SHA,
-        "experiment_sha": git_head(),
+        "harness_sha": git_head(),
         "symbol": symbol,
         "timeframe": timeframe,
         "tv_csv_sha256": tv_csv_sha,
         "timezone": timezone_reported,
-        "n_overlap": gate["n_timestamp_overlap"],
-        "data_identity_pass": gate["data_identity_pass"],
+        **gate,
         "indicator_parity_pass": "NOT_RUN",
     }
 
-    if not gate["data_identity_pass"]:
+    out_dir = Path(output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
 
-        out_dir = Path(output_dir)
-        out_dir.mkdir(parents=True, exist_ok=True)
+    # 5) identity FAIL 仍先保存完整证据, 再 STOP (不继续 DTP)
+    if not gate["data_identity_pass"]:
         (out_dir / "r2b_identity_summary.json").write_text(
             json.dumps(summary, indent=2, default=str)
         )
-
         raise SystemExit("STOP_R2B_DATA_IDENTITY_MISMATCH")
 
-    # 5) indicator compare
+    # 6) Required indicator contract: 六列必须全部存在, 否则 fail closed
+    _require_all_indicator_columns(tv)
+
+    # 7) indicator compare
     idx = py_dtp.index.intersection(tv.index)
 
     rows = []
     mismatches = []
 
     for key, canon in TV_INDICATOR_FIELDS.items():
-
-        if canon not in tv.columns:
-            print(
-                f"[WARN] TV missing indicator column for {key}; skipped",
-                file=sys.stderr,
-            )
-            continue
-
         rep = compare_field(
             py_dtp[canon].loc[idx],
             tv[canon].loc[idx],
@@ -569,16 +591,8 @@ def run_parity(
         for r in rows
     ]
 
-    indicator_parity_pass = (
-        "PASS"
-        if rows and all(r["n_mismatch"] == 0 for r in rows)
-        else "FAIL"
-    )
-
+    indicator_parity_pass = decide_indicator_parity(rows)
     summary["indicator_parity_pass"] = indicator_parity_pass
-
-    out_dir = Path(output_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
 
     (out_dir / "r2b_identity_summary.json").write_text(
         json.dumps(summary, indent=2, default=str)
@@ -597,6 +611,41 @@ def run_parity(
         f"indicator_parity_pass={indicator_parity_pass}",
         flush=True,
     )
+
+
+def _require_all_indicator_columns(tv: pd.DataFrame) -> None:
+    """
+    DTP parity 固定要求六列全部存在。
+    缺任意一个 -> fail closed, 禁止 WARN + skip / 部分字段 PASS。
+    """
+
+    for key, canon in TV_INDICATOR_FIELDS.items():
+        if canon not in tv.columns:
+            raise SystemExit(
+                f"STOP_R2B_TV_MISSING_INDICATOR_COLUMN:{key}"
+            )
+
+
+def decide_indicator_parity(rows: list[dict]) -> str:
+    """
+    indicator_parity_pass 判定 (独立可测):
+        实际比较字段 == required(6)
+        AND 所有 n_mismatch == 0
+        AND 所有 warmup_mismatch == False
+    否则 FAIL。
+    """
+
+    required = {"sma50", "atr200", "avg_diff", "p100", "avg_col", "trend"}
+    compared = {r["name"] for r in rows}
+
+    if compared != required:
+        return "FAIL"
+    if any(r["n_mismatch"] != 0 for r in rows):
+        return "FAIL"
+    if any(r["warmup_mismatch"] for r in rows):
+        return "FAIL"
+
+    return "PASS"
 
 
 # ---------------------------------------------------------------------------
@@ -648,7 +697,7 @@ def run_comparator_tests() -> None:
     )
     print("[SELFTEST] timestamp timezone-shift: PASS", flush=True)
 
-    # --- OHLC ---
+    # --- OHLC identity (含 timestamp coverage contract) ---
     def ohlc_df(idx, vals):
         return pd.DataFrame(
             {
@@ -665,6 +714,7 @@ def run_comparator_tests() -> None:
         "2026-01-01 00:10", "2026-01-01 00:15",
     )
     base = np.array([1.0, 2.0, 3.0, 4.0])
+
     py = ohlc_df(o_idx, base)
     tv = ohlc_df(o_idx, base)
     g = identity_gate(py, tv)
@@ -682,6 +732,31 @@ def run_comparator_tests() -> None:
     assert not g5["data_identity_pass"]
     assert g5["first_ohlc_mismatch"] is not None
     print("[SELFTEST] OHLC 1e-5 (gate fail): PASS", flush=True)
+
+    # --- Regression Test 1: TV extra timestamp -> MUST FAIL ---
+    # 比较了交集却声称身份一致 = false PASS
+    tv_idx3 = _utc_index(
+        "2026-01-01 00:00", "2026-01-01 00:05", "2026-01-01 00:10",
+    )
+    py1 = ohlc_df(o_idx[:2], base[:2])          # 00:00, 00:05
+    tv1 = ohlc_df(tv_idx3, base[:3])            # 00:00, 00:05, 00:10 (前两根相同)
+    g1 = identity_gate(py1, tv1)
+    assert not g1["data_identity_pass"], g1
+    assert g1["n_tv_only"] == 1, g1
+    assert abs(g1["tv_timestamp_coverage"] - 2 / 3) < 1e-9, g1
+    print("[SELFTEST] R1 TV extra timestamp -> FAIL: PASS", flush=True)
+
+    # --- Regression Test 2: Python extra history allowed -> PASS ---
+    extra_idx = _utc_index(
+        "2025-12-31 23:55", "2026-01-01 00:00", "2026-01-01 00:05",
+    )
+    py2 = ohlc_df(extra_idx, [0.5, 1.0, 2.0])
+    tv2 = ohlc_df(o_idx[:2], base[:2])          # 00:00, 00:05
+    g2 = identity_gate(py2, tv2)
+    assert g2["data_identity_pass"], g2
+    assert g2["n_python_only"] == 1, g2
+    assert g2["n_tv_only"] == 0, g2
+    print("[SELFTEST] R2 Python extra history -> PASS: PASS", flush=True)
 
     # --- indicator ---
     s_idx = _utc_index(
@@ -714,6 +789,83 @@ def run_comparator_tests() -> None:
     assert rt["n_mismatch"] == 1
     assert rt["first_mismatch_timestamp"] == str(s_idx[2])
     print("[SELFTEST] indicator trend-state-mismatch: PASS", flush=True)
+
+    # --- Regression Test 3: loader non-monotonic (real path, no pre-sort) ---
+    csv3 = (
+        "time,open,high,low,close\n"
+        "2026-01-01 00:00,1,1,1,1\n"
+        "2026-01-01 00:10,2,2,2,2\n"
+        "2026-01-01 00:05,3,3,3,3\n"
+    )
+    p3 = Path(tempfile.mktemp(suffix=".csv"))
+    p3.write_text(csv3)
+    try:
+        load_tv_csv(str(p3), "UTC")
+        raise SystemExit("SELFTEST_FAIL: non-monotonic not detected")
+    except SystemExit as e:
+        assert "NON_MONOTONIC" in str(e), e
+    print("[SELFTEST] R3 loader non-monotonic -> STOP: PASS", flush=True)
+
+    # --- Regression Test 4: missing required indicator -> fail closed ---
+    csv4 = (
+        "time,open,high,low,close,R2B_SMA50,R2B_ATR200,"
+        "R2B_AVG_DIFF,R2B_AVG_COL,R2B_TREND\n"
+        "2026-01-01 00:00,1,1,1,1,1,1,0,0,-1\n"
+        "2026-01-01 00:05,2,2,2,2,2,2,0,0,1\n"
+    )
+    p4 = Path(tempfile.mktemp(suffix=".csv"))
+    p4.write_text(csv4)
+    tv4 = load_tv_csv(str(p4), "UTC")
+    try:
+        _require_all_indicator_columns(tv4)
+        raise SystemExit("SELFTEST_FAIL: missing indicator not detected")
+    except SystemExit as e:
+        assert "MISSING_INDICATOR_COLUMN:R2B_P100" in str(e), e
+    print("[SELFTEST] R4 missing required indicator -> STOP: PASS", flush=True)
+
+    # --- Regression Test 5: partial indicator cannot PASS ---
+    s2_idx = s_idx[:2]
+    partial_rows = [
+        compare_field(
+            pd.Series([1.0, 2.0], index=s2_idx),
+            pd.Series([1.0, 2.0], index=s2_idx),
+            "sma50",
+        ),
+        compare_field(
+            pd.Series([1.0, 2.0], index=s2_idx),
+            pd.Series([1.0, 2.0], index=s2_idx),
+            "atr200",
+        ),
+    ]
+    assert decide_indicator_parity(partial_rows) == "FAIL"
+
+    full_rows = [
+        compare_field(
+            pd.Series([1.0, 2.0], index=s2_idx),
+            pd.Series([1.0, 2.0], index=s2_idx),
+            canon,
+            integer=(canon == "trend"),
+        )
+        for canon in (
+            "sma50", "atr200", "avg_diff", "p100", "avg_col", "trend"
+        )
+    ]
+    assert decide_indicator_parity(full_rows) == "PASS"
+    print("[SELFTEST] R5 partial indicator cannot PASS: PASS", flush=True)
+
+    # --- Regression Test 6: HTF hard stop ---
+    for tf in (15, 60, 240):
+        try:
+            run_parity(
+                "--nonexistent.csv", "AG", tf, None,
+                tempfile.mkdtemp(),
+            )
+            raise SystemExit("SELFTEST_FAIL: HTF not blocked")
+        except SystemExit as e:
+            assert (
+                f"HTF_CANONICAL_CALENDAR_NOT_READY:{tf}" in str(e)
+            ), e
+    print("[SELFTEST] R6 HTF hard stop: PASS", flush=True)
 
     print("[SELFTEST] ALL PASS", flush=True)
 
