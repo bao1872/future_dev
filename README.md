@@ -92,6 +92,19 @@ pip install -r requirements.txt
 
 PyTDX 扩展行情不需要账号凭据。
 
+### Python 版本（重要）
+
+研究脚本必须运行在项目的虚拟环境 **Python 3.12**（`.venv`，由 `uv` 管理，CPython 3.12）上。
+
+- 系统 `/usr/bin/python3` 是 3.9.6，且未安装 `pandas` / `numpy` / `sklearn` / `scipy` 等依赖，**不要使用**。
+- 直接用 `.venv/bin/python` 运行研究脚本，例如：
+
+```bash
+.venv/bin/python research/liquidity_oracle_atlas/experiment_structural_reversion_pgm_v1.py --audit-only
+```
+
+不要使用 `python` / `python3` 这类未指向 `.venv` 的解释器。
+
 ---
 
 ## 启动 Streamlit
