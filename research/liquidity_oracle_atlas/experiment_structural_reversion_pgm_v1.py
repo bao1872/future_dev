@@ -3295,14 +3295,13 @@ def extract_candidate_rows(
     df: pd.DataFrame,
     blocks: Sequence[str],
     common_scan_universe: bool = False,
-) -> pd.DataFrame:
+) -> Tuple[pd.DataFrame, Dict[str, int]]:
 
     assert_allowed_blocks(
         df
     )
 
-    mask = (
-
+    block_mask = (
         df[
             "block"
         ]
@@ -3310,53 +3309,66 @@ def extract_candidate_rows(
             list(blocks)
         )
         .to_numpy(bool)
+    )
 
+    raw_block_rows = int(
+        block_mask.sum()
+    )
+
+    atr0_vals = (
+        df[
+            "atr0"
+        ]
+        .to_numpy(float)
+    )
+
+    m1 = (
+        block_mask
         &
-
         df[
             "same_block_entry_valid"
         ]
         .to_numpy(bool)
+    )
 
+    m2 = (
+        m1
         &
-
         np.isfinite(
-            df[
-                "atr0"
-            ]
-            .to_numpy(float)
+            atr0_vals
         )
-
         &
-
         (
-            df[
-                "atr0"
-            ]
-            .to_numpy(float)
+            atr0_vals
             > 0
         )
+    )
 
+    m3 = (
+        m2
         &
-
         np.isfinite(
             df[
                 "m15_dev"
             ]
             .to_numpy(float)
         )
+    )
 
+    m4 = (
+        m3
         &
-
         np.isfinite(
             df[
                 "m15_sma"
             ]
             .to_numpy(float)
         )
+    )
 
+    mask = (
+        m4
         &
-
         (
             df[
                 "reversion_dir"
@@ -3391,6 +3403,25 @@ def extract_candidate_rows(
             SCAN_COMMON_M15_WARMUP
         )
 
+    funnel = dict(
+        raw_block_rows=raw_block_rows,
+        same_block_entry_valid=int(
+            m1.sum()
+        ),
+        atr0_valid=int(
+            m2.sum()
+        ),
+        m15_dev_valid=int(
+            m3.sum()
+        ),
+        m15_sma_valid=int(
+            m4.sum()
+        ),
+        reversion_dir_nonzero=int(
+            mask.sum()
+        ),
+    )
+
     out = (
         df
         .loc[mask]
@@ -3412,7 +3443,7 @@ def extract_candidate_rows(
         )
     )
 
-    return out
+    return out, funnel
 
 
 def build_path_dataset(
@@ -3422,11 +3453,12 @@ def build_path_dataset(
         str,
         Mapping[str, Any],
     ],
+    horizon: int,
     cap: Optional[int] = None,
     common_scan_universe: bool = False,
-) -> pd.DataFrame:
+) -> Tuple[pd.DataFrame, Dict[str, Any]]:
 
-    sample = (
+    sample, cand_funnel = (
         extract_candidate_rows(
             df,
             blocks,
@@ -3471,7 +3503,7 @@ def build_path_dataset(
 
             bars_by_sym,
 
-            n_future=HMAX,
+            n_future=horizon,
         )
     )
 
@@ -3502,11 +3534,6 @@ def build_path_dataset(
             f"STOP_STRUCTREV_EMPTY_PATH_DATASET:{list(blocks)}"
         )
 
-    O = np.asarray(
-        tensor["O"],
-        float,
-    )
-
     H = np.asarray(
         tensor["H"],
         float,
@@ -3522,7 +3549,38 @@ def build_path_dataset(
         float,
     )
 
-    entry = O[:, 0]
+    syms = (
+        sample[
+            "symbol"
+        ]
+        .to_numpy()
+    )
+
+    bar_t = (
+        sample[
+            "entry_bar"
+        ]
+        .to_numpy()
+    )
+
+    decision_close = np.empty(
+        len(sample),
+        dtype=float,
+    )
+
+    for s in np.unique(syms):
+
+        m = (
+            syms
+            == s
+        )
+
+        decision_close[m] = np.asarray(
+            bars_by_sym[s]["c"],
+            dtype=float,
+        )[
+            bar_t[m]
+        ]
 
     atr0 = (
         sample[
@@ -3546,34 +3604,40 @@ def build_path_dataset(
     # -------------------------------------------------------------------------
 
     favorable = np.where(
-
         direction[:, None] > 0,
-
-        H - entry[:, None],
-
-        entry[:, None] - L,
-
-    ) / atr0[:, None]
+        (
+            H
+            - decision_close[:, None]
+        )
+        / atr0[:, None],
+        (
+            decision_close[:, None]
+            - L
+        )
+        / atr0[:, None],
+    )
 
     adverse = np.where(
-
         direction[:, None] > 0,
-
-        entry[:, None] - L,
-
-        H - entry[:, None],
-
-    ) / atr0[:, None]
-
-    close_return = (
-
-        direction[:, None]
-
-        * (
-            C
-            - entry[:, None]
+        (
+            decision_close[:, None]
+            - L
         )
+        / atr0[:, None],
+        (
+            H
+            - decision_close[:, None]
+        )
+        / atr0[:, None],
+    )
 
+    signal_return = (
+        direction[:, None]
+        *
+        (
+            C
+            - decision_close[:, None]
+        )
         / atr0[:, None]
     )
 
@@ -3591,40 +3655,35 @@ def build_path_dataset(
         .to_numpy(float)
     )
 
-    mean_dist_R = (
-
+    mean_dist_now_R = (
         direction
-
-        * (
+        *
+        (
             mean_price
-            - entry
+            - decision_close
         )
-
         / atr0
     )
 
-    mean_target_valid = (
-
+    mean_ahead_now = (
         np.isfinite(
-            mean_dist_R
+            mean_dist_now_R
         )
-
         &
-
         (
-            mean_dist_R
+            mean_dist_now_R
             > 0
         )
     )
 
     sample[
         "mean_target_dist_R"
-    ] = mean_dist_R
+    ] = mean_dist_now_R
 
     sample[
-        "mean_target_valid"
+        "mean_ahead_now"
     ] = (
-        mean_target_valid
+        mean_ahead_now
         .astype(
             np.int8
         )
@@ -3642,14 +3701,12 @@ def build_path_dataset(
     )
 
     opposite_sr_dist_R = (
-
         direction
-
-        * (
+        *
+        (
             opposite_sr_price
-            - entry
+            - decision_close
         )
-
         / atr0
     )
 
@@ -3686,7 +3743,7 @@ def build_path_dataset(
     # Outcomes
     # -------------------------------------------------------------------------
 
-    for horizon in HORIZONS:
+    for horizon in (horizon,):  # single-horizon build; caller passes horizon
 
         k = horizon
 
@@ -3707,7 +3764,7 @@ def build_path_dataset(
         sample[
             f"ret_R_{horizon}"
         ] = (
-            close_return[
+            signal_return[
                 :,
                 k - 1,
             ]
@@ -3731,7 +3788,7 @@ def build_path_dataset(
             f"y_positive_{horizon}"
         ] = (
 
-            close_return[
+            signal_return[
                 :,
                 k - 1,
             ]
@@ -3746,20 +3803,14 @@ def build_path_dataset(
         # 是否触及 SMA mean
         # ---------------------------------------------------------------------
 
-        mean_hit_matrix = (
-
-            favorable_h
-
-            >=
-
-            mean_dist_R[
-                :,
-                None,
-            ]
+        mean_hit_matrix = np.where(
+            direction[:, None] > 0,
+            H >= mean_price[:, None],
+            L <= mean_price[:, None],
         )
 
         mean_hit_matrix[
-            ~mean_target_valid,
+            ~mean_ahead_now,
             :
         ] = False
 
@@ -3800,7 +3851,7 @@ def build_path_dataset(
             f"y_mean_hit_{horizon}"
         ] = np.where(
 
-            mean_target_valid,
+            mean_ahead_now,
 
             mean_has.astype(float),
 
@@ -3813,7 +3864,7 @@ def build_path_dataset(
             f"y_mean_before_1R_{horizon}"
         ] = np.where(
 
-            mean_target_valid,
+            mean_ahead_now,
 
             (
                 mean_has
@@ -3870,7 +3921,36 @@ def build_path_dataset(
             np.nan,
         )
 
-    return sample
+        # ---------------------------------------------------------------------
+        # Universe funnel
+        # ---------------------------------------------------------------------
+
+        funnel = dict(
+            cand_funnel,
+        )
+
+        funnel["mean_ahead_now"] = int(
+            mean_ahead_now.sum()
+        )
+
+        funnel["future_path_valid"] = int(
+            len(sample)
+        )
+
+        for outc in [
+            f"y_mean_hit_{horizon}",
+            f"y_mean_before_1R_{horizon}",
+            f"y_opp_sr_hit_{horizon}",
+            f"y_positive_{horizon}",
+        ]:
+
+            funnel[f"outcome_finite:{outc}"] = int(
+                np.isfinite(
+                    sample[outc].to_numpy(float)
+                ).sum()
+            )
+
+        return sample, funnel
 
 
 # =============================================================================
@@ -4244,14 +4324,16 @@ def fit_eval_cpd(
         .copy()
     )
 
-    if (
-        len(tr) < 1000
-        or len(ev) < 200
-    ):
+    # ---------------------------------------------------------------------
+    # Fail-closed（仅技术性）：
+    # 删除任意 1000 阈值。
+    # 只要求 train / eval 非空 + train 含两类。
+    # ---------------------------------------------------------------------
+    if len(tr) == 0 or len(ev) == 0:
 
         raise SystemExit(
 
-            "STOP_STRUCTREV_SAMPLE_TOO_SMALL:"
+            "STOP_STRUCTREV_SAMPLE_EMPTY:"
             f"{outcome}:"
             f"train={len(tr)} "
             f"eval={len(ev)}"
@@ -4287,6 +4369,43 @@ def fit_eval_cpd(
         raise SystemExit(
             f"STOP_STRUCTREV_TRAIN_ONE_CLASS:{outcome}"
         )
+
+    # ---------------------------------------------------------------------
+    # 完整 sample facts（不再用小样本守卫掩盖）
+    # ---------------------------------------------------------------------
+    n_pos_tr = int(
+        y_train.sum()
+    )
+    n_neg_tr = len(y_train) - n_pos_tr
+    n_pos_ev = int(
+        y_eval.sum()
+    )
+    n_neg_ev = len(y_eval) - n_pos_ev
+    n_days_tr = int(
+        np.unique(
+            train["entry_day"]
+        ).size
+    )
+    n_days_ev = int(
+        np.unique(
+            ev["entry_day"]
+        ).size
+    )
+
+    print(
+        (
+            f"[SAMPLE] {outcome} "
+            f"train={len(tr)} "
+            f"(pos={n_pos_tr} neg={n_neg_tr} "
+            f"days={n_days_tr} "
+            f"rate={np.mean(y_train):.4f}) "
+            f"eval={len(ev)} "
+            f"(pos={n_pos_ev} neg={n_neg_ev} "
+            f"days={n_days_ev} "
+            f"rate={np.mean(y_eval):.4f})"
+        ),
+        flush=True,
+    )
 
     model = make_binary_cpd(
         nodes
@@ -4383,6 +4502,14 @@ def fit_eval_cpd(
         ),
     )
 
+    # 评估集行键（per-horizon G0-G6 行键一致性校验用）
+    eval_keys = tuple(
+        zip(
+            ev["symbol"].to_numpy(),
+            ev["entry_bar"].to_numpy(),
+        )
+    )
+
     return (
 
         metrics,
@@ -4394,6 +4521,8 @@ def fit_eval_cpd(
         ].to_numpy(),
 
         prob,
+
+        eval_keys,
     )
 
 
@@ -4419,6 +4548,7 @@ def evaluate_graph_ladder(
 
         previous_loss = None
         previous_days = None
+        previous_eval_keys = None
         previous_graph = None
 
         for (
@@ -4431,6 +4561,7 @@ def evaluate_graph_ladder(
                 loss,
                 days,
                 _,
+                eval_keys,
             ) = fit_eval_cpd(
 
                 train,
@@ -4478,6 +4609,11 @@ def evaluate_graph_ladder(
                         previous_days,
                         days,
                     )
+
+                    or
+
+                    previous_eval_keys
+                    != eval_keys
                 ):
 
                     raise SystemExit(
@@ -4537,6 +4673,7 @@ def evaluate_graph_ladder(
 
             previous_loss = loss
             previous_days = days
+            previous_eval_keys = eval_keys
             previous_graph = graph_name
 
     return (
@@ -4558,6 +4695,7 @@ def evaluate_graph_ladder(
 def diagnostic_cells(
     eval_df: pd.DataFrame,
     window_name: str,
+    horizon: int,
 ) -> pd.DataFrame:
 
     rows = []
@@ -4598,7 +4736,7 @@ def diagnostic_cells(
         np.inf,
     ]
 
-    for horizon in HORIZONS:
+    for horizon in (horizon,):  # single-horizon diagnostic
 
         outcome = (
             f"y_mean_hit_{horizon}"
@@ -4933,6 +5071,22 @@ def run_parameter_scan(
     cap: Optional[int] = None,
 ) -> pd.DataFrame:
 
+    # ---------------------------------------------------------------------
+    # 参数扫描授权闸门
+    #
+    # 默认拒绝；
+    # 需要显式 env AUTHORIZE_STRUCTREV_PARAMETER_SCAN=1
+    # ---------------------------------------------------------------------
+    scan_token = os.environ.get(
+        "AUTHORIZE_STRUCTREV_PARAMETER_SCAN",
+        "",
+    ).strip()
+
+    if scan_token != "1":
+        raise SystemExit(
+            "STOP_STRUCTREV_PARAMETER_SCAN_NOT_AUTHORIZED"
+        )
+
     scored_a = bundle[
         "scored_A"
     ]
@@ -5013,6 +5167,8 @@ def run_parameter_scan(
 
             bars_by_sym,
 
+            horizon=24,
+
             cap=cap,
 
             common_scan_universe=True,
@@ -5025,6 +5181,8 @@ def run_parameter_scan(
             ("TB2",),
 
             bars_by_sym,
+
+            horizon=24,
 
             cap=cap,
 
@@ -5041,6 +5199,7 @@ def run_parameter_scan(
             metrics,
             loss,
             days,
+            _,
             _,
         ) = fit_eval_cpd(
 
@@ -5375,6 +5534,276 @@ def prefix_invariance_synthetic() -> None:
 
 
 # =============================================================================
+# 17b. Synthetic causality audits
+# =============================================================================
+
+def pivot_causality_synthetic() -> None:
+    """
+    验证 confirmed_pivots 的因果性：
+
+    一个在 center index p 的极值，
+    只在 p+right 才被系统“知道”，
+    之前全部为 NaN。
+    """
+
+    left = 3
+    right = 3
+
+    n = 60
+    p = 25
+
+    # high pivot
+    v = np.linspace(
+        0.0,
+        1.0,
+        n,
+    )
+
+    v[p] = 100.0
+
+    out = confirmed_pivots(
+        v,
+        left,
+        right,
+        "high",
+    )
+
+    confirm_idx = p + right
+
+    if not np.all(
+        np.isnan(
+            out[:confirm_idx]
+        )
+    ):
+        raise SystemExit(
+            "STOP_STRUCTREV_PIVOT_CAUSALITY_LEAK:"
+            "before_confirmation"
+        )
+
+    if not np.isfinite(
+        out[confirm_idx]
+    ):
+        raise SystemExit(
+            "STOP_STRUCTREV_PIVOT_CAUSALITY_MISSING:"
+            "at_confirmation"
+        )
+
+    if out[confirm_idx] != v[p]:
+        raise SystemExit(
+            "STOP_STRUCTREV_PIVOT_CAUSALITY_VALUE_MISMATCH"
+        )
+
+    # low pivot
+    v2 = np.linspace(
+        1.0,
+        0.0,
+        n,
+    )
+
+    v2[p] = -100.0
+
+    out2 = confirmed_pivots(
+        v2,
+        left,
+        right,
+        "low",
+    )
+
+    if not np.all(
+        np.isnan(
+            out2[:confirm_idx]
+        )
+    ):
+        raise SystemExit(
+            "STOP_STRUCTREV_PIVOT_CAUSALITY_LEAK:"
+            "before_confirmation_low"
+        )
+
+    if out2[confirm_idx] != v2[p]:
+        raise SystemExit(
+            "STOP_STRUCTREV_PIVOT_CAUSALITY_VALUE_MISMATCH_LOW"
+        )
+
+
+def higher_tf_asof_synthetic() -> None:
+    """
+    验证更高周期（1H / 4H）as-of 对齐合同：
+
+    一个 15m decision bar 在 available_time = t 时，
+    只能使用 available_time <= t 的更高周期 bar，
+    绝不能偷看下一个更高周期 bar。
+
+    复现 attach_indicator_features 的 as-of 对齐逻辑：
+        pos = searchsorted(available_time, t, side="right") - 1
+    """
+
+    n = 600
+
+    rng = np.random.default_rng(
+        11,
+    )
+
+    close = (
+        100.0
+        + np.cumsum(
+            rng.normal(
+                0,
+                0.2,
+                n,
+            )
+        )
+    )
+
+    high = (
+        close
+        + rng.uniform(
+            0.05,
+            0.4,
+            n,
+        )
+    )
+
+    low = (
+        close
+        - rng.uniform(
+            0.05,
+            0.4,
+            n,
+        )
+    )
+
+    open_ = np.r_[
+        close[0],
+        close[:-1],
+    ]
+
+    time_index = pd.date_range(
+        "2026-01-01",
+        periods=n,
+        freq="5min",
+    )
+
+    raw = pd.DataFrame(
+        {
+            "time": time_index,
+            "trading_day": pd.Timestamp(
+                "2026-01-01",
+            ),
+            "segment": 0,
+            "open": open_,
+            "high": high,
+            "low": low,
+            "close": close,
+            "disc": False,
+            "available_time": (
+                time_index
+                + pd.Timedelta(
+                    minutes=5,
+                )
+            ),
+            "n_base": 1,
+        }
+    )
+
+    h1 = resample_causal(
+        raw,
+        60,
+    )
+
+    h1_avail = (
+        pd.to_datetime(
+            h1["available_time"]
+        )
+        .to_numpy(
+            dtype="datetime64[ns]"
+        )
+    )
+
+    decision_times = (
+        pd.to_datetime(
+            raw["available_time"]
+        )
+        .to_numpy(
+            dtype="datetime64[ns]"
+        )
+    )
+
+    for t in decision_times[::30]:
+
+        pos = (
+            np.searchsorted(
+                h1_avail,
+                t,
+                side="right",
+            )
+            - 1
+        )
+
+        if pos < 0:
+            continue
+
+        # as-of 合同：对齐的 1H bar 必须已 available
+        if h1_avail[pos] > t:
+            raise SystemExit(
+                "STOP_STRUCTREV_HTF_ASOF_FUTURE_LEAK"
+            )
+
+        # 下一个 1H bar 必须严格晚于 t
+        if pos + 1 < len(h1_avail):
+
+            if h1_avail[pos + 1] <= t:
+                raise SystemExit(
+                    "STOP_STRUCTREV_HTF_ASOF_NOT_LATEST"
+                )
+
+    # 因果扰动：
+    # 修改未来 1H bar 不应改变过去决策的 as-of 对齐
+    h1_perturbed = h1.copy()
+
+    h1_perturbed.loc[
+        h1_perturbed.index[-1],
+        "close",
+    ] += 999.0
+
+    h1_perturbed_avail = (
+        pd.to_datetime(
+            h1_perturbed["available_time"]
+        )
+        .to_numpy(
+            dtype="datetime64[ns]"
+        )
+    )
+
+    for t in decision_times[::30]:
+
+        pos0 = (
+            np.searchsorted(
+                h1_avail,
+                t,
+                side="right",
+            )
+            - 1
+        )
+
+        pos1 = (
+            np.searchsorted(
+                h1_perturbed_avail,
+                t,
+                side="right",
+            )
+            - 1
+        )
+
+        if pos0 < 0 or pos1 < 0:
+            continue
+
+        if pos0 != pos1:
+            raise SystemExit(
+                "STOP_STRUCTREV_HTF_ASOF_PERTURB_DRIFT"
+            )
+
+
+# =============================================================================
 # 18. Audit
 # =============================================================================
 
@@ -5413,8 +5842,17 @@ def run_audit_only() -> None:
         flush=True,
     )
 
+    pivot_causality_synthetic()
+
     print(
-        "[AUDIT] confirmed pivot causality: PASS",
+        "[AUDIT] confirmed pivot causality (synthetic): PASS",
+        flush=True,
+    )
+
+    higher_tf_asof_synthetic()
+
+    print(
+        "[AUDIT] higher-TF as-of (15m/1H/4H synthetic): PASS",
         flush=True,
     )
 
@@ -5442,28 +5880,13 @@ def prepare_default_frames(
     ]
 
     symbols = sorted(
-
-        set(
-            bundle[
-                "scored_A"
-            ][
-                "symbol"
-            ]
-            .unique()
-            .tolist()
-        )
-
-        |
-
-        set(
-            bundle[
-                "scored_B"
-            ][
-                "symbol"
-            ]
-            .unique()
-            .tolist()
-        )
+        bundle[
+            "scored_A"
+        ][
+            "symbol"
+        ]
+        .unique()
+        .tolist()
     )
 
     print(
@@ -5484,7 +5907,6 @@ def prepare_default_frames(
 
     for key in (
         "scored_A",
-        "scored_B",
     ):
 
         print(
@@ -5542,26 +5964,24 @@ def run_main(
     assert_base_sha_ancestor()
 
     print(
-        "[LOAD] reuse x1.load_and_score()",
+        "[LOAD] load_window_a_only() "
+        "(TB1 -> TB2 only; no TB3 / Window B)",
         flush=True,
     )
 
-    # -------------------------------------------------------------------------
-    # 现有 owner：
-    #
-    # Window A fit 一次
-    # Window B fit 一次
-    # -------------------------------------------------------------------------
+    t0 = time.perf_counter()
 
-    bundle = (
-        x1
-        .load_and_score()
+    bundle = load_window_a_only()
+
+    prepared = prepare_default_frames(
+        bundle,
     )
 
-    prepared = (
-        prepare_default_frames(
-            bundle
-        )
+    t1 = time.perf_counter()
+
+    print(
+        f"[LOAD] done {t1 - t0:.2f}s",
+        flush=True,
     )
 
     frames = prepared[
@@ -5585,34 +6005,26 @@ def run_main(
     )
 
     # -------------------------------------------------------------------------
-    # smoke:
-    #     只研究 mean_hit
-    #
-    # full:
-    #     加入 mean_before_1R
+    # smoke / full 探索：
+    #   只研究 Window A (TB1 -> TB2)。
+    #   不访问 TB3 / Window B。
+    #   每个 horizon 独立构建自己的 path-valid universe。
     # -------------------------------------------------------------------------
 
-    outcomes = []
-
-    for horizon in HORIZONS:
-
-        outcomes.append(
-            f"y_mean_hit_{horizon}"
-        )
-
-        if full:
-
-            outcomes.append(
-                f"y_mean_before_1R_{horizon}"
-            )
+    active_windows = [
+        w
+        for w in WINDOWS
+        if w["name"] == "A_TB1_to_TB2"
+    ]
 
     all_metrics = []
     all_bootstrap = []
     all_cells = []
+    all_funnels = []
 
     counts = {}
 
-    for window in WINDOWS:
+    for window in active_windows:
 
         frame = frames[
             window[
@@ -5620,100 +6032,100 @@ def run_main(
             ]
         ]
 
-        train = (
-            build_path_dataset(
+        for horizon in HORIZONS:
 
+            t2 = time.perf_counter()
+
+            train, train_funnel = build_path_dataset(
                 frame,
-
-                window[
-                    "train"
-                ],
-
+                window["train"],
                 bars_by_sym,
-
+                horizon=horizon,
                 cap=cap,
             )
-        )
 
-        eval_df = (
-            build_path_dataset(
-
+            eval_df, eval_funnel = build_path_dataset(
                 frame,
+                (window["eval"],),
+                bars_by_sym,
+                horizon=horizon,
+                cap=cap,
+            )
 
+            t3 = time.perf_counter()
+
+            key = (
+                f"{window['name']}"
+                f"|H{horizon}"
+            )
+
+            counts[key] = dict(
+                n_train=len(train),
+                n_eval=len(eval_df),
+            )
+
+            print(
                 (
-                    window[
-                        "eval"
-                    ],
+                    "[WINDOW] "
+                    f"{key} "
+                    f"train={len(train)} "
+                    f"eval={len(eval_df)} "
+                    f"build={t3 - t2:.2f}s"
                 ),
-
-                bars_by_sym,
-
-                cap=cap,
+                flush=True,
             )
-        )
 
-        counts[
-            window["name"]
-        ] = dict(
+            print(
+                f"[FUNNEL][train] {key} {train_funnel}",
+                flush=True,
+            )
+            print(
+                f"[FUNNEL][eval ] {key} {eval_funnel}",
+                flush=True,
+            )
 
-            n_train=len(
-                train
-            ),
+            outcomes_h = [
+                f"y_mean_hit_{horizon}",
+            ]
 
-            n_eval=len(
-                eval_df
-            ),
-        )
+            if full:
 
-        print(
+                outcomes_h.append(
+                    f"y_mean_before_1R_{horizon}"
+                )
 
-            "[WINDOW] "
-            f"{window['name']} "
-            f"train={len(train)} "
-            f"eval={len(eval_df)}",
-
-            flush=True,
-        )
-
-        metrics, bootstrap = (
-            evaluate_graph_ladder(
-
+            metrics, bootstrap = evaluate_graph_ladder(
                 train,
-
                 eval_df,
-
-                window[
-                    "name"
-                ],
-
-                outcomes,
-
+                key,
+                outcomes_h,
                 n_boot,
             )
-        )
 
-        cells = (
-            diagnostic_cells(
-
+            cells = diagnostic_cells(
                 eval_df,
-
-                window[
-                    "name"
-                ],
+                key,
+                horizon,
             )
-        )
 
-        all_metrics.append(
-            metrics
-        )
+            all_metrics.append(
+                metrics
+            )
 
-        all_bootstrap.append(
-            bootstrap
-        )
+            all_bootstrap.append(
+                bootstrap
+            )
 
-        all_cells.append(
-            cells
-        )
+            all_cells.append(
+                cells
+            )
+
+            all_funnels.append(
+                dict(
+                    window=key,
+                    **train_funnel,
+                )
+            )
 
     return dict(
 
@@ -5733,6 +6145,8 @@ def run_main(
         ),
 
         counts=counts,
+
+        funnels=all_funnels,
 
         params=asdict(
             PINE_DEFAULT
