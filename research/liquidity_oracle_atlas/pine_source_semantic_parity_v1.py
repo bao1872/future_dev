@@ -617,11 +617,38 @@ def case_crossover() -> dict:
     }
 
 
+def epsilon_point_match(ov, pv):
+    """Strict Pine differential point comparator (shared by case_epsilon + F2b/c/d).
+
+    Returns (point_match, guard_status_mismatch, both_finite, abs_err).
+
+    point_match is False (=> counts toward n_epsilon_mismatch) when:
+      - both finite but |O - P| > FLOAT_TOL, OR
+      - exactly one side finite (status divergence).
+    Both NaN (e.g. warmup / exact-zero denominator) => match.
+    guard_status_mismatch: Oracle finite but production NaN (legacy guard symptom),
+    reported as auxiliary evidence only.
+    """
+    ov = float(ov)
+    pv = float(pv)
+    ov_f = np.isfinite(ov)
+    pv_f = np.isfinite(pv)
+    both_finite = ov_f and pv_f
+    both_nan = np.isnan(ov) and np.isnan(pv)
+    numeric_match = both_finite and np.isclose(ov, pv, rtol=0.0, atol=FLOAT_TOL)
+    point_match = bool(both_nan or numeric_match)
+    guard_status_mm = bool(ov_f and (not pv_f))
+    abs_err = abs(ov - pv) if both_finite else None
+    return point_match, guard_status_mm, both_finite, abs_err
+
+
 def case_epsilon() -> dict:
-    # Construct 0 < |P100| <= 1e-12 so Pine direct division gives finite
-    # while production's |denom|>1e-12 guard forces NaN.
+    # Numerically STABLE construction: small positive base price so that
+    # avg_diff = SMA - SMA[5] does NOT suffer catastrophic cancellation
+    # (subtracting two ~100-scale SMAs to form a ~1e-13 value). This isolates
+    # the real Pine-semantic question (production gate) from float noise.
     n = 600
-    close = 100.0 + np.arange(n) * 1e-13
+    close = 1e-10 + np.arange(n) * 1e-13
     high, low, close = make_ohlc(close, band=1e-14)
     o = dtp_literal_oracle(high, low, close)
     feat = run_production_segment(high, low, close)
@@ -638,33 +665,33 @@ def case_epsilon() -> dict:
     prod_ts = feat["trend_score"].to_numpy(float)
 
     n_match = 0
-    n_guard_mismatch = 0
+    n_mismatch = 0
+    n_guard_status_mismatch = 0
     first_mm_idx = None
     first_o_val = None
     first_p_val = None
     samples = []
+    abs_errors = []
     ratio_resid = []
     for i in idxs:
         ov = oracle_ac[i]
         pv = prod_ts[i]
-        both_finite = np.isfinite(ov) and np.isfinite(pv)
-        # The SOURCE divergence under test is the production guard: production
-        # returns NaN where Pine/Oracle divide (finite). Floating-point
-        # cancellation noise at this 1e-13 synthetic scale (subtraction of
-        # ~100-scale SMAs to form avg_diff) is NOT a Pine-semantic divergence,
-        # so a both-finite-but-unequal ratio is reported but not counted as a
-        # mismatch.
-        guard_mismatch = bool(np.isnan(pv) and np.isfinite(ov))
-        if guard_mismatch:
-            n_guard_mismatch += 1
+        point_match, gsm, both_finite, abs_err = epsilon_point_match(ov, pv)
+        if point_match:
+            n_match += 1
+        else:
+            n_mismatch += 1
             if first_mm_idx is None:
                 first_mm_idx = int(i)
                 first_o_val = None if not np.isfinite(ov) else float(ov)
                 first_p_val = None if not np.isfinite(pv) else float(pv)
-        else:
-            n_match += 1
-            if both_finite and (abs(ov) + abs(pv)) > 0:
-                ratio_resid.append(abs(ov - pv) / (abs(ov) + abs(pv)))
+        if gsm:
+            n_guard_status_mismatch += 1
+        if abs_err is not None:
+            abs_errors.append(abs_err)
+            denom_sum = abs(float(ov)) + abs(float(pv))
+            if denom_sum > 0:
+                ratio_resid.append(abs_err / denom_sum)
         if len(samples) < 5:
             samples.append({
                 "index": int(i),
@@ -677,25 +704,40 @@ def case_epsilon() -> dict:
                 ),
             })
 
-    n_epsilon_mismatch = n_guard_mismatch
-    ratio_rms = (
+    # strict numeric/status mismatch count (NOT guard-only)
+    n_epsilon_mismatch = n_mismatch
+    max_abs_error = float(max(abs_errors)) if abs_errors else None
+    mean_abs_error = float(np.mean(abs_errors)) if abs_errors else None
+    ratio_resid_rms = (
         float(np.sqrt(np.mean(np.square(ratio_resid))))
         if ratio_resid else None
     )
+    region_p100 = denom_p[eps_mask]
+    min_abs_nonzero_p100 = (
+        float(np.min(np.abs(region_p100))) if eps_mask.any() else None
+    )
+    max_abs_p100_in_region = (
+        float(np.max(np.abs(region_p100))) if eps_mask.any() else None
+    )
 
-    # verdict from the ACTUAL differential, never hardcoded
-    guard_source_match = (int(eps_mask.sum()) > 0 and n_epsilon_mismatch == 0)
+    # strict parity verdict from the ACTUAL differential, never hardcoded
+    strict_parity_pass = (int(eps_mask.sum()) > 0 and n_epsilon_mismatch == 0)
 
     return {
-        "name": "epsilon_guard",
+        "name": "epsilon_region",
         "n_epsilon_points": int(eps_mask.sum()),
         "n_epsilon_match": n_match,
         "n_epsilon_mismatch": n_epsilon_mismatch,
-        "ratio_resid_rms": ratio_rms,
+        "n_guard_status_mismatch": n_guard_status_mismatch,
+        "max_abs_error": max_abs_error,
+        "mean_abs_error": mean_abs_error,
+        "ratio_resid_rms": ratio_resid_rms,
+        "min_abs_nonzero_p100": min_abs_nonzero_p100,
+        "max_abs_p100_in_region": max_abs_p100_in_region,
         "first_epsilon_mismatch_index": first_mm_idx,
         "first_oracle_value": first_o_val,
         "first_production_value": first_p_val,
-        "guard_source_match": guard_source_match,
+        "strict_parity_pass": strict_parity_pass,
         "samples": samples,
     }
 
@@ -1023,23 +1065,63 @@ def test_pine_safe_divide() -> dict:
 
 
 def test_epsilon_alignment() -> dict:
-    """Test F2 -- after DTP-FIX1 the production gate matches Pine semantics.
+    """Test F2a -- numerically stable epsilon region must achieve strict parity.
 
-    With the 1e-12 threshold removed, the synthetic 0<|P100|<=1e-12 region
-    must now divide (no mismatch). A mismatch here would mean regression.
+    With the 1e-12 threshold removed, every point in 0<|P100|<=1e-12 must
+    match Oracle numerically/status-wise (not just be finite).
     """
     c = case_epsilon()
     return {
         "n_epsilon_points": c["n_epsilon_points"],
         "n_epsilon_match": c["n_epsilon_match"],
         "n_epsilon_mismatch": c["n_epsilon_mismatch"],
-        "guard_source_match": c["guard_source_match"],
+        "n_guard_status_mismatch": c["n_guard_status_mismatch"],
+        "max_abs_error": c["max_abs_error"],
+        "mean_abs_error": c["mean_abs_error"],
+        "ratio_resid_rms": c["ratio_resid_rms"],
+        "strict_parity_pass": c["strict_parity_pass"],
         "samples": c["samples"],
         "pass": bool(
-            c["n_epsilon_points"] > 0
+            c["n_epsilon_points"] >= 20
             and c["n_epsilon_mismatch"] == 0
-            and c["guard_source_match"] is True
+            and c["strict_parity_pass"] is True
         ),
+    }
+
+
+def test_epsilon_finite_mismatch() -> dict:
+    """Test F2b -- comparator must flag finite != finite (never auto-MATCH)."""
+    pt, gsm, _, _ = epsilon_point_match(0.92, 0.80)
+    return {
+        "oracle": 0.92,
+        "production": 0.80,
+        "point_match": pt,
+        "guard_status_mismatch": gsm,
+        "pass": bool(pt is False and gsm is False),
+    }
+
+
+def test_epsilon_status_mismatch() -> dict:
+    """Test F2c -- oracle finite, production NaN => mismatch + guard symptom."""
+    pt, gsm, _, _ = epsilon_point_match(0.92, np.nan)
+    return {
+        "oracle": 0.92,
+        "production": None,
+        "point_match": pt,
+        "guard_status_mismatch": gsm,
+        "pass": bool(pt is False and gsm is True),
+    }
+
+
+def test_epsilon_exact_match() -> dict:
+    """Test F2d -- identical finite values => match, no mismatch."""
+    pt, gsm, _, _ = epsilon_point_match(0.92, 0.92)
+    return {
+        "oracle": 0.92,
+        "production": 0.92,
+        "point_match": pt,
+        "guard_status_mismatch": gsm,
+        "pass": bool(pt is True and gsm is False),
     }
 
 
@@ -1100,7 +1182,7 @@ def main() -> None:
               f"prev_avg_col={t['prev_avg_col']} cur_avg_col={t['cur_avg_col']}",
               flush=True)
     print(f"[AUDIT] T1-A epsilon n_epsilon_points={c_eps['n_epsilon_points']} "
-          f"guard_source_match={c_eps['guard_source_match']}", flush=True)
+          f"strict_parity_pass={c_eps['strict_parity_pass']}", flush=True)
 
     # T1-B random
     rand_rows = random_differential()
@@ -1133,6 +1215,9 @@ def main() -> None:
     t_pref = test_prefix_invariance()
     t_chain = test_call_chain()
     t_eps = test_epsilon_alignment()
+    t_eps_b = test_epsilon_finite_mismatch()
+    t_eps_c = test_epsilon_status_mismatch()
+    t_eps_d = test_epsilon_exact_match()
     # Hardening tests E1-E5
     t_seg = test_segment_reset()
     t_cmp = test_compare_int_evidence()
@@ -1144,9 +1229,20 @@ def main() -> None:
     print("[AUDIT] Test C call-chain pass:", t_chain["pass"],
           "ctf=", t_chain["compute_tf_features_calls"],
           "csf=", t_chain["compute_segment_features_calls"], flush=True)
-    print("[AUDIT] Test F2 epsilon alignment pass:", t_eps["pass"],
+    print("[AUDIT] Test F2a epsilon strict parity pass:", t_eps["pass"],
           "n_points=", t_eps["n_epsilon_points"],
-          "n_mismatch=", t_eps["n_epsilon_mismatch"], flush=True)
+          "n_mismatch=", t_eps["n_epsilon_mismatch"],
+          "n_guard_status_mm=", t_eps["n_guard_status_mismatch"],
+          "max_abs_err=", t_eps["max_abs_error"],
+          "mean_abs_err=", t_eps["mean_abs_error"],
+          "ratio_rms=", t_eps["ratio_resid_rms"], flush=True)
+    print("[AUDIT] Test F2b finite-mismatch regression pass:", t_eps_b["pass"],
+          "point_match=", t_eps_b["point_match"], flush=True)
+    print("[AUDIT] Test F2c status-mismatch regression pass:", t_eps_c["pass"],
+          "point_match=", t_eps_c["point_match"],
+          "guard_status_mm=", t_eps_c["guard_status_mismatch"], flush=True)
+    print("[AUDIT] Test F2d exact-match regression pass:", t_eps_d["pass"],
+          "point_match=", t_eps_d["point_match"], flush=True)
     print("[AUDIT] Test F1 production zero-denominator pass:", t_zprod["pass"],
           "n_zero_denom=", t_zprod["n_zero_denominator"],
           "n_inf=", t_zprod["n_inf"], flush=True)
@@ -1193,8 +1289,9 @@ def main() -> None:
     else:
         verdict = "MATCH"
     verdict_reason = (
-        f"core_math={core_status}; epsilon_guard={eps_status} "
-        f"(n_epsilon_mismatch={c_eps['n_epsilon_mismatch']}); "
+        f"core_math={core_status}; division_semantics={eps_status} "
+        f"(n_numeric_status_mismatch={c_eps['n_epsilon_mismatch']}, "
+        f"n_guard_status_mismatch={c_eps['n_guard_status_mismatch']}); "
         f"segment_reset={seg_status}; percentile_na_semantics={pct_status}. "
         f"AG disc_true={ag['n_disc_true']} (no reset on AG); segment marks "
         f"true data-break / ATR5 price-jump, not normal session gaps."
@@ -1217,15 +1314,20 @@ def main() -> None:
             "p100_first_finite": NORM - 1 + (SMA_LEN - 1) + LAG,
             "avg_col_first_finite": NORM - 1 + (SMA_LEN - 1) + LAG,
         },
-        "epsilon_guard": {
-            "n_epsilon_points": c_eps["n_epsilon_points"],
-            "n_epsilon_match": c_eps["n_epsilon_match"],
-            "n_epsilon_mismatch": c_eps["n_epsilon_mismatch"],
+        "epsilon_region": {
+            "n_points": c_eps["n_epsilon_points"],
+            "n_numeric_status_mismatch": c_eps["n_epsilon_mismatch"],
+            "n_guard_status_mismatch": c_eps["n_guard_status_mismatch"],
+            "max_abs_error": c_eps["max_abs_error"],
+            "mean_abs_error": c_eps["mean_abs_error"],
             "ratio_resid_rms": c_eps["ratio_resid_rms"],
+            "min_abs_nonzero_p100": c_eps["min_abs_nonzero_p100"],
+            "max_abs_p100_in_region": c_eps["max_abs_p100_in_region"],
+            "n_match": c_eps["n_epsilon_match"],
             "first_epsilon_mismatch_index": c_eps["first_epsilon_mismatch_index"],
             "first_oracle_value": c_eps["first_oracle_value"],
             "first_production_value": c_eps["first_production_value"],
-            "match": c_eps["guard_source_match"],
+            "strict_parity_pass": c_eps["strict_parity_pass"],
             "observed_on_AG": epsilon_observed_ag,
         },
         "prefix_invariance": {
@@ -1257,7 +1359,7 @@ def main() -> None:
         },
         "classification": {
             "core_math": core_status,
-            "epsilon_guard": eps_status,
+            "division_semantics": eps_status,
             "segment_reset": seg_status,
             "percentile_na_semantics": pct_status,
         },
@@ -1276,7 +1378,10 @@ def main() -> None:
             "B_prefix": t_pref["pass"],
             "C_call_chain": t_chain["pass"],
             "F1_production_zero_denominator": t_zprod["pass"],
-            "F2_epsilon_alignment": t_eps["pass"],
+            "F2a_epsilon_alignment": t_eps["pass"],
+            "F2b_finite_mismatch": t_eps_b["pass"],
+            "F2c_status_mismatch": t_eps_c["pass"],
+            "F2d_exact_match": t_eps_d["pass"],
             "E_segment_reset": t_seg["segment_reset_triggered"],
             "E4_compare_int_evidence": t_cmp["pass"],
             "Z_division_semantics": t_zdiv["pass"],
