@@ -304,6 +304,8 @@ def identity_gate(
         TV 是 Python 历史的子区间, 允许 Python 拥有更多历史。
         但 TV 的每一根 bar 都必须存在于 Python: n_overlap == n_tv。
         TV 出现 Python 不存在的 timestamp -> FAIL (比较交集却声称身份一致)。
+        TV 还必须是 Python row sequence 的连续子区间
+        (n_internal_python_rows_skipped == 0); 否则 TV 中间漏 bar 仍可 false PASS。
     """
 
     n_python = len(py)
@@ -320,11 +322,12 @@ def identity_gate(
     tv_timestamp_coverage = (n_overlap / n_tv) if n_tv else 0.0
     python_timestamp_coverage = (n_overlap / n_python) if n_python else 0.0
 
-    first_ts_mismatch = None
-    if n_tv_only:
-        first_ts_mismatch = str(only_tv.min())
-    elif n_python_only:
-        first_ts_mismatch = str(only_py.min())
+    # TV-only = 会导致 identity failure 的 timestamp (证据).
+    # Python-only = 合法额外历史, 不得称为 mismatch.
+    first_tv_only_timestamp = str(only_tv.min()) if n_tv_only else None
+    first_python_only_timestamp = (
+        str(only_py.min()) if n_python_only else None
+    )
 
     out = {
         "n_python": n_python,
@@ -335,7 +338,8 @@ def identity_gate(
         "n_tv_only": n_tv_only,
         "tv_timestamp_coverage": tv_timestamp_coverage,
         "python_timestamp_coverage": python_timestamp_coverage,
-        "first_timestamp_mismatch": first_ts_mismatch,
+        "first_tv_only_timestamp": first_tv_only_timestamp,
+        "first_python_only_timestamp": first_python_only_timestamp,
     }
 
     # TV -> Python positional continuity (report only; 不因正常休市自动 FAIL)
@@ -352,14 +356,23 @@ def identity_gate(
     out["tv_python_position_monotonic"] = tv_python_position_monotonic
     out["n_internal_python_rows_skipped"] = n_internal_skipped
 
-    # TV 每一根都必须能在 Python 找到; Python 额外历史允许.
-    timestamp_pass = (n_tv > 0) and (n_overlap == n_tv)
+    # TV 必须是 Python row sequence 的连续子区间:
+    #   1) TV 每根都在 Python (n_overlap == n_tv)
+    #   2) TV 中间不能漏 bar (n_internal_python_rows_skipped == 0)
+    # 正常午休 / 夜盘断点下 Python 也没有那些行, row 仍连续, 不触发.
+    continuous_subsequence_pass = bool(
+        n_tv > 0
+        and n_overlap == n_tv
+        and n_internal_skipped == 0
+    )
+    out["continuous_subsequence_pass"] = continuous_subsequence_pass
 
     if n_overlap == 0:
         for col in OHLC_COLS:
             out[f"{col}_mismatch"] = 0
             out[f"max_abs_{col}_error"] = None
         out["first_ohlc_mismatch"] = None
+        out["continuous_subsequence_pass"] = False
         out["data_identity_pass"] = False
         return out
 
@@ -397,7 +410,9 @@ def identity_gate(
 
     out["first_ohlc_mismatch"] = first_ohlc
     ohlc_pass = all(out[f"{col}_mismatch"] == 0 for col in OHLC_COLS)
-    out["data_identity_pass"] = bool(timestamp_pass and ohlc_pass)
+    out["data_identity_pass"] = bool(
+        continuous_subsequence_pass and ohlc_pass
+    )
 
     return out
 
@@ -424,24 +439,21 @@ def compare_field(
 
     mismatch_rows = []
 
+    diff = np.abs(a - b)
     if integer:
         mm = both & (a.astype("int64") != b.astype("int64"))
-        if both.any():
-            max_abs = 0.0
-            mean_abs = 0.0
-        else:
-            max_abs = None
-            mean_abs = None
     else:
-        diff = np.abs(a - b)
         tol = atol + rtol * np.abs(b)
         mm = both & (diff > tol)
-        if both.any():
-            max_abs = float(diff[both].max())
-            mean_abs = float(diff[both].mean())
-        else:
-            max_abs = None
-            mean_abs = None
+
+    # error statistics 在 jointly finite rows 上真实计算 (含 integer/trend):
+    # 不把 mismatch 判定与误差统计混为一谈 (trend +1 vs -1 的误差应记 2).
+    if both.any():
+        max_abs = float(diff[both].max())
+        mean_abs = float(diff[both].mean())
+    else:
+        max_abs = None
+        mean_abs = None
 
     one_nan = (
         np.isfinite(a) & ~np.isfinite(b)
@@ -593,6 +605,9 @@ def run_parity(
 
     indicator_parity_pass = decide_indicator_parity(rows)
     summary["indicator_parity_pass"] = indicator_parity_pass
+    summary["insufficient_finite_overlap"] = any(
+        r["n_both_finite"] <= 0 for r in rows
+    )
 
     (out_dir / "r2b_identity_summary.json").write_text(
         json.dumps(summary, indent=2, default=str)
@@ -630,6 +645,7 @@ def decide_indicator_parity(rows: list[dict]) -> str:
     """
     indicator_parity_pass 判定 (独立可测):
         实际比较字段 == required(6)
+        AND 每个字段 n_both_finite > 0 (双方全 NaN 不能算 PASS)
         AND 所有 n_mismatch == 0
         AND 所有 warmup_mismatch == False
     否则 FAIL。
@@ -640,10 +656,14 @@ def decide_indicator_parity(rows: list[dict]) -> str:
 
     if compared != required:
         return "FAIL"
-    if any(r["n_mismatch"] != 0 for r in rows):
-        return "FAIL"
-    if any(r["warmup_mismatch"] for r in rows):
-        return "FAIL"
+    for r in rows:
+        # 双方都是 NaN -> n_both_finite=0, 实际没比较任何有效数值, 不能 PASS.
+        if r["n_both_finite"] <= 0:
+            return "FAIL"
+        if r["n_mismatch"] != 0:
+            return "FAIL"
+        if r["warmup_mismatch"]:
+            return "FAIL"
 
     return "PASS"
 
@@ -866,6 +886,84 @@ def run_comparator_tests() -> None:
                 f"HTF_CANONICAL_CALENDAR_NOT_READY:{tf}" in str(e)
             ), e
     print("[SELFTEST] R6 HTF hard stop: PASS", flush=True)
+
+    # --- Regression Test 7: required field all-NaN cannot PASS ---
+    nan_idx = _utc_index("2026-01-01 00:00", "2026-01-01 00:05")
+    nan_a = pd.Series([np.nan, np.nan], index=nan_idx)
+    nan_b = pd.Series([np.nan, np.nan], index=nan_idx)
+    r7_rows = [compare_field(nan_a, nan_b, "sma50")]
+    for canon in ("atr200", "avg_diff", "p100", "avg_col", "trend"):
+        r7_rows.append(
+            compare_field(
+                pd.Series([1.0, 2.0], index=nan_idx),
+                pd.Series([1.0, 2.0], index=nan_idx),
+                canon,
+                integer=(canon == "trend"),
+            )
+        )
+    assert decide_indicator_parity(r7_rows) == "FAIL"
+    sma_row = r7_rows[0]
+    assert sma_row["n_both_finite"] == 0, sma_row
+    assert sma_row["n_mismatch"] == 0, sma_row
+    assert sma_row["warmup_mismatch"] is False, sma_row
+    print("[SELFTEST] R7 all-NaN required field -> FAIL: PASS", flush=True)
+
+    # --- Regression Test 8: TV internal missing bar ---
+    py8_idx = _utc_index(
+        "2026-01-01 00:00", "2026-01-01 00:05",
+        "2026-01-01 00:10", "2026-01-01 00:15",
+    )
+    tv8_idx = _utc_index(
+        "2026-01-01 00:00", "2026-01-01 00:05", "2026-01-01 00:15",
+    )
+    v8 = np.array([1.0, 2.0, 3.0, 4.0])
+    py8 = ohlc_df(py8_idx, v8)
+    tv8 = ohlc_df(tv8_idx, [1.0, 2.0, 4.0])
+    g8 = identity_gate(py8, tv8)
+    assert g8["n_tv_only"] == 0, g8
+    assert g8["n_timestamp_overlap"] == 3, g8
+    assert g8["n_internal_python_rows_skipped"] == 1, g8
+    assert g8["continuous_subsequence_pass"] is False, g8
+    assert g8["data_identity_pass"] is False, g8
+    print("[SELFTEST] R8 TV internal missing bar -> FAIL: PASS", flush=True)
+
+    # --- Regression Test 9: normal session gap must NOT false fail ---
+    gap_idx = _utc_index(
+        "2026-01-01 10:00", "2026-01-01 10:05",
+        "2026-01-01 13:30", "2026-01-01 13:35",
+    )
+    v9 = np.array([1.0, 2.0, 3.0, 4.0])
+    py9 = ohlc_df(gap_idx, v9)
+    tv9 = ohlc_df(gap_idx, v9)
+    g9 = identity_gate(py9, tv9)
+    assert g9["n_internal_python_rows_skipped"] == 0, g9
+    assert g9["continuous_subsequence_pass"] is True, g9
+    assert g9["data_identity_pass"] is True, g9
+    print("[SELFTEST] R9 session gap row-continuous -> PASS: PASS", flush=True)
+
+    # --- Regression Test 10: python-only history evidence semantics ---
+    py10_idx = _utc_index(
+        "2025-12-31 23:55", "2026-01-01 00:00", "2026-01-01 00:05",
+    )
+    tv10_idx = _utc_index("2026-01-01 00:00", "2026-01-01 00:05")
+    py10 = ohlc_df(py10_idx, [0.5, 1.0, 2.0])
+    tv10 = ohlc_df(tv10_idx, [1.0, 2.0])
+    g10 = identity_gate(py10, tv10)
+    assert g10["data_identity_pass"] is True, g10
+    assert g10["first_tv_only_timestamp"] is None, g10
+    assert g10["first_python_only_timestamp"] is not None, g10
+    assert "first_timestamp_mismatch" not in g10, g10
+    print("[SELFTEST] R10 python-only timestamp evidence: PASS", flush=True)
+
+    # --- Regression Test 11: trend error statistics real ---
+    t_idx = _utc_index("2026-01-01 00:00", "2026-01-01 00:05")
+    pt = pd.Series([-1.0, 1.0], index=t_idx)
+    tt = pd.Series([-1.0, -1.0], index=t_idx)
+    rt = compare_field(pt, tt, "trend", integer=True)
+    assert rt["n_mismatch"] == 1, rt
+    assert rt["max_abs_error"] == 2.0, rt
+    assert rt["mean_abs_error"] == 1.0, rt
+    print("[SELFTEST] R11 trend error statistics: PASS", flush=True)
 
     print("[SELFTEST] ALL PASS", flush=True)
 
