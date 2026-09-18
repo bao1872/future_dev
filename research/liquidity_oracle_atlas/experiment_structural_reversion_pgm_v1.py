@@ -2757,6 +2757,16 @@ def attach_indicator_features(
             rows
         ] = decision_close
 
+        # discontinuity segment of each decision bar (the reset owner).
+        decision_segment = np.cumsum(
+            np.asarray(
+                bars["disc"],
+                dtype=bool,
+            ).astype(
+                np.int64
+            )
+        )[bar_t]
+
         for tf in TF_MINUTES:
 
             f = cache[sym][tf]
@@ -2785,6 +2795,33 @@ def attach_indicator_features(
             ok = (
                 pos >= 0
             )
+
+            # discontinuity segment isolation: a decision may only consume
+            # features from its OWN segment. If the latest available row still
+            # belongs to a previous segment, the correct result is NaN
+            # (segment never decreases, so no backward search is performed).
+            same_segment = np.zeros(
+                len(pos),
+                dtype=bool,
+            )
+
+            valid = np.where(
+                ok
+            )[0]
+
+            if len(valid):
+
+                tf_segment = (
+                    f["segment"]
+                    .to_numpy(np.int64)
+                )
+
+                same_segment[valid] = (
+                    tf_segment[pos[valid]]
+                    == decision_segment[valid]
+                )
+
+            ok &= same_segment
 
             if not np.any(ok):
                 continue
