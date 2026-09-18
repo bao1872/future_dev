@@ -517,6 +517,27 @@ def require_full_authorization() -> None:
         )
 
 
+def require_parameter_scan_authorization() -> None:
+    """
+    参数扫描授权闸门。
+
+    默认拒绝; 需要显式 env AUTHORIZE_STRUCTREV_PARAMETER_SCAN=1。
+
+    该 gate 必须在 CLI 层、任何 load / fit / feature 工作之前调用;
+    这里仅作为次级防御保留。
+    """
+
+    scan_token = os.environ.get(
+        "AUTHORIZE_STRUCTREV_PARAMETER_SCAN",
+        "",
+    ).strip()
+
+    if scan_token != "1":
+        raise SystemExit(
+            "STOP_STRUCTREV_PARAMETER_SCAN_NOT_AUTHORIZED"
+        )
+
+
 # =============================================================================
 # 3. Pine 基础函数
 # =============================================================================
@@ -3468,32 +3489,159 @@ def build_path_dataset(
         )
     )
 
-    if (
-        cap is not None
-        and len(sample) > cap
-    ):
+    # -------------------------------------------------------------------------
+    # Decision anchor (causal t)
+    #
+    # 研究问题：在 t 时刻看到信号之后未来发生什么。
+    # decision bar = t (bar_t)
+    # entry_bar    = t + 1 (future path 起点, x1.build_future_tensor 合同)
+    #
+    # 禁止用 entry_bar / future O/H/L/C 计算 decision-time state。
+    # -------------------------------------------------------------------------
+
+    decision_bar = (
+        sample["bar_t"].to_numpy(np.int64)
+    )
+
+    entry_bar = (
+        sample["entry_bar"].to_numpy(np.int64)
+    )
+
+    if not np.array_equal(entry_bar, decision_bar + 1):
+
+        n_mismatch = int(
+            (entry_bar != decision_bar + 1).sum()
+        )
+
+        raise SystemExit(
+            "STOP_STRUCTREV_DECISION_ENTRY_INDEX_CONTRACT "
+            f"mismatch={n_mismatch} "
+            f"sample_entry_bar={entry_bar[:5].tolist()}"
+        )
+
+    # decision-close parity gate:
+    # bars[t][bar_t] + 5min == attach 时 decision_close_time_structrev
+    decision_close_time = (
+        sample["decision_close_time_structrev"]
+        .to_numpy(dtype="datetime64[ns]")
+    )
+
+    for s in np.unique(sample["symbol"].to_numpy()):
+
+        m = sample["symbol"].to_numpy() == s
+
+        bar_time = (
+            pd.to_datetime(
+                np.asarray(bars_by_sym[s]["t"])[decision_bar[m]]
+            )
+            .to_numpy(dtype="datetime64[ns]")
+        )
+
+        expected = bar_time + np.timedelta64(5, "m")
+
+        if not np.array_equal(expected, decision_close_time[m]):
+
+            raise SystemExit(
+                "STOP_STRUCTREV_DECISION_TIME_PARITY:"
+                f"{s}"
+            )
+
+    syms = sample["symbol"].to_numpy()
+
+    atr0 = sample["atr0"].to_numpy(float)
+
+    direction = sample["reversion_dir"].to_numpy(float)
+
+    mean_price = sample["m15_sma"].to_numpy(float)
+
+    opp_sr_price = (
+        sample["m15_sr_opp_price"].to_numpy(float)
+    )
+
+    decision_close = np.empty(len(sample), dtype=float)
+
+    for s in np.unique(syms):
+
+        m = syms == s
+
+        decision_close[m] = np.asarray(
+            bars_by_sym[s]["c"], dtype=float
+        )[decision_bar[m]]
+
+    # mean-ahead (t 时刻信息) —— 作为 candidate gate
+    mean_dist_now_R = (
+        direction
+        * (mean_price - decision_close)
+        / atr0
+    )
+
+    mean_ahead_now = (
+        np.isfinite(mean_dist_now_R)
+        & (mean_dist_now_R > 0)
+    )
+
+    opp_sr_dist_now_R = (
+        direction
+        * (opp_sr_price - decision_close)
+        / atr0
+    )
+
+    opp_sr_valid = (
+        np.isfinite(opp_sr_dist_now_R)
+        & (opp_sr_dist_now_R > 0)
+    )
+
+    # 把 decision-time 量作为列挂回 sample,
+    # 之后所有过滤都保持对齐。
+    sample = sample.copy()
+
+    sample["decision_close_structrev"] = decision_close
+
+    sample["mean_target_dist_R"] = mean_dist_now_R
+
+    sample["mean_ahead_now"] = (
+        mean_ahead_now.astype(np.int8)
+    )
+
+    sample["opp_sr_target_dist_R"] = opp_sr_dist_now_R
+
+    sample["opp_sr_target_valid"] = (
+        opp_sr_valid.astype(np.int8)
+    )
+
+    # funnel: candidate 阶段 fact (mean gate 之前)
+    funnel = dict(cand_funnel)
+
+    funnel["mean_ahead_now"] = int(mean_ahead_now.sum())
+
+    # candidate gate: mean 在 t 时刻已经 ahead
+    # (mean_ahead_now 是 t 时刻信息, 不依赖未来)
+    sample = (
+        sample.loc[mean_ahead_now]
+        .copy()
+        .reset_index(drop=True)
+    )
+
+    # smoke cap (仅 smoke 时 cap 生效; full 时 cap=None)
+    if cap is not None and len(sample) > cap:
 
         # evenly spaced sample
         # 避免 smoke 只取最早的数据
         pos = np.linspace(
-
-            0,
-
-            len(sample) - 1,
-
-            cap,
-
+            0, len(sample) - 1, cap
         ).round().astype(int)
 
         sample = (
-            sample
-            .iloc[pos]
+            sample.iloc[pos]
             .copy()
             .reset_index(drop=True)
         )
 
+    funnel["post_smoke_cap"] = int(len(sample))
+
     # -------------------------------------------------------------------------
     # 直接复用项目 future tensor owner
+    # future path 从 entry_bar (= bar_t + 1) 开始。
     # -------------------------------------------------------------------------
 
     tensor_raw = (
@@ -3508,15 +3656,12 @@ def build_path_dataset(
     )
 
     valid = np.asarray(
-        tensor_raw[
-            "path_valid"
-        ],
+        tensor_raw["path_valid"],
         dtype=bool,
     )
 
     sample = (
-        sample
-        .loc[valid]
+        sample.loc[valid]
         .copy()
         .reset_index(drop=True)
     )
@@ -3534,6 +3679,17 @@ def build_path_dataset(
             f"STOP_STRUCTREV_EMPTY_PATH_DATASET:{list(blocks)}"
         )
 
+    # decision-time 量从列取回 (已随过滤对齐)
+    decision_close = (
+        sample["decision_close_structrev"].to_numpy(float)
+    )
+
+    atr0 = sample["atr0"].to_numpy(float)
+
+    direction = (
+        sample["reversion_dir"].to_numpy(float)
+    )
+
     H = np.asarray(
         tensor["H"],
         float,
@@ -3549,38 +3705,8 @@ def build_path_dataset(
         float,
     )
 
-    syms = (
-        sample[
-            "symbol"
-        ]
-        .to_numpy()
-    )
-
-    bar_t = (
-        sample[
-            "entry_bar"
-        ]
-        .to_numpy()
-    )
-
-    decision_close = np.empty(
-        len(sample),
-        dtype=float,
-    )
-
-    for s in np.unique(syms):
-
-        m = (
-            syms
-            == s
-        )
-
-        decision_close[m] = np.asarray(
-            bars_by_sym[s]["c"],
-            dtype=float,
-        )[
-            bar_t[m]
-        ]
+    # decision_close 已在上方基于 bar_t (causal t) 计算并挂为列,
+    # 此处不再用 entry_bar / future bar 重算。
 
     atr0 = (
         sample[
@@ -3747,6 +3873,13 @@ def build_path_dataset(
 
         k = horizon
 
+        # mean_ahead_now 在 candidate gate 后全为 True;
+        # 用列回读得到 post-filter 对齐版本,
+        # 避免与 pre-gate 数组错位。
+        mean_ahead_now_final = (
+            sample["mean_ahead_now"].to_numpy() > 0
+        )
+
         favorable_h = (
             favorable[
                 :,
@@ -3810,7 +3943,7 @@ def build_path_dataset(
         )
 
         mean_hit_matrix[
-            ~mean_ahead_now,
+            ~mean_ahead_now_final,
             :
         ] = False
 
@@ -3851,7 +3984,7 @@ def build_path_dataset(
             f"y_mean_hit_{horizon}"
         ] = np.where(
 
-            mean_ahead_now,
+            mean_ahead_now_final,
 
             mean_has.astype(float),
 
@@ -3864,7 +3997,7 @@ def build_path_dataset(
             f"y_mean_before_1R_{horizon}"
         ] = np.where(
 
-            mean_ahead_now,
+            mean_ahead_now_final,
 
             (
                 mean_has
@@ -3923,15 +4056,10 @@ def build_path_dataset(
 
         # ---------------------------------------------------------------------
         # Universe funnel
+        # 顺序: cand -> mean_ahead_now -> post_smoke_cap
+        #        -> future_path_valid -> outcome_finite
+        # funnel 已在上方逐步填充 (mean_ahead_now, post_smoke_cap)。
         # ---------------------------------------------------------------------
-
-        funnel = dict(
-            cand_funnel,
-        )
-
-        funnel["mean_ahead_now"] = int(
-            mean_ahead_now.sum()
-        )
 
         funnel["future_path_valid"] = int(
             len(sample)
@@ -4383,7 +4511,7 @@ def fit_eval_cpd(
     n_neg_ev = len(y_eval) - n_pos_ev
     n_days_tr = int(
         np.unique(
-            train["entry_day"]
+            tr["entry_day"]
         ).size
     )
     n_days_ev = int(
@@ -4391,17 +4519,23 @@ def fit_eval_cpd(
             ev["entry_day"]
         ).size
     )
+    n_symbols_tr = int(
+        tr["symbol"].nunique()
+    )
+    n_symbols_ev = int(
+        ev["symbol"].nunique()
+    )
 
     print(
         (
             f"[SAMPLE] {outcome} "
             f"train={len(tr)} "
             f"(pos={n_pos_tr} neg={n_neg_tr} "
-            f"days={n_days_tr} "
+            f"days={n_days_tr} symbols={n_symbols_tr} "
             f"rate={np.mean(y_train):.4f}) "
             f"eval={len(ev)} "
             f"(pos={n_pos_ev} neg={n_neg_ev} "
-            f"days={n_days_ev} "
+            f"days={n_days_ev} symbols={n_symbols_ev} "
             f"rate={np.mean(y_eval):.4f})"
         ),
         flush=True,
@@ -4502,11 +4636,24 @@ def fit_eval_cpd(
         ),
     )
 
-    # 评估集行键（per-horizon G0-G6 行键一致性校验用）
+    # 训练/评估集行键 (per-horizon G0-G6 行键一致性校验用)
+    # episode_id 不存在时退化为 (symbol, bar_t)
+    key_cols = (
+        "symbol",
+        "bar_t",
+    )
+
+    train_keys = tuple(
+        zip(
+            tr[key_cols[0]].to_numpy(),
+            tr[key_cols[1]].to_numpy(),
+        )
+    )
+
     eval_keys = tuple(
         zip(
-            ev["symbol"].to_numpy(),
-            ev["entry_bar"].to_numpy(),
+            ev[key_cols[0]].to_numpy(),
+            ev[key_cols[1]].to_numpy(),
         )
     )
 
@@ -4523,6 +4670,8 @@ def fit_eval_cpd(
         prob,
 
         eval_keys,
+
+        train_keys,
     )
 
 
@@ -4549,6 +4698,7 @@ def evaluate_graph_ladder(
         previous_loss = None
         previous_days = None
         previous_eval_keys = None
+        previous_train_keys = None
         previous_graph = None
 
         for (
@@ -4562,6 +4712,7 @@ def evaluate_graph_ladder(
                 days,
                 _,
                 eval_keys,
+                train_keys,
             ) = fit_eval_cpd(
 
                 train,
@@ -4614,6 +4765,11 @@ def evaluate_graph_ladder(
 
                     previous_eval_keys
                     != eval_keys
+
+                    or
+
+                    previous_train_keys
+                    != train_keys
                 ):
 
                     raise SystemExit(
@@ -4674,6 +4830,7 @@ def evaluate_graph_ladder(
             previous_loss = loss
             previous_days = days
             previous_eval_keys = eval_keys
+            previous_train_keys = train_keys
             previous_graph = graph_name
 
     return (
@@ -5072,20 +5229,12 @@ def run_parameter_scan(
 ) -> pd.DataFrame:
 
     # ---------------------------------------------------------------------
-    # 参数扫描授权闸门
+    # 参数扫描授权闸门 (次级防御)
     #
-    # 默认拒绝；
-    # 需要显式 env AUTHORIZE_STRUCTREV_PARAMETER_SCAN=1
+    # 主 gate 在 CLI 层、load/fit 之前调用。
+    # 这里再次校验, 避免被直接调用绕过。
     # ---------------------------------------------------------------------
-    scan_token = os.environ.get(
-        "AUTHORIZE_STRUCTREV_PARAMETER_SCAN",
-        "",
-    ).strip()
-
-    if scan_token != "1":
-        raise SystemExit(
-            "STOP_STRUCTREV_PARAMETER_SCAN_NOT_AUTHORIZED"
-        )
+    require_parameter_scan_authorization()
 
     scored_a = bundle[
         "scored_A"
@@ -5159,7 +5308,7 @@ def run_parameter_scan(
             params,
         )
 
-        train = build_path_dataset(
+        train, train_funnel = build_path_dataset(
 
             scored,
 
@@ -5174,7 +5323,7 @@ def run_parameter_scan(
             common_scan_universe=True,
         )
 
-        eval_df = build_path_dataset(
+        eval_df, eval_funnel = build_path_dataset(
 
             scored,
 
@@ -5199,6 +5348,7 @@ def run_parameter_scan(
             metrics,
             loss,
             days,
+            _,
             _,
             _,
         ) = fit_eval_cpd(
@@ -5625,16 +5775,132 @@ def pivot_causality_synthetic() -> None:
         )
 
 
+def decision_anchor_synthetic() -> None:
+    """
+    针对 R1.1 关键 bug 的合成/结构测试：
+
+    decision anchor 必须等于 bar_t 的 close (C_t)，
+    绝不能用 entry_bar (t+1) 的 close (C_{t+1})。
+
+    构造最小合成：
+        C_t     = 100
+        C_{t+1} = 999
+        SMA_t   = 110
+        direction = +1
+        ATR     = 10
+
+    正确 (用 C_t):
+        mean_dist_now_R = +1 * (110 - 100) / 10 = +1
+
+    错误 (用 C_{t+1}):
+        mean_dist_now_R = +1 * (110 - 999) / 10 = -88.9
+
+    测试必须明确抓住这次 bug (错误值 != +1)。
+    """
+
+    # bars: index 0 = bar_t, index 1 = entry_bar (t+1)
+    c = np.array(
+        [
+            100.0,
+            999.0,
+        ]
+    )
+
+    bars_by_sym = {
+        "X": {
+            "c": c,
+        },
+    }
+
+    sample = pd.DataFrame(
+        {
+            "symbol": ["X"],
+            "bar_t": [0],
+            "entry_bar": [1],
+            "m15_sma": [110.0],
+            "reversion_dir": [1],
+            "atr0": [10.0],
+        }
+    )
+
+    decision_bar = (
+        sample["bar_t"].to_numpy(np.int64)
+    )
+
+    # 正确实现: decision_close = bars["c"][bar_t]
+    decision_close_correct = np.asarray(
+        bars_by_sym["X"]["c"],
+        dtype=float,
+    )[decision_bar]
+
+    mean_dist_correct = (
+        sample["reversion_dir"].to_numpy(float)
+        * (
+            sample["m15_sma"].to_numpy(float)
+            - decision_close_correct
+        )
+        / sample["atr0"].to_numpy(float)
+    )
+
+    if not np.allclose(
+        mean_dist_correct,
+        [1.0],
+    ):
+        raise SystemExit(
+            "STOP_STRUCTREV_DECISION_ANCHOR_SYNTHETIC_BUG:"
+            f"correct={mean_dist_correct.tolist()}"
+        )
+
+    # 错误实现 (用 entry_bar): 必须被测试抓出 != +1
+    entry_bar = (
+        sample["entry_bar"].to_numpy(np.int64)
+    )
+
+    decision_close_wrong = np.asarray(
+        bars_by_sym["X"]["c"],
+        dtype=float,
+    )[entry_bar]
+
+    mean_dist_wrong = (
+        sample["reversion_dir"].to_numpy(float)
+        * (
+            sample["m15_sma"].to_numpy(float)
+            - decision_close_wrong
+        )
+        / sample["atr0"].to_numpy(float)
+    )
+
+    if np.allclose(
+        mean_dist_wrong,
+        [1.0],
+    ):
+        raise SystemExit(
+            "STOP_STRUCTREV_DECISION_ANCHOR_SYNTHETIC_FAILED_TO_CATCH_BUG"
+        )
+
+    # 明确断言错误实现会得到 -88.9 (非 +1)
+    if not np.allclose(
+        mean_dist_wrong,
+        [-88.9],
+    ):
+        raise SystemExit(
+            "STOP_STRUCTREV_DECISION_ANCHOR_SYNTHETIC_WRONG_VALUE:"
+            f"wrong={mean_dist_wrong.tolist()}"
+        )
+
+
 def higher_tf_asof_synthetic() -> None:
     """
-    验证更高周期（1H / 4H）as-of 对齐合同：
+    验证更高周期（15m / 1H / 4H）as-of 对齐合同：
 
-    一个 15m decision bar 在 available_time = t 时，
+    一个 5m decision bar 在 available_time = t 时，
     只能使用 available_time <= t 的更高周期 bar，
     绝不能偷看下一个更高周期 bar。
 
     复现 attach_indicator_features 的 as-of 对齐逻辑：
         pos = searchsorted(available_time, t, side="right") - 1
+
+    每个 timeframe 单独 fail code。
     """
 
     n = 600
@@ -5705,102 +5971,108 @@ def higher_tf_asof_synthetic() -> None:
         }
     )
 
-    h1 = resample_causal(
-        raw,
-        60,
-    )
-
-    h1_avail = (
-        pd.to_datetime(
-            h1["available_time"]
-        )
-        .to_numpy(
-            dtype="datetime64[ns]"
-        )
-    )
-
     decision_times = (
         pd.to_datetime(
             raw["available_time"]
         )
         .to_numpy(
-            dtype="datetime64[ns]"
+            dtype="datetime64[ns]",
         )
     )
 
-    for t in decision_times[::30]:
+    for minutes in (
+        15,
+        60,
+        240,
+    ):
 
-        pos = (
-            np.searchsorted(
-                h1_avail,
-                t,
-                side="right",
-            )
-            - 1
+        tf = resample_causal(
+            raw,
+            minutes,
         )
 
-        if pos < 0:
-            continue
+        tf_avail = (
+            pd.to_datetime(
+                tf["available_time"]
+            )
+            .to_numpy(
+                dtype="datetime64[ns]",
+            )
+        )
 
-        # as-of 合同：对齐的 1H bar 必须已 available
-        if h1_avail[pos] > t:
-            raise SystemExit(
-                "STOP_STRUCTREV_HTF_ASOF_FUTURE_LEAK"
+        for t in decision_times[::30]:
+
+            pos = (
+                np.searchsorted(
+                    tf_avail,
+                    t,
+                    side="right",
+                )
+                - 1
             )
 
-        # 下一个 1H bar 必须严格晚于 t
-        if pos + 1 < len(h1_avail):
+            if pos < 0:
+                continue
 
-            if h1_avail[pos + 1] <= t:
+            # as-of 合同：对齐的更高周期 bar 必须已 available
+            if tf_avail[pos] > t:
                 raise SystemExit(
-                    "STOP_STRUCTREV_HTF_ASOF_NOT_LATEST"
+                    f"STOP_STRUCTREV_HTF_ASOF_FUTURE_LEAK:{minutes}"
                 )
 
-    # 因果扰动：
-    # 修改未来 1H bar 不应改变过去决策的 as-of 对齐
-    h1_perturbed = h1.copy()
+            # 下一个更高周期 bar 必须严格晚于 t
+            if pos + 1 < len(tf_avail):
 
-    h1_perturbed.loc[
-        h1_perturbed.index[-1],
-        "close",
-    ] += 999.0
+                if tf_avail[pos + 1] <= t:
+                    raise SystemExit(
+                        f"STOP_STRUCTREV_HTF_ASOF_NOT_LATEST:{minutes}"
+                    )
 
-    h1_perturbed_avail = (
-        pd.to_datetime(
-            h1_perturbed["available_time"]
-        )
-        .to_numpy(
-            dtype="datetime64[ns]"
-        )
-    )
+        # 因果扰动：
+        # 修改未来更高周期 bar 不应改变过去决策的 as-of 对齐
+        tf_perturbed = tf.copy()
 
-    for t in decision_times[::30]:
+        tf_perturbed.loc[
+            tf_perturbed.index[-1],
+            "close",
+        ] += 999.0
 
-        pos0 = (
-            np.searchsorted(
-                h1_avail,
-                t,
-                side="right",
+        tf_perturbed_avail = (
+            pd.to_datetime(
+                tf_perturbed["available_time"]
             )
-            - 1
+            .to_numpy(
+                dtype="datetime64[ns]",
+            )
         )
 
-        pos1 = (
-            np.searchsorted(
-                h1_perturbed_avail,
-                t,
-                side="right",
-            )
-            - 1
-        )
+        for t in decision_times[::30]:
 
-        if pos0 < 0 or pos1 < 0:
-            continue
-
-        if pos0 != pos1:
-            raise SystemExit(
-                "STOP_STRUCTREV_HTF_ASOF_PERTURB_DRIFT"
+            pos0 = (
+                np.searchsorted(
+                    tf_avail,
+                    t,
+                    side="right",
+                )
+                - 1
             )
+
+            pos1 = (
+                np.searchsorted(
+                    tf_perturbed_avail,
+                    t,
+                    side="right",
+                )
+                - 1
+            )
+
+            if pos0 < 0 or pos1 < 0:
+                continue
+
+            if pos0 != pos1:
+                raise SystemExit(
+                    f"STOP_STRUCTREV_HTF_ASOF_PERTURB_DRIFT:{minutes}"
+                )
 
 
 # =============================================================================
@@ -5846,6 +6118,13 @@ def run_audit_only() -> None:
 
     print(
         "[AUDIT] confirmed pivot causality (synthetic): PASS",
+        flush=True,
+    )
+
+    decision_anchor_synthetic()
+
+    print(
+        "[AUDIT] decision-anchor synthetic (bar_t != entry_bar): PASS",
         flush=True,
     )
 
@@ -6333,6 +6612,13 @@ def main() -> None:
     # -------------------------------------------------------------------------
 
     if args.parameter_scan:
+
+        # -----------------------------------------------------------------
+        # 授权 + clean-tree gate 必须在任何 load / fit / feature 之前。
+        # -----------------------------------------------------------------
+        require_parameter_scan_authorization()
+
+        assert_clean_git_tree()
 
         assert_base_sha_ancestor()
 
