@@ -2,9 +2,9 @@
 pine_source_semantic_parity_v1.py
 ================================================================================
 
-STRUCTREV-PGM-R2B-SRC1-DTP
---------------------------
-DTP (Deviation Trend Profile) Source Semantic Differential Audit.
+STRUCTREV-PGM-R2B-SRC1.1-DTP-AUDIT-HARDEN
+-------------------------------------------
+DTP Source Semantic Differential Audit -- infrastructure hardening.
 
 方向 (per user 2026-09-18):
     不再做 TradingView runtime parity. 改为:
@@ -46,7 +46,7 @@ from research.phase1_tradability.phase1_contract_v1 import discontinuity_flags
 OUT = REPO_ROOT / "artifacts" / "pine_source_semantic_parity"
 PINEFILE = REPO_ROOT / "ref" / "DeviationTrendProfile.pine"
 
-BASE_SHA = "edd028177db9ca735e680d615262a371879f84a2"
+BASE_SHA = "10f735e23ba491d4a1ef3aad11368528f265a6a3"
 
 # --- frozen DTP parameters (read from production SSOT; assert frozen) ---
 SMA_LEN = prod.PINE_DEFAULT.sma_len
@@ -83,12 +83,21 @@ def pine_source_sha256() -> str:
     return hashlib.sha256(PINEFILE.read_bytes()).hexdigest()
 
 
-def check_gates() -> None:
-    head = git_head()
-    if head != BASE_SHA:
-        raise SystemExit(
-            f"STOP_DTP_BASE_SHA_MISMATCH: head={head} base={BASE_SHA}"
-        )
+def assert_base_ancestor() -> None:
+    """Reproducibility gate.
+
+    The audit code (BASE_SHA) must be an ancestor of the commit that actually
+    runs it. This holds both during development (HEAD == BASE_SHA) and after
+    the hardening commit is made (HEAD descends from BASE_SHA). It fails only
+    if BASE_SHA is NOT in the running commit's history (e.g. rebased away),
+    which would mean the artifact cannot be rebuilt from that SHA.
+    """
+    r = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", BASE_SHA, "HEAD"],
+        cwd=str(REPO_ROOT),
+    )
+    if r.returncode != 0:
+        raise SystemExit(f"STOP_DTP_BASE_NOT_ANCESTOR:{BASE_SHA}")
     actual = pine_source_sha256()
     expected = (
         "7132bf12844dd09c9c18fb0745d20c8f66f6bb1ef07f297698b566e3ad9d4745"
@@ -257,6 +266,35 @@ def production_dtp_5m(symbol: str):
     return raw_frame, tf5, feat
 
 
+def run_production_with_disc(
+    high: np.ndarray,
+    low: np.ndarray,
+    close: np.ndarray,
+    disc: np.ndarray,
+) -> pd.DataFrame:
+    """Drive the REAL production chain with a synthetic `disc` array.
+
+    Used by the segment-reset test: disc=True forces a new segment, so
+    production recomputes SMA/ATR/500-bar normalization/trend_state from
+    scratch at that bar (Pine source does NOT do this).
+    """
+    n = len(close)
+    bars = {
+        "t": pd.date_range("2024-01-01", periods=n, freq="5min"),
+        "day": pd.date_range("2024-01-01", periods=n, freq="5min"),
+        "disc": np.asarray(disc, dtype=bool),
+        "o": np.asarray(close, dtype=float),
+        "h": np.asarray(high, dtype=float),
+        "l": np.asarray(low, dtype=float),
+        "c": np.asarray(close, dtype=float),
+        "n": n,
+    }
+    raw_frame = prod.raw_frame_from_owner(bars)
+    tf5 = prod.resample_causal(raw_frame, 5)
+    feat = prod.compute_tf_features(tf5, prod.PINE_DEFAULT, include_sr=False)
+    return feat
+
+
 # =============================================================================
 # 3. differential comparator
 # =============================================================================
@@ -315,12 +353,21 @@ def compare_int(
     mm = o[region] != p[region]
     n_compared = int(len(region))
     n_mismatch = int(mm.sum())
-    first = int(np.argmax(mm)) if n_mismatch else None
+    if n_mismatch:
+        local = int(np.argmax(mm))
+        first = start + local          # absolute index, not region-relative
+        diff = np.abs(
+            o[region].astype(float) - p[region].astype(float)
+        )
+        max_abs = float(diff.max())
+    else:
+        first = None
+        max_abs = None
     return {
         "field": name,
         "n_compared": n_compared,
         "n_mismatch": n_mismatch,
-        "max_abs_error": 0.0 if n_mismatch else None,
+        "max_abs_error": max_abs,
         "first_mismatch_index": first,
         "first_oracle_value": (
             int(o[first]) if first is not None else None
@@ -329,6 +376,35 @@ def compare_int(
             int(p[first]) if first is not None else None
         ),
     }
+
+
+def compare_region(
+    name: str,
+    oracle: np.ndarray,
+    production: np.ndarray,
+    a: int,
+    b: int,
+    int_field: bool = False,
+) -> int:
+    """Count mismatches over [a, b) for the segment-reset test.
+
+    For float fields: mismatch = (both finite & |diff|>tol) OR exactly one
+    finite. For int fields: mismatch = (o != p).
+    """
+    o = np.asarray(oracle, dtype=float if not int_field else int)
+    p = np.asarray(production, dtype=float if not int_field else int)
+    seg_o = o[a:b]
+    seg_p = p[a:b]
+    if int_field:
+        mm = seg_o != seg_p
+    else:
+        both = np.isfinite(seg_o) & np.isfinite(seg_p)
+        one_nan = (
+            (np.isfinite(seg_o) & ~np.isfinite(seg_p))
+            | (~np.isfinite(seg_o) & np.isfinite(seg_p))
+        )
+        mm = (both & (np.abs(seg_o - seg_p) > FLOAT_TOL)) | one_nan
+    return int(mm.sum())
 
 
 def compare_segment(group_feat: pd.DataFrame) -> dict:
@@ -530,31 +606,62 @@ def case_epsilon() -> dict:
     feat = run_production_segment(high, low, close)
     _, slope_p, denom_p = production_denominator(close)
 
+    # epsilon region E = { i : 0 < |P100_i| <= 1e-12 }
     eps_mask = (
         np.isfinite(denom_p)
         & (np.abs(denom_p) > 0)
         & (np.abs(denom_p) <= EPS_GUARD)
     )
     idxs = np.where(eps_mask)[0]
+    oracle_ac = o["avg_col"]
+    prod_ts = feat["trend_score"].to_numpy(float)
+
+    n_match = 0
+    n_mismatch = 0
+    first_mm_idx = None
+    first_o_val = None
+    first_p_val = None
     samples = []
-    for i in idxs[:5]:
-        samples.append({
-            "index": int(i),
-            "p100": float(denom_p[i]),
-            "oracle_avg_col": (
-                None if not np.isfinite(o["avg_col"][i])
-                else float(o["avg_col"][i])
-            ),
-            "production_trend_score": (
-                None if not np.isfinite(feat["trend_score"].to_numpy(float)[i])
-                else float(feat["trend_score"].to_numpy(float)[i])
-            ),
-        })
+    for i in idxs:
+        ov = oracle_ac[i]
+        pv = prod_ts[i]
+        both_finite = np.isfinite(ov) and np.isfinite(pv)
+        both_nan = np.isnan(ov) and np.isnan(pv)
+        numeric_match = both_finite and np.isclose(ov, pv, rtol=0, atol=FLOAT_TOL)
+        point_match = bool(both_nan or numeric_match)
+        if point_match:
+            n_match += 1
+        else:
+            n_mismatch += 1
+            if first_mm_idx is None:
+                first_mm_idx = int(i)
+                first_o_val = None if not np.isfinite(ov) else float(ov)
+                first_p_val = None if not np.isfinite(pv) else float(pv)
+        if len(samples) < 5:
+            samples.append({
+                "index": int(i),
+                "p100": float(denom_p[i]),
+                "oracle_avg_col": (
+                    None if not np.isfinite(ov) else float(ov)
+                ),
+                "production_trend_score": (
+                    None if not np.isfinite(pv) else float(pv)
+                ),
+            })
+
+    # verdict from the ACTUAL differential, never hardcoded
+    guard_source_match = (int(eps_mask.sum()) > 0 and n_mismatch == 0)
+
     return {
         "name": "epsilon_guard",
         "n_epsilon_points": int(eps_mask.sum()),
+        "n_epsilon_match": n_match,
+        "n_epsilon_mismatch": n_mismatch,
+        "first_epsilon_mismatch_index": first_mm_idx,
+        "first_oracle_value": first_o_val,
+        "first_production_value": first_p_val,
+        "guard_source_match": guard_source_match,
         "samples": samples,
-        "guard_source_match": False if eps_mask.any() else True,
     }
 
 
@@ -744,36 +851,112 @@ def test_prefix_invariance() -> dict:
 
 
 def test_call_chain() -> dict:
-    calls = {"compute_segment_features": 0}
+    calls = {"compute_tf_features": 0, "compute_segment_features": 0}
 
-    orig = prod.compute_segment_features
+    orig_ctf = prod.compute_tf_features
+    orig_csf = prod.compute_segment_features
 
-    def wrapper(seg, params, include_sr):
+    def w_tf(tf, params, include_sr):
+        calls["compute_tf_features"] += 1
+        return orig_ctf(tf, params, include_sr)
+
+    def w_sf(seg, params, include_sr):
         calls["compute_segment_features"] += 1
-        return orig(seg, params, include_sr)
+        return orig_csf(seg, params, include_sr)
 
-    prod.compute_segment_features = wrapper
+    prod.compute_tf_features = w_tf
+    prod.compute_segment_features = w_sf
     try:
         _, _, feat = production_dtp_5m("AG")
     finally:
-        prod.compute_segment_features = orig
-
-    # structural assertion: output is exactly what compute_segment_features
-    # produces on the same single segment (proves engine == compute_segment_features,
-    # not pine_runtime_parity_v1.compute_dtp).
-    used_compute_dtp = False
-    try:
-        import research.liquidity_oracle_atlas.pine_runtime_parity_v1 as prp
-        if prp.compute_dtp in ():
-            used_compute_dtp = True
-    except Exception:
-        pass
+        prod.compute_tf_features = orig_ctf
+        prod.compute_segment_features = orig_csf
 
     return {
+        "compute_tf_features_calls": calls["compute_tf_features"],
         "compute_segment_features_calls": calls["compute_segment_features"],
-        "used_compute_dtp": used_compute_dtp,
         "n_ag_rows": int(len(feat)),
-        "pass": bool(calls["compute_segment_features"] >= 1 and not used_compute_dtp),
+        "pass": bool(
+            calls["compute_tf_features"] >= 1
+            and calls["compute_segment_features"] >= 1
+        ),
+    }
+
+
+def test_segment_reset() -> dict:
+    """Test E -- classify the production segment reset.
+
+    disc[900]=True forces a second segment. Production reinitializes SMA/ATR/
+    500-bar normalization/trend_state at the break (Pine source does NOT).
+    Classification: INTENTIONAL_DATA_SAFETY_EXTENSION.
+    """
+    n = 1600
+    disc_index = 900
+    rng = np.random.default_rng(20260918)
+    close = 100.0 + np.cumsum(rng.uniform(-0.05, 0.05, n))
+    high = close + rng.uniform(0.01, 0.1, n)
+    low = close - rng.uniform(0.01, 0.1, n)
+    disc = np.zeros(n, dtype=bool)
+    disc[disc_index] = True
+
+    # Pine-source Oracle: full sequence, NO reset
+    oracle = dtp_literal_oracle(high, low, close)
+
+    # Production: real chain with disc -> segment reset
+    feat = run_production_with_disc(high, low, close, disc)
+    n_segments = int(feat["segment"].nunique())
+
+    fields = {
+        "sma": (oracle["sma"], feat["sma"].to_numpy(float)),
+        "atr": (oracle["atr"], feat["atr"].to_numpy(float)),
+        "trend_score": (oracle["avg_col"], feat["trend_score"].to_numpy(float)),
+        "trend_state": (
+            oracle["trend_state"], feat["trend_state"].to_numpy(int)
+        ),
+    }
+    pre = {}
+    post = {}
+    for name, (o, p) in fields.items():
+        pre[name] = compare_region(name, o, p, 0, disc_index,
+                                    int_field=(name == "trend_state"))
+        post[name] = compare_region(name, o, p, disc_index, n,
+                                     int_field=(name == "trend_state"))
+
+    segment_reset_triggered = n_segments > 1
+    return {
+        "n": n,
+        "disc_index": disc_index,
+        "n_segments": n_segments,
+        "segment_reset_triggered": segment_reset_triggered,
+        "first_post_reset_index": disc_index,
+        "pre_reset_mismatch": pre,
+        "sma_mismatch_after_reset": post["sma"],
+        "atr_mismatch_after_reset": post["atr"],
+        "trend_score_mismatch_after_reset": post["trend_score"],
+        "trend_state_mismatch_after_reset": post["trend_state"],
+        "classification": "INTENTIONAL_DATA_SAFETY_EXTENSION",
+    }
+
+
+def test_compare_int_evidence() -> dict:
+    """Test E4 -- verify compare_int absolute index + max_abs_error evidence.
+
+    Mismatch injected at absolute index 7 (start=5). +1 vs -1 must give
+    max_abs_error = 2 and first_mismatch_index = 7.
+    """
+    o = np.full(10, -1, dtype=int)
+    p = o.copy()
+    p[7] = +1
+    r = compare_int("trend_state", o, p, start=5)
+    return {
+        "first_mismatch_index": r["first_mismatch_index"],
+        "max_abs_error": r["max_abs_error"],
+        "expected_index": 7,
+        "expected_max_abs_error": 2.0,
+        "pass": bool(
+            r["first_mismatch_index"] == 7
+            and r["max_abs_error"] == 2.0
+        ),
     }
 
 
@@ -781,9 +964,14 @@ def test_epsilon_guard() -> dict:
     c = case_epsilon()
     return {
         "n_epsilon_points": c["n_epsilon_points"],
+        "n_epsilon_mismatch": c["n_epsilon_mismatch"],
         "guard_source_match": c["guard_source_match"],
         "samples": c["samples"],
-        "pass": bool(c["n_epsilon_points"] > 0 and not c["guard_source_match"]),
+        "pass": bool(
+            c["n_epsilon_points"] > 0
+            and c["n_epsilon_mismatch"] > 0
+            and c["guard_source_match"] is False
+        ),
     }
 
 
@@ -792,11 +980,11 @@ def test_epsilon_guard() -> dict:
 # =============================================================================
 
 def main() -> None:
-    check_gates()
+    assert_base_ancestor()
     OUT.mkdir(parents=True, exist_ok=True)
 
-    print("[AUDIT] gates passed: base_sha ok, pine_source_sha ok, params frozen",
-          flush=True)
+    print("[AUDIT] gates passed: base_ancestor ok, pine_source_sha ok, "
+          "params frozen", flush=True)
 
     # T1-A deterministic
     c_const = case_constant_range()
@@ -847,44 +1035,67 @@ def main() -> None:
     t_pref = test_prefix_invariance()
     t_chain = test_call_chain()
     t_eps = test_epsilon_guard()
+    # Hardening tests E1-E5
+    t_seg = test_segment_reset()
+    t_cmp = test_compare_int_evidence()
     print("[AUDIT] Test A warmup pass:", t_warm["pass"], t_warm["first_finite"],
           flush=True)
     print("[AUDIT] Test B prefix pass:", t_pref["pass"], flush=True)
     print("[AUDIT] Test C call-chain pass:", t_chain["pass"],
-          t_chain["compute_segment_features_calls"], flush=True)
-    print("[AUDIT] Test D epsilon pass:", t_eps["pass"], flush=True)
+          "ctf=", t_chain["compute_tf_features_calls"],
+          "csf=", t_chain["compute_segment_features_calls"], flush=True)
+    print("[AUDIT] Test D epsilon pass:", t_eps["pass"],
+          "n_mismatch=", t_eps["n_epsilon_mismatch"], flush=True)
+    print("[AUDIT] Test E segment-reset triggered:", t_seg["segment_reset_triggered"],
+          "segments=", t_seg["n_segments"],
+          "post_reset(sma/atr/ts/state)=",
+          t_seg["sma_mismatch_after_reset"], t_seg["atr_mismatch_after_reset"],
+          t_seg["trend_score_mismatch_after_reset"],
+          t_seg["trend_state_mismatch_after_reset"], flush=True)
+    print("[AUDIT] Test E4 compare_int evidence pass:", t_cmp["pass"],
+          "idx=", t_cmp["first_mismatch_index"], "max_abs=", t_cmp["max_abs_error"],
+          flush=True)
 
     # epsilon guard observed on real AG?
     ag_avgcol = ag_seg_agg.get("avg_col", {})
     epsilon_observed_ag = int(ag_avgcol.get("n_mismatch", 0))
 
-    # ---- verdict ----
-    algo_mismatch = sum(
-        ag_seg_agg[f]["n_mismatch"]
-        for f in ("sma", "atr", "avg_diff", "p100", "trend_state")
+    # ---- classification (4 buckets) ----
+    core_fields = ("sma", "atr", "avg_diff", "p100", "trend_state")
+    core_mismatch = (
+        sum(rand_agg[f]["n_mismatch"] for f in core_fields)
+        + sum(ag_seg_agg[f]["n_mismatch"] for f in core_fields)
     )
-    # avg_col mismatch == epsilon guard manifestation
-    epsilon_on_ag = epsilon_observed_ag
-    if c_eps["guard_source_match"] is False:
-        verdict = "MISMATCH"
-        verdict_reason = (
-            "DTP core math (SMA/ATR/avg_diff/P100/trend transition) MATCHES "
-            "Pine source within segments; SOURCE MISMATCH at epsilon guard: "
-            "Python forces trend_score=NaN when 0<|P100|<=1e-12 while Pine "
-            "divides directly (proven in Case 4). Segment reset: AG disc=0 "
-            "(no reset); segment only marks true data-break / ATR5 price-jump, "
-            "not normal session gaps."
-        )
-    elif algo_mismatch > 0:
-        verdict = "MISMATCH"
-        verdict_reason = f"algorithmic mismatch (excl epsilon) n={algo_mismatch}"
-    else:
-        verdict = "MATCH"
-        verdict_reason = "all DTP fields match Pine source semantics"
+    core_status = "EXACT_SOURCE_MATCH" if core_mismatch == 0 else "SOURCE_DIVERGENCE"
+
+    # epsilon guard: verdict comes from the ACTUAL differential
+    eps_status = (
+        "EXACT_SOURCE_MATCH"
+        if (c_eps["n_epsilon_points"] > 0 and c_eps["n_epsilon_mismatch"] == 0)
+        else "SOURCE_DIVERGENCE"
+    )
+
+    seg_status = "INTENTIONAL_DATA_SAFETY_EXTENSION"
+    pct_status = "UNVERIFIED"
+
+    verdict = (
+        "MISMATCH"
+        if (eps_status == "SOURCE_DIVERGENCE"
+            or core_status == "SOURCE_DIVERGENCE")
+        else "MATCH"
+    )
+    verdict_reason = (
+        f"core_math={core_status}; epsilon_guard={eps_status} "
+        f"(n_epsilon_mismatch={c_eps['n_epsilon_mismatch']}); "
+        f"segment_reset={seg_status}; percentile_na_semantics={pct_status}. "
+        f"AG disc_true={ag['n_disc_true']} (no reset on AG); segment marks "
+        f"true data-break / ATR5 price-jump, not normal session gaps."
+    )
 
     summary = {
-        "task_id": "STRUCTREV-PGM-R2B-SRC1-DTP",
+        "task_id": "STRUCTREV-PGM-R2B-SRC1.1-DTP-AUDIT-HARDEN",
         "git_sha": git_head(),
+        "audit_git_sha": git_head(),
         "pine_source_sha256": pine_source_sha256(),
         "symbol": "AG",
         "oracle_definition_version": "literal_DeviationTrendProfile_pine_v1",
@@ -899,16 +1110,13 @@ def main() -> None:
             "avg_col_first_finite": NORM - 1 + (SMA_LEN - 1) + LAG,
         },
         "epsilon_guard": {
-            "oracle_value": (
-                c_eps["samples"][0]["oracle_avg_col"]
-                if c_eps["samples"] else None
-            ),
-            "production_value": (
-                c_eps["samples"][0]["production_trend_score"]
-                if c_eps["samples"] else None
-            ),
+            "n_epsilon_points": c_eps["n_epsilon_points"],
+            "n_epsilon_match": c_eps["n_epsilon_match"],
+            "n_epsilon_mismatch": c_eps["n_epsilon_mismatch"],
+            "first_epsilon_mismatch_index": c_eps["first_epsilon_mismatch_index"],
+            "first_oracle_value": c_eps["first_oracle_value"],
+            "first_production_value": c_eps["first_production_value"],
             "match": c_eps["guard_source_match"],
-            "n_epsilon_points_case4": c_eps["n_epsilon_points"],
             "observed_on_AG": epsilon_on_ag,
         },
         "prefix_invariance": {
@@ -922,6 +1130,27 @@ def main() -> None:
                 "non-5min AND non-normal-session time gap, OR ATR5 price jump"
             ),
             "normal_session_gap_reset": False,
+            "synthetic_test": {
+                "n": t_seg["n"],
+                "disc_index": t_seg["disc_index"],
+                "n_segments": t_seg["n_segments"],
+                "segment_reset_triggered": t_seg["segment_reset_triggered"],
+                "first_post_reset_index": t_seg["first_post_reset_index"],
+                "pre_reset_mismatch": t_seg["pre_reset_mismatch"],
+                "sma_mismatch_after_reset": t_seg["sma_mismatch_after_reset"],
+                "atr_mismatch_after_reset": t_seg["atr_mismatch_after_reset"],
+                "trend_score_mismatch_after_reset":
+                    t_seg["trend_score_mismatch_after_reset"],
+                "trend_state_mismatch_after_reset":
+                    t_seg["trend_state_mismatch_after_reset"],
+                "classification": t_seg["classification"],
+            },
+        },
+        "classification": {
+            "core_math": core_status,
+            "epsilon_guard": eps_status,
+            "segment_reset": seg_status,
+            "percentile_na_semantics": pct_status,
         },
         "per_field_random": rand_agg,
         "per_field_ag_per_segment": ag_seg_agg,
@@ -931,6 +1160,8 @@ def main() -> None:
             "B_prefix": t_pref["pass"],
             "C_call_chain": t_chain["pass"],
             "D_epsilon": t_eps["pass"],
+            "E_segment_reset": t_seg["segment_reset_triggered"],
+            "E4_compare_int_evidence": t_cmp["pass"],
         },
         "verdict": verdict,
         "verdict_reason": verdict_reason,
