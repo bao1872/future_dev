@@ -1117,7 +1117,7 @@ def main() -> None:
             "first_oracle_value": c_eps["first_oracle_value"],
             "first_production_value": c_eps["first_production_value"],
             "match": c_eps["guard_source_match"],
-            "observed_on_AG": epsilon_on_ag,
+            "observed_on_AG": epsilon_observed_ag,
         },
         "prefix_invariance": {
             "oracle_pass": t_pref["pass"],
