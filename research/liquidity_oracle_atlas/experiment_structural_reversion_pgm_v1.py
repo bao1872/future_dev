@@ -3706,21 +3706,8 @@ def build_path_dataset(
     )
 
     # decision_close 已在上方基于 bar_t (causal t) 计算并挂为列,
-    # 此处不再用 entry_bar / future bar 重算。
-
-    atr0 = (
-        sample[
-            "atr0"
-        ]
-        .to_numpy(float)
-    )
-
-    direction = (
-        sample[
-            "reversion_dir"
-        ]
-        .to_numpy(float)
-    )
+    # atr0 / direction 也在 path_valid 过滤后从列取回 (3687-3691),
+    # 此处不再重复赋值。
 
     # -------------------------------------------------------------------------
     # 统一方向：
@@ -3905,17 +3892,39 @@ def build_path_dataset(
 
         sample[
             f"mfe_R_{horizon}"
-        ] = np.nanmax(
-            favorable_h,
-            axis=1,
+        ] = np.maximum(
+            0.0,
+            np.nanmax(
+                favorable_h,
+                axis=1,
+            ),
         )
 
         sample[
             f"mae_R_{horizon}"
-        ] = np.nanmax(
-            adverse_h,
-            axis=1,
+        ] = np.maximum(
+            0.0,
+            np.nanmax(
+                adverse_h,
+                axis=1,
+            ),
         )
+
+        if np.any(
+            sample[f"mfe_R_{horizon}"].to_numpy(float)
+            < 0
+        ):
+            raise SystemExit(
+                "STOP_STRUCTREV_NEGATIVE_MFE"
+            )
+
+        if np.any(
+            sample[f"mae_R_{horizon}"].to_numpy(float)
+            < 0
+        ):
+            raise SystemExit(
+                "STOP_STRUCTREV_NEGATIVE_MAE"
+            )
 
         sample[
             f"y_positive_{horizon}"
@@ -4411,6 +4420,8 @@ def fit_eval_cpd(
     np.ndarray,
     np.ndarray,
     np.ndarray,
+    Tuple[Tuple[Any, ...], ...],
+    Tuple[Tuple[Any, ...], ...],
 ]:
 
     if (
@@ -4593,8 +4604,40 @@ def fit_eval_cpd(
             len(tr)
         ),
 
+        n_train_positive=int(
+            n_pos_tr
+        ),
+
+        n_train_negative=int(
+            n_neg_tr
+        ),
+
+        n_train_days=int(
+            n_days_tr
+        ),
+
+        n_train_symbols=int(
+            n_symbols_tr
+        ),
+
         n_eval=int(
             len(ev)
+        ),
+
+        n_eval_positive=int(
+            n_pos_ev
+        ),
+
+        n_eval_negative=int(
+            n_neg_ev
+        ),
+
+        n_eval_days=int(
+            n_days_ev
+        ),
+
+        n_eval_symbols=int(
+            n_symbols_ev
         ),
 
         event_rate_train=float(
@@ -5223,6 +5266,66 @@ def load_window_a_only() -> Dict[str, Any]:
 # 16. Parameter scan
 # =============================================================================
 
+def assert_scan_universe_aligned(
+    name: str,
+    loss: np.ndarray,
+    baseline_loss: np.ndarray,
+    days: np.ndarray,
+    baseline_days: np.ndarray,
+    eval_keys: Sequence[Tuple[Any, ...]],
+    baseline_eval_keys: Sequence[Tuple[Any, ...]],
+    train_keys: Sequence[Tuple[Any, ...]],
+    baseline_train_keys: Sequence[Tuple[Any, ...]],
+) -> None:
+    """
+    参数扫描配对宇宙一致性 gate (fail-closed)。
+
+    参数效果比较必须建立在完全相同的
+    train rows / eval rows 之上:
+        (symbol, bar_t) 必须逐一相等。
+    """
+
+    if (
+        baseline_loss is None
+        or baseline_days is None
+        or baseline_eval_keys is None
+        or baseline_train_keys is None
+    ):
+
+        raise SystemExit(
+            "STOP_STRUCTREV_SCAN_BASELINE_ORDER_BROKEN"
+        )
+
+    if (
+
+        len(loss)
+        != len(baseline_loss)
+
+        or
+
+        not np.array_equal(
+            days,
+            baseline_days,
+        )
+    ):
+
+        raise SystemExit(
+            f"STOP_STRUCTREV_SCAN_UNIVERSE_DRIFT:{name}"
+        )
+
+    if eval_keys != baseline_eval_keys:
+
+        raise SystemExit(
+            f"STOP_STRUCTREV_SCAN_EVAL_UNIVERSE_DRIFT:{name}"
+        )
+
+    if train_keys != baseline_train_keys:
+
+        raise SystemExit(
+            f"STOP_STRUCTREV_SCAN_TRAIN_UNIVERSE_DRIFT:{name}"
+        )
+
+
 def run_parameter_scan(
     bundle: Dict[str, Any],
     cap: Optional[int] = None,
@@ -5256,6 +5359,8 @@ def run_parameter_scan(
 
     baseline_loss = None
     baseline_days = None
+    baseline_eval_keys = None
+    baseline_train_keys = None
 
     scan_nodes = (
 
@@ -5349,8 +5454,8 @@ def run_parameter_scan(
             loss,
             days,
             _,
-            _,
-            _,
+            eval_keys,
+            train_keys,
         ) = fit_eval_cpd(
 
             train,
@@ -5388,6 +5493,14 @@ def run_parameter_scan(
                 days.copy()
             )
 
+            baseline_eval_keys = (
+                eval_keys
+            )
+
+            baseline_train_keys = (
+                train_keys
+            )
+
             row.update(
 
                 delta_vs_pine=np.nan,
@@ -5401,35 +5514,17 @@ def run_parameter_scan(
 
         else:
 
-            if (
-                baseline_loss
-                is None
-                or baseline_days
-                is None
-            ):
-
-                raise SystemExit(
-                    "STOP_STRUCTREV_SCAN_BASELINE_ORDER_BROKEN"
-                )
-
-            if (
-
-                len(loss)
-                != len(
-                    baseline_loss
-                )
-
-                or
-
-                not np.array_equal(
-                    days,
-                    baseline_days,
-                )
-            ):
-
-                raise SystemExit(
-                    f"STOP_STRUCTREV_SCAN_UNIVERSE_DRIFT:{name}"
-                )
+            assert_scan_universe_aligned(
+                name=name,
+                loss=loss,
+                baseline_loss=baseline_loss,
+                days=days,
+                baseline_days=baseline_days,
+                eval_keys=eval_keys,
+                baseline_eval_keys=baseline_eval_keys,
+                train_keys=train_keys,
+                baseline_train_keys=baseline_train_keys,
+            )
 
             delta = (
                 baseline_loss
@@ -5889,6 +5984,235 @@ def decision_anchor_synthetic() -> None:
         )
 
 
+def mfe_mae_synthetic() -> None:
+    """
+    验证 MFE / MAE 语义：
+
+        MFE >= 0
+        MAE >= 0
+
+    MFE = max(0, max over future of favorable excursion)
+    MAE = max(0, max over future of adverse excursion)
+
+    favorable (long) = (H_future - C_t) / atr0
+    adverse   (long) = (C_t - L_future) / atr0
+
+    复现 build_path_dataset 的同一公式。
+    """
+
+    def compute(
+        decision_close,
+        H,
+        L,
+        atr0,
+        direction,
+    ):
+
+        favorable = np.where(
+            direction[:, None] > 0,
+            (
+                H
+                - decision_close[:, None]
+            )
+            / atr0[:, None],
+            (
+                decision_close[:, None]
+                - L
+            )
+            / atr0[:, None],
+        )
+
+        adverse = np.where(
+            direction[:, None] > 0,
+            (
+                decision_close[:, None]
+                - L
+            )
+            / atr0[:, None],
+            (
+                H
+                - decision_close[:, None]
+            )
+            / atr0[:, None],
+        )
+
+        mfe = np.maximum(
+            0.0,
+            np.nanmax(
+                favorable,
+                axis=1,
+            ),
+        )
+
+        mae = np.maximum(
+            0.0,
+            np.nanmax(
+                adverse,
+                axis=1,
+            ),
+        )
+
+        return mfe, mae
+
+    # Case A: 全程 favorable (long)
+    mfe_a, mae_a = compute(
+        decision_close=np.array([100.0]),
+        H=np.array([[105.0, 110.0]]),
+        L=np.array([[101.0, 102.0]]),
+        atr0=np.array([10.0]),
+        direction=np.array([1]),
+    )
+
+    if not np.allclose(mfe_a, [1.0]):
+        raise SystemExit(
+            "STOP_STRUCTREV_MFE_MAE_SYNTHETIC_A:"
+            f"mfe={mfe_a.tolist()}"
+        )
+
+    if not np.allclose(mae_a, [0.0]):
+        raise SystemExit(
+            "STOP_STRUCTREV_MFE_MAE_SYNTHETIC_A:"
+            f"mae={mae_a.tolist()}"
+        )
+
+    # Case B: 全程 adverse (long)
+    mfe_b, mae_b = compute(
+        decision_close=np.array([100.0]),
+        H=np.array([[99.0, 98.0]]),
+        L=np.array([[95.0, 90.0]]),
+        atr0=np.array([10.0]),
+        direction=np.array([1]),
+    )
+
+    if not np.allclose(mfe_b, [0.0]):
+        raise SystemExit(
+            "STOP_STRUCTREV_MFE_MAE_SYNTHETIC_B:"
+            f"mfe={mfe_b.tolist()}"
+        )
+
+    if not np.allclose(mae_b, [1.0]):
+        raise SystemExit(
+            "STOP_STRUCTREV_MFE_MAE_SYNTHETIC_B:"
+            f"mae={mae_b.tolist()}"
+        )
+
+
+def parameter_scan_keys_drift_synthetic() -> None:
+    """
+    结构测试：参数扫描配对宇宙 key-drift gate。
+
+    直接复用生产 gate assert_scan_universe_aligned,
+    证明 baseline / same 通过, 任何 row key 漂移被拒绝。
+    """
+
+    baseline_eval = (
+        ("AG", 100),
+        ("CU", 200),
+    )
+
+    baseline_train = (
+        ("AG", 100),
+        ("CU", 200),
+    )
+
+    loss = np.array(
+        [0.1, 0.2]
+    )
+
+    baseline_loss = np.array(
+        [0.1, 0.2]
+    )
+
+    days = np.array(
+        [5, 6]
+    )
+
+    baseline_days = np.array(
+        [5, 6]
+    )
+
+    # same: 必须与 baseline 完全一致, PASS
+    assert_scan_universe_aligned(
+        name="same",
+        loss=loss,
+        baseline_loss=baseline_loss,
+        days=days,
+        baseline_days=baseline_days,
+        eval_keys=baseline_eval,
+        baseline_eval_keys=baseline_eval,
+        train_keys=baseline_train,
+        baseline_train_keys=baseline_train,
+    )
+
+    # eval key 漂移 -> 必须被拒绝
+    drift_eval = (
+        ("AG", 101),
+        ("CU", 200),
+    )
+
+    try:
+
+        assert_scan_universe_aligned(
+            name="drift_eval",
+            loss=loss,
+            baseline_loss=baseline_loss,
+            days=days,
+            baseline_days=baseline_days,
+            eval_keys=drift_eval,
+            baseline_eval_keys=baseline_eval,
+            train_keys=baseline_train,
+            baseline_train_keys=baseline_train,
+        )
+
+    except SystemExit as exc:
+
+        if (
+            "STOP_STRUCTREV_SCAN_EVAL_UNIVERSE_DRIFT"
+            not in str(exc)
+        ):
+            raise
+
+    else:
+
+        raise SystemExit(
+            "STOP_STRUCTREV_SCAN_DRIFT_SYNTHETIC_FAILED"
+        )
+
+    # train key 漂移 -> 必须被拒绝
+    drift_train = (
+        ("AG", 101),
+        ("CU", 200),
+    )
+
+    try:
+
+        assert_scan_universe_aligned(
+            name="drift_train",
+            loss=loss,
+            baseline_loss=baseline_loss,
+            days=days,
+            baseline_days=baseline_days,
+            eval_keys=baseline_eval,
+            baseline_eval_keys=baseline_eval,
+            train_keys=drift_train,
+            baseline_train_keys=baseline_train,
+        )
+
+    except SystemExit as exc:
+
+        if (
+            "STOP_STRUCTREV_SCAN_TRAIN_UNIVERSE_DRIFT"
+            not in str(exc)
+        ):
+            raise
+
+    else:
+
+        raise SystemExit(
+            "STOP_STRUCTREV_SCAN_DRIFT_SYNTHETIC_FAILED"
+        )
+
+
 def higher_tf_asof_synthetic() -> None:
     """
     验证更高周期（15m / 1H / 4H）as-of 对齐合同：
@@ -6128,10 +6452,24 @@ def run_audit_only() -> None:
         flush=True,
     )
 
+    mfe_mae_synthetic()
+
+    print(
+        "[AUDIT] MFE/MAE nonnegative semantics: PASS",
+        flush=True,
+    )
+
     higher_tf_asof_synthetic()
 
     print(
         "[AUDIT] higher-TF as-of (15m/1H/4H synthetic): PASS",
+        flush=True,
+    )
+
+    parameter_scan_keys_drift_synthetic()
+
+    print(
+        "[AUDIT] parameter-scan key-drift gate: PASS",
         flush=True,
     )
 
