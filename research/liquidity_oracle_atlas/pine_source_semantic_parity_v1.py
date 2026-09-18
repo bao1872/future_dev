@@ -116,6 +116,28 @@ def assert_base_ancestor() -> None:
 # 1. Literal Pine-source Oracle (test-only, independent)
 # =============================================================================
 
+def pine_safe_divide(
+    numerator: np.ndarray,
+    denominator: np.ndarray,
+) -> np.ndarray:
+    """Pine Script division semantics for the literal Oracle.
+
+    Pine: x / 0 -> na (NOT +inf / -inf like NumPy/Python).
+    Therefore denominator exactly == 0.0 (incl. +0.0 and -0.0) -> NaN.
+    Tiny NON-zero denominators still divide normally (no epsilon guard).
+    """
+    numerator = np.asarray(numerator, dtype=np.float64)
+    denominator = np.asarray(denominator, dtype=np.float64)
+    out = np.full(len(numerator), np.nan, dtype=np.float64)
+    valid = (
+        np.isfinite(numerator)
+        & np.isfinite(denominator)
+        & (denominator != 0.0)
+    )
+    out[valid] = numerator[valid] / denominator[valid]
+    return out
+
+
 def dtp_literal_oracle(
     high: np.ndarray,
     low: np.ndarray,
@@ -181,9 +203,8 @@ def dtp_literal_oracle(
         if np.all(np.isfinite(w)):
             p100[i] = float(np.max(w))
 
-    # ---- avg_col = avg_diff / P100 (DIRECT, no guard) ----
-    with np.errstate(divide="ignore", invalid="ignore"):
-        avg_col[:] = avg_diff / p100
+    # ---- avg_col = avg_diff / P100 (Pine semantics: /0 -> NaN) ----
+    avg_col[:] = pine_safe_divide(avg_diff, p100)
 
     # ---- trend state machine ----
     state = -1
@@ -960,6 +981,33 @@ def test_compare_int_evidence() -> dict:
     }
 
 
+def test_pine_safe_divide() -> dict:
+    """Test Z -- Pine zero/tiny division semantics for the literal Oracle.
+
+    Pine: x / 0 -> na (NOT +inf / -inf like NumPy).
+    Tiny NON-zero denominator (9.2e-14 / 1e-13) still divides -> 0.92.
+    """
+    num = np.array([1.0, -1.0, 0.0, 9.2e-14])
+    den = np.array([0.0, 0.0, 0.0, 1.0e-13])
+    out = pine_safe_divide(num, den)
+    checks = {
+        "z1_pos_over_zero": bool(np.isnan(out[0])),
+        "z2_neg_over_zero": bool(np.isnan(out[1])),
+        "z3_zero_over_zero": bool(np.isnan(out[2])),
+        "z4_tiny_divides": bool(
+            np.isfinite(out[3]) and abs(out[3] - 0.92) < 1e-12
+        ),
+        "no_inf": bool(not np.any(np.isinf(out))),
+    }
+    return {
+        "pass": bool(all(checks.values())),
+        "numerator": num.tolist(),
+        "denominator": den.tolist(),
+        "result": [None if np.isnan(v) else float(v) for v in out],
+        "checks": checks,
+    }
+
+
 def test_epsilon_guard() -> dict:
     c = case_epsilon()
     return {
@@ -1038,6 +1086,7 @@ def main() -> None:
     # Hardening tests E1-E5
     t_seg = test_segment_reset()
     t_cmp = test_compare_int_evidence()
+    t_zdiv = test_pine_safe_divide()
     print("[AUDIT] Test A warmup pass:", t_warm["pass"], t_warm["first_finite"],
           flush=True)
     print("[AUDIT] Test B prefix pass:", t_pref["pass"], flush=True)
@@ -1055,6 +1104,8 @@ def main() -> None:
     print("[AUDIT] Test E4 compare_int evidence pass:", t_cmp["pass"],
           "idx=", t_cmp["first_mismatch_index"], "max_abs=", t_cmp["max_abs_error"],
           flush=True)
+    print("[AUDIT] Test Z division semantics pass:", t_zdiv["pass"],
+          "result=", t_zdiv["result"], flush=True)
 
     # epsilon guard observed on real AG?
     ag_avgcol = ag_seg_agg.get("avg_col", {})
@@ -1162,6 +1213,20 @@ def main() -> None:
             "D_epsilon": t_eps["pass"],
             "E_segment_reset": t_seg["segment_reset_triggered"],
             "E4_compare_int_evidence": t_cmp["pass"],
+            "Z_division_semantics": t_zdiv["pass"],
+        },
+        "division_semantics": {
+            "oracle_uses_pine_safe_divide": True,
+            "zero_denominator_returns_nan": bool(t_zdiv["checks"]["z1_pos_over_zero"]
+                                                 and t_zdiv["checks"]["z2_neg_over_zero"]
+                                                 and t_zdiv["checks"]["z3_zero_over_zero"]),
+            "tiny_nonzero_divides": bool(t_zdiv["checks"]["z4_tiny_divides"]),
+            "no_numpy_inf": bool(t_zdiv["checks"]["no_inf"]),
+            "samples": {
+                "numerator": t_zdiv["numerator"],
+                "denominator": t_zdiv["denominator"],
+                "result": t_zdiv["result"],
+            },
         },
         "verdict": verdict,
         "verdict_reason": verdict_reason,
