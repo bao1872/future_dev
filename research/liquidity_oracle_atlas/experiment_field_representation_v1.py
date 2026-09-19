@@ -191,6 +191,19 @@ assert len(VARIANTS["V3_LIQ_REPR"]) == 120
 assert len(VARIANTS["V4_FIELD_CORE"]) == 148
 assert len(VARIANTS["V5_FIELD_FULL"]) == 155
 
+# --- E1.1 attribution variants (auxiliary-state decomposition) ------------ #
+FIELD_CORE_COLS = prefixed(TREND_NEW + SR_NEW + LIQ_NEW)
+VOL_COLS = prefixed(VOL_NEW)
+MAT_COLS = list(MATURITY_COLS)
+
+VARIANTS["V6_OLD96_AUX"] = VARIANTS["V0_OLD96"] + VOL_COLS + MAT_COLS
+VARIANTS["V7_FIELD_VOL"] = FIELD_CORE_COLS + VOL_COLS
+VARIANTS["V8_FIELD_MAT"] = FIELD_CORE_COLS + MAT_COLS
+
+assert len(VARIANTS["V6_OLD96_AUX"]) == 103
+assert len(VARIANTS["V7_FIELD_VOL"]) == 152
+assert len(VARIANTS["V8_FIELD_MAT"]) == 151
+
 
 # --------------------------------------------------------------------------- #
 # §15 field integration (frozen)                                               #
@@ -890,7 +903,19 @@ def load_oracle():
         _stop(f"STOP_ORACLE_DUPLICATE_KEYS R1={d1} R2={d2}")
     if len(r1) != len(r2):
         _stop(f"STOP_R1_R2_KEY_MISMATCH {len(r1)} != {len(r2)}")
-    print(f"[oracle] R1/R2 rows={len(r1)} dup=0/0", flush=True)
+
+    # Row-count equality alone does NOT imply semantic-key equality.
+    k1 = set(map(tuple, r1[KEY].to_numpy(dtype=object).tolist()))
+    k2 = set(map(tuple, r2[KEY].to_numpy(dtype=object).tolist()))
+    if k1 != k2:
+        _stop(
+            "STOP_R1_R2_KEY_MISMATCH "
+            f"r1_only={len(k1 - k2)} r2_only={len(k2 - k1)}"
+        )
+    print(
+        f"[oracle] R1/R2 rows={len(r1)} dup=0/0 key_sets_identical=True",
+        flush=True,
+    )
     return r1, r2
 
 
@@ -1045,6 +1070,19 @@ def main(argv=None):
         flush=True,
     )
 
+    # ---- E1.1 §12/§13 univariate diagnostics: maturity + vol regime vs Yopp
+    univariate = {}
+    te_y = joined.loc[m_te, "Y_opp"].to_numpy(float)
+    for c in MATURITY_COLS + [f"{tf}_vol_regime_log_ratio" for tf in TF]:
+        if c not in joined.columns:
+            continue
+        x = joined.loc[m_te, c].to_numpy(float)
+        ok = np.isfinite(x) & np.isfinite(te_y)
+        univariate[c] = (
+            float(spearmanr(x[ok], te_y[ok]).statistic) if int(ok.sum()) >= 3 else None
+        )
+    print(f"[univariate] {univariate}", flush=True)
+
     results = dict(
         task_id="FUTURE-ENV-R3C-E1-COMPACT-FIELD-REPRESENTATION",
         symbols=symbols,
@@ -1070,7 +1108,11 @@ def main(argv=None):
     )
 
     deciles = []
-    DECILE_VARIANTS = {"V0_OLD96", "V2_SR_REPR", "V4_FIELD_CORE", "V5_FIELD_FULL"}
+    # E1.1: only TEST Yopp deciles, only for the attribution chain
+    DECILE_VARIANTS = {
+        "V0_OLD96", "V4_FIELD_CORE", "V5_FIELD_FULL",
+        "V6_OLD96_AUX", "V7_FIELD_VOL", "V8_FIELD_MAT",
+    }
 
     stages = [("VAL", m_tr, m_va, va_start), ("TEST", (m_tr | m_va), m_te, te_start)]
 
@@ -1164,7 +1206,11 @@ def main(argv=None):
                     ridge=reg_metrics(yev[mev], p),
                 )
 
-                if stage_name == "TEST" and vname in DECILE_VARIANTS:
+                if (
+                    stage_name == "TEST"
+                    and vname in DECILE_VARIANTS
+                    and task == "Yopp"
+                ):
                     dd = ev.copy()
                     dd["_pred"] = full
                     extra = ["Y_trade"] if task == "Yopp" else ["Y_long"]
@@ -1183,6 +1229,36 @@ def main(argv=None):
             f"TEST_Yopp_spear={vres.get('TEST', {}).get('Yopp', {}).get('ridge', {}).get('spearman')}",
             flush=True,
         )
+
+    # ---- E1.1 §5/§10 attribution decomposition ----
+    def _m(v, st, task, model, met):
+        return results["variants"][v][st].get(task, {}).get(model, {}).get(
+            met, float("nan"))
+
+    attrib = {}
+    for st in ("VAL", "TEST"):
+        for label, task, model, met in (
+            ("TaskA_auc", "TaskA", "logistic", "roc_auc"),
+            ("TaskB_auc", "TaskB", "logistic", "roc_auc"),
+            ("Yopp_spearman", "Yopp", "ridge", "spearman"),
+            ("Ydir_spearman", "Ydir", "ridge", "spearman"),
+        ):
+            v0 = _m("V0_OLD96", st, task, model, met)
+            v4 = _m("V4_FIELD_CORE", st, task, model, met)
+            v5 = _m("V5_FIELD_FULL", st, task, model, met)
+            v6 = _m("V6_OLD96_AUX", st, task, model, met)
+            v7 = _m("V7_FIELD_VOL", st, task, model, met)
+            v8 = _m("V8_FIELD_MAT", st, task, model, met)
+            attrib.setdefault(st, {})[label] = dict(
+                field_core_effect_V4_minus_V0=v4 - v0,
+                aux_combined_V5_minus_V4=v5 - v4,
+                aux_on_old96_V6_minus_V0=v6 - v0,
+                vol_effect_V7_minus_V4=v7 - v4,
+                maturity_effect_V8_minus_V4=v8 - v4,
+                interaction_V5_minus_V7_minus_V8_plus_V4=v5 - v7 - v8 + v4,
+            )
+    results["attribution"] = attrib
+    results["univariate_test_spearman_vs_Yopp"] = univariate
 
     results["runtime"] = dict(
         old_environment_sec=round(t_old, 3),
