@@ -44,8 +44,15 @@
       "purged_rows": 0,
       "train_used": 53244,
       "eval_rows": 17586,
-      "preprocess_sec": 0.427,
-      "model_sec": 2.764,
+      "preprocess_sec": 0.407,
+      "model_sec": 2.18,
+      "fit_counts": {
+        "preprocessor_fit_count": 1,
+        "train_transform_count": 1,
+        "eval_transform_count": 1,
+        "classification_fit_count": 2,
+        "regression_fit_count": 2
+      },
       "TaskA_trade_vs_wait": {
         "n": 13365,
         "global_prior": {
@@ -153,8 +160,15 @@
       "purged_rows": 0,
       "train_used": 70830,
       "eval_rows": 18068,
-      "preprocess_sec": 0.94,
-      "model_sec": 3.936,
+      "preprocess_sec": 0.554,
+      "model_sec": 3.52,
+      "fit_counts": {
+        "preprocessor_fit_count": 1,
+        "train_transform_count": 1,
+        "eval_transform_count": 1,
+        "classification_fit_count": 2,
+        "regression_fit_count": 2
+      },
       "TaskA_trade_vs_wait": {
         "n": 13962,
         "global_prior": {
@@ -264,36 +278,36 @@
       "object": "AG",
       "taskA": {
         "n": 6950,
-        "roc_auc": 0.514844197015387,
-        "balanced_accuracy": 0.5017793628701771
+        "roc_auc": 0.5054316477228794,
+        "balanced_accuracy": 0.5000908528570324
       },
       "taskB": {
         "n": 2160,
-        "roc_auc": 0.4953930372792416,
-        "balanced_accuracy": 0.49800171649632
+        "roc_auc": 0.529381898094414,
+        "balanced_accuracy": 0.5084600588144835
       },
       "Yopp_ridge": {
         "n": 9034,
-        "spearman": 0.07695322727712459,
-        "r2": -0.011225855676650243
+        "spearman": 0.07596422724262779,
+        "r2": 0.002224318860820973
       }
     },
     "AU": {
       "object": "AU",
       "taskA": {
         "n": 7012,
-        "roc_auc": 0.4884016292870016,
-        "balanced_accuracy": 0.484589433658074
+        "roc_auc": 0.485194386927041,
+        "balanced_accuracy": 0.49021883514706704
       },
       "taskB": {
         "n": 2227,
-        "roc_auc": 0.5512803935893043,
-        "balanced_accuracy": 0.5100676239179204
+        "roc_auc": 0.5388134459105631,
+        "balanced_accuracy": 0.4892911287246491
       },
       "Yopp_ridge": {
         "n": 9034,
-        "spearman": -0.0025154918670929477,
-        "r2": -0.26288258381294183
+        "spearman": -0.01505008002833466,
+        "r2": -0.07356967295936201
       }
     }
   },
@@ -323,9 +337,13 @@
       "spearman": 0.019570416589001837
     }
   },
+  "fit_counts": {
+    "per_symbol_extra_fit_count": 0,
+    "robustness_extra_fit_count": 0
+  },
   "runtime": {
-    "environment_sec": 79.262,
-    "join_sec": 0.377,
-    "total_sec": 98.898
+    "environment_sec": 81.847,
+    "join_sec": 0.23,
+    "total_sec": 92.931
   }
 }

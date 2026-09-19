@@ -367,6 +367,26 @@ def main(argv=None):
     symbols = [s.strip() for s in args.symbols.split(",") if s.strip()]
     t_all = time.perf_counter()
 
+    # ---- minimal hard checks on the feature contract ----
+    assert len(FEATURE_COLS) == 96, f"FEATURE_COLS={len(FEATURE_COLS)} != 96"
+    assert len(set(FEATURE_COLS)) == 96, "FEATURE_COLS contains duplicates"
+    banned = {"symbol", "decision_bar_index", "decision_time",
+              "decision_bar_start_time", "trading_day"}
+    for t in TF:
+        banned |= {
+            f"{t}_sma", f"{t}_atr",
+            f"{t}_bucket_start", f"{t}_n_base_known",
+            f"{t}_sr_support_price", f"{t}_sr_resistance_price",
+            f"{t}_liq_up_level_price", f"{t}_liq_down_level_price",
+        }
+    for c in FEATURE_COLS:
+        assert c not in banned, f"excluded field present in features: {c}"
+    print(
+        f"[features] {len(FEATURE_COLS)} base features "
+        f"(cont={len(CONT_COLS)} disc={len(DISC_COLS)}), excluded fields absent",
+        flush=True,
+    )
+
     r1, r2 = load_oracle()
     joined, counters = build_joined(symbols, r1, r2, args.limit_bars)
     joined = make_targets(joined)
@@ -454,6 +474,7 @@ def main(argv=None):
     )
 
     deciles = []
+    test_predictions = None
 
     # ---- two walk-forward stages: evaluate VAL, then TEST ----
     stages = [
@@ -472,11 +493,22 @@ def main(argv=None):
             flush=True,
         )
 
+        # ONE preprocessor fit + ONE train transform + ONE eval transform per
+        # stage. Everything below slices these two matrices with boolean masks;
+        # no further pre.transform(...) calls are made.
         t_pre = time.perf_counter()
         pre = make_preprocessor()
         Xtr = pre.fit_transform(tr_p[FEATURE_COLS])
         Xev = pre.transform(ev[FEATURE_COLS])
         t_pre = time.perf_counter() - t_pre
+
+        fit_counts = dict(
+            preprocessor_fit_count=1,
+            train_transform_count=1,
+            eval_transform_count=1,
+            classification_fit_count=0,
+            regression_fit_count=0,
+        )
 
         t_mod = time.perf_counter()
         stage_res = dict(
@@ -485,74 +517,84 @@ def main(argv=None):
             eval_rows=int(len(ev)),
             preprocess_sec=round(t_pre, 3),
             model_sec=None,
+            fit_counts=fit_counts,
         )
 
-        for task, ycol, vocab in (
-            ("TaskA_trade_vs_wait", "Y_trade", TRADE_ACTIONS),
-            ("TaskB_direction", "Y_long", DIRECTION_ACTIONS),
+        train_action = tr_p["stable_action"].astype(str).to_numpy()
+        eval_action = ev["stable_action"].astype(str).to_numpy()
+        pred_arrays = {}
+
+        for task, ycol, vocab, pname in (
+            ("TaskA_trade_vs_wait", "Y_trade", TRADE_ACTIONS, "pred_trade"),
+            ("TaskB_direction", "Y_long", DIRECTION_ACTIONS, "pred_direction"),
         ):
-            sub_tr = tr_p[tr_p["stable_action"].astype(str).isin(vocab)]
-            sub_ev = ev[ev["stable_action"].astype(str).isin(vocab)]
-            if sub_tr["Y_" + ycol.split("_")[1]].notna().sum() == 0 or len(sub_ev) == 0:
-                continue
-            ytr = sub_tr[ycol].to_numpy(float)
-            yev = sub_ev[ycol].to_numpy(float)
-            ok_tr = ~np.isnan(ytr)
-            ok_ev = ~np.isnan(yev)
+            m_tr_a = np.isin(train_action, vocab)
+            m_ev_a = np.isin(eval_action, vocab)
+            ytr_all = tr_p[ycol].to_numpy(float)
+            yev_all = ev[ycol].to_numpy(float)
+            ok_tr = m_tr_a & ~np.isnan(ytr_all)
+            ok_ev = m_ev_a & ~np.isnan(yev_all)
             if ok_tr.sum() == 0 or ok_ev.sum() == 0:
                 continue
-            Xtr_t = pre.transform(sub_tr[FEATURE_COLS])
-            Xev_t = pre.transform(sub_ev[FEATURE_COLS])
             clf = LogisticRegression(max_iter=2000)
-            clf.fit(Xtr_t[ok_tr], ytr[ok_tr].astype(int))
-            p = clf.predict_proba(Xev_t[ok_ev])[:, 1]
+            clf.fit(Xtr[ok_tr], ytr_all[ok_tr].astype(int))
+            fit_counts["classification_fit_count"] += 1
+            p = clf.predict_proba(Xev[ok_ev])[:, 1]
 
-            gp, grate = prior_vector(
-                sub_tr["symbol"].to_numpy()[ok_tr], ytr[ok_tr],
-                sub_ev["symbol"].to_numpy()[ok_ev],
-            )
+            # full-length array, NaN where this task does not apply
+            full = np.full(len(ev), np.nan)
+            full[np.flatnonzero(ok_ev)] = p
+            pred_arrays[pname] = full
+
+            grate = float(np.mean(ytr_all[ok_tr]))
             sp, _ = prior_vector(
-                sub_tr["symbol"].to_numpy()[ok_tr], ytr[ok_tr],
-                sub_ev["symbol"].to_numpy()[ok_ev],
+                tr_p["symbol"].to_numpy()[ok_tr], ytr_all[ok_tr],
+                ev["symbol"].to_numpy()[ok_ev],
             )
             stage_res[task] = dict(
                 n=int(ok_ev.sum()),
-                global_prior=clf_metrics(yev[ok_ev], np.full(ok_ev.sum(), grate)),
-                symbol_prior=clf_metrics(yev[ok_ev], sp),
-                logistic=clf_metrics(yev[ok_ev], p),
+                global_prior=clf_metrics(
+                    yev_all[ok_ev].astype(int), np.full(int(ok_ev.sum()), grate)),
+                symbol_prior=clf_metrics(yev_all[ok_ev].astype(int), sp),
+                logistic=clf_metrics(yev_all[ok_ev].astype(int), p),
             )
 
-        for task, ycol in (("Yopp", "Y_opp"), ("Ydir", "Y_dir")):
-            ytr = tr_p[ycol].to_numpy(float)
-            yev = ev[ycol].to_numpy(float)
-            ok_tr = np.isfinite(ytr)
-            ok_ev = np.isfinite(yev)
-            if ok_tr.sum() == 0 or ok_ev.sum() == 0:
+        for task, ycol, pname in (
+            ("Yopp", "Y_opp", "pred_yopp"),
+            ("Ydir", "Y_dir", "pred_ydir"),
+        ):
+            ytr_all = tr_p[ycol].to_numpy(float)
+            yev_all = ev[ycol].to_numpy(float)
+            mtr = np.isfinite(ytr_all)
+            mev = np.isfinite(yev_all)
+            if mtr.sum() == 0 or mev.sum() == 0:
                 continue
-            Xtr_r = pre.transform(tr_p[FEATURE_COLS])
-            Xev_r = pre.transform(ev[FEATURE_COLS])
             rg = Ridge(alpha=1.0)
-            rg.fit(Xtr_r[ok_tr], ytr[ok_tr])
-            p = rg.predict(Xev_r[ok_ev])
-            gmean = float(np.mean(ytr[ok_tr]))
-            per = pd.Series(ytr[ok_tr]).groupby(
-                tr_p["symbol"].to_numpy()[ok_tr]).mean().to_dict()
+            rg.fit(Xtr[mtr], ytr_all[mtr])
+            fit_counts["regression_fit_count"] += 1
+            p = rg.predict(Xev[mev])
+
+            full = np.full(len(ev), np.nan)
+            full[np.flatnonzero(mev)] = p
+            pred_arrays[pname] = full
+
+            gmean = float(np.mean(ytr_all[mtr]))
+            per = pd.Series(ytr_all[mtr]).groupby(
+                tr_p["symbol"].to_numpy()[mtr]).mean().to_dict()
             sym_mean = np.array([
-                per.get(s, gmean) for s in ev["symbol"].to_numpy()[ok_ev]
+                per.get(s, gmean) for s in ev["symbol"].to_numpy()[mev]
             ], dtype=float)
             stage_res[task] = dict(
-                n=int(ok_ev.sum()),
-                global_mean=reg_metrics(yev[ok_ev], np.full(ok_ev.sum(), gmean)),
-                symbol_mean=reg_metrics(yev[ok_ev], sym_mean),
-                ridge=reg_metrics(yev[ok_ev], p),
+                n=int(mev.sum()),
+                global_mean=reg_metrics(yev_all[mev], np.full(int(mev.sum()), gmean)),
+                symbol_mean=reg_metrics(yev_all[mev], sym_mean),
+                ridge=reg_metrics(yev_all[mev], p),
             )
 
             # deciles (prediction vs realised)
-            dd = ev[ok_ev].copy()
-            dd["_pred"] = p
-            extra = (
-                ["Y_trade"] if task == "Yopp" else ["Y_long"]
-            )
+            dd = ev.copy()
+            dd["_pred"] = full
+            extra = ["Y_trade"] if task == "Yopp" else ["Y_long"]
             deciles += decile_table(
                 dd.rename(columns={ycol: "_act"}), "_pred", "_act", extra,
                 f"{stage_name}_{task}",
@@ -561,88 +603,94 @@ def main(argv=None):
         stage_res["model_sec"] = round(time.perf_counter() - t_mod, 3)
         results["stages"][stage_name] = stage_res
 
-    # ---- per-symbol TEST ----
-    m_te = dcol.isin(te_days)
-    m_tr_va = m_tr | m_va
-    tr2 = joined[m_tr_va & ~(lat >= te_start)]
-    ev2 = joined[m_te]
-    pre2 = make_preprocessor()
-    Xtr2 = pre2.fit_transform(tr2[FEATURE_COLS])
-    Xev2 = pre2.transform(ev2[FEATURE_COLS])
+        # keep the global TEST-stage predictions for diagnostics only
+        if stage_name == "TEST":
+            test_predictions = dict(
+                eval_frame=ev,
+                pred_trade=pred_arrays.get("pred_trade"),
+                pred_direction=pred_arrays.get("pred_direction"),
+                pred_yopp=pred_arrays.get("pred_yopp"),
+                pred_ydir=pred_arrays.get("pred_ydir"),
+            )
 
+    # ---- per-symbol TEST: GLOBAL model -> per-symbol evaluation (no refit) ----
+    # The research question is "how does the single globally-trained model
+    # behave per symbol", NOT "how good is a model trained per symbol".
+    # So we slice the saved global TEST predictions by symbol.
     per_symbol = {}
-    for sym in symbols:
-        rec = dict(object=sym)
-        for task, ycol, vocab, mname in (
-            ("TaskA", "Y_trade", TRADE_ACTIONS, "taskA"),
-            ("TaskB", "Y_long", DIRECTION_ACTIONS, "taskB"),
-        ):
-            st = tr2[tr2["symbol"] == sym]
-            se = ev2[ev2["symbol"] == sym]
-            st = st[st["stable_action"].astype(str).isin(vocab)]
-            se = se[se["stable_action"].astype(str).isin(vocab)]
-            ytr = st[ycol].to_numpy(float)
-            yev = se[ycol].to_numpy(float)
-            ok_tr, ok_ev = ~np.isnan(ytr), ~np.isnan(yev)
-            if ok_tr.sum() < 2 or ok_ev.sum() < 2 or len(np.unique(yev[ok_ev])) < 2:
-                rec[mname] = dict(n=int(ok_ev.sum()), roc_auc=None, balanced_accuracy=None)
-                continue
-            clf = LogisticRegression(max_iter=2000)
-            clf.fit(pre2.transform(st[FEATURE_COLS])[ok_tr], ytr[ok_tr].astype(int))
-            p = clf.predict_proba(pre2.transform(se[FEATURE_COLS])[ok_ev])[:, 1]
-            mt = clf_metrics(yev[ok_ev].astype(int), p)
-            rec[mname] = dict(
-                n=mt["n"], roc_auc=mt["roc_auc"], balanced_accuracy=mt["balanced_accuracy"]
-            )
-        st = tr2[tr2["symbol"] == sym]
-        se = ev2[ev2["symbol"] == sym]
-        ytr = st["Y_opp"].to_numpy(float)
-        yev = se["Y_opp"].to_numpy(float)
-        ok_tr, ok_ev = np.isfinite(ytr), np.isfinite(yev)
-        if ok_tr.sum() >= 2 and ok_ev.sum() >= 2:
-            rg = Ridge(alpha=1.0)
-            rg.fit(pre2.transform(st[FEATURE_COLS])[ok_tr], ytr[ok_tr])
-            mt = reg_metrics(yev[ok_ev], rg.predict(pre2.transform(se[FEATURE_COLS])[ok_ev]))
-            rec["Yopp_ridge"] = dict(
-                n=mt["n"], spearman=mt["spearman"], r2=mt["r2"]
-            )
-        else:
-            rec["Yopp_ridge"] = dict(n=int(ok_ev.sum()), spearman=None, r2=None)
-        per_symbol[sym] = rec
+    per_symbol_extra_fit_count = 0
+    if test_predictions is not None:
+        ev = test_predictions["eval_frame"]
+        sym_arr = ev["symbol"].to_numpy()
+        for sym in symbols:
+            m = sym_arr == sym
+            rec = dict(object=sym)
+            for ycol, pname, mname in (
+                ("Y_trade", "pred_trade", "taskA"),
+                ("Y_long", "pred_direction", "taskB"),
+            ):
+                y = ev[ycol].to_numpy(float)
+                p = test_predictions[pname]
+                if p is None:
+                    rec[mname] = dict(n=0, roc_auc=None, balanced_accuracy=None)
+                    continue
+                ok = m & ~np.isnan(y) & ~np.isnan(p)
+                if ok.sum() < 2 or len(np.unique(y[ok])) < 2:
+                    rec[mname] = dict(
+                        n=int(ok.sum()), roc_auc=None, balanced_accuracy=None)
+                    continue
+                mt = clf_metrics(y[ok].astype(int), p[ok])
+                rec[mname] = dict(
+                    n=mt["n"], roc_auc=mt["roc_auc"],
+                    balanced_accuracy=mt["balanced_accuracy"],
+                )
+            y = ev["Y_opp"].to_numpy(float)
+            p = test_predictions["pred_yopp"]
+            if p is None:
+                rec["Yopp_ridge"] = dict(n=0, spearman=None, r2=None)
+            else:
+                ok = m & np.isfinite(y) & np.isfinite(p)
+                if ok.sum() >= 2:
+                    mt = reg_metrics(y[ok], p[ok])
+                    rec["Yopp_ridge"] = dict(
+                        n=mt["n"], spearman=mt["spearman"], r2=mt["r2"])
+                else:
+                    rec["Yopp_ridge"] = dict(
+                        n=int(ok.sum()), spearman=None, r2=None)
+            per_symbol[sym] = rec
     results["test_per_symbol"] = per_symbol
 
-    # ---- robustness subset diagnostic (no retrain) ----
+    # ---- robustness subset: slice global TEST predictions (no refit) ----
     rob = {}
-    mask_rob = (ev2["joint_retention_stable"] >= 0.9).to_numpy()
-    if mask_rob.sum() > 0:
-        sub = ev2[mask_rob]
-        for task, ycol, vocab in (
-            ("TaskA", "Y_trade", TRADE_ACTIONS),
-            ("TaskB", "Y_long", DIRECTION_ACTIONS),
+    robustness_extra_fit_count = 0
+    if test_predictions is not None:
+        ev = test_predictions["eval_frame"]
+        mrob = ev["joint_retention_stable"].to_numpy() >= 0.9
+        for task, ycol, pname in (
+            ("TaskA", "Y_trade", "pred_trade"),
+            ("TaskB", "Y_long", "pred_direction"),
         ):
-            s = sub[sub["stable_action"].astype(str).isin(vocab)]
-            y = s[ycol].to_numpy(float)
-            ok = ~np.isnan(y)
+            y = ev[ycol].to_numpy(float)
+            p = test_predictions[pname]
+            if p is None:
+                continue
+            ok = mrob & ~np.isnan(y) & ~np.isnan(p)
             if ok.sum() < 2 or len(np.unique(y[ok])) < 2:
                 rob[task] = dict(n=int(ok.sum()))
                 continue
-            clf = LogisticRegression(max_iter=2000)
-            st = tr2[tr2["stable_action"].astype(str).isin(vocab)]
-            ytr = st[ycol].to_numpy(float)
-            ok_tr = ~np.isnan(ytr)
-            clf.fit(pre2.transform(st[FEATURE_COLS])[ok_tr], ytr[ok_tr].astype(int))
-            p = clf.predict_proba(pre2.transform(s[FEATURE_COLS])[ok])[:, 1]
-            rob[task] = clf_metrics(y[ok].astype(int), p)
-        s = sub.copy()
-        y = s["Y_opp"].to_numpy(float)
-        ok = np.isfinite(y)
-        if ok.sum() >= 2:
-            rg = Ridge(alpha=1.0)
-            ytr = tr2["Y_opp"].to_numpy(float)
-            ok_tr = np.isfinite(ytr)
-            rg.fit(pre2.transform(tr2[FEATURE_COLS])[ok_tr], ytr[ok_tr])
-            rob["Yopp"] = reg_metrics(y[ok], rg.predict(pre2.transform(s[FEATURE_COLS])[ok]))
+            rob[task] = clf_metrics(y[ok].astype(int), p[ok])
+        y = ev["Y_opp"].to_numpy(float)
+        p = test_predictions["pred_yopp"]
+        if p is not None:
+            ok = mrob & np.isfinite(y) & np.isfinite(p)
+            if ok.sum() >= 2:
+                rob["Yopp"] = reg_metrics(y[ok], p[ok])
     results["test_robustness_ge_0.9"] = rob
+
+    results["fit_counts"] = dict(
+        per_symbol_extra_fit_count=per_symbol_extra_fit_count,
+        robustness_extra_fit_count=robustness_extra_fit_count,
+    )
 
     # ---- save ----
     jpath = os.path.join(args.out_dir, args.joined_name)
