@@ -96,5 +96,7 @@
     "ORACLE_CONSTRAINT_PROTOCOL.json",
     "ORACLE_CONSTRAINT_AUDIT.json",
     "oracle_constraint_report.md"
-  ]
+  ],
+  "experiment_base_sha": "0bee4029a40a8985f1be6da7431d2edeb0109dd6",
+  "code_sha_used_for_t2": "47a53405b8ef60208bfdc612ccf47a3076777f44"
 }

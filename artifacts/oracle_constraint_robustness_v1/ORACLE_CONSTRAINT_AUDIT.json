@@ -190,5 +190,22 @@
     "NET_PNL": "UNAVAILABLE_COST_METADATA",
     "rule": "friction hurdle c*ATR_t is NOT a real fee; only gross price-point utility + risk/time/friction penalties",
     "FRICTION_HURDLE_NOT_ACTUAL_TRANSACTION_COST": true
+  },
+  "experiment_base_sha": "0bee4029a40a8985f1be6da7431d2edeb0109dd6",
+  "code_sha_used_for_t2": "47a53405b8ef60208bfdc612ccf47a3076777f44",
+  "status": "INDEPENDENT_REVIEW_CORE_PASS / METADATA_CLOSURE_COMPLETE",
+  "rows_artifact": {
+    "path": "artifacts/oracle_constraint_robustness_v1/oracle_constraint_rows.parquet",
+    "sha256": "3980177b78d46cbc4ab7ffcd84dedebee3c5c62e396b11ec0da478b463e3f265",
+    "size_bytes": 59266986,
+    "rows": 505161,
+    "columns": 61
+  },
+  "action_matrix_artifact": {
+    "path": "artifacts/oracle_constraint_robustness_v1/oracle_constraint_action_matrix.parquet",
+    "sha256": "a436b49f1c7692259793fbf2dbc0cf8edfd7e9cd0e90aa5b37bf62f717093edf",
+    "size_bytes": 15330865,
+    "rows": 505161,
+    "columns": 105
   }
 }

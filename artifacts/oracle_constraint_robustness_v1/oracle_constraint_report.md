@@ -1,10 +1,11 @@
 ﻿# Oracle Constraint Robustness v1 (R2.1)
 
-> **Status**: `PROVISIONAL_PENDING_USER_AUDIT`. This is a SENSITIVITY /
+> **Status**: `INDEPENDENT_REVIEW_CORE_PASS / METADATA_CLOSURE_COMPLETE`. This is a SENSITIVITY /
 > ROBUSTNESS surface, not parameter tuning. No "best lambda" is selected.
 
 **Task**: `FUTURE-ORACLE-R2.1-CORRECTNESS-CLOSURE`
 **Base**: 0bee4029a40a8985f1be6da7431d2edeb0109dd6 (R2.1 base commit)
+**Metadata closure**: Task `FUTURE-ORACLE-R2-FINAL-METADATA-CLOSURE`. `code_sha_used_for_t2` = `47a53405b8ef60208bfdc612ccf47a3076777f44` recorded in PROTOCOL + AUDIT; both parquet SHA256 pinned in AUDIT; no T2 re-run.
 **Horizons**: [6, 12, 24]
 **Grid**: 27 core + 7 stress
 = 34 thetas. Core = λR∈(0, 0.25, 0.5) × λT∈(0, 0.005, 0.01) ×
@@ -28,10 +29,25 @@ ATR_t. We never feed ATR-normalized V back into the recursion.
   joint_opposite_flip_rate_mean = 0.0
 - **Opportunity robustness** (trade -> Wait/Tie suppression, Core): see
   direction_vs_suppression_core + trade_suppression_rate in one_factor_sensitivity.
-- **Timing robustness** (action same but holding/exit sensitive):
-  edge_ATR / value_ATR min-median-max per (theta, H) in rows + parameter_summary.
+- **Exact exit-timing robustness**: **NOT supported**. Direction/opportunity are
+  stable but optimal exit is materially sensitive — baseline_direction_holding
+  mean span = 11.39 bars, P(span>=6)=76.8%, P(span>=12)=53.9%; edge_ATR spread
+  (per oracle_constraint_edge_summary.json: H6/H12/H24 median 0.383/0.541/0.808,
+  p10 0.068/0.095/0.141, p90 1.069/1.514/2.307) confirms holding/exit sensitivity.
+  Conclusion: model environment -> stable direction / opportunity value first;
+  treat exit timing as a separate downstream problem.
 - NOTE: Stress region (direction_vs_suppression_stress) is reported separately
   and only characterizes extreme-condition behaviour, never the headline.
+
+## 3b. Research conclusions (independent review)
+- **Direction robustness: SUPPORTED.** Stable-cohort joint retention mean = 0.9882;
+  95.58% of stable baseline samples stay fully consistent across all Core theta x H
+  cells; zero Long<->Short direct flip in Core.
+- **Opportunity robustness: SUPPORTED.** Core trade->Wait/Tie suppression ~3.7%
+  (Long) / 3.5% (Short); risk lambda_R=0.5 suppresses ~8.5% of baseline trades
+  with no direct direction flip; time/friction effects small in tested range.
+- **Exact exit-timing robustness: NOT SUPPORTED; exit timing is materially
+  sensitive** (see above). This is the key structural result guiding next phase.
 
 ## 4. Joint retention distribution
 Headline = **stable-cohort** joint retention (baseline action itself stable across
