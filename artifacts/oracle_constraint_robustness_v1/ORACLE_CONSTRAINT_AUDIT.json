@@ -1,9 +1,11 @@
 {
   "experiment": "Oracle Constraint Robustness v1",
-  "task_id": "FUTURE-ORACLE-R2-CONSTRAINT-ROBUSTNESS",
-  "rows_sha256": "170104e1edb02295ebf2493b34d63e0f54090761c24d2357acb2dfd968398148",
+  "task_id": "FUTURE-ORACLE-R2.1-CORRECTNESS-CLOSURE",
+  "rows_sha256": "3980177b78d46cbc4ab7ffcd84dedebee3c5c62e396b11ec0da478b463e3f265",
   "rows_path": "artifacts/oracle_constraint_robustness_v1/oracle_constraint_rows.parquet",
   "n_decisions": 505161,
+  "raw_load_count": 15,
+  "precompute_count": 15,
   "grid": {
     "n_core": 27,
     "n_stress": 7,

@@ -1,8 +1,8 @@
 {
   "experiment": "Oracle Constraint Robustness v1",
-  "task_id": "FUTURE-ORACLE-R2-CONSTRAINT-ROBUSTNESS",
+  "task_id": "FUTURE-ORACLE-R2.1-CORRECTNESS-CLOSURE",
   "version": "1.0",
-  "base_commit": "1211e7117955d794a59e1df0d30849db02900db1",
+  "base_commit": "0bee4029a40a8985f1be6da7431d2edeb0109dd6",
   "frozen": [
     "H in {6,12,24}",
     "decision_time",
