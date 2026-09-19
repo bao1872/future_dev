@@ -433,12 +433,12 @@ def test_t0_edge_atr_scale_invariance():
 def test_t0_wait_tie_share_explicit():
     ca = np.array([A_LONG] * 10 + [A_SHORT] * 5 + [A_WAIT] * 8 + [A_TIE] * 4,
                   dtype=np.int8)
-    sh_L, sh_S, sh_W, sh_T, cons, cons_code, cons_rate = _action_shares(ca, 27)
+    sh_L, sh_S, sh_W, sh_T, cons, cons_rate = _action_shares(ca, 27)
     assert sh_L == 10 / 27, sh_L
     assert sh_S == 5 / 27, sh_S
     assert sh_W == 8 / 27, sh_W
     assert sh_T == 4 / 27, sh_T
-    assert cons == "Long" and cons_code == A_LONG
+    assert cons == "Long"
     assert abs(cons_rate - 10 / 27) < 1e-12
 
 
@@ -614,15 +614,78 @@ def test_t1p5_small_end_to_end():
     # 8) by_symbol robustness columns present & covers both symbols
     by_sym = pd.read_csv(tmp / "oracle_constraint_by_symbol.csv")
     for c in ["joint_retention_mean", "joint_retention_ge_0_9",
-              "joint_retention_ge_0_8", "joint_opposite_flip_mean",
-              "joint_tie_mean", "strict_Long_n", "strict_Short_n",
-              "strict_Wait_n", "strict_Tie_n", "strict_nonrobust_n",
-              "baseline_stable_Long_n", "baseline_stable_Short_n",
-              "baseline_stable_Wait_n"]:
+              "joint_retention_ge_0_8", "joint_retention_stable_mean",
+              "joint_retention_stable_ge_0_9", "joint_retention_stable_ge_0_8",
+              "joint_opposite_flip_mean", "joint_tie_mean",
+              "strict_Long_n", "strict_Short_n", "strict_Wait_n", "strict_Tie_n",
+              "strict_nonrobust_n", "baseline_stable_Long_n",
+              "baseline_stable_Short_n", "baseline_stable_Wait_n"]:
         assert c in by_sym.columns, f"by_symbol missing {c}"
     assert set(by_sym["symbol"]) == {"AG", "RB"}
     assert by_sym["joint_retention_mean"].notna().all()
+    assert by_sym["joint_retention_stable_mean"].notna().all()
     assert (by_sym["strict_nonrobust_n"] >= 0).all()
+
+    # 9) stable-cohort headline + Core/Stress direction separation present
+    assert summary["stable_cohort_n"] > 0, "no stable-cohort decisions"
+    assert summary["joint_retention_stable_distribution"] is not None
+    assert summary["joint_retention_all_distribution"] is not None
+    assert "direction_vs_suppression_core" in summary
+    assert "direction_vs_suppression_stress" in summary
+    for k in ("direction_vs_suppression_core", "direction_vs_suppression_stress"):
+        d = summary[k]
+        for rate_k in ("Long_to_Short_rate", "Short_to_Long_rate",
+                       "Long_to_WaitTie_rate", "Short_to_WaitTie_rate",
+                       "Wait_to_Trade_rate"):
+            assert 0.0 <= d[rate_k] <= 1.0, f"{k}.{rate_k} out of [0,1]"
+
+    # 10) conditional-denominator sanity: numerators subset of denominators
+    for axis in ("risk_only", "time_only", "friction_only"):
+        for row in summary["one_factor_sensitivity"][axis]:
+            assert row["opposite_flip_count"] <= row["baseline_trade_count"]
+            assert row["trade_suppression_count"] <= row["baseline_trade_count"]
+            assert row["trade_creation_count"] <= row["baseline_wait_count"]
+            for rate_k in ("opposite_flip_rate", "trade_suppression_rate",
+                           "trade_creation_rate"):
+                assert 0.0 <= row[rate_k] <= 1.0
+
+
+# ---- R2.1b: second-pass statistical semantics fixes -----------------------
+def test_t0_consensus_tie_ambiguous():
+    """Consensus vote tie across multiple actions => Ambiguous, never auto-Long."""
+    n = 27
+    # 9 Long / 9 Wait / 9 Tie -> 3-way tie -> Ambiguous
+    ca = np.array([A_LONG] * 9 + [A_WAIT] * 9 + [A_TIE] * 9, dtype=int)
+    _, _, _, _, cons, rate = _action_shares(ca, n)
+    assert cons == "Ambiguous", cons
+    assert abs(rate - 9 / 27) < 1e-9
+    # 10 Long / 9 Wait / 8 Tie -> Long wins cleanly
+    ca2 = np.array([A_LONG] * 10 + [A_WAIT] * 9 + [A_TIE] * 8, dtype=int)
+    _, _, _, _, cons2, rate2 = _action_shares(ca2, n)
+    assert cons2 == "Long", cons2
+    assert abs(rate2 - 10 / 27) < 1e-9
+
+
+def test_t0_stable_cohort_joint_retention():
+    """Stable-cohort joint_retention == all-row value; Ambiguous/Tie -> None."""
+    bars = build_bars("AG")
+    keep = 800
+    for k in ("o", "h", "l", "c", "disc", "seg", "atr5"):
+        bars[k] = bars[k][-keep:]
+    bars["t"] = bars["t"][-keep:]
+    bars["decision_time"] = bars["decision_time"][-keep:]
+    bars["n"] = keep
+    cand = precompute_candidate_paths(bars)
+    rows, mat, counters, nv, vidx = evaluate_symbol(bars, cand)
+    df = pd.DataFrame(rows)
+    for _, r in df.iterrows():
+        bsa = r["baseline_stable_action"]
+        if bsa in ("Long", "Short", "Wait"):
+            assert r["joint_retention_stable"] == r["joint_retention"], \
+                (bsa, r["joint_retention_stable"], r["joint_retention"])
+        else:
+            # None is stored as NaN in the float DataFrame column
+            assert pd.isna(r["joint_retention_stable"]), (bsa, r["joint_retention_stable"])
 
 
 if __name__ == "__main__":
@@ -645,5 +708,8 @@ if __name__ == "__main__":
     test_t0_wait_tie_share_explicit()
     test_t0_action_matrix_key_alignment()
     test_t0_parity_negative_control()
+    # R2.1b statistical-semantics tests
+    test_t0_consensus_tie_ambiguous()
+    test_t0_stable_cohort_joint_retention()
     test_t1p5_small_end_to_end()
     print("ALL T0/T1/T1.5 PASSED")

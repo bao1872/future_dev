@@ -280,12 +280,14 @@ def _action_shares(ca, n_core):
         "Wait": int((ca == A_WAIT).sum()),
         "Tie": int((ca == A_TIE).sum()),
     }
-    order = ["Long", "Short", "Wait", "Tie"]
-    cons = max(order, key=lambda k: counts[k])  # tie -> first (Long)
-    cons_code = {"Long": A_LONG, "Short": A_SHORT,
-                 "Wait": A_WAIT, "Tie": A_TIE}[cons]
-    cons_rate = counts[cons] / n_core
-    return sh_L, sh_S, sh_W, sh_T, cons, cons_code, cons_rate
+    # Fix R2.1b: a vote tie across multiple actions is NOT a consensus. "Tie"
+    # means a Q-value tie WITHIN one Oracle parameter; "Ambiguous" means the
+    # multi-theta vote is split. Never pick by action order (would fake Long).
+    top_count = max(counts.values())
+    winners = [a for a in ("Long", "Short", "Wait", "Tie") if counts[a] == top_count]
+    cons = winners[0] if len(winners) == 1 else "Ambiguous"
+    cons_rate = top_count / n_core
+    return sh_L, sh_S, sh_W, sh_T, cons, cons_rate
 
 
 def actions_for_theta(core, cand=None, hmax=HMAX):
@@ -550,8 +552,7 @@ def evaluate_symbol(bars, cand, thetas=THETAS, hmax=HMAX, keep_idx=None):
             ca = core_act[j, :, hi]            # 27 codes
             ce = core_edge[j, :, hi]           # 27 edge_ATR
             cv = core_val[j, :, hi]            # 27 value_ATR
-            sh_L, sh_S, sh_W, sh_T, cons, cons_code, cons_rate = _action_shares(
-                ca, N_CORE)
+            sh_L, sh_S, sh_W, sh_T, cons, cons_rate = _action_shares(ca, N_CORE)
             bact = int(base_act[H][t])
             breten = float((ca == bact).mean())
             opp_rate = (float((bact == A_LONG) and (ca == A_SHORT).mean()
@@ -569,10 +570,7 @@ def evaluate_symbol(bars, cand, thetas=THETAS, hmax=HMAX, keep_idx=None):
             rec[f"Short_share_H{H}"] = round(float(sh_S), 4)
             rec[f"Wait_share_H{H}"] = round(float(sh_W), 4)
             rec[f"Tie_share_H{H}"] = round(float(sh_T), 4)
-            rec[f"consensus_action_H{H}"] = ("Long" if cons_code == A_LONG else
-                                             "Short" if cons_code == A_SHORT else
-                                             "Wait" if cons_code == A_WAIT else
-                                             "Tie")
+            rec[f"consensus_action_H{H}"] = cons
             rec[f"consensus_rate_H{H}"] = round(float(cons_rate), 4)
             rec[f"baseline_retention_H{H}"] = round(float(breten), 4)
             rec[f"opposite_flip_H{H}"] = round(float(flip), 4)
@@ -597,6 +595,14 @@ def evaluate_symbol(bars, cand, thetas=THETAS, hmax=HMAX, keep_idx=None):
         rec["joint_retention"] = round(joint_match / joint_tot, 4)
         rec["joint_opposite_flip_rate"] = round(joint_opp / joint_tot, 4)
         rec["joint_tie_rate"] = round(joint_tie / joint_tot, 4)
+        # Fix R2.1b: stable-cohort joint retention headline. For decisions whose
+        # baseline action is itself stable across the 3 H (Long/Short/Wait), the
+        # three H baselines coincide, so joint_match/joint_tot already equals the
+        # stable-cohort definition #{ (theta,H): A = A_stable } / 81. Ambiguous /
+        # Tie baselines are excluded from the stable cohort.
+        rec["joint_retention_stable"] = (
+            round(joint_match / joint_tot, 4)
+            if bstable in (A_LONG, A_SHORT, A_WAIT) else None)
         # --- item 5: holding-time distribution WHEN DIRECTION is unchanged ---
         # Gather optimal holding across the 81 (theta,H) cells whose action keeps
         # the baseline direction. This separates "direction stable but exit time
@@ -730,7 +736,7 @@ def run_all(symbols=SYMBOLS, tail_bars=None, out_dir=None):
 
     # aggregate counters across symbols
     agg = _aggregate_counters(all_counters)
-    summary = _build_summary(rows_df, agg, per_sym, t0, mem0)
+    summary = _build_summary(rows_df, agg, per_sym, t0, mem0, raw_load, precomp)
     rows_sha = _write_artifacts(rows_df, matrix_df, summary, agg, per_sym, out_dir)
     print(f"\n[DONE] {time.perf_counter()-t0:.1f}s rows={len(rows_df)} "
           f"sha={rows_sha[:12]} -> {out_dir}")
@@ -763,7 +769,8 @@ def _hist_median(hist, edges):
     return float(edges[idx])
 
 
-def _build_summary(rows_df, agg, per_sym, t0, mem0):
+def _build_summary(rows_df, agg, per_sym, t0, mem0, raw_load_count=0,
+                  precompute_count=0):
     s = dict(experiment="Oracle Constraint Robustness v1",
              task_id="FUTURE-ORACLE-R2.1-CORRECTNESS-CLOSURE",
              horizons=list(HORIZONS), n_symbols=len(per_sym),
@@ -773,26 +780,44 @@ def _build_summary(rows_df, agg, per_sym, t0, mem0):
              runtime_sec=round(time.perf_counter() - t0, 2),
              peak_rss_mb=round(
                  resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1048576, 1),
-             per_symbol_timing=per_sym)
-    # core joint-retention distribution (over rows)
-    jr = pd.to_numeric(rows_df["joint_retention"], errors="coerce").dropna()
-    s["joint_retention_distribution"] = dict(
-        n=int(len(jr)),
-        p10=round(float(jr.quantile(.1)), 4),
-        p25=round(float(jr.quantile(.25)), 4),
-        p50=round(float(jr.quantile(.5)), 4),
-        p75=round(float(jr.quantile(.75)), 4),
-        p90=round(float(jr.quantile(.9)), 4),
-        mean=round(float(jr.mean()), 4),
-        frac_full=round(float((jr >= 0.999).mean()), 4),
-        frac_above_0_8=round(float((jr >= 0.8).mean()), 4))
-    # joint retention fractions at user-specified thresholds
-    s["joint_retention_thresholds"] = dict(
-        ge_0_999=round(float((jr >= 0.999).mean()), 4),
-        ge_0_9=round(float((jr >= 0.9).mean()), 4),
-        ge_0_8=round(float((jr >= 0.8).mean()), 4),
-        ge_0_7=round(float((jr >= 0.7).mean()), 4),
-        ge_0_5=round(float((jr >= 0.5).mean()), 4))
+             per_symbol_timing=per_sym,
+             raw_load_count=int(raw_load_count),
+             precompute_count=int(precompute_count))
+    # Fix R2.1b: explicitly separate the all-row DIAGNOSTIC from the
+    # stable-cohort HEADLINE. The stable cohort only includes decisions whose
+    # baseline action is itself stable (Long/Short/Wait) across all three H.
+    def _jr_dist(jr):
+        if len(jr) == 0:
+            return None
+        return dict(
+            n=int(len(jr)),
+            p10=round(float(jr.quantile(.1)), 4),
+            p25=round(float(jr.quantile(.25)), 4),
+            p50=round(float(jr.quantile(.5)), 4),
+            p75=round(float(jr.quantile(.75)), 4),
+            p90=round(float(jr.quantile(.9)), 4),
+            mean=round(float(jr.mean()), 4),
+            frac_full=round(float((jr >= 0.999).mean()), 4),
+            frac_above_0_8=round(float((jr >= 0.8).mean()), 4))
+
+    def _jr_thr(jr):
+        if len(jr) == 0:
+            return None
+        return dict(
+            ge_0_999=round(float((jr >= 0.999).mean()), 4),
+            ge_0_9=round(float((jr >= 0.9).mean()), 4),
+            ge_0_8=round(float((jr >= 0.8).mean()), 4),
+            ge_0_7=round(float((jr >= 0.7).mean()), 4),
+            ge_0_5=round(float((jr >= 0.5).mean()), 4))
+
+    jr_all = pd.to_numeric(rows_df["joint_retention"], errors="coerce").dropna()
+    s["joint_retention_all_distribution"] = _jr_dist(jr_all)
+    s["joint_retention_all_thresholds"] = _jr_thr(jr_all)
+    jr_stable = pd.to_numeric(rows_df["joint_retention_stable"],
+                              errors="coerce").dropna()
+    s["joint_retention_stable_distribution"] = _jr_dist(jr_stable)
+    s["joint_retention_stable_thresholds"] = _jr_thr(jr_stable)
+    s["stable_cohort_n"] = int(len(jr_stable))
     # joint opposite flip / tie rate
     s["joint_opposite_flip_rate_mean"] = round(
         float(pd.to_numeric(rows_df["joint_opposite_flip_rate"],
@@ -803,31 +828,39 @@ def _build_summary(rows_df, agg, per_sym, t0, mem0):
     # strict robust counts
     sr = rows_df["strict_robust_action"].fillna("")
     s["strict_robust_counts"] = sr.value_counts().to_dict()
-    # ---- item 1: direction flip vs opportunity suppression (kept SEPARATE) ----
-    # trans[ti, hi, bci, cci]; Long=0, Short=1, Wait=2, Tie=3 (aggregated over syms)
-    tr = agg["trans"]
-    L, S, W, T = 0, 1, 2, 3
-    flip_LS = float(tr[:, :, L, S].sum())
-    flip_SL = float(tr[:, :, S, L].sum())
-    supp_L = float(tr[:, :, L, W].sum() + tr[:, :, L, T].sum())
-    supp_S = float(tr[:, :, S, W].sum() + tr[:, :, S, T].sum())
-    crea = float(tr[:, :, W, L].sum() + tr[:, :, W, S].sum())
-    cells_L = float(tr[:, :, L, :].sum()) or 1.0
-    cells_S = float(tr[:, :, S, :].sum()) or 1.0
-    cells_W = float(tr[:, :, W, :].sum()) or 1.0
-    s["direction_vs_suppression"] = dict(
-        baseline_Long_cells=int(cells_L),
-        baseline_Short_cells=int(cells_S),
-        Long_to_Short_count=int(flip_LS),
-        Short_to_Long_count=int(flip_SL),
-        Long_to_Short_rate=round(flip_LS / cells_L, 4),
-        Short_to_Long_rate=round(flip_SL / cells_S, 4),
-        Long_to_WaitTie_count=int(supp_L),
-        Short_to_WaitTie_count=int(supp_S),
-        Long_to_WaitTie_rate=round(supp_L / cells_L, 4),
-        Short_to_WaitTie_rate=round(supp_S / cells_S, 4),
-        Wait_to_Trade_count=int(crea),
-        Wait_to_Trade_rate=round(crea / cells_W, 4))
+    # Fix R2.1b: Core and Stress parameter regions MUST be reported SEPARATELY.
+    # The headline robustness question is the Core (reasonable) region; Stress
+    # only characterizes behaviour under extreme conditions.
+    core_tr = agg["trans"][:N_CORE]
+    stress_tr = agg["trans"][N_CORE:]
+
+    def _direction_vs_suppression(tr):
+        L, S, W, T = 0, 1, 2, 3
+        flip_LS = float(tr[:, :, L, S].sum())
+        flip_SL = float(tr[:, :, S, L].sum())
+        supp_L = float(tr[:, :, L, W].sum() + tr[:, :, L, T].sum())
+        supp_S = float(tr[:, :, S, W].sum() + tr[:, :, S, T].sum())
+        crea = float(tr[:, :, W, L].sum() + tr[:, :, W, S].sum())
+        cells_L = float(tr[:, :, L, :].sum()) or 1.0
+        cells_S = float(tr[:, :, S, :].sum()) or 1.0
+        cells_W = float(tr[:, :, W, :].sum()) or 1.0
+        return dict(
+            baseline_Long_cells=int(cells_L),
+            baseline_Short_cells=int(cells_S),
+            baseline_Wait_cells=int(cells_W),
+            Long_to_Short_count=int(flip_LS),
+            Short_to_Long_count=int(flip_SL),
+            Long_to_Short_rate=round(flip_LS / cells_L, 4),
+            Short_to_Long_rate=round(flip_SL / cells_S, 4),
+            Long_to_WaitTie_count=int(supp_L),
+            Short_to_WaitTie_count=int(supp_S),
+            Long_to_WaitTie_rate=round(supp_L / cells_L, 4),
+            Short_to_WaitTie_rate=round(supp_S / cells_S, 4),
+            Wait_to_Trade_count=int(crea),
+            Wait_to_Trade_rate=round(crea / cells_W, 4))
+
+    s["direction_vs_suppression_core"] = _direction_vs_suppression(core_tr)
+    s["direction_vs_suppression_stress"] = _direction_vs_suppression(stress_tr)
     # ---- item 2: baseline-trade retention distribution (stable Long / Short) --
     ret = {}
     for bsa, label in (("Long", "stable_Long"), ("Short", "stable_Short")):
@@ -936,6 +969,14 @@ def _one_factor(agg):
 
 
 def _sweep(agg, pts):
+    """One-factor sweep over CORE thetas, with CONDITIONAL denominators.
+
+    Fix R2.1b: rates are conditioned on the relevant baseline-action cells, NOT
+    all decision cells. Numerators/denominators are also returned for audit.
+      - flip   P(L<->S | baseline trade)        denom = baseline L + S cells
+      - supp   P(Wait/Tie | baseline trade)     denom = baseline L + S cells
+      - crea   P(L/S | baseline Wait)           denom = baseline Wait cells
+    """
     rows = []
     for (r, t, c) in pts:
         ti = None
@@ -944,31 +985,35 @@ def _sweep(agg, pts):
                 ti = k; break
         if ti is None:
             continue
-        # direction flip (Long<->Short) rate vs baseline, averaged over H,
-        # computed from transition tensor: baseline Long->Short + Short->Long
-        flip = 0.0; supp = 0.0; crea = 0.0; denom = 0
+        flip_num = 0.0; supp_num = 0.0; crea_num = 0.0
+        flip_den = 0.0; supp_den = 0.0; crea_den = 0.0
         for hi in range(3):
-            # transition[ti, hi, bci, cci]; Long=0,Short=1,Wait=2,Tie=3
+            # transition[ti, hi, bci, cci]; Long=0, Short=1, Wait=2, Tie=3
             tr = agg["trans"][ti, hi]
-            tot = tr.sum()
-            if tot == 0:
-                continue
-            # baseline Long (0) -> Short (1)
-            flip += tr[0, 1]
-            # baseline Short (1) -> Long (0)
-            flip += tr[1, 0]
-            # baseline L/S -> Wait/Tie
-            supp += tr[0, 2] + tr[0, 3] + tr[1, 2] + tr[1, 3]
-            # baseline Wait (2) -> L/S
-            crea += tr[2, 0] + tr[2, 1]
-            denom += tot
-        flip = flip / denom if denom else 0.0
-        supp = supp / denom if denom else 0.0
-        crea = crea / denom if denom else 0.0
+            base_L = float(tr[0, :].sum())   # baseline Long cells
+            base_S = float(tr[1, :].sum())   # baseline Short cells
+            base_W = float(tr[2, :].sum())   # baseline Wait cells
+            # direction flip (Long<->Short) vs baseline trade
+            flip_num += tr[0, 1] + tr[1, 0]
+            flip_den += base_L + base_S
+            # trade -> Wait/Tie suppression vs baseline trade
+            supp_num += tr[0, 2] + tr[0, 3] + tr[1, 2] + tr[1, 3]
+            supp_den += base_L + base_S
+            # Wait -> trade creation vs baseline Wait
+            crea_num += tr[2, 0] + tr[2, 1]
+            crea_den += base_W
+        flip = flip_num / flip_den if flip_den else 0.0
+        supp = supp_num / supp_den if supp_den else 0.0
+        crea = crea_num / crea_den if crea_den else 0.0
         rows.append(dict(lambda_r=r, lambda_t=t, friction_hurdle_atr=c,
                          opposite_flip_rate=round(flip, 4),
+                         opposite_flip_count=int(flip_num),
+                         baseline_trade_count=int(round(flip_den)),
                          trade_suppression_rate=round(supp, 4),
-                         trade_creation_rate=round(crea, 4)))
+                         trade_suppression_count=int(supp_num),
+                         trade_creation_rate=round(crea, 4),
+                         trade_creation_count=int(crea_num),
+                         baseline_wait_count=int(round(crea_den))))
     return rows
 
 
@@ -990,6 +1035,7 @@ def _write_artifacts(rows_df, matrix_df, summary, agg, per_sym, out_dir=OUT):
     for sym in per_sym.keys():
         g = rows_df[rows_df["symbol"] == sym]
         jr = pd.to_numeric(g["joint_retention"], errors="coerce").dropna()
+        jrs = pd.to_numeric(g["joint_retention_stable"], errors="coerce").dropna()
         jf = pd.to_numeric(g["joint_opposite_flip_rate"],
                            errors="coerce").dropna()
         jt = pd.to_numeric(g["joint_tie_rate"], errors="coerce").dropna()
@@ -1004,6 +1050,12 @@ def _write_artifacts(rows_df, matrix_df, summary, agg, per_sym, out_dir=OUT):
                                    if len(jr) else None),
             joint_retention_ge_0_8=(round(float((jr >= 0.8).mean()), 4)
                                    if len(jr) else None),
+            joint_retention_stable_mean=(round(float(jrs.mean()), 4)
+                                         if len(jrs) else None),
+            joint_retention_stable_ge_0_9=(round(float((jrs >= 0.9).mean()), 4)
+                                           if len(jrs) else None),
+            joint_retention_stable_ge_0_8=(round(float((jrs >= 0.8).mean()), 4)
+                                           if len(jrs) else None),
             joint_opposite_flip_mean=(round(float(jf.mean()), 4)
                                      if len(jf) else None),
             joint_tie_mean=(round(float(jt.mean()), 4) if len(jt) else None),
@@ -1078,6 +1130,8 @@ def _write_artifacts(rows_df, matrix_df, summary, agg, per_sym, out_dir=OUT):
         rows_sha256=rows_sha,
         rows_path=str(rows_path),
         n_decisions=int(len(rows_df)),
+        raw_load_count=summary.get("raw_load_count"),
+        precompute_count=summary.get("precompute_count"),
         grid=dict(n_core=N_CORE, n_stress=len(THETAS) - N_CORE,
                   total=len(THETAS),
                   core=[(r, t, c) for (r, t, c, g) in CORE],
@@ -1123,16 +1177,25 @@ ATR_t. We never feed ATR-normalized V back into the recursion.
 - runtime_sec = {summary['runtime_sec']}
 - peak_rss_mb = {summary['peak_rss_mb']}
 
-## 3. Headline robustness (user's three layers)
-- **Direction robustness** (Long<->Short direct flip):
+## 3. Headline robustness (Core region only)
+- **Direction robustness** (Long<->Short direct flip, Core grid):
   joint_opposite_flip_rate_mean = {summary['joint_opposite_flip_rate_mean']}
-- **Opportunity robustness** (trade -> Wait/Tie suppression): see
-  trade_suppression_rate in one_factor_sensitivity + parameter_summary.
+- **Opportunity robustness** (trade -> Wait/Tie suppression, Core): see
+  direction_vs_suppression_core + trade_suppression_rate in one_factor_sensitivity.
 - **Timing robustness** (action same but holding/exit sensitive):
   edge_ATR / value_ATR min-median-max per (theta, H) in rows + parameter_summary.
+- NOTE: Stress region (direction_vs_suppression_stress) is reported separately
+  and only characterizes extreme-condition behaviour, never the headline.
 
 ## 4. Joint retention distribution
-{summary['joint_retention_distribution']}
+Headline = **stable-cohort** joint retention (baseline action itself stable across
+H6/H12/H24; Ambiguous/Tie baselines excluded). All-row diagnostic retained.
+
+**Stable cohort** (n = {summary['stable_cohort_n']}):
+{summary['joint_retention_stable_distribution']}
+
+**All rows (diagnostic only, NOT the headline)**:
+{summary['joint_retention_all_distribution']}
 
 ## 5. Strict robust action counts
 {summary['strict_robust_counts']}
