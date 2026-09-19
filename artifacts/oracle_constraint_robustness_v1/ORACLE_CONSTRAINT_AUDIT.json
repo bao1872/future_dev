@@ -1,0 +1,192 @@
+{
+  "experiment": "Oracle Constraint Robustness v1",
+  "task_id": "FUTURE-ORACLE-R2-CONSTRAINT-ROBUSTNESS",
+  "rows_sha256": "170104e1edb02295ebf2493b34d63e0f54090761c24d2357acb2dfd968398148",
+  "rows_path": "artifacts/oracle_constraint_robustness_v1/oracle_constraint_rows.parquet",
+  "n_decisions": 505161,
+  "grid": {
+    "n_core": 27,
+    "n_stress": 7,
+    "total": 34,
+    "core": [
+      [
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.025
+      ],
+      [
+        0.0,
+        0.0,
+        0.05
+      ],
+      [
+        0.0,
+        0.005,
+        0.0
+      ],
+      [
+        0.0,
+        0.005,
+        0.025
+      ],
+      [
+        0.0,
+        0.005,
+        0.05
+      ],
+      [
+        0.0,
+        0.01,
+        0.0
+      ],
+      [
+        0.0,
+        0.01,
+        0.025
+      ],
+      [
+        0.0,
+        0.01,
+        0.05
+      ],
+      [
+        0.25,
+        0.0,
+        0.0
+      ],
+      [
+        0.25,
+        0.0,
+        0.025
+      ],
+      [
+        0.25,
+        0.0,
+        0.05
+      ],
+      [
+        0.25,
+        0.005,
+        0.0
+      ],
+      [
+        0.25,
+        0.005,
+        0.025
+      ],
+      [
+        0.25,
+        0.005,
+        0.05
+      ],
+      [
+        0.25,
+        0.01,
+        0.0
+      ],
+      [
+        0.25,
+        0.01,
+        0.025
+      ],
+      [
+        0.25,
+        0.01,
+        0.05
+      ],
+      [
+        0.5,
+        0.0,
+        0.0
+      ],
+      [
+        0.5,
+        0.0,
+        0.025
+      ],
+      [
+        0.5,
+        0.0,
+        0.05
+      ],
+      [
+        0.5,
+        0.005,
+        0.0
+      ],
+      [
+        0.5,
+        0.005,
+        0.025
+      ],
+      [
+        0.5,
+        0.005,
+        0.05
+      ],
+      [
+        0.5,
+        0.01,
+        0.0
+      ],
+      [
+        0.5,
+        0.01,
+        0.025
+      ],
+      [
+        0.5,
+        0.01,
+        0.05
+      ]
+    ],
+    "stress": [
+      [
+        1.0,
+        0.0,
+        0.0
+      ],
+      [
+        1.0,
+        0.02,
+        0.0
+      ],
+      [
+        1.0,
+        0.0,
+        0.1
+      ],
+      [
+        0.0,
+        0.02,
+        0.0
+      ],
+      [
+        0.0,
+        0.02,
+        0.1
+      ],
+      [
+        0.0,
+        0.0,
+        0.1
+      ],
+      [
+        1.0,
+        0.02,
+        0.1
+      ]
+    ]
+  },
+  "cost": {
+    "canonical_table_found": false,
+    "NET_PNL": "UNAVAILABLE_COST_METADATA",
+    "rule": "friction hurdle c*ATR_t is NOT a real fee; only gross price-point utility + risk/time/friction penalties",
+    "FRICTION_HURDLE_NOT_ACTUAL_TRANSACTION_COST": true
+  }
+}

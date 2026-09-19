@@ -1,0 +1,100 @@
+{
+  "experiment": "Oracle Constraint Robustness v1",
+  "task_id": "FUTURE-ORACLE-R2-CONSTRAINT-ROBUSTNESS",
+  "version": "1.0",
+  "base_commit": "1211e7117955d794a59e1df0d30849db02900db1",
+  "frozen": [
+    "H in {6,12,24}",
+    "decision_time",
+    "segment",
+    "entry",
+    "exit",
+    "discontinuity",
+    "tie semantics",
+    "label availability",
+    "ATR5 owner"
+  ],
+  "forbidden": [
+    "DTP",
+    "SR",
+    "Liquidity",
+    "15m/1H/4H",
+    "GBDT",
+    "MoE",
+    "PGM",
+    "real-but-unverified fee data"
+  ],
+  "utility": "U = R - lambda_R*MAE - c*ATR_t - lambda_T*ATR_t*k (price points; ATR only used at output as Q/ATR)",
+  "dp_rule": "Bellman in price points; NEVER normalize V by ATR before recursion. Penalties use decision-time ATR_t.",
+  "thetas_core": 27,
+  "thetas_stress": 7,
+  "total_thetas": 34,
+  "core_grid": {
+    "lambda_r": [
+      0.0,
+      0.25,
+      0.5
+    ],
+    "lambda_t": [
+      0.0,
+      0.005,
+      0.01
+    ],
+    "friction_hurdle_atr": [
+      0.0,
+      0.025,
+      0.05
+    ]
+  },
+  "stress_points": [
+    [
+      1.0,
+      0.0,
+      0.0
+    ],
+    [
+      1.0,
+      0.02,
+      0.0
+    ],
+    [
+      1.0,
+      0.0,
+      0.1
+    ],
+    [
+      0.0,
+      0.02,
+      0.0
+    ],
+    [
+      0.0,
+      0.02,
+      0.1
+    ],
+    [
+      0.0,
+      0.0,
+      0.1
+    ],
+    [
+      1.0,
+      0.02,
+      0.1
+    ]
+  ],
+  "friction_hurdle_note": "c*ATR_t is a FRICTION HURDLE, NOT actual transaction cost. FRICTION_HURDLE_NOT_ACTUAL_TRANSACTION_COST",
+  "one_load_per_symbol": true,
+  "batched_theta_eval": true,
+  "outputs": [
+    "oracle_constraint_rows.parquet",
+    "oracle_constraint_action_matrix.parquet",
+    "oracle_constraint_parameter_summary.csv",
+    "oracle_constraint_by_symbol.csv",
+    "oracle_constraint_by_month.csv",
+    "oracle_constraint_summary.json",
+    "ORACLE_CONSTRAINT_PROTOCOL.json",
+    "ORACLE_CONSTRAINT_AUDIT.json",
+    "oracle_constraint_report.md"
+  ]
+}
