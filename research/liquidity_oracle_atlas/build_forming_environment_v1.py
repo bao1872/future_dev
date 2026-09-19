@@ -131,7 +131,9 @@ class RunStats:
     production_pd_concat_count: int = 0
     production_full_history_recompute_count: int = 0
     runtime_sec: float = 0.0
-    peak_rss_mb: float = 0.0
+    # NOTE: this is a `tracemalloc` traced-allocation peak, NOT process RSS.
+    peak_tracemalloc_mb: float = 0.0
+    profile_memory_enabled: bool = False
 
 
 # --------------------------------------------------------------------------- #
@@ -273,7 +275,7 @@ class FormingEnvironmentBuilder:
         return self
 
     # ------------------------------------------------------------------- run
-    def run(self) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+    def run(self, profile_memory: bool = False) -> Tuple[pd.DataFrame, Dict[str, Any]]:
         if self.base is None:
             raise RuntimeError("call load_raw() first")
         n = self.n
@@ -300,7 +302,10 @@ class FormingEnvironmentBuilder:
             arr[f"{tf}_bucket_start"] = np.empty(n, dtype="datetime64[ns]")
             arr[f"{tf}_n_base_known"] = np.zeros(n, dtype=np.int64)
 
-        tracemalloc.start()
+        self.stats.profile_memory_enabled = bool(profile_memory)
+        self.stats.peak_tracemalloc_mb = 0.0
+        if profile_memory:
+            tracemalloc.start()
         t0 = time.perf_counter()
 
         for tf in tfs:
@@ -343,14 +348,22 @@ class FormingEnvironmentBuilder:
                 arr[f"{tf}_n_base_known"][i] = int(form["n_base"][i])
 
         self.stats.runtime_sec = time.perf_counter() - t0
-        _, peak = tracemalloc.get_traced_memory()
-        tracemalloc.stop()
-        self.stats.peak_rss_mb = peak / 1e6
+        if profile_memory:
+            _, peak = tracemalloc.get_traced_memory()
+            tracemalloc.stop()
+            self.stats.peak_tracemalloc_mb = peak / 1e6
 
+        # R3A frozen semantics: the decision instant is the 5m bar CLOSE
+        # C_t = T_t + 5min, where T_t is the 5m bar start. `self._time` is
+        # the bar START time, so decision_time must be start + 5min.
+        start_time = self._time.to_numpy()
         data = {
             "data_object": [self.symbol] * n,
             "decision_bar_index": np.arange(n),
-            "decision_time": self._time.to_numpy(),
+            "decision_bar_start_time": start_time,
+            "decision_time": start_time + np.timedelta64(5, "m"),
+            "segment": base["segment"].to_numpy(np.int64),
+            "trading_day": base["trading_day"].to_numpy(),
         }
         for col, a in arr.items():
             data[col] = a
@@ -374,7 +387,8 @@ class FormingEnvironmentBuilder:
                 self.stats.production_full_history_recompute_count
             ),
             "runtime_sec": self.stats.runtime_sec,
-            "peak_rss_mb": self.stats.peak_rss_mb,
+            "peak_tracemalloc_mb": self.stats.peak_tracemalloc_mb,
+            "profile_memory_enabled": self.stats.profile_memory_enabled,
         }
         return df, audit
 
