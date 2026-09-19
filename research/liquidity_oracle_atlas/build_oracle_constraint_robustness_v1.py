@@ -1,6 +1,6 @@
 """Oracle Constraint Robustness experiment (v1).
 
-FUTURE-ORACLE-R2-CONSTRAINT-ROBUSTNESS
+FUTURE-ORACLE-R2.1-CORRECTNESS-CLOSURE
 
 Purpose
 -------
@@ -111,6 +111,34 @@ def theta_id(r, t, c, grid):
     return f"r{r}_t{t}_c{c}_{grid}".replace(".", "p")
 
 
+def assert_numeric_parity(a, b, tol=1e-9):
+    """Fail-closed Q/V parity check.
+
+    Fix R2.1: a naively computed ``max(abs(A-B))`` returns NaN whenever either
+    array contains -inf cells, and ``NaN > tol`` is False -> a finite mismatch
+    could pass silently. This helper requires (1) identical finite masks,
+    (2) identical -inf masks, (3) allclose on the finite-finite cells only.
+    """
+    a = np.asarray(a, float)
+    b = np.asarray(b, float)
+    assert np.array_equal(np.isfinite(a), np.isfinite(b)), "finite mask mismatch"
+    assert np.array_equal(np.isneginf(a), np.isneginf(b)), "-inf mask mismatch"
+    m = np.isfinite(a) & np.isfinite(b)
+    assert np.allclose(a[m], b[m], atol=tol, rtol=0), "finite-values mismatch"
+
+
+def _parity_mismatch(a, b, tol=1e-9):
+    """Return 1 if a/b are not numerically identical (per assert_numeric_parity),
+    0 otherwise. Does not raise."""
+    a = np.asarray(a, float)
+    b = np.asarray(b, float)
+    if not (np.array_equal(np.isfinite(a), np.isfinite(b))
+            and np.array_equal(np.isneginf(a), np.isneginf(b))):
+        return 1
+    m = np.isfinite(a) & np.isfinite(b)
+    return 0 if np.allclose(a[m], b[m], atol=tol, rtol=0) else 1
+
+
 # ---------------------------------------------------------------------------
 # candidate-path precompute (ONE per symbol, price points only)
 # ---------------------------------------------------------------------------
@@ -176,13 +204,20 @@ def oracle_core_theta(cand, lam_r, lam_t, c, hmax=HMAX):
     QSa = np.maximum.accumulate(u_s, axis=1)
     QL = np.full((n, hmax + 1), NEG); QL[:, 1:] = QLa
     QS = np.full((n, hmax + 1), NEG); QS[:, 1:] = QSa
-    # earliest optimal holding (1-based k); for invalid -> 0
-    hold_l = (np.argmax(u_l, axis=1) + 1)
-    hold_s = (np.argmax(u_s, axis=1) + 1)
-    any_valid_l = np.any(cand["valid_exit"], axis=1)
-    any_valid_s = np.any(cand["valid_exit"], axis=1)
-    hold_l = np.where(any_valid_l, hold_l, 0)
-    hold_s = np.where(any_valid_s, hold_s, 0)
+    # H-specific optimal holding (1-based k), indexed by H in [1..hmax].
+    # Fix R2.1: the optimal exit must be argmax over k<=H, NOT the global
+    # argmax over all k<=hmax (which previously reused the HMAX optimum for
+    # every horizon). hold_l[:, H] is the best exit length within horizon H.
+    n = cand["n"]
+    hold_l = np.zeros((n, hmax + 1), dtype=np.int8)
+    hold_s = np.zeros((n, hmax + 1), dtype=np.int8)
+    for h in range(1, hmax + 1):
+        valid_l = np.any(cand["valid_exit"][:, :h], axis=1)
+        valid_s = np.any(cand["valid_exit"][:, :h], axis=1)
+        kl = np.argmax(u_l[:, :h], axis=1) + 1
+        ks = np.argmax(u_s[:, :h], axis=1) + 1
+        hold_l[:, h] = np.where(valid_l, kl, 0)
+        hold_s[:, h] = np.where(valid_s, ks, 0)
 
     Vflat = np.zeros((n + 1, hmax + 1))
     QW = np.zeros((n, hmax + 1))
@@ -228,8 +263,40 @@ def classify_batch(a_l, a_s, a_w, eps=EPS_TIE):
     return action, edge
 
 
-def actions_for_theta(core, hmax=HMAX):
-    """Return per-H actions / edges / best-values / holdings (H order 6,12,24)."""
+def _action_shares(ca, n_core):
+    """Explicit Long/Short/Wait/Tie shares + consensus from action codes.
+
+    Fix R2.1: previous code relied on implicit ``ca + 1`` bincount indices and
+    mislabelled Wait/Tie. Here every code is compared explicitly so the mapping
+    cannot drift.
+    """
+    sh_L = float(np.mean(ca == A_LONG))
+    sh_S = float(np.mean(ca == A_SHORT))
+    sh_W = float(np.mean(ca == A_WAIT))
+    sh_T = float(np.mean(ca == A_TIE))
+    counts = {
+        "Long": int((ca == A_LONG).sum()),
+        "Short": int((ca == A_SHORT).sum()),
+        "Wait": int((ca == A_WAIT).sum()),
+        "Tie": int((ca == A_TIE).sum()),
+    }
+    order = ["Long", "Short", "Wait", "Tie"]
+    cons = max(order, key=lambda k: counts[k])  # tie -> first (Long)
+    cons_code = {"Long": A_LONG, "Short": A_SHORT,
+                 "Wait": A_WAIT, "Tie": A_TIE}[cons]
+    cons_rate = counts[cons] / n_core
+    return sh_L, sh_S, sh_W, sh_T, cons, cons_code, cons_rate
+
+
+def actions_for_theta(core, cand=None, hmax=HMAX):
+    """Return per-H actions / edges / best-values / holdings (H order 6,12,24).
+
+    R2.1: holding is H-specific (argmax over k<=H), stored as
+    ``core["hold_l"][:, H]``. If ``cand`` is supplied, also returns the
+    ATR-normalized edge (``edge_atr``) and the raw price-point edge
+    (``edge_points``); otherwise those keys are omitted.
+    """
+    atr = cand["atr_t"] if cand is not None else None
     out = {}
     for H in HORIZONS:
         a_l = core["QL"][:, H]
@@ -237,8 +304,15 @@ def actions_for_theta(core, hmax=HMAX):
         a_w = core["QW"][:, H]
         act, edge = classify_batch(a_l, a_s, a_w)
         best_val = np.maximum.reduce([a_l, a_s, a_w])
-        out[H] = dict(action=act, edge=edge, best=best_val,
-                      hold_l=core["hold_l"], hold_s=core["hold_s"])
+        d = dict(action=act, edge=edge, best=best_val,
+                 hold_l=core["hold_l"][:, H], hold_s=core["hold_s"][:, H])
+        if atr is not None:
+            edge_atr = np.full_like(edge, np.nan, dtype=float)
+            with np.errstate(divide="ignore", invalid="ignore"):
+                np.divide(edge, atr, out=edge_atr, where=atr > 0)
+            d["edge_atr"] = edge_atr
+            d["edge_points"] = edge
+        out[H] = d
     return out
 
 
@@ -351,7 +425,7 @@ def evaluate_symbol(bars, cand, thetas=THETAS, hmax=HMAX, keep_idx=None):
     nv = len(vidx)
 
     # baseline (theta 0) actions / edges per H (from R2 theta 0 for consistency)
-    base = actions_for_theta(base_core)
+    base = actions_for_theta(base_core, cand)
     base_act = {H: base[H]["action"] for H in HORIZONS}
 
     # containers
@@ -366,12 +440,14 @@ def evaluate_symbol(bars, cand, thetas=THETAS, hmax=HMAX, keep_idx=None):
     # parameter-level counters (per theta x H)
     # action histogram [theta, H, 4]; transition vs baseline [theta,H,4,4];
     # edge histogram [theta,H,bins]; holding histogram [theta,H,24]
-    EBINS = 301
-    ELO, EHI = -5.0, 10.0
-    eedges = np.linspace(ELO, EHI, EBINS)
+    # Fix R2.1: the edge histogram is built from the ATR-normalized edge
+    # (dimensionless multiples of ATR), so the bins must live on that scale.
+    EBINS_ATR = 801
+    ELO_ATR, EHI_ATR = -100.0, 300.0
+    eedges_atr = np.linspace(ELO_ATR, EHI_ATR, EBINS_ATR)
     act_hist = np.zeros((len(thetas), 3, 4), dtype=np.int64)
     trans = np.zeros((len(thetas), 3, 4, 4), dtype=np.int64)
-    edge_hist = np.zeros((len(thetas), 3, EBINS - 1), dtype=np.int64)
+    edge_hist = np.zeros((len(thetas), 3, EBINS_ATR - 1), dtype=np.int64)
     hold_hist = np.zeros((len(thetas), 3, 24), dtype=np.int64)
 
     # by-symbol accumulation (counts) for by_symbol summary
@@ -383,10 +459,11 @@ def evaluate_symbol(bars, cand, thetas=THETAS, hmax=HMAX, keep_idx=None):
     for ti, th in enumerate(thetas):
         lam_r, lam_t, c, grid = th
         core = oracle_core_theta(cand, lam_r, lam_t, c)
-        aH = actions_for_theta(core)
+        aH = actions_for_theta(core, cand)
         is_core = ti < N_CORE
         for hi, H in enumerate(HORIZONS):
             act = aH[H]["action"]; edge = aH[H]["edge"]; best = aH[H]["best"]
+            edge_atr = aH[H]["edge_atr"]
             act_v = act[vidx]
             full_act[:, ti, hi] = act_v
             bact = base_act[H][vidx]
@@ -409,13 +486,14 @@ def evaluate_symbol(bars, cand, thetas=THETAS, hmax=HMAX, keep_idx=None):
                 core_hold_l[:, ti, hi] = aH[H]["hold_l"][vidx]
                 core_hold_s[:, ti, hi] = aH[H]["hold_s"][vidx]
             # edge / value histograms (only for valid finite edges)
-            emask = np.isfinite(edge[vidx])
-            ev = np.clip(edge[vidx][emask], ELO, EHI)
+            # edge_ATR = ATR-normalized edge (Fix R2.1); used for parameter median
+            emask = np.isfinite(edge_atr[vidx])
+            ev = np.clip(edge_atr[vidx][emask], ELO_ATR, EHI_ATR)
             if len(ev):
-                eh = np.histogram(ev, bins=eedges)[0]
+                eh = np.histogram(ev, bins=eedges_atr)[0]
                 edge_hist[ti, hi] += eh.astype(np.int64)
             if is_core:
-                core_edge[:, ti, hi] = edge[vidx].astype(np.float32)
+                core_edge[:, ti, hi] = edge_atr[vidx].astype(np.float32)
                 core_val[:, ti, hi] = (best[vidx] / np.where(
                     atr[vidx] > 0, atr[vidx], np.nan)).astype(np.float32)
             # holding histogram for trade actions
@@ -472,16 +550,8 @@ def evaluate_symbol(bars, cand, thetas=THETAS, hmax=HMAX, keep_idx=None):
             ca = core_act[j, :, hi]            # 27 codes
             ce = core_edge[j, :, hi]           # 27 edge_ATR
             cv = core_val[j, :, hi]            # 27 value_ATR
-            counts = np.bincount(ca + 1, minlength=5)  # codes -1..2 -> 0..4
-            # mapping: -1->0,0->1,1->2,2->3
-            sh_L = counts[2] / N_CORE
-            sh_S = counts[1] / N_CORE
-            sh_W = counts[3] / N_CORE
-            sh_T = counts[4] / N_CORE
-            cons = int(np.argmax(counts))
-            cons_code = (1 if cons == 2 else -1 if cons == 0 else
-                         0 if cons == 3 else 2)
-            cons_rate = counts[cons] / N_CORE
+            sh_L, sh_S, sh_W, sh_T, cons, cons_code, cons_rate = _action_shares(
+                ca, N_CORE)
             bact = int(base_act[H][t])
             breten = float((ca == bact).mean())
             opp_rate = (float((bact == A_LONG) and (ca == A_SHORT).mean()
@@ -577,9 +647,9 @@ def evaluate_symbol(bars, cand, thetas=THETAS, hmax=HMAX, keep_idx=None):
     counters = dict(act_hist=act_hist, trans=trans, edge_hist=edge_hist,
                     hold_hist=hold_hist, sym_act=sym_act,
                     sym_flip=sym_flip, sym_supp=sym_supp, sym_crea=sym_crea,
-                    eedges=eedges, n_valid=int(nv))
+                    eedges=eedges_atr, n_valid=int(nv))
     # full_act is already in valid-decision space (axis0 == nv == len(vidx)).
-    return rows, full_act, counters, nv
+    return rows, full_act, counters, nv, vidx
 
 
 # ---------------------------------------------------------------------------
@@ -593,7 +663,24 @@ def _sha256(path):
     return h.hexdigest()
 
 
-def run_all(symbols=SYMBOLS, tail_bars=None):
+def _assert_matrix_key_alignment(rows_df, matrix_df):
+    """Fail-closed: every (symbol, decision_bar_index, decision_time) key in the
+    row-level table must appear exactly once in the action matrix and vice versa.
+    R2.1 fixes the previous bug where the matrix key was np.arange(nv) and could
+    silently misalign whenever valid decisions are non-contiguous.
+    """
+    key = ["symbol", "decision_bar_index", "decision_time"]
+    rk = rows_df[key]
+    mk = matrix_df[key]
+    assert not rk.duplicated().any(), "duplicate row-level keys"
+    assert not mk.duplicated().any(), "duplicate matrix keys"
+    merged = rk.merge(mk, on=key, how="outer", indicator=True)
+    bad = int((merged["_merge"] != "both").sum())
+    assert bad == 0, f"{bad} key(s) missing/extra between rows and matrix"
+
+
+def run_all(symbols=SYMBOLS, tail_bars=None, out_dir=None):
+    out_dir = Path(out_dir) if out_dir else OUT
     t0 = time.perf_counter()
     mem0 = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     rows_all = []
@@ -615,13 +702,14 @@ def run_all(symbols=SYMBOLS, tail_bars=None):
             bars["n"] = keep
         cand = precompute_candidate_paths(bars)
         precomp += 1
-        rows, mat, counters, nv = evaluate_symbol(bars, cand)
+        rows, mat, counters, nv, vidx = evaluate_symbol(bars, cand)
         per_sym[sym] = dict(n=int(nv),
                              sec=round(time.perf_counter() - bt, 2))
         rows_all.append(pd.DataFrame(rows))
         mdf = pd.DataFrame({
             "symbol": sym,
-            "decision_bar_index": np.arange(nv),
+            "decision_bar_index": vidx,
+            "decision_time": pd.to_datetime(bars["decision_time"][vidx]),
         })
         # matrix: columns per theta (H6/H12/H24 action codes)
         cols = {}
@@ -638,13 +726,14 @@ def run_all(symbols=SYMBOLS, tail_bars=None):
 
     rows_df = pd.concat(rows_all, ignore_index=True)
     matrix_df = pd.concat(matrix_frames, ignore_index=True)
+    _assert_matrix_key_alignment(rows_df, matrix_df)
 
     # aggregate counters across symbols
     agg = _aggregate_counters(all_counters)
     summary = _build_summary(rows_df, agg, per_sym, t0, mem0)
-    rows_sha = _write_artifacts(rows_df, matrix_df, summary, agg, per_sym)
+    rows_sha = _write_artifacts(rows_df, matrix_df, summary, agg, per_sym, out_dir)
     print(f"\n[DONE] {time.perf_counter()-t0:.1f}s rows={len(rows_df)} "
-          f"sha={rows_sha[:12]} -> {OUT}")
+          f"sha={rows_sha[:12]} -> {out_dir}")
     return dict(rows=rows_df, summary=summary, rows_sha=rows_sha)
 
 
@@ -676,7 +765,7 @@ def _hist_median(hist, edges):
 
 def _build_summary(rows_df, agg, per_sym, t0, mem0):
     s = dict(experiment="Oracle Constraint Robustness v1",
-             task_id="FUTURE-ORACLE-R2-CONSTRAINT-ROBUSTNESS",
+             task_id="FUTURE-ORACLE-R2.1-CORRECTNESS-CLOSURE",
              horizons=list(HORIZONS), n_symbols=len(per_sym),
              n_core_thetas=N_CORE, n_stress_thetas=len(THETAS) - N_CORE,
              n_thetas=len(THETAS),
@@ -787,7 +876,7 @@ def _build_summary(rows_df, agg, per_sym, t0, mem0):
 
 
 def _parameter_table(agg):
-    act_hist = agg["act_hist"]; nH = 3
+    act_hist = agg["act_hist"]; trans = agg["trans"]; nH = 3
     tbl = []
     for ti, th in enumerate(THETAS):
         r, t, c, grid = th
@@ -806,12 +895,18 @@ def _parameter_table(agg):
         if ti == BASELINE_IDX:
             row["baseline_action_agreement"] = 1.0
         else:
-            # agreement of this theta's action with baseline theta's action,
-            # derived from transition tensor sums
-            agree = 0.0
+            # Agreement = fraction of (decision, H) cells where this theta's
+            # action equals the baseline theta's action. Derived from the
+            # transition tensor: trace(T_{theta,H}) / sum(T_{theta,H}) averaged
+            # over H (== #matches / (N*3)). Fix R2.1: previously always None.
+            num = 0.0
+            den = 0.0
             for hi in range(nH):
-                agree += float(act_hist[ti, hi].sum())
-            row["baseline_action_agreement"] = None
+                tr = trans[ti, hi]
+                num += float(np.trace(tr))
+                den += float(tr.sum())
+            row["baseline_action_agreement"] = (
+                round(num / den, 6) if den > 0 else None)
         # median edge_ATR from histogram
         meds = [_hist_median(agg["edge_hist"][ti, hi], agg["eedges"])
                 for hi in range(nH)]
@@ -877,23 +972,51 @@ def _sweep(agg, pts):
     return rows
 
 
-def _write_artifacts(rows_df, matrix_df, summary, agg, per_sym):
-    rows_path = OUT / "oracle_constraint_rows.parquet"
+def _write_artifacts(rows_df, matrix_df, summary, agg, per_sym, out_dir=OUT):
+    rows_path = out_dir / "oracle_constraint_rows.parquet"
     rows_df.to_parquet(rows_path, index=False)
     rows_sha = _sha256(rows_path)
 
-    matrix_path = OUT / "oracle_constraint_action_matrix.parquet"
+    matrix_path = out_dir / "oracle_constraint_action_matrix.parquet"
     matrix_df.to_parquet(matrix_path, index=False)
 
     # parameter summary csv (flattened)
     psum = summary["parameter_summary"]
-    pd.DataFrame(psum).to_csv(OUT / "oracle_constraint_parameter_summary.csv",
+    pd.DataFrame(psum).to_csv(out_dir / "oracle_constraint_parameter_summary.csv",
                               index=False)
-    # by symbol
+    # by symbol: robustness aggregation directly from the row-level table
+    # (no DP re-run). Fix R2.1: previously only a runtime table.
     by_sym = []
-    for sym, d in per_sym.items():
-        by_sym.append(dict(symbol=sym, n_decisions=d["n"], sec=d["sec"]))
-    pd.DataFrame(by_sym).to_csv(OUT / "oracle_constraint_by_symbol.csv",
+    for sym in per_sym.keys():
+        g = rows_df[rows_df["symbol"] == sym]
+        jr = pd.to_numeric(g["joint_retention"], errors="coerce").dropna()
+        jf = pd.to_numeric(g["joint_opposite_flip_rate"],
+                           errors="coerce").dropna()
+        jt = pd.to_numeric(g["joint_tie_rate"], errors="coerce").dropna()
+        sr = g["strict_robust_action"].fillna("")
+        bsa = g["baseline_stable_action"].fillna("")
+        by_sym.append(dict(
+            symbol=sym,
+            n_decisions=int(len(g)),
+            sec=per_sym[sym]["sec"],
+            joint_retention_mean=(round(float(jr.mean()), 4) if len(jr) else None),
+            joint_retention_ge_0_9=(round(float((jr >= 0.9).mean()), 4)
+                                   if len(jr) else None),
+            joint_retention_ge_0_8=(round(float((jr >= 0.8).mean()), 4)
+                                   if len(jr) else None),
+            joint_opposite_flip_mean=(round(float(jf.mean()), 4)
+                                     if len(jf) else None),
+            joint_tie_mean=(round(float(jt.mean()), 4) if len(jt) else None),
+            strict_Long_n=int((sr == "Long").sum()),
+            strict_Short_n=int((sr == "Short").sum()),
+            strict_Wait_n=int((sr == "Wait").sum()),
+            strict_Tie_n=int((sr == "Tie").sum()),
+            strict_nonrobust_n=int((sr == "").sum()),
+            baseline_stable_Long_n=int((bsa == "Long").sum()),
+            baseline_stable_Short_n=int((bsa == "Short").sum()),
+            baseline_stable_Wait_n=int((bsa == "Wait").sum()),
+        ))
+    pd.DataFrame(by_sym).to_csv(out_dir / "oracle_constraint_by_symbol.csv",
                                 index=False)
     # by month (calendar month of decision_time)
     blk = pd.to_datetime(rows_df["decision_time"]).dt.strftime("%Y-%m")
@@ -906,17 +1029,17 @@ def _write_artifacts(rows_df, matrix_df, summary, agg, per_sym):
                                  float(g["joint_opposite_flip_rate"].mean()), 4),
                              joint_tie_mean=round(
                                  float(g["joint_tie_rate"].mean()), 4)))
-    pd.DataFrame(by_month).to_csv(OUT / "oracle_constraint_by_month.csv",
+    pd.DataFrame(by_month).to_csv(out_dir / "oracle_constraint_by_month.csv",
                                   index=False)
 
-    json.dump(summary, open(OUT / "oracle_constraint_summary.json", "w"),
+    json.dump(summary, open(out_dir / "oracle_constraint_summary.json", "w"),
               indent=2, default=str)
 
     protocol = dict(
         experiment="Oracle Constraint Robustness v1",
-        task_id="FUTURE-ORACLE-R2-CONSTRAINT-ROBUSTNESS",
+        task_id="FUTURE-ORACLE-R2.1-CORRECTNESS-CLOSURE",
         version="1.0",
-        base_commit="1211e7117955d794a59e1df0d30849db02900db1",
+        base_commit="0bee4029a40a8985f1be6da7431d2edeb0109dd6",
         frozen=["H in {6,12,24}", "decision_time", "segment", "entry", "exit",
                 "discontinuity", "tie semantics", "label availability",
                 "ATR5 owner"],
@@ -946,12 +1069,12 @@ def _write_artifacts(rows_df, matrix_df, summary, agg, per_sym):
                  "ORACLE_CONSTRAINT_AUDIT.json",
                  "oracle_constraint_report.md"],
     )
-    json.dump(protocol, open(OUT / "ORACLE_CONSTRAINT_PROTOCOL.json", "w"),
+    json.dump(protocol, open(out_dir / "ORACLE_CONSTRAINT_PROTOCOL.json", "w"),
               indent=2, default=str)
 
     audit = dict(
         experiment="Oracle Constraint Robustness v1",
-        task_id="FUTURE-ORACLE-R2-CONSTRAINT-ROBUSTNESS",
+        task_id="FUTURE-ORACLE-R2.1-CORRECTNESS-CLOSURE",
         rows_sha256=rows_sha,
         rows_path=str(rows_path),
         n_decisions=int(len(rows_df)),
@@ -967,20 +1090,20 @@ def _write_artifacts(rows_df, matrix_df, summary, agg, per_sym):
             FRICTION_HURDLE_NOT_ACTUAL_TRANSACTION_COST=True,
         ),
     )
-    json.dump(audit, open(OUT / "ORACLE_CONSTRAINT_AUDIT.json", "w"),
+    json.dump(audit, open(out_dir / "ORACLE_CONSTRAINT_AUDIT.json", "w"),
               indent=2, default=str)
 
-    _write_report(rows_df, summary, protocol, audit)
+    _write_report(rows_df, summary, protocol, audit, out_dir)
     return rows_sha
 
 
-def _write_report(rows_df, summary, protocol, audit):
-    md = f"""# Oracle Constraint Robustness v1 (R2)
+def _write_report(rows_df, summary, protocol, audit, out_dir=OUT):
+    md = f"""# Oracle Constraint Robustness v1 (R2.1)
 
 > **Status**: `PROVISIONAL_PENDING_USER_AUDIT`. This is a SENSITIVITY /
 > ROBUSTNESS surface, not parameter tuning. No "best lambda" is selected.
 
-**Task**: `FUTURE-ORACLE-R2-CONSTRAINT-ROBUSTNESS`
+**Task**: `FUTURE-ORACLE-R2.1-CORRECTNESS-CLOSURE`
 **Base**: {protocol['base_commit']} (R1.1)
 **Horizons**: {list(HORIZONS)}
 **Grid**: {summary['n_core_thetas']} core + {summary['n_stress_thetas']} stress
@@ -1024,7 +1147,7 @@ ATR_t. We never feed ATR-normalized V back into the recursion.
 {audit['cost']}
 ```
 """
-    open(OUT / "oracle_constraint_report.md", "w",
+    open(out_dir / "oracle_constraint_report.md", "w",
          encoding="utf-8-sig").write(md)
 
 

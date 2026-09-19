@@ -25,6 +25,8 @@ from research.liquidity_oracle_atlas.build_oracle_constraint_robustness_v1 impor
     precompute_candidate_paths, brute_force_oracle_r2,
     build_bars, THETAS, CORE, STRESS_POINTS, N_CORE, NEG,
     A_LONG, A_SHORT, A_WAIT, A_TIE,
+    theta_id, _action_shares, assert_numeric_parity, _parity_mismatch,
+    evaluate_symbol, HORIZONS, run_all, _assert_matrix_key_alignment,
 )
 
 TOL = 1e-9
@@ -95,9 +97,10 @@ def _parity(bars, tag):
     core1 = r1_oracle_core(bars, horizons=HORIZONS, hmax=HMAX)
     cand = precompute_candidate_paths(bars)
     core2 = oracle_core_theta(cand, 0.0, 0.0, 0.0)
-    qm = int(np.abs(core1["ql"] - core2["QL"]).max() > TOL)
-    sm = int(np.abs(core1["qs"] - core2["QS"]).max() > TOL)
-    vm = int(np.abs(core1["Vflat"] - core2["Vflat"]).max() > TOL)
+    # Fix R2.1: fail-closed numeric parity (handles -inf cells correctly)
+    qm = _parity_mismatch(core1["ql"], core2["QL"])
+    sm = _parity_mismatch(core1["qs"], core2["QS"])
+    vm = _parity_mismatch(core1["Vflat"], core2["Vflat"])
     a1 = r1_actions(bars)
     a2 = r2_theta0_actions(bars)
     am = int((a1 != a2).any())
@@ -207,8 +210,8 @@ def test_t0_wait_time_prefers_earlier():
     c0 = oracle_core_theta(cand, 0.0, 0.0, 0.0)
     cT = oracle_core_theta(cand, 0.0, 0.010, 0.0)
     # chosen holding at decision t=0 must be the earlier exit (k=2)
-    assert c0["hold_l"][0] == 2, f"baseline holding must be 2, got {c0['hold_l'][0]}"
-    assert cT["hold_l"][0] == 2, f"time penalty must keep earlier exit, got {cT['hold_l'][0]}"
+    assert c0["hold_l"][0, 6] == 2, f"baseline holding must be 2, got {c0['hold_l'][0, 6]}"
+    assert cT["hold_l"][0, 6] == 2, f"time penalty must keep earlier exit, got {cT['hold_l'][0, 6]}"
     # raw per-exit utilities confirm the later exit is strictly penalized
     u2 = 30.0 - 0.010 * 10.0 * 2
     u10 = 30.0 - 0.010 * 10.0 * 10
@@ -363,7 +366,7 @@ def test_t1_real_ag_all_thetas():
     bars["decision_time"] = bars["decision_time"][-keep:]
     bars["n"] = keep
     cand = precompute_candidate_paths(bars)
-    rows, mat, counters, nv = evaluate_symbol(bars, cand)
+    rows, mat, counters, nv, vidx = evaluate_symbol(bars, cand)
     assert nv > 0
     assert mat.shape == (nv, len(THETAS), 3)
     df = pd.DataFrame(rows)
@@ -383,6 +386,245 @@ def test_t1_real_ag_all_thetas():
     assert counters["act_hist"].shape == (len(THETAS), 3, 4)
 
 
+# ---- R2.1 Fix 1: H-specific optimal holding -------------------------------
+def test_t0_h_specific_holding():
+    # Exits so the optimal LONG holding differs by horizon:
+    #   H=6  -> peak at k=3 (index 4); H=12 -> k=9 (index 10);
+    #   H=24 -> k=20 (index 21).
+    n = 30
+    o = np.ones(n) * 100.0
+    o[4] = 130.0    # k=3
+    o[10] = 140.0   # k=9
+    o[21] = 150.0   # k=20
+    bars = make_bars(o)               # entry t=0 -> e=1, exit = e+k
+    cand = precompute_candidate_paths(bars)
+    core = oracle_core_theta(cand, 0.0, 0.0, 0.0)
+    hl = core["hold_l"]
+    assert hl[0, 6] == 3, f"H6 optimal holding must be 3, got {hl[0, 6]}"
+    assert hl[0, 12] == 9, f"H12 optimal holding must be 9, got {hl[0, 12]}"
+    assert hl[0, 24] == 20, f"H24 optimal holding must be 20, got {hl[0, 24]}"
+    # the previous bug applied the HMAX optimum to every horizon
+    assert hl[0, 6] != hl[0, 24], "H6 and H24 holdings must differ"
+
+
+# ---- R2.1 Fix 2: edge_ATR is ATR-normalized (scale invariant) -------------
+def test_t0_edge_atr_scale_invariance():
+    rng = np.random.default_rng(99)
+    o = np.cumsum(rng.normal(0, 2, size=40)) + 500
+    bars = make_bars(o)
+    cand = precompute_candidate_paths(bars)
+    bars_s = make_bars(o * 3.7)      # scales prices AND atr by f=3.7
+    cand_s = precompute_candidate_paths(bars_s)
+    core = oracle_core_theta(cand, 0.0, 0.0, 0.0)
+    core_s = oracle_core_theta(cand_s, 0.0, 0.0, 0.0)
+    aH = actions_for_theta(core, cand)
+    aH_s = actions_for_theta(core_s, cand_s)
+    for H in HORIZONS:
+        ep = aH[H]["edge_points"]; ep_s = aH_s[H]["edge_points"]
+        ea = aH[H]["edge_atr"]; ea_s = aH_s[H]["edge_atr"]
+        m = np.isfinite(ep) & np.isfinite(ep_s) & np.isfinite(ea) & np.isfinite(ea_s)
+        assert m.any(), f"no finite edge for H={H}"
+        ratio = ep_s[m] / ep[m]
+        assert np.allclose(ratio, 3.7, rtol=1e-3), f"edge_points scale broke: {ratio}"
+        assert np.allclose(ea_s[m], ea[m], rtol=1e-6), "edge_ATR must be scale-invariant"
+
+
+# ---- R2.1 Fix 3: explicit Wait/Tie share mapping -------------------------
+def test_t0_wait_tie_share_explicit():
+    ca = np.array([A_LONG] * 10 + [A_SHORT] * 5 + [A_WAIT] * 8 + [A_TIE] * 4,
+                  dtype=np.int8)
+    sh_L, sh_S, sh_W, sh_T, cons, cons_code, cons_rate = _action_shares(ca, 27)
+    assert sh_L == 10 / 27, sh_L
+    assert sh_S == 5 / 27, sh_S
+    assert sh_W == 8 / 27, sh_W
+    assert sh_T == 4 / 27, sh_T
+    assert cons == "Long" and cons_code == A_LONG
+    assert abs(cons_rate - 10 / 27) < 1e-12
+
+
+# ---- R2.1 Fix 4: action-matrix key alignment -----------------------------
+def test_t0_action_matrix_key_alignment():
+    bars = build_bars("AG")
+    keep = min(800, bars["n"])
+    for k in ("o", "h", "l", "c", "disc", "atr5"):
+        bars[k] = bars[k][-keep:]
+    bars["t"] = bars["t"][-keep:]
+    bars["decision_time"] = bars["decision_time"][-keep:]
+    bars["n"] = keep
+    cand = precompute_candidate_paths(bars)
+    rows, mat, counters, nv, vidx = evaluate_symbol(bars, cand)
+    assert nv == len(vidx)
+    # matrix key must be the REAL vidx, not np.arange(nv)
+    mdf = pd.DataFrame({
+        "symbol": "AG",
+        "decision_bar_index": vidx,
+        "decision_time": pd.to_datetime(bars["decision_time"][vidx]),
+    })
+    cols = {}
+    for ti, th in enumerate(THETAS):
+        tid = theta_id(*th)
+        cols[f"{tid}_H6"] = mat[:, ti, 0]
+        cols[f"{tid}_H12"] = mat[:, ti, 1]
+        cols[f"{tid}_H24"] = mat[:, ti, 2]
+    mdf = pd.concat([mdf, pd.DataFrame(cols)], axis=1)
+    rdf = pd.DataFrame(rows)
+    # 1:1, no missing/extra
+    assert list(mdf["decision_bar_index"]) == list(rdf["decision_bar_index"])
+    merged = rdf.merge(mdf, on=["symbol", "decision_bar_index", "decision_time"],
+                       how="outer", indicator=True)
+    assert (merged["_merge"] == "both").all(), \
+        f"key alignment broken: {merged['_merge'].value_counts().to_dict()}"
+
+
+# ---- R2.1 Fix 5: parity gate must actually fail on mismatch --------------
+def test_t0_parity_negative_control():
+    bars = make_bars(np.cumsum(np.random.default_rng(1).normal(0, 1, 40)) + 100)
+    cand = precompute_candidate_paths(bars)
+    core = oracle_core_theta(cand, 0.0, 0.0, 0.0)
+    # inject a finite Q mismatch
+    bad = core["QL"].copy()
+    fin = np.argwhere(np.isfinite(bad))
+    r, c = fin[0]
+    bad[r, c] += 0.01
+    raised = False
+    try:
+        assert_numeric_parity(core["QL"], bad)
+    except AssertionError:
+        raised = True
+    assert raised, "parity helper must fail on finite mismatch"
+    # inject a -inf/finite mask mismatch
+    bad2 = core["QL"].copy()
+    fin2 = np.argwhere(np.isfinite(core["QL"]))
+    r2, c2 = fin2[0]
+    bad2[r2, c2] = NEG
+    raised2 = False
+    try:
+        assert_numeric_parity(core["QL"], bad2)
+    except AssertionError:
+        raised2 = True
+    assert raised2, "parity helper must fail on -inf mask mismatch"
+
+
+# ---- R2.1 Phase C: T1.5 small-sample end-to-end gate -----------------------
+def test_t1p5_small_end_to_end():
+    """Full engineering chain on AG + RB (tail 2000), NOT for research results.
+
+    Validates candidate-path -> DP -> robustness aggregation -> row artifacts ->
+    action matrix -> parameter summary -> by-symbol -> by-month -> audit/report,
+    plus the corrected holding / edge_ATR / Wait-Tie mapping / key alignment.
+    Writes only to a temp dir (never overwrites the real R2 artifacts).
+    """
+    import tempfile
+    from pathlib import Path as _P
+
+    tmp = _P(tempfile.mkdtemp())
+    res = run_all(symbols=["AG", "RB"], tail_bars=2000, out_dir=tmp)
+    rows_df = res["rows"]
+    summary = res["summary"]
+
+    # 1) all artifacts written to the (temp) out_dir
+    req = ["oracle_constraint_rows.parquet",
+           "oracle_constraint_action_matrix.parquet",
+           "oracle_constraint_parameter_summary.csv",
+           "oracle_constraint_by_symbol.csv",
+           "oracle_constraint_by_month.csv",
+           "oracle_constraint_summary.json",
+           "ORACLE_CONSTRAINT_PROTOCOL.json",
+           "ORACLE_CONSTRAINT_AUDIT.json",
+           "oracle_constraint_report.md"]
+    for f in req:
+        assert (tmp / f).exists(), f"missing artifact: {f}"
+
+    # 2) key alignment: rows vs matrix (re-read from parquet), fail-closed
+    matrix_df = pd.read_parquet(tmp / "oracle_constraint_action_matrix.parquet")
+    assert len(rows_df) == len(matrix_df)
+    _assert_matrix_key_alignment(rows_df, matrix_df)
+    key = ["symbol", "decision_bar_index", "decision_time"]
+    assert not rows_df[key].duplicated().any(), "duplicate row keys"
+    assert not matrix_df[key].duplicated().any(), "duplicate matrix keys"
+
+    # 3) decision_bar_index uses the REAL vidx, not np.arange(nv).
+    #    Prove it deterministically: force a middle discontinuity so vidx gains a
+    #    real internal gap; the buggy arange(nv) key would then diverge.
+    bars = build_bars("AG")
+    keep = min(2000, bars["n"])
+    for k in ("o", "h", "l", "c", "disc", "seg", "atr5"):
+        bars[k] = bars[k][-keep:]
+    bars["t"] = bars["t"][-keep:]
+    bars["decision_time"] = bars["decision_time"][-keep:]
+    bars["n"] = keep
+    cand = precompute_candidate_paths(bars)
+    _, _, _, _, vidx0 = evaluate_symbol(bars, cand)
+    bars["disc"][keep // 2] = True          # force a middle discontinuity
+    cand2 = precompute_candidate_paths(bars)
+    _, _, _, _, vidx1 = evaluate_symbol(bars, cand2)
+    assert not np.array_equal(vidx1, vidx0), \
+        "forced discontinuity did not change the valid-decision set"
+    assert not np.array_equal(vidx1, np.arange(len(vidx1))), \
+        "forced middle discontinuity did not create a gap in vidx"
+    # production builds the matrix key from exactly this vidx; the old bug used
+    # arange(nv), which would NOT equal vidx1 -> the regression would be caught.
+    buggy_key = np.arange(len(vidx1))
+    assert not np.array_equal(buggy_key, vidx1), \
+        "buggy arange key would equal real vidx (test cannot distinguish bug)"
+
+    # 4) per-H holding <= horizon, baseline + a stress theta
+    for sym in ["AG", "RB"]:
+        bars = build_bars(sym)
+        keep = min(2000, bars["n"])
+        for k in ("o", "h", "l", "c", "disc", "seg", "atr5"):
+            bars[k] = bars[k][-keep:]
+        bars["t"] = bars["t"][-keep:]
+        bars["decision_time"] = bars["decision_time"][-keep:]
+        bars["n"] = keep
+        cand = precompute_candidate_paths(bars)
+        for (r, t, c) in [(0.0, 0.0, 0.0), (0.5, 0.5, 1.0)]:
+            core = oracle_core_theta(cand, r, t, c)
+            for H in HORIZONS:
+                assert (core["hold_l"][:, H] <= H).all(), \
+                    f"{sym} hold_l>H at H={H}"
+                assert (core["hold_s"][:, H] <= H).all(), \
+                    f"{sym} hold_s>H at H={H}"
+
+    # 5) edge_ATR is ATR-normalized (finite, modest magnitude => not raw points)
+    ptbl = summary["parameter_summary"]
+    for r in ptbl:
+        for H in HORIZONS:
+            v = r[f"H{H}_median_edge_ATR"]
+            assert v is not None, \
+                f"edge_ATR median None for {r['theta_id']} H{H}"
+            assert abs(v) < 500, \
+                f"edge_ATR looks un-normalized (raw price points?): {v}"
+
+    # 6) baseline_action_agreement: baseline==1.0, others filled
+    #    baseline is THETAS[0] == CORE[0] == (0,0,0,grid)
+    base = ptbl[0]
+    assert base["baseline_action_agreement"] == 1.0
+    others = [r["baseline_action_agreement"] for r in ptbl[1:]]
+    assert all(a is not None for a in others), \
+        "non-baseline baseline_action_agreement must be filled"
+
+    # 7) Wait/Tie explicit mapping: H6 pct sums ~100, non-negative
+    for r in ptbl:
+        s = (r["H6_Long_pct"] + r["H6_Short_pct"]
+             + r["H6_Wait_pct"] + r["H6_Tie_pct"])
+        assert abs(s - 100.0) < 1.0, f"H6 pct sum off: {s}"
+        assert r["H6_Wait_pct"] >= 0 and r["H6_Tie_pct"] >= 0
+
+    # 8) by_symbol robustness columns present & covers both symbols
+    by_sym = pd.read_csv(tmp / "oracle_constraint_by_symbol.csv")
+    for c in ["joint_retention_mean", "joint_retention_ge_0_9",
+              "joint_retention_ge_0_8", "joint_opposite_flip_mean",
+              "joint_tie_mean", "strict_Long_n", "strict_Short_n",
+              "strict_Wait_n", "strict_Tie_n", "strict_nonrobust_n",
+              "baseline_stable_Long_n", "baseline_stable_Short_n",
+              "baseline_stable_Wait_n"]:
+        assert c in by_sym.columns, f"by_symbol missing {c}"
+    assert set(by_sym["symbol"]) == {"AG", "RB"}
+    assert by_sym["joint_retention_mean"].notna().all()
+    assert (by_sym["strict_nonrobust_n"] >= 0).all()
+
+
 if __name__ == "__main__":
     test_t0_baseline_parity_synthetic()
     test_t0_baseline_parity_real_ag()
@@ -397,4 +639,11 @@ if __name__ == "__main__":
     test_t0_brute_force_differential()
     test_t0_time_prefers_earlier_equal_return()
     test_t1_real_ag_all_thetas()
-    print("ALL T0/T1 PASSED")
+    # R2.1 new correctness tests
+    test_t0_h_specific_holding()
+    test_t0_edge_atr_scale_invariance()
+    test_t0_wait_tie_share_explicit()
+    test_t0_action_matrix_key_alignment()
+    test_t0_parity_negative_control()
+    test_t1p5_small_end_to_end()
+    print("ALL T0/T1/T1.5 PASSED")
