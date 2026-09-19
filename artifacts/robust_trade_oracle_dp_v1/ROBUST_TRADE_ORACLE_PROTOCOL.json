@@ -1,6 +1,7 @@
 {
-  "experiment": "Robust 5m Trade Oracle DP v1.0",
-  "task_id": "FUTURE-ORACLE-R1-ROBUST-5M-DP",
+  "experiment": "Robust 5m Trade Oracle DP v1.1",
+  "task_id": "FUTURE-ORACLE-R1.1-CORRECTNESS-HARDENING",
+  "version": "1.1",
   "horizons": [
     6,
     12,
@@ -9,6 +10,7 @@
   "hmax": 24,
   "utility": "U = GrossPnL - Cost; Cost = 0 (no cost owner)",
   "environment_independent": true,
+  "oracle_semantics": "at most one round-trip trade per horizon; Long/Short/Wait; Wait owns future option value",
   "forbidden_inputs": [
     "DTP",
     "SR",
@@ -21,15 +23,24 @@
   "allowed_inputs": [
     "5m OHLC path",
     "execution constraints",
-    "discontinuity flags"
+    "discontinuity flags",
+    "causal ATR5 (units only)"
   ],
-  "fill": "next valid 5m bar open (entry and exit); no same-bar hindsight",
+  "fills": "next valid 5m bar open (entry and exit); no same-bar hindsight",
   "single_position": true,
   "no_discontinuity_cross": true,
-  "wait_has_option_value": true,
+  "fix_A": "Q_W(t,h)=0 when disc[t+1]=1; whole horizon banned from crossing",
+  "fix_B": "decision_time = bar_start_time + 5min (close)",
+  "fix_C": "segment = cumsum(disc) (canonical owner)",
+  "fix_D": "tie via numeric eps; n_best==1 -> unique else Tie; stable needs all 3 horizons SAME UNIQUE action",
+  "fix_E": "label_available_time per H (reason HORIZON_END/DISCONTINUITY/DATA_END); not the optimal exit time",
+  "fix_F": "raw price points retained + ATR5-normalized (units only, does not enter argmax/exit/DP)",
+  "fix_G": "exclusion accounting input=output+tail+disc+noroundtrip",
+  "fix_H": "per-symbol raw 5m loaded once; samples reuse it",
   "reused": [
     "load_raw_5m",
-    "discontinuity_flags"
+    "discontinuity_flags",
+    "compute_atr5"
   ],
   "not_reused": [
     "fixed stop",

@@ -1,64 +1,71 @@
-﻿# Robust 5m Trade Oracle DP v1.0
+﻿# Robust 5m Trade Oracle DP v1.1 (Correctness Hardening)
 
-> **Status**: `PROVISIONAL_PENDING_USER_AUDIT`. No model yet (R1 = label
-> stability only). Utility = gross price-point PnL, cost = 0.
+> **Status**: `PROVISIONAL_PENDING_USER_AUDIT`. No model yet (R1/R1.1 = label
+> stability & correctness only). Utility = gross price-point PnL, cost = 0.
+> Built on R1 after user review found 4 substantive label-semantics issues.
 
-**Task**: `FUTURE-ORACLE-R1-ROBUST-5M-DP`
+**Task**: `FUTURE-ORACLE-R1.1-CORRECTNESS-HARDENING`
 **Horizons**: [6, 12, 24] (30/60/120 min)
-**Environment-independent**: uses only 5m OHLC + discontinuity flags.
+**Environment-independent**: only 5m OHLC + discontinuity + causal ATR5 (units).
 No DTP / SR / Liquidity / HTF / indicators.
 
-## 0. Contract (frozen)
+## 0. Frozen semantics
 
 - Decision at 5m close `t`; entry fill = open of next valid bar `e=t+1`.
-- Exit fill = open of bar `e+h` (next-open convention); holding `h` in 1..H.
-- Single position, fixed 1 unit, no add, no same-symbol hedging.
-- No crossing discontinuity; horizon caps holding; data end caps path.
-- `V_flat[t][h] = max(Q_L, Q_S, V_flat[t+1][h-1])`; `Q_W = V_flat[t+1][h-1]`.
-- Shared compute: one load + one segment build + one QL/QS precompute + one
-  backward flat DP. H=6/12/24 read from tables (never re-run data).
+- Exit fill = open of bar `e+h`; holding `h` in 1..H.
+- **At most one round-trip trade per Oracle horizon** (exit does not re-enter
+  in the same horizon). Oracle answers "is THIS bar a good trade opportunity?".
+- Single position, fixed 1 unit, no add, no hedge.
+- **Whole horizon banned from crossing a discontinuity** (Fix A).
+- `V_flat[t][h] = max(Q_L, Q_S, Q_W(t,h))`; `Q_W=0` if `disc[t+1]=1`;
+  `Q_W=V_flat[t+1][h-1]` otherwise.
+- Ties use numeric eps; only n_best==1 yields a unique action (else Tie).
+  stable_action needs all 3 horizons = SAME UNIQUE.
+- Shared compute: one load + one segment + one QL/QS precompute + one backward
+  flat DP; H=6/12/24 read from tables.
 
 ## 1. Sample counts
 
 | metric | value |
 |---|---:|
-| n_decisions | 505163 |
-| runtime_sec | 41.82 |
-| peak_rss_mb | 468.7 |
+| n_decisions | 505161 |
+| runtime_sec | 65.87 |
+| peak_rss_mb | 885.3 |
 | n_symbols | 15 |
 
 ## 2. Stable action distribution
 
 | class | pct |
 |---|---:|
-| Long | 13.749 |
-| Short | 12.643 |
+| Long | 10.679 |
+| Short | 9.798 |
 | Wait | 48.317 |
-| Ambiguous | 25.291 |
+| Ambiguous | 31.206 |
 
-Agreement: 3/3 = 74.709% ; 2/3+ = 99.996%
+Agreement: 3/3 = 73.594% ; 2/3+ = 99.224%
+Tie rows = 69883; stable_trade_zero_edge_count = 0
 
-## 3. By symbol
+## 3. By symbol (with exclusion accounting)
 
 ### symbol
 
-| symbol | n | stable_Long_pct | stable_Short_pct | stable_Wait_pct | stable_Ambiguous_pct | agreement_3of3_pct |
-|---|---|---|---|---|---|---|
-| AG | 44449 | 14.536 | 11.235 | 50.897 | 23.332 | 76.668 |
-| AL | 37321 | 14.97 | 13.156 | 44.334 | 27.539 | 72.461 |
-| AU | 44449 | 13.926 | 11.305 | 52.35 | 22.419 | 77.581 |
-| CF | 27817 | 14.283 | 13.898 | 43.502 | 28.317 | 71.683 |
-| CU | 37321 | 13.847 | 11.969 | 49.503 | 24.68 | 75.32 |
-| I | 27817 | 14.66 | 14.096 | 42.064 | 29.18 | 70.82 |
-| M | 27817 | 14.049 | 13.37 | 45.544 | 27.037 | 72.963 |
-| MA | 27817 | 13.334 | 13.467 | 46.863 | 26.336 | 73.664 |
-| NI | 37321 | 11.969 | 12.583 | 51.74 | 23.708 | 76.292 |
-| P | 27817 | 13.247 | 12.147 | 50.566 | 24.039 | 75.961 |
-| RB | 27817 | 13.308 | 14.678 | 44.577 | 27.436 | 72.564 |
-| RU | 27817 | 13.132 | 13.021 | 48.043 | 25.804 | 74.196 |
-| SC | 44445 | 13.828 | 12.51 | 49.103 | 24.558 | 75.442 |
-| SN | 37321 | 13.231 | 11.677 | 52.52 | 22.572 | 77.428 |
-| TA | 27817 | 13.628 | 12.654 | 47.083 | 26.635 | 73.365 |
+| symbol | input_5m_rows | output_decision_rows | excluded_tail | excluded_disc_before_entry | excluded_no_valid_roundtrip | tie_rows | stable_Long_pct | stable_Short_pct | stable_Wait_pct | stable_Ambiguous_pct | agreement_3of3_pct |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| AG | 44451 | 44449 | 2 | 0 | 0 | 2684 | 13.01 | 10.194 | 50.897 | 25.899 | 76.179 |
+| AL | 37323 | 37321 | 2 | 0 | 0 | 8672 | 9.678 | 8.606 | 44.334 | 37.381 | 70.622 |
+| AU | 44451 | 44449 | 2 | 0 | 0 | 1057 | 13.373 | 10.835 | 52.35 | 23.443 | 77.347 |
+| CF | 27819 | 27817 | 2 | 0 | 0 | 7427 | 8.577 | 8.243 | 43.502 | 39.677 | 69.45 |
+| CU | 37323 | 37321 | 2 | 0 | 0 | 4015 | 11.286 | 9.885 | 49.503 | 29.327 | 74.323 |
+| I | 27819 | 27817 | 2 | 0 | 0 | 8256 | 8.056 | 7.884 | 42.064 | 41.996 | 68.541 |
+| M | 27819 | 27817 | 2 | 0 | 0 | 6028 | 9.325 | 8.865 | 45.544 | 36.266 | 71.197 |
+| MA | 27819 | 27817 | 2 | 0 | 0 | 4939 | 9.595 | 9.527 | 46.863 | 34.015 | 72.204 |
+| NI | 37323 | 37321 | 2 | 0 | 0 | 2281 | 10.798 | 11.235 | 51.74 | 26.227 | 75.729 |
+| P | 27819 | 27817 | 2 | 0 | 0 | 2778 | 10.957 | 10.192 | 50.566 | 28.285 | 75.152 |
+| RB | 27819 | 27817 | 2 | 0 | 0 | 6874 | 8.261 | 9.271 | 44.577 | 37.89 | 70.597 |
+| RU | 27819 | 27817 | 2 | 0 | 0 | 4252 | 9.904 | 9.757 | 48.043 | 32.297 | 72.912 |
+| SC | 44449 | 44443 | 2 | 2 | 2 | 4903 | 11.12 | 10.335 | 49.101 | 29.444 | 74.642 |
+| SN | 37323 | 37321 | 2 | 0 | 0 | 1045 | 12.583 | 11.117 | 52.52 | 23.78 | 77.313 |
+| TA | 27819 | 27817 | 2 | 0 | 0 | 4672 | 9.832 | 9.278 | 47.083 | 33.807 | 72.053 |
 
 
 ## 4. By time block (calendar month; "TB block" mapped to month)
@@ -67,133 +74,197 @@ Agreement: 3/3 = 74.709% ; 2/3+ = 99.996%
 
 | time_block | n | stable_Long_pct | stable_Short_pct | stable_Wait_pct | stable_Ambiguous_pct |
 |---|---|---|---|---|---|
-| 2025-01 | 22044 | 13.954 | 12.412 | 48.512 | 25.122 |
-| 2025-02 | 22488 | 14.412 | 12.651 | 48.799 | 24.137 |
-| 2025-03 | 26397 | 13.808 | 12.926 | 48.24 | 25.026 |
-| 2025-04 | 25371 | 13.149 | 13.019 | 48.0 | 25.833 |
-| 2025-05 | 23301 | 12.605 | 13.729 | 47.371 | 26.295 |
-| 2025-06 | 25002 | 14.727 | 12.067 | 47.06 | 26.146 |
-| 2025-07 | 28911 | 14.033 | 12.231 | 47.778 | 25.959 |
-| 2025-08 | 26535 | 13.217 | 13.021 | 47.526 | 26.237 |
-| 2025-09 | 27072 | 13.963 | 13.494 | 47.056 | 25.488 |
-| 2025-10 | 21231 | 13.899 | 13.132 | 47.454 | 25.515 |
-| 2025-11 | 25278 | 14.265 | 12.976 | 47.167 | 25.591 |
-| 2025-12 | 28329 | 14.293 | 12.309 | 48.35 | 25.049 |
-| 2026-01 | 25140 | 14.785 | 10.967 | 49.276 | 24.972 |
-| 2026-02 | 17016 | 12.7 | 12.853 | 48.449 | 25.999 |
-| 2026-03 | 27512 | 14.463 | 11.933 | 49.658 | 23.946 |
-| 2026-04 | 25371 | 13.961 | 11.722 | 49.813 | 24.504 |
-| 2026-05 | 22626 | 12.822 | 13.759 | 48.754 | 24.666 |
-| 2026-06 | 25677 | 10.461 | 14.764 | 49.496 | 25.279 |
-| 2026-07 | 28911 | 12.898 | 12.86 | 48.791 | 25.451 |
-| 2026-08 | 26397 | 15.945 | 10.236 | 48.464 | 25.355 |
-| 2026-09 | 4554 | 14.603 | 13.834 | 49.824 | 21.739 |
+| 2025-01 | 22044 | 10.733 | 9.431 | 48.512 | 31.324 |
+| 2025-02 | 22481 | 10.907 | 9.697 | 48.792 | 30.604 |
+| 2025-03 | 26397 | 10.744 | 9.694 | 48.255 | 31.307 |
+| 2025-04 | 25378 | 10.162 | 10.229 | 47.99 | 31.618 |
+| 2025-05 | 23301 | 9.665 | 10.3 | 47.371 | 32.664 |
+| 2025-06 | 24995 | 10.842 | 8.726 | 47.061 | 33.371 |
+| 2025-07 | 28911 | 10.515 | 9.159 | 47.778 | 32.548 |
+| 2025-08 | 26542 | 9.509 | 9.314 | 47.525 | 33.652 |
+| 2025-09 | 27072 | 10.424 | 9.667 | 47.056 | 32.853 |
+| 2025-10 | 21224 | 10.568 | 10.055 | 47.451 | 31.926 |
+| 2025-11 | 25285 | 10.524 | 9.713 | 47.17 | 32.592 |
+| 2025-12 | 28329 | 11.299 | 9.224 | 48.35 | 31.127 |
+| 2026-01 | 25140 | 12.148 | 8.886 | 49.276 | 29.69 |
+| 2026-02 | 17016 | 9.955 | 9.949 | 48.449 | 31.647 |
+| 2026-03 | 27503 | 11.646 | 10.21 | 49.664 | 28.481 |
+| 2026-04 | 25378 | 11.301 | 9.753 | 49.803 | 29.143 |
+| 2026-05 | 22626 | 10.413 | 11.279 | 48.754 | 29.554 |
+| 2026-06 | 25670 | 8.551 | 11.987 | 49.497 | 29.965 |
+| 2026-07 | 28911 | 10.425 | 10.276 | 48.784 | 30.514 |
+| 2026-08 | 26397 | 12.645 | 8.361 | 48.464 | 30.53 |
+| 2026-09 | 4561 | 11.774 | 11.883 | 49.857 | 26.485 |
 
 
-## 5. Distribution quantiles (H=24)
+## 5. Distribution quantiles (H=24, ATR-normalized primary)
 
-- edge: {'n': 505161, 'p10': 0.3, 'p25': 1.48, 'p50': 7.0, 'p75': 33.0, 'p90': 160.0, 'mean': 77.9558}
-- holding (trade actions): {'n': 133322, 'p10': 6.0, 'p25': 11.0, 'p50': 17.0, 'p75': 22.0, 'p90': 24.0, 'mean': 15.8823}
-- MFE (trade actions): {'n': 133322, 'p10': 5.0, 'p25': 14.0, 'p50': 60.0, 'p75': 240.0, 'p90': 1100.0, 'mean': 520.7012}
-- MAE (trade actions): {'n': 133322, 'p10': 0.0, 'p25': 0.2, 'p50': 2.0, 'p75': 10.0, 'p90': 45.0, 'mean': 24.6336}
+- edge_ATR: {'n': 504426, 'p10': 0.11628, 'p25': 0.3125, 'p50': 0.67568, 'p75': 1.25, 'p90': 1.96807, 'mean': 0.92083}
+- holding (trade actions): {'n': 103439, 'p10': 6.0, 'p25': 11.0, 'p50': 17.0, 'p75': 22.0, 'p90': 24.0, 'mean': 15.89543}
+- MFE_ATR: {'n': 103402, 'p10': 2.42417, 'p25': 3.36618, 'p50': 5.0, 'p75': 7.67442, 'p90': 11.66667, 'mean': 6.36454}
+- MAE_ATR: {'n': 103402, 'p10': 0.0, 'p25': 0.05153, 'p50': 0.20408, 'p75': 0.37037, 'p90': 0.58824, 'mean': 0.27105}
 
-## 6. Stable-class edge / holding
+Raw (per-symbol scale, not cross-comparable): edge_raw {'n': 505161, 'p10': 0.29999, 'p25': 1.47998, 'p50': 7.0, 'p75': 33.0, 'p90': 160.0, 'mean': 77.95527},
+MFE_raw {'n': 103439, 'p10': 5.10004, 'p25': 15.0, 'p50': 74.0, 'p75': 340.03174, 'p90': 1409.975, 'mean': 628.53004}, MAE_raw {'n': 103439, 'p10': 0.0, 'p25': 0.09998, 'p50': 2.0, 'p75': 10.0, 'p90': 59.9375, 'mean': 28.53969}.
 
-| class | median_edge | min_edge | median_holding |
-|---|---:|---:|---:|
-| Long | 2.5 | 0.0 | 17.0 |
-| Short | 2.35 | 0.0 | 17.0 |
-| Wait | 10.0 | 0.001 | None |
+## 6. Stable-class edge / holding (ATR-normalized)
 
-## 7. Human oracle samples (5)
+| class | median_edge_ATR | median_holding |
+|---|---:|---:|
+| Long | 0.41463 | 17.0 |
+| Short | 0.41176 | 16.0 |
+| Wait | 0.73027 | None |
+
+## 7. Cross-horizon transition (Long/Short/Wait/Tie)
+
+- 6->12: [[75052, 0, 25013, 3220], [0, 69708, 24699, 3277], [0, 0, 244080, 0], [0, 0, 23674, 36438]]
+- 12->24: [[53945, 0, 19411, 1696], [0, 49494, 18636, 1578], [0, 0, 317466, 0], [0, 0, 16106, 26829]]
+- 6->24: [[53945, 0, 46293, 3047], [0, 49494, 45384, 2806], [0, 0, 244080, 0], [0, 0, 35862, 24250]]
+
+## 8. Exclusion accounting (input = output + excluded, mutually exclusive)
+
+### symbol
+
+| input_5m_rows | output_decision_rows | excluded_tail | excluded_discontinuity_before_entry | excluded_no_valid_roundtrip | tie_rows |
+|---|---|---|---|---|---|
+| 505195 | 505161 | 30 | 2 | 2 | 69883 |
+
+
+## 9. Human oracle samples (5)
 
 ```json
 [
   [
-    "stable_Long_high_edge",
+    "stable_Long",
     {
       "symbol": "SN",
-      "decision_time": "2026-03-23 14:50:00",
+      "decision_bar_start_time": "2026-03-23 14:50:00",
+      "decision_time": "2026-03-23 14:55:00",
       "decision_bar_index": 26863,
       "segment": 0,
       "agreement": 1.0,
       "stable_action": "Long",
+      "atr5_t": 2436.0,
       "H6": {
         "QL": 16929.96875,
         "QS": -12280.0,
         "QW": 4649.96875,
+        "QL_ATR": 6.949905069786535,
+        "QS_ATR": -5.041050903119869,
+        "QW_ATR": 1.9088541666666667,
         "action": "Long",
         "edge": 12280.0,
+        "edge_ATR": 5.041050903119869,
         "exit_bars": 26865.0,
+        "holding_bars": 1.0,
         "realized_move": 16929.96875,
         "MFE": 16929.96875,
-        "MAE": 120.0
+        "MAE": 120.0,
+        "label_available_time": "2026-03-23 21:30:00",
+        "terminal_reason": "HORIZON_END"
       },
       "H12": {
         "QL": 16929.96875,
         "QS": -12280.0,
         "QW": 4649.96875,
+        "QL_ATR": 6.949905069786535,
+        "QS_ATR": -5.041050903119869,
+        "QW_ATR": 1.9088541666666667,
         "action": "Long",
         "edge": 12280.0,
+        "edge_ATR": 5.041050903119869,
         "exit_bars": 26865.0,
+        "holding_bars": 1.0,
         "realized_move": 16929.96875,
         "MFE": 16929.96875,
-        "MAE": 120.0
+        "MAE": 120.0,
+        "label_available_time": "2026-03-23 22:00:00",
+        "terminal_reason": "HORIZON_END"
       },
       "H24": {
         "QL": 26709.96875,
         "QS": -12280.0,
         "QW": 14429.96875,
+        "QL_ATR": 10.964683394909688,
+        "QS_ATR": -5.041050903119869,
+        "QW_ATR": 5.923632491789819,
         "action": "Long",
         "edge": 12280.0,
+        "edge_ATR": 5.041050903119869,
         "exit_bars": 26882.0,
+        "holding_bars": 18.0,
         "realized_move": 26709.96875,
         "MFE": 27120.0,
-        "MAE": 120.0
+        "MAE": 120.0,
+        "label_available_time": "2026-03-23 23:00:00",
+        "terminal_reason": "HORIZON_END"
       }
     }
   ],
   [
-    "stable_Short_high_edge",
+    "stable_Short",
     {
       "symbol": "SN",
-      "decision_time": "2026-01-15 14:55:00",
+      "decision_bar_start_time": "2026-01-15 14:55:00",
+      "decision_time": "2026-01-15 15:00:00",
       "decision_bar_index": 23099,
       "segment": 0,
       "agreement": 1.0,
       "stable_action": "Short",
+      "atr5_t": 2551.9875,
       "H6": {
         "QL": -15569.96875,
         "QS": 22700.0,
         "QW": 7130.03125,
+        "QL_ATR": -6.101114817372734,
+        "QS_ATR": 8.895027894925033,
+        "QW_ATR": 2.7939130775522996,
         "action": "Short",
         "edge": 15569.96875,
+        "edge_ATR": 6.101114817372734,
         "exit_bars": 23104.0,
+        "holding_bars": 4.0,
         "realized_move": 22700.0,
         "MFE": 23440.0,
-        "MAE": 3020.0
+        "MAE": 3020.0,
+        "label_available_time": "2026-01-15 21:35:00",
+        "terminal_reason": "HORIZON_END"
       },
       "H12": {
         "QL": -15569.96875,
         "QS": 22700.0,
         "QW": 7130.03125,
+        "QL_ATR": -6.101114817372734,
+        "QS_ATR": 8.895027894925033,
+        "QW_ATR": 2.7939130775522996,
         "action": "Short",
         "edge": 15569.96875,
+        "edge_ATR": 6.101114817372734,
         "exit_bars": 23104.0,
+        "holding_bars": 4.0,
         "realized_move": 22700.0,
         "MFE": 23440.0,
-        "MAE": 3020.0
+        "MAE": 3020.0,
+        "label_available_time": "2026-01-15 22:05:00",
+        "terminal_reason": "HORIZON_END"
       },
       "H24": {
         "QL": -13310.03125,
         "QS": 22700.0,
         "QW": 9389.96875,
+        "QL_ATR": -5.2155550330869564,
+        "QS_ATR": 8.895027894925033,
+        "QW_ATR": 3.679472861838077,
         "action": "Short",
         "edge": 13310.03125,
+        "edge_ATR": 5.2155550330869564,
         "exit_bars": 23104.0,
+        "holding_bars": 4.0,
         "realized_move": 22700.0,
         "MFE": 23440.0,
-        "MAE": 3020.0
+        "MAE": 3020.0,
+        "label_available_time": "2026-01-15 23:05:00",
+        "terminal_reason": "HORIZON_END"
       }
     }
   ],
@@ -201,138 +272,207 @@ Agreement: 3/3 = 74.709% ; 2/3+ = 99.996%
     "stable_Wait",
     {
       "symbol": "SN",
-      "decision_time": "2026-01-30 00:25:00",
+      "decision_bar_start_time": "2026-01-30 00:25:00",
+      "decision_time": "2026-01-30 00:30:00",
       "decision_bar_index": 24071,
       "segment": 0,
       "agreement": 1.0,
       "stable_action": "Wait",
+      "atr5_t": 2778.00625,
       "H6": {
         "QL": 3210.03125,
         "QS": 1500.0,
         "QW": 4710.03125,
+        "QL_ATR": 1.155516208791827,
+        "QS_ATR": 0.5399555886528333,
+        "QW_ATR": 1.6954717974446603,
         "action": "Wait",
         "edge": 1500.0,
+        "edge_ATR": 0.5399555886528333,
         "exit_bars": NaN,
+        "holding_bars": NaN,
         "realized_move": NaN,
         "MFE": NaN,
-        "MAE": NaN
+        "MAE": NaN,
+        "label_available_time": "2026-01-30 09:05:00",
+        "terminal_reason": "HORIZON_END"
       },
       "H12": {
         "QL": 5730.03125,
         "QS": 1760.0,
         "QW": 7490.03125,
+        "QL_ATR": 2.062641597728587,
+        "QS_ATR": 0.633547890685991,
+        "QW_ATR": 2.696189488414578,
         "action": "Wait",
         "edge": 1760.0,
+        "edge_ATR": 0.633547890685991,
         "exit_bars": NaN,
+        "holding_bars": NaN,
         "realized_move": NaN,
         "MFE": NaN,
-        "MAE": NaN
+        "MAE": NaN,
+        "label_available_time": "2026-01-30 09:35:00",
+        "terminal_reason": "HORIZON_END"
       },
       "H24": {
         "QL": 5730.03125,
         "QS": 30660.0,
         "QW": 36390.03125,
+        "QL_ATR": 2.062641597728587,
+        "QS_ATR": 11.036692232063913,
+        "QW_ATR": 13.0993338297925,
         "action": "Wait",
         "edge": 5730.03125,
+        "edge_ATR": 2.062641597728587,
         "exit_bars": NaN,
+        "holding_bars": NaN,
         "realized_move": NaN,
         "MFE": NaN,
-        "MAE": NaN
+        "MAE": NaN,
+        "label_available_time": "2026-01-30 10:50:00",
+        "terminal_reason": "HORIZON_END"
       }
     }
   ],
   [
-    "ambiguous",
+    "tie",
     {
-      "symbol": "RB",
-      "decision_time": "2026-07-07 11:15:00",
-      "decision_bar_index": 24831,
-      "segment": 0,
-      "agreement": 0.6667,
-      "stable_action": "Ambiguous",
-      "H6": {
-        "QL": -2.0,
-        "QS": 7.0,
-        "QW": 5.0,
-        "action": "Short",
-        "edge": 2.0,
-        "exit_bars": 24837.0,
-        "realized_move": 7.0,
-        "MFE": 7.0,
-        "MAE": 0.0
-      },
-      "H12": {
-        "QL": -2.0,
-        "QS": 7.0,
-        "QW": 5.0,
-        "action": "Short",
-        "edge": 2.0,
-        "exit_bars": 24837.0,
-        "realized_move": 7.0,
-        "MFE": 7.0,
-        "MAE": 0.0
-      },
-      "H24": {
-        "QL": 3.0,
-        "QS": 7.0,
-        "QW": 10.0,
-        "action": "Wait",
-        "edge": 3.0,
-        "exit_bars": NaN,
-        "realized_move": NaN,
-        "MFE": NaN,
-        "MAE": NaN
-      }
-    }
-  ],
-  [
-    "max_edge_any",
-    {
-      "symbol": "SN",
-      "decision_time": "2026-01-15 14:55:00",
-      "decision_bar_index": 23099,
+      "symbol": "SC",
+      "decision_bar_start_time": "2025-02-17 21:30:00",
+      "decision_time": "2025-02-17 21:35:00",
+      "decision_bar_index": 2871,
       "segment": 0,
       "agreement": 1.0,
-      "stable_action": "Short",
+      "stable_action": "Ambiguous",
+      "atr5_t": 1.14000244140625,
       "H6": {
-        "QL": -15569.96875,
-        "QS": 22700.0,
-        "QW": 7130.03125,
-        "action": "Short",
-        "edge": 15569.96875,
-        "exit_bars": 23104.0,
-        "realized_move": 22700.0,
-        "MFE": 23440.0,
-        "MAE": 3020.0
+        "QL": 1.10003662109375,
+        "QS": 0.0,
+        "QW": 1.10003662109375,
+        "QL_ATR": 0.9649423379627151,
+        "QS_ATR": 0.0,
+        "QW_ATR": 0.9649423379627151,
+        "action": "Tie",
+        "edge": 0.0,
+        "edge_ATR": 0.0,
+        "exit_bars": NaN,
+        "holding_bars": NaN,
+        "realized_move": NaN,
+        "MFE": NaN,
+        "MAE": NaN,
+        "label_available_time": "2025-02-17 22:10:00",
+        "terminal_reason": "HORIZON_END"
       },
       "H12": {
-        "QL": -15569.96875,
-        "QS": 22700.0,
-        "QW": 7130.03125,
-        "action": "Short",
-        "edge": 15569.96875,
-        "exit_bars": 23104.0,
-        "realized_move": 22700.0,
-        "MFE": 23440.0,
-        "MAE": 3020.0
+        "QL": 1.10003662109375,
+        "QS": 0.0,
+        "QW": 1.10003662109375,
+        "QL_ATR": 0.9649423379627151,
+        "QS_ATR": 0.0,
+        "QW_ATR": 0.9649423379627151,
+        "action": "Tie",
+        "edge": 0.0,
+        "edge_ATR": 0.0,
+        "exit_bars": NaN,
+        "holding_bars": NaN,
+        "realized_move": NaN,
+        "MFE": NaN,
+        "MAE": NaN,
+        "label_available_time": "2025-02-17 22:40:00",
+        "terminal_reason": "HORIZON_END"
       },
       "H24": {
-        "QL": -13310.03125,
-        "QS": 22700.0,
-        "QW": 9389.96875,
-        "action": "Short",
-        "edge": 13310.03125,
-        "exit_bars": 23104.0,
-        "realized_move": 22700.0,
-        "MFE": 23440.0,
-        "MAE": 3020.0
+        "QL": 1.60003662109375,
+        "QS": 0.0,
+        "QW": 1.60003662109375,
+        "QL_ATR": 1.4035378899013804,
+        "QS_ATR": 0.0,
+        "QW_ATR": 1.4035378899013804,
+        "action": "Tie",
+        "edge": 0.0,
+        "edge_ATR": 0.0,
+        "exit_bars": NaN,
+        "holding_bars": NaN,
+        "realized_move": NaN,
+        "MFE": NaN,
+        "MAE": NaN,
+        "label_available_time": "2025-02-17 23:40:00",
+        "terminal_reason": "HORIZON_END"
+      }
+    }
+  ],
+  [
+    "discontinuity_near",
+    {
+      "symbol": "SC",
+      "decision_bar_start_time": "2026-03-04 00:25:00",
+      "decision_time": "2026-03-04 00:30:00",
+      "decision_bar_index": 30482,
+      "segment": 0,
+      "agreement": 1.0,
+      "stable_action": "Ambiguous",
+      "atr5_t": 0.0,
+      "H6": {
+        "QL": 0.0,
+        "QS": 0.0,
+        "QW": 0.0,
+        "QL_ATR": NaN,
+        "QS_ATR": NaN,
+        "QW_ATR": NaN,
+        "action": "Tie",
+        "edge": 0.0,
+        "edge_ATR": NaN,
+        "exit_bars": NaN,
+        "holding_bars": NaN,
+        "realized_move": NaN,
+        "MFE": NaN,
+        "MAE": NaN,
+        "label_available_time": "2026-03-04 01:05:00",
+        "terminal_reason": "HORIZON_END"
+      },
+      "H12": {
+        "QL": 0.0,
+        "QS": 0.0,
+        "QW": 0.0,
+        "QL_ATR": NaN,
+        "QS_ATR": NaN,
+        "QW_ATR": NaN,
+        "action": "Tie",
+        "edge": 0.0,
+        "edge_ATR": NaN,
+        "exit_bars": NaN,
+        "holding_bars": NaN,
+        "realized_move": NaN,
+        "MFE": NaN,
+        "MAE": NaN,
+        "label_available_time": "2026-03-04 01:35:00",
+        "terminal_reason": "HORIZON_END"
+      },
+      "H24": {
+        "QL": 0.0,
+        "QS": 0.0,
+        "QW": 0.0,
+        "QL_ATR": NaN,
+        "QS_ATR": NaN,
+        "QW_ATR": NaN,
+        "action": "Tie",
+        "edge": 0.0,
+        "edge_ATR": NaN,
+        "exit_bars": NaN,
+        "holding_bars": NaN,
+        "realized_move": NaN,
+        "MFE": NaN,
+        "MAE": NaN,
+        "label_available_time": "2026-03-04 01:35:00",
+        "terminal_reason": "DISCONTINUITY"
       }
     }
   ]
 ]
 ```
 
-## 8. Cost metadata
+## 10. Cost metadata
 
 ```json
 {
@@ -346,14 +486,14 @@ Agreement: 3/3 = 74.709% ; 2/3+ = 99.996%
     "slippage"
   ],
   "NET_PNL": "UNAVAILABLE_COST_METADATA",
-  "rule": "\u7981\u6b62\u51ed\u8bb0\u5fc6\u586b\u5199\u624b\u7eed\u8d39/\u6ed1\u70b9\uff1b\u53ea\u62a5 GROSS price-point PnL",
+  "rule": "\u7981\u6b62\u51ed\u8bb0\u5fc6\u586b\u5199\u624b\u7eed\u8d39/\u6ed1\u70b9\uff1b\u53ea\u62a5 GROSS price-point PnL (ATR-normalized \u4f9b\u8de8\u54c1\u79cd\u6bd4\u8f83)",
   "break_even_note": "utility v1 = GrossPnL - Cost, Cost=0; net PnL requires per-symbol tick value + fee table which is not present in the project. Do NOT claim net profitable."
 }
 ```
 
-## 9. Next
+## 11. Next
 
-User audits DP Bellman, Wait option value, next-open execution, discontinuity
-boundary, horizon off-by-one, MFE/MAE interval, H=6/12/24 shared compute, and
-row-level artifact completeness. Then decides Oracle R2 (risk/time penalty,
-longer horizon, 2/3 consensus) or proceeds to Environment -> Oracle mapping.
+User audits R1.1 fixes (A-H). Then the real Oracle robustness experiment:
+scan `risk penalty x time penalty x friction hurdle` over the SAME precomputed
+future paths and measure how many Long/Short/Wait labels stay stable. Only
+after that is the Oracle a credible label for Environment -> Oracle mapping.
