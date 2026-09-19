@@ -1,0 +1,39 @@
+{
+  "experiment": "Robust 5m Trade Oracle DP v1.0",
+  "task_id": "FUTURE-ORACLE-R1-ROBUST-5M-DP",
+  "horizons": [
+    6,
+    12,
+    24
+  ],
+  "hmax": 24,
+  "utility": "U = GrossPnL - Cost; Cost = 0 (no cost owner)",
+  "environment_independent": true,
+  "forbidden_inputs": [
+    "DTP",
+    "SR",
+    "Liquidity",
+    "4H",
+    "1H",
+    "15m",
+    "5m indicator state"
+  ],
+  "allowed_inputs": [
+    "5m OHLC path",
+    "execution constraints",
+    "discontinuity flags"
+  ],
+  "fill": "next valid 5m bar open (entry and exit); no same-bar hindsight",
+  "single_position": true,
+  "no_discontinuity_cross": true,
+  "wait_has_option_value": true,
+  "reused": [
+    "load_raw_5m",
+    "discontinuity_flags"
+  ],
+  "not_reused": [
+    "fixed stop",
+    "liquidity target of run_fixed_execution_baseline_v1.py"
+  ],
+  "shared_compute": "one load + one segment build + one QL/QS precompute + one backward flat DP; H=6/12/24 read from tables"
+}
