@@ -20,6 +20,10 @@ Suite:
   MATURE mature IndicatorState differential (direct state-level, no 5m rebuild)
   PREVIEW preview() does not mutate committed state
   PERF  fail-closed structural gate + microbenchmark
+  T1.5  efficient end-to-end engineering chain (Raw->Prepare->Streaming->
+        Environment->Artifact->Audit). Engineering/artifact/schema validation
+        only; does NOT re-verify indicator math (T0/T1/MATURE/PREVIEW do that),
+        no future-mutation reruns, no Oracle join. One production run/object.
 
 Per the PERF1 spec, T1.5 (heavy end-to-end) is intentionally NOT run here;
 the streaming kernel is validated against the canonical oracle instead.
@@ -27,7 +31,9 @@ the streaming kernel is validated against the canonical oracle instead.
 
 from __future__ import annotations
 
+import hashlib
 import importlib
+import json
 import os
 import sys
 import time
@@ -57,6 +63,27 @@ from research.liquidity_oracle_atlas.experiment_structural_reversion_pgm_v1 impo
 
 TF_ORDER = ["m5", "m15", "h1", "h4"]
 TOL = 1e-6
+
+# T1.5 artifact staging (temp/test only; parquet is NOT committed)
+_REPO_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
+T15_OUT = os.path.join(
+    _REPO_ROOT, "artifacts", "forming_environment_v1", "t15"
+)
+
+# Semantic row key + mandatory protocol metadata
+KEY_COLS = ["data_object", "decision_bar_index", "decision_time"]
+META_COLS = [
+    "data_object",
+    "decision_bar_index",
+    "decision_bar_start_time",
+    "decision_time",
+    "segment",
+    "trading_day",
+]
+# Future-derived model fields that must NOT be emitted
+FORBIDDEN_FUTURE_COLS = ["tf_is_complete"]
 
 
 # --------------------------------------------------------------------------- #
@@ -826,6 +853,270 @@ def PERF_gate_and_microbenchmark():
 
 
 # --------------------------------------------------------------------------- #
+# T1.5 efficient end-to-end engineering-chain validation                       #
+# --------------------------------------------------------------------------- #
+def _t15_window_frame(symbol: str, start: int, end: int):
+    """Test-only WINDOW selection (raw[start:end]).
+
+    Uses the documented ``set_raw_frame`` hook; production is NOT modified.
+    Needed because ``max_bars`` is prefix-only, and the only object carrying a
+    real discontinuity (SC) has it at index 30496 — a prefix window would need
+    ~30.5k bars, which conflicts with the ~2500-3000 bar scale. Returns
+    (frame, real_discontinuity_count).
+    """
+    from research.export_ob_trigger_execution_v21 import load_raw_5m
+    from research.phase1_tradability.phase1_contract_v1 import discontinuity_flags
+
+    raw = load_raw_5m(symbol).sort_values("bar_start_time").reset_index(drop=True)
+    disc = np.asarray(discontinuity_flags(symbol), dtype=bool)
+    if len(raw) != len(disc):
+        raise SystemExit("STOP_T15_RAW_DISC_LENGTH_MISMATCH")
+    r = raw.iloc[start:end]
+    d = disc[start:end]
+    bars = dict(
+        n=len(r),
+        t=pd.to_datetime(r["bar_start_time"]).to_numpy(),
+        day=pd.to_datetime(r["trading_day"]).to_numpy(),
+        disc=d,
+        o=r["open"].to_numpy(float),
+        h=r["high"].to_numpy(float),
+        l=r["low"].to_numpy(float),
+        c=r["close"].to_numpy(float),
+    )
+    return raw_frame_from_owner(bars), int(d.sum())
+
+
+def T1_5_efficient_e2e():
+    """End-to-end engineering chain ONLY:
+
+        Raw -> Prepare -> Streaming Environment -> Artifact -> Audit
+
+    Deliberately does NOT re-verify DTP/SR/Liquidity math, mature-state
+    differential or preview math (already covered by T0/T1/MATURE/PREVIEW).
+    No future-mutation reruns (T0 covers it), no Oracle join, no model fit.
+    Each object runs production EXACTLY ONCE.
+    """
+    os.makedirs(T15_OUT, exist_ok=True)
+
+    # per-TF required engineering columns (presence only; math already proven)
+    tf_cols = []
+    for tf in TF_ORDER:
+        tf_cols += [
+            f"{tf}_bucket_start",
+            f"{tf}_n_base_known",
+            f"{tf}_dev",              # DTP present
+            f"{tf}_sr_n_channels",    # SR present
+            f"{tf}_liq_up_count",     # Liquidity present
+        ]
+    required = list(META_COLS) + tf_cols
+
+    specs = [
+        ("AG", ("prefix", 3000)),
+        ("SC", ("window", 29000, 32000)),
+    ]
+
+    frames = []
+    objs = []
+    total_runtime = 0.0
+    rng = np.random.default_rng(7)
+
+    for sym, mode in specs:
+        b = FormingEnvironmentBuilder(
+            sym, max_bars=(mode[1] if mode[0] == "prefix" else None)
+        )
+        if mode[0] == "prefix":
+            b.load_raw()
+            window_note = f"prefix[0:{mode[1]}]"
+        else:
+            frame, _ndisc = _t15_window_frame(sym, mode[1], mode[2])
+            b.set_raw_frame(frame)
+            window_note = f"window[{mode[1]}:{mode[2]}]"
+        b.prepare()
+
+        # ---- production runs EXACTLY ONCE per object ----
+        t0 = time.perf_counter()
+        df, audit = b.run(profile_memory=False)
+        dt = time.perf_counter() - t0
+        total_runtime += dt
+        if dt > 30.0:
+            raise SystemExit(
+                f"STOP_UNEXPECTED_RUNTIME {sym} {dt:.1f}s > 30s "
+                "(check for code drift / slow reference / profiling)"
+            )
+
+        n = len(df)
+        n_tf = len([t for t in TF_ORDER if t in b.tf_minutes])
+        st = audit["stats"]
+
+        # ---- hard counts: one raw load, one production run ----
+        assert st["raw_load_count"] == 1, f"{sym} raw_load_count={st['raw_load_count']}"
+        expected_preview = n * n_tf
+        assert st["preview_step_count"] == expected_preview, (
+            f"{sym} preview {st['preview_step_count']} != {expected_preview}"
+        )
+
+        # ---- schema / forbidden future columns ----
+        missing = [c for c in required if c not in df.columns]
+        present_future = [c for c in FORBIDDEN_FUTURE_COLS if c in df.columns]
+
+        # ---- decision clock ----
+        delta = df["decision_time"] - df["decision_bar_start_time"]
+        clock_viol = int((delta != pd.Timedelta(minutes=5)).sum())
+
+        # ---- ordering (strictly increasing) ----
+        bi = df["decision_bar_index"].to_numpy()
+        dtimes = df["decision_time"].to_numpy()
+        bi_ok = bool(np.all(np.diff(bi) > 0))
+        dt_ok = bool(np.all(np.diff(dtimes) > np.timedelta64(0, "ns")))
+        unsorted_rows = 0 if (bi_ok and dt_ok) else n
+
+        # ---- duplicate semantic keys ----
+        dup = int(df.duplicated(subset=KEY_COLS).sum())
+
+        # ---- discontinuity / segments ----
+        real_disc = int(b.base["disc"].sum())
+        seg_count = int(b.base["segment"].nunique())
+
+        # ---- artifact write ----
+        ppath = os.path.join(T15_OUT, f"forming_environment_{sym}.parquet")
+        apath = os.path.join(T15_OUT, f"forming_environment_{sym}_audit.json")
+        df.to_parquet(ppath, index=False)
+        with open(apath, "w") as fh:
+            json.dump(audit, fh, indent=2, default=str)
+        raw_bytes = open(ppath, "rb").read()
+        sha = hashlib.sha256(raw_bytes).hexdigest()
+
+        # ---- artifact round-trip (this is what T1.5 should prove) ----
+        rt = pd.read_parquet(ppath)
+        assert len(rt) == n, f"{sym} roundtrip row count {len(rt)} != {n}"
+        assert list(rt.columns) == list(df.columns), f"{sym} roundtrip columns differ"
+        rt_key_mismatch = 0
+        for c in KEY_COLS + ["decision_bar_start_time"]:
+            if not rt[c].equals(df[c]):
+                rt_key_mismatch += 1
+        rtd = rt["decision_time"] - rt["decision_bar_start_time"]
+        rt_clock_viol = int((rtd != pd.Timedelta(minutes=5)).sum())
+        # 20-row sample: dtype/schema integrity + value fidelity
+        samp = rng.choice(n, size=min(20, n), replace=False)
+        dtype_bad = 0
+        val_bad = 0
+        for tf in TF_ORDER:
+            for c in DISCRETE_COLS:
+                if rt[f"{tf}_{c}"].dtype.kind not in ("i", "u"):
+                    dtype_bad += 1
+            for c in CONTINUOUS_COLS:
+                col = f"{tf}_{c}"
+                if rt[col].dtype.kind != "f":
+                    dtype_bad += 1
+                    continue
+                a = rt[col].to_numpy(float)[samp]
+                bb = df[col].to_numpy(float)[samp]
+                if not np.array_equal(np.isnan(a), np.isnan(bb)):
+                    val_bad += 1
+                    continue
+                m = ~np.isnan(a)
+                if m.any() and not np.all(np.abs(a[m] - bb[m]) <= 1e-12):
+                    val_bad += 1
+
+        objs.append(
+            dict(
+                object=sym,
+                window=window_note,
+                rows=n,
+                columns=len(df.columns),
+                segments=seg_count,
+                real_discontinuity_count=real_disc,
+                raw_load_count=int(st["raw_load_count"]),
+                preview_step_count=int(st["preview_step_count"]),
+                expected_preview_count=expected_preview,
+                commit_step_count=int(st["commit_step_count"]),
+                duplicate_keys=dup,
+                decision_clock_violations=clock_viol,
+                unsorted_rows=unsorted_rows,
+                schema_missing_columns=missing,
+                forbidden_future_columns=present_future,
+                runtime_sec=round(dt, 3),
+                parquet=dict(
+                    path=os.path.relpath(ppath, _REPO_ROOT),
+                    rows=n,
+                    size_bytes=len(raw_bytes),
+                    sha256=sha,
+                ),
+                roundtrip=dict(
+                    rows=len(rt),
+                    columns=len(rt.columns),
+                    key_mismatch=rt_key_mismatch,
+                    clock_violations=rt_clock_viol,
+                    dtype_bad=dtype_bad,
+                    sample_value_mismatch=val_bad,
+                ),
+            )
+        )
+        frames.append(df)
+
+    # ---- multi-object merge smoke (artifact aggregation; pd.concat allowed) ----
+    merged = pd.concat(frames, ignore_index=True)
+    global_dup = int(merged.duplicated(subset=["data_object", "decision_bar_index"]).sum())
+    global_dup_t = int(merged.duplicated(subset=["data_object", "decision_time"]).sum())
+
+    # ---- acceptance ----
+    for o in objs:
+        assert o["duplicate_keys"] == 0, f"{o['object']} duplicate keys"
+        assert o["decision_clock_violations"] == 0, f"{o['object']} clock violations"
+        assert o["unsorted_rows"] == 0, f"{o['object']} unsorted rows"
+        assert not o["schema_missing_columns"], (
+            f"{o['object']} missing {o['schema_missing_columns']}"
+        )
+        assert not o["forbidden_future_columns"], (
+            f"{o['object']} future columns {o['forbidden_future_columns']}"
+        )
+        assert o["raw_load_count"] == 1, f"{o['object']} raw_load != 1"
+        assert o["preview_step_count"] == o["expected_preview_count"]
+        assert o["roundtrip"]["key_mismatch"] == 0, f"{o['object']} roundtrip key mismatch"
+        assert o["roundtrip"]["clock_violations"] == 0
+        assert o["roundtrip"]["dtype_bad"] == 0
+        assert o["roundtrip"]["sample_value_mismatch"] == 0
+    assert len(objs) == 2, "need 2 objects"
+    assert global_dup == 0 and global_dup_t == 0, "merged semantic key duplicates"
+    assert sum(o["real_discontinuity_count"] for o in objs) > 0, (
+        "no object covered a real discontinuity"
+    )
+
+    summary = dict(
+        task_id="FUTURE-ENV-R3A-T1.5-EFFICIENT-E2E",
+        objects=[o["object"] for o in objs],
+        total_runtime_sec=round(total_runtime, 3),
+        merged_rows=len(merged),
+        merged_duplicate_keys=global_dup,
+        objects_detail=objs,
+        acceptance=dict(
+            objects_completed=len(objs),
+            duplicate_keys=0,
+            decision_clock_violations=0,
+            unsorted_rows=0,
+            schema_missing=0,
+            future_only_columns=0,
+            raw_load_per_object=1,
+            preview_equals_rows_x_ntf=True,
+            roundtrip_key_mismatch=0,
+            unexpected_runtime_stop=0,
+        ),
+    )
+    spath = os.path.join(T15_OUT, "FORMING_ENVIRONMENT_T15_SUMMARY.json")
+    with open(spath, "w") as fh:
+        json.dump(summary, fh, indent=2, default=str)
+
+    disc_total = sum(o["real_discontinuity_count"] for o in objs)
+    return (
+        f"[PASS] T1.5 e2e OK (objects={len(objs)}, rows={[o['rows'] for o in objs]}, "
+        f"segments={[o['segments'] for o in objs]}, real_disc={disc_total}, "
+        f"runtime/obj={[o['runtime_sec'] for o in objs]}s total={total_runtime:.2f}s, "
+        f"preview={[o['preview_step_count'] for o in objs]}==expected, "
+        f"dup=0 clock_viol=0 unsorted=0, roundtrip_ok, merged_dup={global_dup})"
+    )
+
+
+# --------------------------------------------------------------------------- #
 # runner                                                                       #
 # --------------------------------------------------------------------------- #
 def run_all_tests():
@@ -844,6 +1135,7 @@ def run_all_tests():
         ("MATURE", MATURE_state_differential),
         ("PREVIEW", PREVIEW_non_mutation),
         ("PERF", PERF_gate_and_microbenchmark),
+        ("T1.5", T1_5_efficient_e2e),
     ]
     passed = 0
     failed = 0

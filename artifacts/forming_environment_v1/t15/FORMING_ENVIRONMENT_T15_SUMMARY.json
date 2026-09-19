@@ -1,0 +1,88 @@
+{
+  "task_id": "FUTURE-ENV-R3A-T1.5-EFFICIENT-E2E",
+  "objects": [
+    "AG",
+    "SC"
+  ],
+  "total_runtime_sec": 3.135,
+  "merged_rows": 6000,
+  "merged_duplicate_keys": 0,
+  "objects_detail": [
+    {
+      "object": "AG",
+      "window": "prefix[0:3000]",
+      "rows": 3000,
+      "columns": 134,
+      "segments": 1,
+      "real_discontinuity_count": 0,
+      "raw_load_count": 1,
+      "preview_step_count": 12000,
+      "expected_preview_count": 12000,
+      "commit_step_count": 4403,
+      "duplicate_keys": 0,
+      "decision_clock_violations": 0,
+      "unsorted_rows": 0,
+      "schema_missing_columns": [],
+      "forbidden_future_columns": [],
+      "runtime_sec": 1.553,
+      "parquet": {
+        "path": "artifacts/forming_environment_v1/t15/forming_environment_AG.parquet",
+        "rows": 3000,
+        "size_bytes": 607807,
+        "sha256": "a3f44f10b8de9dd60fb12f101bd04c51257b03017d1bdfe58c29a5468a4a165d"
+      },
+      "roundtrip": {
+        "rows": 3000,
+        "columns": 134,
+        "key_mismatch": 0,
+        "clock_violations": 0,
+        "dtype_bad": 0,
+        "sample_value_mismatch": 0
+      }
+    },
+    {
+      "object": "SC",
+      "window": "window[29000:32000]",
+      "rows": 3000,
+      "columns": 134,
+      "segments": 3,
+      "real_discontinuity_count": 2,
+      "raw_load_count": 1,
+      "preview_step_count": 12000,
+      "expected_preview_count": 12000,
+      "commit_step_count": 4406,
+      "duplicate_keys": 0,
+      "decision_clock_violations": 0,
+      "unsorted_rows": 0,
+      "schema_missing_columns": [],
+      "forbidden_future_columns": [],
+      "runtime_sec": 1.581,
+      "parquet": {
+        "path": "artifacts/forming_environment_v1/t15/forming_environment_SC.parquet",
+        "rows": 3000,
+        "size_bytes": 483910,
+        "sha256": "5ac08793bee4bec8be8c8c2ed99ce4ee3e9b3527fb13e3083e01c7cdfc810d15"
+      },
+      "roundtrip": {
+        "rows": 3000,
+        "columns": 134,
+        "key_mismatch": 0,
+        "clock_violations": 0,
+        "dtype_bad": 0,
+        "sample_value_mismatch": 0
+      }
+    }
+  ],
+  "acceptance": {
+    "objects_completed": 2,
+    "duplicate_keys": 0,
+    "decision_clock_violations": 0,
+    "unsorted_rows": 0,
+    "schema_missing": 0,
+    "future_only_columns": 0,
+    "raw_load_per_object": 1,
+    "preview_equals_rows_x_ntf": true,
+    "roundtrip_key_mismatch": 0,
+    "unexpected_runtime_stop": 0
+  }
+}
