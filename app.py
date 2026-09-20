@@ -34,8 +34,16 @@ pages = [
         default=True,
     ),
     st.Page(
+        "pages/6_Alternating_Label_Audit.py",
+        title="买卖点审计 BUY/SELL",
+    ),
+    st.Page(
         "pages/5_Label_Indicator_Audit.py",
-        title="标签与指标审计",
+        title="标签与指标审计 · R1/R2",
+    ),
+    st.Page(
+        "pages/6_Indicator_Viewer.py",
+        title="指标观察器",
     ),
     st.Page(
         "pages/3_Strategy_Lab.py",
