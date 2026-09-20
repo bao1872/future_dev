@@ -74,6 +74,8 @@ build_figure = _page_mod.build_figure
 dtp_box_x = _page_mod.dtp_box_x
 first_seen_i = _page_mod.first_seen_i
 resolve_selection = _page_mod.resolve_selection
+segment_start_global = _page_mod.segment_start_global
+segment_local_to_global = _page_mod.segment_local_to_global
 
 TF_LABELS = ["5m", "15m", "1H", "4H"]
 CONT_TOL = 1e-9
@@ -642,6 +644,25 @@ def _notie_base(n=400, seed=7):
                      np.zeros(n, dtype=np.int64), np.zeros(n, dtype=bool))
 
 
+def _two_segment_base(n=1000, boundary=700, seed=13):
+    """Two-segment synthetic base: segment 0 = global [0, boundary), 1 = [boundary, n)."""
+    rng = np.random.default_rng(seed)
+    close = 100.0 + np.cumsum(rng.normal(0, 0.35, n))
+    o = np.empty(n); h = np.empty(n); l = np.empty(n)
+    o[0] = close[0]; h[0] = close[0] + 0.4; l[0] = close[0] - 0.4
+    for i in range(1, n):
+        o[i] = close[i - 1]
+        hi = max(o[i], close[i]); lo = min(o[i], close[i])
+        h[i] = hi + 0.05 + 0.10 * rng.random()
+        l[i] = lo - 0.05 - 0.10 * rng.random()
+    seg = np.zeros(n, dtype=np.int64)
+    seg[boundary:] = 1
+    disc = np.zeros(n, dtype=bool)
+    disc[boundary] = True
+    t = pd.date_range("2024-01-02 09:00", periods=n, freq="5min")
+    return make_base(t, np.stack([o, h, l, close], axis=-1), seg, disc)
+
+
 def _record_mismatch(rep, field, production, oracle, bar, side):
     """Record first mismatch + bump counter (module-level: no loop closure)."""
     rep["mismatch_count"] += 1
@@ -702,6 +723,9 @@ def test_T0_SR_SOURCE_differential():
     print("SR_SOURCE", rep)
     assert rep["oracle_missing_fields"] == [], (
         f"source oracle lacks fields: {rep['oracle_missing_fields']}")
+    # guard against a vacuous pass (fixture drift -> 0 objects -> 0 mismatch)
+    assert rep["checkpoints_compared"] > 0, rep
+    assert rep["channels_compared"] > 0, rep
     assert rep["mismatch_count"] == 0, rep
 
 
@@ -787,7 +811,9 @@ def test_T0_LIQ_SOURCE_differential():
     base = _notie_base(n=400, seed=7)
     rep = _liq_bar_aligned(base, "5m")
     print("LIQ_SOURCE", rep)
+    # guard against a vacuous pass (fixture drift -> 0 objects -> 0 mismatch)
     assert rep["bars_compared"] > 0, rep
+    assert rep["levels_compared"] > 0, rep
     assert rep["mismatch_count"] == 0, rep
 
 
@@ -1064,6 +1090,78 @@ def test_T0_DTP_PROFILE_GEOMETRY():
     for (c0, a0), (c1, a1) in itertools.pairwise(pairs):
         if c1 > c0:
             assert a1 >= a0, ("opacity must rise with count", pairs)
+
+
+# --------------------------------------------------------------------------- #
+# FIX3: Liquidity `left` is SEGMENT-LOCAL -> must map to the global Plotly x     #
+# --------------------------------------------------------------------------- #
+def test_FIX3_segment_local_to_global():
+    """S = segment start, L = segment-local index -> expected global = S + L.
+
+    Covers BOTH the first segment (S == 0) and a later segment (S > 0).
+    """
+    base = _two_segment_base(n=1000, boundary=700)
+    track = build_viewer_track(base, "5m", raw_load_count=1)
+
+    # --- first segment: S = 0 ---
+    S0 = segment_start_global(track, 0)
+    assert S0 == 0, S0
+    for L in (0, 5, 120, 300):
+        assert segment_local_to_global(track, 100, L) == S0 + L, (S0, L)
+
+    # --- later segment: S = 700 ---
+    for i in (700, 780, 850, 999):
+        assert segment_start_global(track, i) == 700, i
+    for L in (0, 80, 250):
+        assert segment_local_to_global(track, 800, L) == 700 + L, L
+
+    # identity: ci == global - segment_start_global
+    for i in (700, 780, 999):
+        assert i - segment_start_global(track, i) == i - 700
+
+
+def test_FIX3_liq_left_renders_global_x():
+    """A liquidity level with left_local=80 in segment 1 (global start 700)
+    must be drawn at x0 == 780 -- NOT 80, and NOT collapsed to viewport lo."""
+    n, boundary = 1000, 700
+    base = _two_segment_base(n=n, boundary=boundary)
+    track = build_viewer_track(base, "5m", raw_load_count=1)
+    sel = 800
+    assert int(track.segment[sel]) == 1
+    S = segment_start_global(track, sel)
+    assert S == boundary
+
+    LOCAL = 80
+    LVL = 123.0
+    expected = S + LOCAL  # 780
+
+    # Force a known level (visual-coordinate test, independent of detection).
+    track.liq_up_valid[:] = False
+    track.liq_down_valid[:] = False
+    track.liq_up_valid[sel, 0] = True
+    track.liq_up_left[sel, 0] = LOCAL
+    track.liq_up_level[sel, 0] = LVL
+    track.liq_up_top[sel, 0] = LVL + 0.5
+    track.liq_up_bottom[sel, 0] = LVL - 0.5
+    track.liq_up_broken[sel, 0] = 0
+    track.liq_up_breach[sel, 0] = np.nan
+    track.liq_up_zone_exists[sel, 0] = 0
+    track.liq_up_zone_active[sel, 0] = 0
+
+    fig = build_figure(track, sel, False, False, True)
+    lo, _hi = compute_viewport(track, sel)
+    assert lo < expected, {"lo": lo, "expected": expected}
+
+    solids = [s for s in fig.layout.shapes
+              if s.type == "line" and (s.line is None or s.line.dash is None)
+              and abs(float(s.y0) - LVL) < 1e-9]
+    assert solids, "no solid Liquidity line was drawn"
+    rendered = sorted(int(s.x0) for s in solids)
+    assert expected in rendered, {"expected_x0": expected, "rendered_x0": rendered,
+                                  "lo": lo, "S": S, "left_local": LOCAL}
+    # must not leak the raw segment-local value, nor collapse to the viewport clamp
+    assert LOCAL not in rendered, ("raw segment-local x leaked", rendered)
+    assert lo not in rendered, ("collapsed to viewport start", rendered)
 
 
 # --------------------------------------------------------------------------- #

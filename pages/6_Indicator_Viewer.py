@@ -260,6 +260,26 @@ def build_figure(track, selected, show_dtp, show_sr, show_liq) -> go.Figure:
     return fig
 
 
+def segment_start_global(track, i: int) -> int:
+    """First GLOBAL TF index of the segment containing bar ``i``."""
+    seg = int(track.segment[i])
+    return int(np.argmax(track.segment == seg))
+
+
+def segment_local_to_global(track, selected, local_index) -> int:
+    """Map a canonical SEGMENT-LOCAL indicator index to the global Plotly x.
+
+    The canonical single-pass ``IndicatorState`` is stepped with ``ci``, which
+    RESTARTS at 0 on every segment change (reset). Therefore anything produced
+    inside it -- notably Liquidity ``level["left"]`` -- is a SEGMENT-LOCAL TF
+    index, whereas the Viewer x-axis (``selected`` / ``lo`` / ``idx_v``) is the
+    GLOBAL TF index. Such values MUST be converted before being drawn.
+
+    Within one segment ``ci == global_index - segment_start_global``.
+    """
+    return segment_start_global(track, selected) + int(local_index)
+
+
 def first_seen_i(valid, left, level, selected, slot, lo) -> int:
     """First bar at which this liquidity level object exists (creation bar).
 
@@ -310,15 +330,21 @@ def _draw_liq(fig, track, selected, lo, side):
         if not valid[selected, j]:
             continue
         lvl = float(level[selected, j])
-        lft = int(left[selected, j])
+        # `left` comes from the canonical LiquidityState, whose `ci` restarts at
+        # 0 per segment -> it is SEGMENT-LOCAL. Convert to the global x used by
+        # the Plotly axis. (zone_left/right and breach_i are already global --
+        # they are written by the Viewer with the global row index `i`.)
+        left_local = int(left[selected, j])
+        left_global = segment_local_to_global(track, selected, left_local)
         brk = bool(broken[selected, j])
 
-        # The level object became visible at `first_seen` (its creation bar).
+        # The level object became visible at `first_seen` (its creation bar),
+        # already a GLOBAL TF index (it scans global track rows).
         # Pine never draws anything for this level before that bar.
         fs = first_seen_i(valid, left, level, selected, j, lo)
 
-        # solid: max(lo, left) -> first_seen - 1
-        solid_from = max(lo, lft)
+        # solid: max(lo, left_global) -> first_seen - 1
+        solid_from = max(lo, left_global)
         solid_to = min(fs - 1, selected)
         if solid_to > solid_from:
             fig.add_shape(type="line", xref="x", yref="y",
