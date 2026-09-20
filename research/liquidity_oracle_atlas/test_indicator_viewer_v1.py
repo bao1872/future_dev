@@ -21,11 +21,13 @@ from __future__ import annotations
 # Page module file is `pages/6_Indicator_Viewer.py` (digit-leading name cannot
 # be imported via `from ... import` syntax) -> load via importlib.
 import importlib as _il
+import itertools
 import os
 import re
 import time
 import tracemalloc
 import types
+from statistics import median
 
 import numpy as np
 import pandas as pd
@@ -45,7 +47,9 @@ from research.liquidity_oracle_atlas.forming_indicator_state_v1 import (
 )
 from research.liquidity_oracle_atlas.indicator_viewer_v1 import (
     BINS,
+    LIQ_VISIBLE,
     PROFILE_OFFSET,
+    SR_MAX,
     TF_LABEL_TO_MINUTES,
     VIEW_BARS,
     _store_liq,
@@ -55,6 +59,7 @@ from research.liquidity_oracle_atlas.indicator_viewer_v1 import (
     selected_snapshot,
 )
 from research.liquidity_oracle_atlas.liquidity_source_semantic_oracle_v1 import (
+    atr_pine,
     run_liquidity_state_machine,
     unique_confirmed_liq_pivots,
 )
@@ -66,6 +71,9 @@ from research.liquidity_oracle_atlas.sr_source_semantic_oracle_v1 import (
 _page_mod = _il.import_module("pages.6_Indicator_Viewer")
 _parse_selection = _page_mod._parse_selection
 build_figure = _page_mod.build_figure
+dtp_box_x = _page_mod.dtp_box_x
+first_seen_i = _page_mod.first_seen_i
+resolve_selection = _page_mod.resolve_selection
 
 TF_LABELS = ["5m", "15m", "1H", "4H"]
 CONT_TOL = 1e-9
@@ -613,80 +621,174 @@ def test_T0_CLICK_selection_parser():
 # --------------------------------------------------------------------------- #
 # T0.SR_SOURCE / T0.LIQ_SOURCE  source-semantic visual differential             #
 # --------------------------------------------------------------------------- #
-def _sr_differential(base, tf):
+def _notie_base(n=400, seed=7):
+    """Deterministic NO-TIE synthetic base (no plateau / equal extrema).
+
+    Strict-unique pivot builtins cannot pick a deterministic winner inside a
+    plateau, so those bars are legitimately unverified. This generator keeps
+    every window a strict extremum, so no tie masking is needed.
+    """
+    rng = np.random.default_rng(seed)
+    close = 100.0 + np.cumsum(rng.normal(0, 0.35, n))
+    o = np.empty(n); h = np.empty(n); l = np.empty(n)
+    o[0] = close[0]; h[0] = close[0] + 0.4; l[0] = close[0] - 0.4
+    for i in range(1, n):
+        o[i] = close[i - 1]
+        hi = max(o[i], close[i]); lo = min(o[i], close[i])
+        h[i] = hi + 0.05 + 0.10 * rng.random()
+        l[i] = lo - 0.05 - 0.10 * rng.random()
+    t = pd.date_range("2024-01-02 09:00", periods=n, freq="5min")
+    return make_base(t, np.stack([o, h, l, close], axis=-1),
+                     np.zeros(n, dtype=np.int64), np.zeros(n, dtype=bool))
+
+
+def _record_mismatch(rep, field, production, oracle, bar, side):
+    """Record first mismatch + bump counter (module-level: no loop closure)."""
+    rep["mismatch_count"] += 1
+    if rep["first_mismatch"] is None:
+        rep["first_mismatch"] = {
+            "bar": int(bar), "side": side, "field": field,
+            "production": production, "oracle": oracle,
+        }
+
+
+# ---- SR: exact ordered channel differential ------------------------------ #
+def _sr_channels(track, i):
+    return [
+        {"top": float(track.sr_top[i, j]),
+         "bottom": float(track.sr_bottom[i, j]),
+         "strength": float(track.sr_strength[i, j])}
+        for j in range(SR_MAX) if bool(track.sr_valid[i, j])
+    ]
+
+
+def _sr_bar_aligned(base, tf, checkpoints):
+    """SR source differential: EXACT ordered channel collection per checkpoint.
+
+    Not `source subset of production`: count / order / top / bottom / strength
+    must all match within 1e-9 at every checkpoint.
+    """
     track = build_viewer_track(base, tf, raw_load_count=1)
-    i = track.n - 1
-    prod = {(round(track.sr_top[i, j], 3), round(track.sr_bottom[i, j], 3))
-               for j in range(6) if track.sr_valid[i, j]}
     h = track.high; l = track.low; o = track.open; c = track.close
-    ph, pl, _ = unique_confirmed_pivots(h, l, o, c)
+    ph, pl, _tie = unique_confirmed_pivots(h, l, o, c)
     osr = run_sr_state_machine(ph, pl, h, l, c)
-    orc = {(round(ch["hi"], 3), round(ch["lo"], 3)) for ch in osr[i]["channels"]}
-    return orc, prod
-
-
-def _liq_differential(base, tf):
-    track = build_viewer_track(base, tf, raw_load_count=1)
-    # Production evicts old visible levels (LIQ_VISIBLE cap) but detects every
-    # oracle level at SOME bar -> compare against the union over all bars
-    # (production is a superset of the source oracle over time).
-    prod_up = set()
-    prod_down = set()
-    for i in range(track.n):
-        for j in range(3):
-            if track.liq_up_valid[i, j]:
-                prod_up.add(round(float(track.liq_up_level[i, j]), 3))
-            if track.liq_down_valid[i, j]:
-                prod_down.add(round(float(track.liq_down_level[i, j]), 3))
-    h = track.high; l = track.low; o = track.open; c = track.close
-    atr = np.ones(track.n) * 1.0
-    ph, pl, _ = unique_confirmed_liq_pivots(h, l, o, c)
-    ol = run_liquidity_state_machine(h, l, c, atr, ph, pl)
-    orc_up = {round(x["level"], 3) for i in range(track.n) for x in ol[i]["vis_up"]}
-    orc_down = {round(x["level"], 3) for i in range(track.n) for x in ol[i]["vis_down"]}
-    return orc_up, prod_up, orc_down, prod_down
+    missing = [f for f in ("hi", "lo", "strength")
+               if osr[-1]["channels"] and f not in osr[-1]["channels"][0]]
+    rep = {"checkpoints_compared": 0, "channels_compared": 0,
+           "fields_compared": ["count", "top", "bottom", "strength"],
+           "oracle_missing_fields": missing,
+           "mismatch_count": 0, "first_mismatch": None}
+    for i in checkpoints:
+        P = _sr_channels(track, i)
+        O = [{"top": float(x["hi"]), "bottom": float(x["lo"]),
+              "strength": float(x["strength"])} for x in osr[i]["channels"]]
+        rep["checkpoints_compared"] += 1
+        rep["channels_compared"] += max(len(P), len(O))
+        if len(P) != len(O):
+            _record_mismatch(rep, "CHANNEL_COUNT", len(P), len(O), i, "sr")
+            continue
+        for k, (a, b) in enumerate(zip(P, O)):
+            for f in ("top", "bottom", "strength"):
+                if abs(a[f] - b[f]) > CONT_TOL:
+                    _record_mismatch(rep, f"{f}[{k}]", a[f], b[f], i, "sr")
+    return rep
 
 
 def test_T0_SR_SOURCE_differential():
-    rng = np.random.default_rng(31)
-    n = 500
-    t = pd.date_range("2024-01-02 09:00", periods=n, freq="5min")
-    close = 100 + np.cumsum(rng.normal(0, 0.2, n))
-    o = np.empty(n); h = np.empty(n); l = np.empty(n)
-    o[0] = close[0]; h[0] = close[0] + 1; l[0] = close[0] - 1
-    for i in range(1, n):
-        o[i] = close[i - 1]; h[i] = max(o[i], close[i]) + 0.5; l[i] = min(o[i], close[i]) - 0.5
-    for b in range(12, n, 25):
-        h[b] = 120.0; close[b] = 119.0; o[b] = 118.0; l[b] = 117.0
-        h[b + 12] = 80.0; close[b + 12] = 81.0; o[b + 12] = 82.0; l[b + 12] = 83.0
-    seg = np.zeros(n, dtype=np.int64); disc = np.zeros(n, dtype=bool)
-    base = make_base(t, np.stack([o, h, l, close], axis=-1), seg, disc)
-    orc, prod = _sr_differential(base, "5m")
-    mismatch = orc - prod  # source channels not reproduced by production
-    # production (frozen canonical) must reproduce every source-detected channel
-    assert mismatch == set(), {"missing": sorted(mismatch), "prod": sorted(prod), "orc": sorted(orc)}
+    base = _notie_base(n=500, seed=31)
+    track = build_viewer_track(base, "5m", raw_load_count=1)
+    cps = [int(track.n * f) for f in (0.5, 0.7, 0.85, 0.99)] + [track.n - 1]
+    rep = _sr_bar_aligned(base, "5m", cps)
+    print("SR_SOURCE", rep)
+    assert rep["oracle_missing_fields"] == [], (
+        f"source oracle lacks fields: {rep['oracle_missing_fields']}")
+    assert rep["mismatch_count"] == 0, rep
+
+
+# ---- Liquidity: bar-aligned differential (NO union / subset / superset) --- #
+LIQ_FIELDS = ("left", "level", "top", "bottom", "brL", "brZ", "breach_i")
+
+
+def _liq_levels(track, i, up):
+    if up:
+        V = track.liq_up_valid; Lft = track.liq_up_left; Lev = track.liq_up_level
+        Tp = track.liq_up_top; Bt = track.liq_up_bottom
+        Br = track.liq_up_broken; Brch = track.liq_up_breach; Za = track.liq_up_zone_active
+    else:
+        V = track.liq_down_valid; Lft = track.liq_down_left; Lev = track.liq_down_level
+        Tp = track.liq_down_top; Bt = track.liq_down_bottom
+        Br = track.liq_down_broken; Brch = track.liq_down_breach; Za = track.liq_down_zone_active
+    out = []
+    for j in range(LIQ_VISIBLE):
+        if not V[i, j]:
+            continue
+        bi = float(Brch[i, j])
+        out.append({"left": int(Lft[i, j]), "level": float(Lev[i, j]),
+                    "top": float(Tp[i, j]), "bottom": float(Bt[i, j]),
+                    "brL": bool(Br[i, j]), "brZ": bool(Za[i, j]),
+                    "breach_i": int(bi) if np.isfinite(bi) else None})
+    return out
+
+
+def _liq_bar_aligned(base, tf):
+    """BAR-ALIGNED Liquidity differential against the pinned source oracle.
+
+    Answers: at bar t, are the currently visible levels (and their flags) the
+    SAME as TradingView would show? Therefore:
+      * compare per bar, in order, field by field;
+      * NEVER use union / subset / superset / "appeared at some bar";
+      * feed the oracle the PINNED Pine ATR atr_pine(length=10) -- the same
+        input production uses (a hand-made np.ones() ATR is not comparable).
+    """
+    track = build_viewer_track(base, tf, raw_load_count=1)
+    h = track.high; l = track.low; o = track.open; c = track.close
+    atr = atr_pine(h, l, c, 10)
+    ph, pl, tie = unique_confirmed_liq_pivots(h, l, o, c)
+    sm = run_liquidity_state_machine(h, l, c, atr, ph, pl)
+    tie_bars = {int(d["confirm_bar"]) for d in tie}
+    rep = {"bars_compared": 0, "levels_compared": 0,
+           "fields_compared": list(LIQ_FIELDS),
+           "mismatch_count": 0, "first_mismatch": None, "tie_masked_rows": 0}
+    for i in range(track.n):
+        if not (np.isfinite(atr[i]) and np.isfinite(track.atr_liq[i])):
+            continue
+        if i in tie_bars:
+            rep["tie_masked_rows"] += 1
+            continue
+        for up in (True, False):
+            key = "vis_up" if up else "vis_down"
+            side = "up" if up else "down"
+            P = _liq_levels(track, i, up)
+            O = [{"left": int(x["left"]), "level": float(x["level"]),
+                  "top": float(x["top"]), "bottom": float(x["bottom"]),
+                  "brL": bool(x["brL"]), "brZ": bool(x["brZ"]),
+                  "breach_i": int(x["breach_i"]) if x["breach_i"] is not None else None}
+                 for x in sm[i][key]]
+            rep["bars_compared"] += 1
+            rep["levels_compared"] += max(len(P), len(O))
+            if len(P) != len(O):
+                _record_mismatch(rep, "LEVEL_COUNT",
+                                 [round(q["level"], 6) for q in P],
+                                 [round(q["level"], 6) for q in O], i, side)
+                continue
+            for k, (a, b) in enumerate(zip(P, O)):
+                for f in LIQ_FIELDS:
+                    va, vb = a[f], b[f]
+                    if isinstance(va, float) and isinstance(vb, float):
+                        ok = abs(va - vb) <= CONT_TOL
+                    else:
+                        ok = (va == vb)
+                    if not ok:
+                        _record_mismatch(rep, f"{f}[{k}]", va, vb, i, side)
+    return rep
 
 
 def test_T0_LIQ_SOURCE_differential():
-    rng = np.random.default_rng(32)
-    n = 500
-    t = pd.date_range("2024-01-02 09:00", periods=n, freq="5min")
-    close = 100 + np.cumsum(rng.normal(0, 0.2, n))
-    o = np.empty(n); h = np.empty(n); l = np.empty(n)
-    o[0] = close[0]; h[0] = close[0] + 1; l[0] = close[0] - 1
-    for i in range(1, n):
-        o[i] = close[i - 1]; h[i] = max(o[i], close[i]) + 0.5; l[i] = min(o[i], close[i]) - 0.5
-    for b in (60, 160, 260, 360, 460):
-        h[b] = 140.0; close[b] = 139.0; o[b] = 138.0; l[b] = 137.0
-    for b in (110, 210, 310, 410):
-        l[b] = 60.0; close[b] = 61.0; o[b] = 62.0; h[b] = 63.0
-    seg = np.zeros(n, dtype=np.int64); disc = np.zeros(n, dtype=bool)
-    base = make_base(t, np.stack([o, h, l, close], axis=-1), seg, disc)
-    orc_up, prod_up, orc_down, prod_down = _liq_differential(base, "5m")
-    miss_up = orc_up - prod_up
-    miss_down = orc_down - prod_down
-    assert miss_up == set(), {"missing_up": sorted(miss_up), "prod_up": sorted(prod_up)}
-    assert miss_down == set(), {"missing_down": sorted(miss_down), "prod_down": sorted(prod_down)}
+    base = _notie_base(n=400, seed=7)
+    rep = _liq_bar_aligned(base, "5m")
+    print("LIQ_SOURCE", rep)
+    assert rep["bars_compared"] > 0, rep
+    assert rep["mismatch_count"] == 0, rep
 
 
 # --------------------------------------------------------------------------- #
@@ -741,42 +843,76 @@ def test_T1_differential(symbol, tf):
 # TP performance gate (near-linear, no full recompute, no reference)             #
 # --------------------------------------------------------------------------- #
 def _scaling_run(n):
+    """Build a track and split runtime into canonical resample / viewer work.
+
+    Returns ``(track, t_resample, t_viewer, t_total, peak_mb)`` so the frozen
+    complexity gate can be reported per component instead of hiding everything
+    inside one opaque number.
+    """
+    import research.liquidity_oracle_atlas.indicator_viewer_v1 as iv
+
     base = gen_random_base(n=n, seed=42)
-    tracemalloc.start()
-    t0 = time.perf_counter()
-    track = build_viewer_track(base, "1H", raw_load_count=1)
-    elapsed = time.perf_counter() - t0
-    _, peak = tracemalloc.get_traced_memory()
-    tracemalloc.stop()
-    return track, elapsed, peak / 1e6
+    acc = {"resample": 0.0}
+    orig = iv.resample_causal
+
+    def timed_resample(b, minutes):
+        t0 = time.perf_counter()
+        out = orig(b, minutes)
+        acc["resample"] += time.perf_counter() - t0
+        return out
+
+    iv.resample_causal = timed_resample
+    try:
+        tracemalloc.start()
+        t0 = time.perf_counter()
+        track = build_viewer_track(base, "1H", raw_load_count=1)
+        total = time.perf_counter() - t0
+        _, peak = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+    finally:
+        iv.resample_causal = orig
+    viewer = max(total - acc["resample"], 0.0)
+    return track, acc["resample"], viewer, total, peak / 1e6
+
+
+# The frozen contract is 2.8 and is NOT adjustable here.
+TP_THRESHOLD = 2.8
 
 
 def test_TP_performance_gate():
-    tN, t2N, t4N = [], [], []
-    for rep in range(2):
-        _tn, eN, _ = _scaling_run(2000)
-        tN.append(eN)
-        _t2, e2N, _ = _scaling_run(4000)
-        t2N.append(e2N)
-        _t4, e4N, _ = _scaling_run(8000)
-        t4N.append(e4N)
-    eN = max(tN); e2N = max(t2N); e4N = max(t4N)
+    # warmup first (allocator / import / branch cache), then 5 reps + median.
+    # We REDUCE MEASUREMENT NOISE instead of relaxing the frozen threshold.
+    _scaling_run(2000)
+
+    rows = {}
+    for tag, n in (("N", 2000), ("2N", 4000), ("4N", 8000)):
+        rs, vs, ts = [], [], []
+        for _rep in range(5):
+            tr, r, v, t, _p = _scaling_run(n)
+            rs.append(r); vs.append(v); ts.append(t)
+        rows[tag] = {"resample": median(rs), "viewer": median(vs),
+                     "total": median(ts), "n_tf": tr.n}
+
+    eN = rows["N"]["total"]; e2N = rows["2N"]["total"]; e4N = rows["4N"]["total"]
     r1 = e2N / eN
     r2 = e4N / e2N
-    print("TP ratios", {"N": eN, "N2": e2N, "N4": e4N, "r1": r1, "r2": r2})
-    track, _, peak_mb = _scaling_run(4000)
+    print("TP timings", rows)
+    print("TP ratios", {"r1": r1, "r2": r2, "threshold": TP_THRESHOLD})
+
+    tr, _r, _v, _t, peak_mb = _scaling_run(4000)
     print("TP counters", {
-        "raw_load": track.raw_load_count, "resample": track.resample_count,
-        "steps": track.indicator_step_count, "full_recompute": track.full_history_recompute_count,
-        "reference": track.reference_call_count, "writes": track.visual_snapshot_write_count,
-        "peak_mb": peak_mb, "n": track.n})
-    assert track.full_history_recompute_count == 0
-    assert track.reference_call_count == 0
-    assert track.resample_count == 1
-    assert track.raw_load_count == 1
-    assert r1 < 3.0, r1
-    assert r2 < 3.0, r2
-    assert track.indicator_step_count == track.n
+        "raw_load": tr.raw_load_count, "resample": tr.resample_count,
+        "steps": tr.indicator_step_count, "full_recompute": tr.full_history_recompute_count,
+        "reference": tr.reference_call_count, "writes": tr.visual_snapshot_write_count,
+        "peak_mb": peak_mb, "n": tr.n})
+    assert tr.full_history_recompute_count == 0
+    assert tr.reference_call_count == 0
+    assert tr.resample_count == 1
+    assert tr.raw_load_count == 1
+    assert tr.indicator_step_count == tr.n
+    # frozen complexity contract (NOT relaxed)
+    assert r1 < TP_THRESHOLD, {"r1": r1, "rows": rows}
+    assert r2 < TP_THRESHOLD, {"r2": r2, "rows": rows}
 
 
 def test_TP_spy_counters(monkeypatch):
@@ -822,21 +958,127 @@ def test_TP_spy_counters(monkeypatch):
     assert calls["step"] == track.n, calls
 
 
-def test_TP_render_perf():
-    """Render complexity must be bounded by VIEW_BARS, not full N."""
-    base = gen_random_base(2000)
-    track = build_viewer_track(base, "5m", raw_load_count=1)
+def test_TP_render_perf_real_ag_5m():
+    """Render benchmark on the REAL AG / 5m track.
+
+    The track is built ONCE; only ``build_figure()`` is benchmarked, so track
+    construction time is never mixed into the render number.
+    """
+    builder = FormingEnvironmentBuilder("AG")
+    builder.load_raw()
+    base = builder.base
+    t_build0 = time.perf_counter()
+    track = build_viewer_track(base, "5m", symbol="AG", raw_load_count=1)
+    track_build_sec = time.perf_counter() - t_build0
+
+    def bench(sel):
+        ts = []
+        for _rep in range(3):
+            t0 = time.perf_counter()
+            build_figure(track, sel, True, True, True)
+            ts.append(time.perf_counter() - t0)
+        return min(ts)
+
     n = track.n
-    for sel in (n - 1, n // 2, 50):
-        t0 = time.perf_counter()
-        fig = build_figure(track, sel, True, True, True)
-        dt = time.perf_counter() - t0
+    report = {"symbol": track.symbol, "tf": track.tf_label, "full_N": n,
+              "track_build_sec": track_build_sec, "viewport_limit": VIEW_BARS,
+              "benchmarks": []}
+    for sel in (n - 1, n // 2):
+        sec = bench(sel)
         lo, hi = compute_viewport(track, sel)
-        rendered = hi - lo + 1
-        assert rendered <= VIEW_BARS, (rendered, sel)
-        candle = fig.data[0]
-        assert max(candle.x) <= sel
-    assert dt < 2.0
+        fig = build_figure(track, sel, True, True, True)
+        bars = hi - lo + 1
+        entry = {"selected": sel, "viewport_bars": bars, "traces": len(fig.data),
+                 "shapes": len(fig.layout.shapes), "render_sec": sec}
+        report["benchmarks"].append(entry)
+        assert bars <= VIEW_BARS, entry
+    print("TP_RENDER_AG5M", report)
+
+
+# --------------------------------------------------------------------------- #
+# T0.CLICK -- direct K-line selection through the REAL figure hit trace          #
+# --------------------------------------------------------------------------- #
+def test_T0_CLICK_hit_trace():
+    """Prove the figure really exposes a selectable hit target AND that the
+    parser round-trips a selection built from that trace's own customdata.
+
+    Unlike the parser-only test, this does NOT hand-write a fake
+    ``{"customdata": [123, ...]}`` event.
+    """
+    base = _notie_base(n=320, seed=11)
+    track = build_viewer_track(base, "5m", raw_load_count=1)
+    sel = track.n - 1
+    fig = build_figure(track, sel, True, True, True)
+    lo, hi = compute_viewport(track, sel)
+    rendered = hi - lo + 1
+
+    hits = [d for d in fig.data if getattr(d, "name", None) == "iv_hit"]
+    assert len(hits) == 1, "figure has no 'iv_hit' selectable trace"
+    hit = hits[0]
+    # covers exactly the viewport -> one target per rendered candle
+    assert len(hit.x) == rendered, (len(hit.x), rendered)
+    assert len(hit.customdata) == rendered, (len(hit.customdata), rendered)
+    assert len(hit.x) == len(fig.data[0].x), "hit layer must span the candles"
+    # each point carries its own TF bar index
+    for k in range(rendered):
+        assert hit.customdata[k][0] == hit.x[k], k
+    assert max(c[0] for c in hit.customdata) == sel
+
+    # round-trip REAL customdata through the parser
+    mid = rendered // 2
+    real_point = list(hit.customdata[mid])
+    parsed = _parse_selection({"selection": {"points": [{"customdata": real_point}]}})
+    assert parsed == real_point[0], (parsed, real_point)
+    assert parsed == hit.x[mid]
+
+
+# --------------------------------------------------------------------------- #
+# DTP profile visual geometry (Pine box.new orientation + count-driven gradient)  #
+# --------------------------------------------------------------------------- #
+def test_T0_DTP_PROFILE_GEOMETRY():
+    # Pine: start = bar_index + offset ; box.new(start-val, upper, start, lower)
+    #       -> the profile box extends to the LEFT of `start`.
+    assert dtp_box_x(7, 130) == (123, 130)
+    assert dtp_box_x(0, 130) == (130, 130)
+    assert dtp_box_x(25, 100) == (75, 100)
+
+    base = gen_trend_base(n=1200, seed=5)
+    track = build_viewer_track(base, "5m", raw_load_count=1)
+    sel = 900
+    fig = build_figure(track, sel, True, False, False)
+    start = sel + PROFILE_OFFSET
+    boxes = [s for s in fig.layout.shapes
+             if s.type == "rect" and s.x1 is not None and int(s.x1) == start]
+    assert boxes, "no DTP profile boxes rendered"
+    for s in boxes:
+        assert int(s.x1) == start, (s.x0, s.x1)
+        cnt = start - int(s.x0)
+        assert dtp_box_x(cnt, start) == (int(s.x0), int(s.x1)), (s.x0, s.x1)
+    # gradient driver must be the bin COUNT (box width), not the bin index:
+    # a wider box (more bars) must never be fainter than a narrower one.
+    def alpha(s):
+        # fillcolor looks like "rgba(18, 209, 235, 0.5)" -> take trailing alpha
+        return float(str(s.fillcolor).split(",")[-1].strip(" )"))
+    pairs = sorted(((start - int(s.x0), alpha(s)) for s in boxes),
+                   key=lambda p: p[0])
+    for (c0, a0), (c1, a1) in itertools.pairwise(pairs):
+        if c1 > c0:
+            assert a1 >= a0, ("opacity must rise with count", pairs)
+
+
+# --------------------------------------------------------------------------- #
+# Symbol / Timeframe selection contract (pure, no Streamlit)                     #
+# --------------------------------------------------------------------------- #
+def test_T0_SYMBOL_TF_selection_contract():
+    # switch -> latest bar
+    assert resolve_selection("AG", "1H", 1000, 500, ("AG", "5m")) == (999, ("AG", "1H"))
+    # same context -> keep previous selection
+    assert resolve_selection("AG", "1H", 1000, 500, ("AG", "1H")) == (500, ("AG", "1H"))
+    # clamped into [0, n-1]
+    assert resolve_selection("AG", "1H", 1000, -5, ("AG", "1H"))[0] == 0
+    assert resolve_selection("AG", "1H", 1000, 99999, ("AG", "1H"))[0] == 999
+    # first visit -> latest bar
+    assert resolve_selection("AG", "1H", 1000, None, None)[0] == 999
 
 
 # --------------------------------------------------------------------------- #

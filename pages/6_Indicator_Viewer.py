@@ -35,6 +35,7 @@ from research.liquidity_oracle_atlas.build_forming_environment_v1 import (
 from research.liquidity_oracle_atlas.git_head import git_head
 from research.liquidity_oracle_atlas.indicator_viewer_v1 import (
     BINS,
+    LIQ_VISIBLE,
     PROFILE_OFFSET,
     SR_MAX,
     build_viewer_track,
@@ -94,6 +95,16 @@ def _parse_selection(event) -> int | None:
     return int(cd[0])
 
 
+def dtp_box_x(count: int, start: int) -> tuple[int, int]:
+    """Pine ``box.new(start-val, upper, start, lower)`` horizontal span.
+
+    The pinned source builds the profile box with its RIGHT edge at ``start``
+    and its LEFT edge at ``start - val``, i.e. the profile grows to the LEFT of
+    ``start`` (``start = bar_index + offset``). Returns ``(x0, x1)``.
+    """
+    return (int(start) - int(count), int(start))
+
+
 def build_figure(track, selected, show_dtp, show_sr, show_liq) -> go.Figure:
     """TradingView-like figure ending exactly at `selected` (no future)."""
     n = track.n
@@ -120,22 +131,23 @@ def build_figure(track, selected, show_dtp, show_sr, show_liq) -> go.Figure:
     if show_dtp:
         trend = track.trend_state[view]
         sma_v = track.sma[view]
-        up_mask = trend == 1
-        dn_mask = trend == -1
-        if up_mask.any():
-            fig.add_trace(go.Scatter(
-                x=idx_v[up_mask], y=sma_v[up_mask], mode="lines",
-                line={"color": C_DTP_UP, "width": 1.5}, name="SMA UP", showlegend=False))
-        if dn_mask.any():
-            fig.add_trace(go.Scatter(
-                x=idx_v[dn_mask], y=sma_v[dn_mask], mode="lines",
-                line={"color": C_DTP_DOWN, "width": 1.5}, name="SMA DOWN", showlegend=False))
+        # Full-x NaN-masked series: Plotly breaks the line at every trend change
+        # instead of connecting two disjoint UP (or DOWN) stretches.
+        up_y = np.where(trend == 1, sma_v, np.nan)
+        dn_y = np.where(trend == -1, sma_v, np.nan)
+        fig.add_trace(go.Scatter(
+            x=idx_v, y=up_y, mode="lines", connectgaps=False,
+            line={"color": C_DTP_UP, "width": 1.5}, name="SMA UP", showlegend=False))
+        fig.add_trace(go.Scatter(
+            x=idx_v, y=dn_y, mode="lines", connectgaps=False,
+            line={"color": C_DTP_DOWN, "width": 1.5}, name="SMA DOWN", showlegend=False))
 
         # ±1/±2/±3 ATR short horizontal levels at the selected bar (right side)
         s = float(track.sma[selected]); a = float(track.atr[selected])
         if np.isfinite(s) and np.isfinite(a) and a > 0:
             xb = [selected, selected + 5]
             for k in (1, 2, 3):
+                # short level lines (kept; not full-history ATR curves)
                 fig.add_trace(go.Scatter(
                     x=xb, y=[s + k * a, s + k * a], mode="lines",
                     line={"color": _rgba(C_DTP_UP, 0.5), "width": 1, "dash": "dot"},
@@ -144,6 +156,16 @@ def build_figure(track, selected, show_dtp, show_sr, show_liq) -> go.Figure:
                     x=xb, y=[s - k * a, s - k * a], mode="lines",
                     line={"color": _rgba(C_DTP_DOWN, 0.5), "width": 1, "dash": "dot"},
                     showlegend=False, hoverinfo="skip"))
+            # small ±1/±2/±3 labels at the short levels
+            for k in (1, 2, 3):
+                fig.add_annotation(
+                    x=selected + 5, y=s + k * a, text=f"+{k}", showarrow=False,
+                    xanchor="left", yshift=0,
+                    font={"color": _rgba(C_DTP_UP, 0.75), "size": 9})
+                fig.add_annotation(
+                    x=selected + 5, y=s - k * a, text=f"-{k}", showarrow=False,
+                    xanchor="left", yshift=0,
+                    font={"color": _rgba(C_DTP_DOWN, 0.75), "size": 9})
 
         # trend switch markers
         diff = np.where(trend[1:] != trend[:-1])[0] + 1
@@ -154,22 +176,27 @@ def build_figure(track, selected, show_dtp, show_sr, show_liq) -> go.Figure:
                 marker={"color": C_DTP_UP if d == 1 else C_DTP_DOWN, "size": 9, "symbol": "circle"},
                 showlegend=False, hoverinfo="skip"))
 
-        # DTP Trend Distribution Profile (literal counting semantics)
+        # DTP Trend Distribution Profile
+        # Pine: start = bar_index + offset; box.new(start-val, upper, start, lower)
+        # -> every profile box extends to the LEFT of `start`, and its gradient
+        #    driver is the bin COUNT (val), not the vertical bin index.
         counts, lookback = dtp_profile(track, selected)
         if counts is not None and lookback is not None:
             pmin = s - 3.0 * a
             pstep = 6.0 * a / BINS
-            x0 = selected + PROFILE_OFFSET
+            start = selected + PROFILE_OFFSET
             trend_up = int(track.trend_state[selected]) == 1
             base = C_DTP_UP if trend_up else C_DTP_DOWN
+            mx = int(counts.max()) if counts.size else 0
             for b in range(BINS):
                 cnt = int(counts[b])
                 if cnt <= 0:
                     continue
                 lower = pmin + pstep * b
-                op = 0.22 + 0.6 * (b / (BINS - 1)) if BINS > 1 else 0.6
+                bx0, bx1 = dtp_box_x(cnt, start)
+                op = 0.22 + 0.6 * (cnt / mx) if mx > 0 else 0.6
                 fig.add_shape(type="rect", xref="x", yref="y",
-                              x0=x0, x1=x0 + min(cnt, 40), y0=lower, y1=lower + pstep,
+                              x0=bx0, x1=bx1, y0=lower, y1=lower + pstep,
                               fillcolor=_rgba(base, op), line={"width": 0}, layer="above")
 
     # ---- SR ------------------------------------------------------------- #
@@ -196,6 +223,19 @@ def build_figure(track, selected, show_dtp, show_sr, show_liq) -> go.Figure:
         _draw_liq(fig, track, selected, lo, side=+1)
         _draw_liq(fig, track, selected, lo, side=-1)
 
+    # ---- selectable hit layer (direct K-line click) --------------------- #
+    # One real selectable marker per visible bar, spanning exactly the
+    # viewport. Each point carries its TF bar index so a click maps back to
+    # `selected`. Very low opacity but still clickable (not an invisible
+    # size-1 trick that cannot be hit).
+    cdata = [[int(x), str(t)] for x, t in zip(idx_v, time_v)]
+    fig.add_trace(go.Scatter(
+        x=idx_v, y=track.close[view], mode="markers",
+        marker={"size": 10, "color": "rgba(255,255,255,0.07)", "line": {"width": 0}},
+        customdata=cdata,
+        hoverinfo="skip", showlegend=False, name="iv_hit",
+    ))
+
     # ---- layout --------------------------------------------------------- #
     right = selected + PROFILE_OFFSET + 40
     tick_step = max(1, len(idx_v) // 10)
@@ -220,44 +260,84 @@ def build_figure(track, selected, show_dtp, show_sr, show_liq) -> go.Figure:
     return fig
 
 
+def first_seen_i(valid, left, level, selected, slot, lo) -> int:
+    """First bar at which this liquidity level object exists (creation bar).
+
+    Pine only starts drawing a level once the cluster has formed, so the
+    creation bar must be known to avoid drawing an extension that never
+    existed before discovery. Level identity = (left, level).
+
+    Walk back from ``selected`` while the same identity is visible. The scan is
+    bounded by the viewport start ``lo``; anything created at or before ``lo``
+    is reported as ``lo`` (callers clamp with ``max(lo, ...)`` anyway).
+    """
+    kl = int(left[selected, slot])
+    kv = float(level[selected, slot])
+    i = int(selected)
+    while i > lo:
+        seen = False
+        for j in range(LIQ_VISIBLE):
+            if (
+                valid[i, j]
+                and int(left[i, j]) == kl
+                and abs(float(level[i, j]) - kv) <= 1e-12
+            ):
+                seen = True
+                break
+        if not seen:
+            return i + 1
+        i -= 1
+    return lo
+
+
 def _draw_liq(fig, track, selected, lo, side):
     if side > 0:
         valid = track.liq_up_valid; left = track.liq_up_left
-        level = track.liq_up_level; top = track.liq_up_top
-        bottom = track.liq_up_bottom; broken = track.liq_up_broken
+        level = track.liq_up_level; broken = track.liq_up_broken
         ze = track.liq_up_zone_exists; za = track.liq_up_zone_active
         zl = track.liq_up_zone_left; zr = track.liq_up_zone_right
         ztop = track.liq_up_zone_top; zbot = track.liq_up_zone_bottom
         color = C_BUY; label = "Buyside"
     else:
         valid = track.liq_down_valid; left = track.liq_down_left
-        level = track.liq_down_level; top = track.liq_down_top
-        bottom = track.liq_down_bottom; broken = track.liq_down_broken
+        level = track.liq_down_level; broken = track.liq_down_broken
         ze = track.liq_down_zone_exists; za = track.liq_down_zone_active
         zl = track.liq_down_zone_left; zr = track.liq_down_zone_right
         ztop = track.liq_down_zone_top; zbot = track.liq_down_zone_bottom
         color = C_SELL; label = "Sellside"
 
-    for j in range(3):
+    for j in range(LIQ_VISIBLE):
         if not valid[selected, j]:
             continue
         lvl = float(level[selected, j])
-        tp = float(top[selected, j]); bt = float(bottom[selected, j])
         lft = int(left[selected, j])
-        bool(broken[selected, j])
+        brk = bool(broken[selected, j])
 
-        # margin region (faint) across the visible window
-        fig.add_shape(type="rect", xref="x", yref="y", x0=lo, x1=selected,
-                      y0=bt, y1=tp, fillcolor=_rgba(color, 0.10),
-                      line={"width": 0}, layer="below")
-        # dotted extension before discovery (lo -> left)
-        if lft > lo:
-            fig.add_shape(type="line", xref="x", yref="y", x0=lo, x1=lft,
-                          y0=lvl, y1=lvl, line={"color": _rgba(color, 0.5), "width": 1, "dash": "dot"},
-                          layer="above")
-        # solid level line from discovery to selected
-        fig.add_shape(type="line", xref="x", yref="y", x0=lft, x1=selected,
-                      y0=lvl, y1=lvl, line={"color": color, "width": 2}, layer="above")
+        # The level object became visible at `first_seen` (its creation bar).
+        # Pine never draws anything for this level before that bar.
+        fs = first_seen_i(valid, left, level, selected, j, lo)
+
+        # solid: max(lo, left) -> first_seen - 1
+        solid_from = max(lo, lft)
+        solid_to = min(fs - 1, selected)
+        if solid_to > solid_from:
+            fig.add_shape(type="line", xref="x", yref="y",
+                          x0=solid_from, x1=solid_to, y0=lvl, y1=lvl,
+                          line={"color": color, "width": 2}, layer="above")
+
+        # dotted: max(lo, first_seen - 1) -> lifecycle end (never before discovery)
+        dotted_from = max(lo, fs - 1)
+        if dotted_from < selected:
+            # unbroken -> selected ; breached/closed -> zone_right (frozen)
+            end_i = float(selected)
+            if brk and bool(ze[selected, j]) and np.isfinite(zr[selected, j]):
+                end_i = float(zr[selected, j])
+            end_i = min(max(end_i, lo), selected)
+            if end_i > dotted_from:
+                fig.add_shape(type="line", xref="x", yref="y",
+                              x0=dotted_from, x1=end_i, y0=lvl, y1=lvl,
+                              line={"color": _rgba(color, 0.5), "width": 1, "dash": "dot"},
+                              layer="above")
         # label
         fig.add_annotation(x=selected, y=lvl, text=f"{label} {lvl:.2f}",
                            showarrow=False, font={"color": color, "size": 10},
@@ -277,21 +357,37 @@ def _draw_liq(fig, track, selected, lo, side):
 # --------------------------------------------------------------------------- #
 # Streamlit page                                                               #
 # --------------------------------------------------------------------------- #
-def _load_base(symbol: str):
-    @st.cache_data(show_spinner="加载 5m 基础数据…")
-    def _load(sym: str):
-        b = FormingEnvironmentBuilder(symbol=sym)
-        b.load_raw()
-        return b.base
-    return _load(symbol)
+# Top-level cache owners (stable, readable, unit-testable; no nested per-call
+# @st.cache_data closure that is rebuilt on every invocation).
+@st.cache_data(show_spinner="加载 5m 基础数据…")
+def load_base_cached(symbol: str):
+    b = FormingEnvironmentBuilder(symbol=symbol)
+    b.load_raw()
+    return b.base
 
 
-def _build_track(symbol: str, tf: str):
-    @st.cache_data(show_spinner="构建指标时间轴…")
-    def _build(sym: str, timeframe: str):
-        base = _load_base(sym)
-        return build_viewer_track(base, timeframe, symbol=sym, source_sha=git_head())
-    return _build(symbol, tf)
+@st.cache_data(show_spinner="构建指标时间轴…")
+def build_track_cached(symbol: str, tf: str, source_sha: str):
+    base = load_base_cached(symbol)
+    return build_viewer_track(base, tf, symbol=symbol, source_sha=source_sha)
+
+
+def resolve_selection(symbol, tf, n_bars, prev_selected, prev_ctx):
+    """Pure data-selection contract for Symbol / Timeframe switching.
+
+    Returns ``(selected, ctx)``:
+      * symbol/TF changed -> selection resets to the LATEST bar;
+      * otherwise -> previous selection clamped into ``[0, n_bars-1]``.
+
+    Pure (no Streamlit) so the contract can be regression-tested directly.
+    """
+    ctx = (symbol, tf)
+    last = max(0, int(n_bars) - 1)
+    if prev_ctx != ctx:
+        return (last, ctx)
+    if prev_selected is None:
+        return (last, ctx)
+    return (int(min(max(int(prev_selected), 0), last)), ctx)
 
 
 def main() -> None:
@@ -300,32 +396,26 @@ def main() -> None:
     st.caption("将选中 K 线当作该时刻最后一根已形成的 K 线；只显示该 TF 三个原始指标当时的状态。"
                "不含 Oracle / Label / PGM / 模型结论。")
 
-    if "iv_symbol" not in st.session_state:
-        st.session_state.iv_symbol = SYMBOLS[0]
-    if "iv_tf" not in st.session_state:
-        st.session_state.iv_tf = "1H"
-    if "iv_show_dtp" not in st.session_state:
-        st.session_state.iv_show_dtp = True
-    if "iv_show_sr" not in st.session_state:
-        st.session_state.iv_show_sr = True
-    if "iv_show_liq" not in st.session_state:
-        st.session_state.iv_show_liq = True
+    st.session_state.setdefault("iv_symbol", SYMBOLS[0])
+    st.session_state.setdefault("iv_tf", "1H")
+    st.session_state.setdefault("iv_show_dtp", True)
+    st.session_state.setdefault("iv_show_sr", True)
+    st.session_state.setdefault("iv_show_liq", True)
 
-    symbol = st.session_state.iv_symbol
-    tf = st.session_state.iv_tf
-    track = _build_track(symbol, tf)
-
-    if "iv_selected" not in st.session_state:
-        st.session_state.iv_selected = track.n - 1
-    st.session_state.iv_selected = int(min(max(st.session_state.iv_selected, 0), track.n - 1))
-
-    # ---- top toolbar ---------------------------------------------------- #
+    # ---- toolbar columns ------------------------------------------------ #
     col_sym, col_tf, col_date, col_bt, col_prev, col_next, c1, c2, c3 = st.columns(
         [1.1, 1.2, 1.6, 1.1, 0.6, 0.6, 0.6, 0.6, 0.6])
+
+    # (1) Symbol / Timeframe widgets FIRST. They own their own state via key=,
+    #     so the returned value is already THIS rerun's choice.
     with col_sym:
-        st.session_state.iv_symbol = st.selectbox("Symbol", SYMBOLS, index=SYMBOLS.index(symbol))
+        symbol = st.selectbox("Symbol", SYMBOLS,
+                              index=SYMBOLS.index(st.session_state.iv_symbol),
+                              key="iv_symbol")
     with col_tf:
-        st.session_state.iv_tf = st.selectbox("Timeframe", TF_LABELS, index=TF_LABELS.index(tf))
+        tf = st.selectbox("Timeframe", TF_LABELS,
+                          index=TF_LABELS.index(st.session_state.iv_tf),
+                          key="iv_tf")
     with c1:
         st.session_state.iv_show_dtp = st.checkbox("DTP", value=st.session_state.iv_show_dtp)
     with c2:
@@ -333,6 +423,16 @@ def main() -> None:
     with c3:
         st.session_state.iv_show_liq = st.checkbox("Liquidity", value=st.session_state.iv_show_liq)
 
+    # (2) NOW build the track from the CURRENT widget values, so the chart
+    #     always corresponds to the dropdown in the SAME rerun.
+    track = build_track_cached(symbol, tf, git_head())
+
+    # (3) Selection: reset to latest bar when symbol/TF changed.
+    prev_ctx = st.session_state.get("_iv_ctx")
+    prev_sel = st.session_state.get("iv_selected")
+    selected, ctx = resolve_selection(symbol, tf, track.n, prev_sel, prev_ctx)
+    st.session_state["_iv_ctx"] = ctx
+    st.session_state.iv_selected = selected
     selected = int(st.session_state.iv_selected)
     # deterministic selectors (fallback if click fails)
     dates = pd.to_datetime(track.time).normalize()
