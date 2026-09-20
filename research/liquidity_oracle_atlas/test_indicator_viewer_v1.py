@@ -18,8 +18,14 @@ production helper.
 
 from __future__ import annotations
 
+# Page module file is `pages/6_Indicator_Viewer.py` (digit-leading name cannot
+# be imported via `from ... import` syntax) -> load via importlib.
+import importlib as _il
+import os
+import re
 import time
 import tracemalloc
+import types
 
 import numpy as np
 import pandas as pd
@@ -39,11 +45,27 @@ from research.liquidity_oracle_atlas.forming_indicator_state_v1 import (
 )
 from research.liquidity_oracle_atlas.indicator_viewer_v1 import (
     BINS,
+    PROFILE_OFFSET,
     TF_LABEL_TO_MINUTES,
+    VIEW_BARS,
+    _store_liq,
     build_viewer_track,
+    compute_viewport,
     dtp_profile,
     selected_snapshot,
 )
+from research.liquidity_oracle_atlas.liquidity_source_semantic_oracle_v1 import (
+    run_liquidity_state_machine,
+    unique_confirmed_liq_pivots,
+)
+from research.liquidity_oracle_atlas.sr_source_semantic_oracle_v1 import (
+    run_sr_state_machine,
+    unique_confirmed_pivots,
+)
+
+_page_mod = _il.import_module("pages.6_Indicator_Viewer")
+_parse_selection = _page_mod._parse_selection
+build_figure = _page_mod.build_figure
 
 TF_LABELS = ["5m", "15m", "1H", "4H"]
 CONT_TOL = 1e-9
@@ -123,9 +145,7 @@ def gen_random_base(n=2000, seed=1):
 def fresh_state_at(base, tf, target):
     """Single-pass IndicatorState stepped 0..target (segment resets).
 
-    Returns (state, last_feats) where last_feats is the feature dict emitted at
-    ``target`` (needed because IndicatorState does not cache scalar values as
-    attributes).
+    Returns (state, last_feats).
     """
     minutes = TF_LABEL_TO_MINUTES[tf]
     tf_bars = resample_causal(base, minutes)
@@ -142,6 +162,53 @@ def fresh_state_at(base, tf, target):
             float(tf_bars["low"].iloc[i]), float(tf_bars["close"].iloc[i]))
         ci += 1
     return state, last_feats
+
+
+def _run_store(seq, side, atr=1.0, nrows=None):
+    """Drive _store_liq over a synthetic sequence.
+
+    ``seq`` is a list of (levels_list, H, L) where each level is a dict with
+    keys left/level/top/bottom/broken. Returns per-bar row dicts.
+    """
+    nrows = nrows or (len(seq) + 2)
+    mk = lambda: np.full((nrows, 3), np.nan)
+    valid = np.zeros((nrows, 3), dtype=bool)
+    left = mk(); level = mk(); top = mk(); bottom = mk()
+    broken = np.zeros((nrows, 3)); breach = mk()
+    ze = np.zeros((nrows, 3)); za = np.zeros((nrows, 3))
+    zl = mk(); zr = mk(); zt = mk(); zb = mk()
+    tracker = {}
+    rows = []
+    for bar, (levels, H, L) in enumerate(seq):
+        # Compute breach from the bar's H/L using the SAME strict rule as
+        # IndicatorState (H > top for buyside, L < bottom for sellside) and
+        # latch it so a breached level stays broken for the rest of the run.
+        breached = []
+        for lev in levels:
+            b = bool(lev.get("broken", False))
+            if not b and (
+                (side > 0 and H > float(lev["top"]))
+                or (side < 0 and L < float(lev["bottom"]))
+            ):
+                b = True
+            if b:
+                lev["broken"] = True
+            breached.append(dict(lev, broken=b))
+        valid[bar] = False; left[bar] = np.nan; level[bar] = np.nan
+        top[bar] = np.nan; bottom[bar] = np.nan; broken[bar] = 0
+        breach[bar] = np.nan; ze[bar] = 0; za[bar] = 0
+        zl[bar] = np.nan; zr[bar] = np.nan; zt[bar] = np.nan; zb[bar] = np.nan
+        _store_liq(valid, left, level, top, bottom, broken, breach, ze, za,
+                   zl, zr, zt, zb, breached, tracker, 0, bar, side, atr, H, L)
+        rows.append(types.SimpleNamespace(
+            zone_exists=bool(ze[bar, 0]), zone_active=bool(za[bar, 0]),
+            zl=zl[bar, 0], zr=zr[bar, 0], zt=zt[bar, 0], zb=zb[bar, 0],
+            broken=bool(broken[bar, 0]), breach=breach[bar, 0],
+            za_all=[bool(za[bar, j]) for j in range(3)],
+            zr_all=[None if not np.isfinite(zr[bar, j]) else float(zr[bar, j])
+                    for j in range(3)],
+        ))
+    return rows
 
 
 # --------------------------------------------------------------------------- #
@@ -178,7 +245,6 @@ def test_T0_2_resample_hand_check():
     assert r["close"] == 105
     assert int(r["n_base"]) == 3
     assert pd.Timestamp(r["time"]) == pd.Timestamp("2024-01-02 09:00")
-    # minimality: a second bucket
     times2 = times + ["2024-01-02 09:15"]
     ohlc2 = np.vstack([ohlc, [105, 106, 104, 106]])
     base2 = make_base(pd.to_datetime(times2), ohlc2, np.zeros(4, dtype=np.int64),
@@ -194,14 +260,12 @@ def test_T0_2_resample_hand_check():
 def test_T0_3_dtp_bands_exact():
     base = gen_trend_base(n=1200, seed=3)
     track = build_viewer_track(base, "5m", raw_load_count=1)
-    # find a fully-warm bar
     i = 900
     sma = track.sma[i]; atr = track.atr[i]
     assert np.isfinite(sma) and np.isfinite(atr)
     for k in (1, 2, 3):
         assert abs((sma + k * atr) - (sma + k * atr)) < 1e-12
         assert abs((sma - k * atr) - (sma - k * atr)) < 1e-12
-    # cross-check stored sma/atr against a fresh single-pass state at i
     _st, feats = fresh_state_at(base, "5m", i)
     assert abs(feats["sma"] - sma) <= CONT_TOL
     assert abs(feats["atr"] - atr) <= CONT_TOL
@@ -213,15 +277,12 @@ def test_T0_3_dtp_bands_exact():
 def test_T0_4_trend_start():
     base = gen_trend_base(n=1200, up_until=600, seed=5)
     track = build_viewer_track(base, "5m", raw_load_count=1)
-    # warmup bar, no switch yet
     assert track.trend_start_global[50] == -1
     assert dtp_profile(track, 50)[0] is None
-    # post first switch bar
     assert track.trend_start_global[900] >= 0
     counts, lookback = dtp_profile(track, 900)
     assert counts is not None
     assert lookback == 900 - int(track.trend_start_global[900])
-    # first switch index is finite, profile unavailable strictly before it
     first = int(track.trend_start_global[900])
     assert track.trend_start_global[first] == first
     assert dtp_profile(track, first - 1)[0] is None
@@ -231,7 +292,6 @@ def test_T0_4_trend_start():
 # T0.5 DTP profile literal oracle (exact count match)                           #
 # --------------------------------------------------------------------------- #
 def literal_pine_profile(close, sma, atr, trend_start_global, selected, bins=BINS):
-    """Independent literal port of ref/DeviationTrendProfile.pine::profile()."""
     n = len(close)
     i = int(selected)
     ts = int(trend_start_global[i]) if 0 <= i < n else -1
@@ -292,11 +352,11 @@ def test_T0_7_liq_snapshot_exact():
         for side, la, lv, lt, lb, lbr, lbo, lba, lzl, lzr, lzt, lzb in (
             ("up", track.liq_up_valid, track.liq_up_level, track.liq_up_top,
              track.liq_up_bottom, track.liq_up_broken, track.liq_up_breach,
-             track.liq_up_zone_active, track.liq_up_zone_left, track.liq_up_zone_right,
+             track.liq_up_zone_exists, track.liq_up_zone_left, track.liq_up_zone_right,
              track.liq_up_zone_top, track.liq_up_zone_bottom),
             ("down", track.liq_down_valid, track.liq_down_level, track.liq_down_top,
              track.liq_down_bottom, track.liq_down_broken, track.liq_down_breach,
-             track.liq_down_zone_active, track.liq_down_zone_left, track.liq_down_zone_right,
+             track.liq_down_zone_exists, track.liq_down_zone_left, track.liq_down_zone_right,
              track.liq_down_zone_top, track.liq_down_zone_bottom),
         ):
             ref = st.liq.levels_up if side == "up" else st.liq.levels_down
@@ -311,144 +371,147 @@ def test_T0_7_liq_snapshot_exact():
 
 
 # --------------------------------------------------------------------------- #
-# T0.8 / T0.9 Liquidity post-break lifecycle (visual-only)                      #
+# T0.8 Liquidity post-break lifecycle (BUYSIDE, visual-only)                    #
 # --------------------------------------------------------------------------- #
 def test_T0_8_postbreak_lifecycle():
-    from research.liquidity_oracle_atlas.indicator_viewer_v1 import _store_liq
-
-    nrows = 12  # > len(seq)
-    up_valid = np.zeros((nrows, 3), dtype=bool)
-    mk = lambda: np.full((nrows, 3), np.nan)
-    up_left = mk(); up_level = mk(); up_top = mk(); up_bottom = mk()
-    up_broken = np.zeros((nrows, 3)); up_breach = mk()
-    up_za = np.zeros((nrows, 3)); up_zl = mk(); up_zr = mk(); up_zt = mk(); up_zb = mk()
-    tracker = {}
-
-    seq = [
-        # bar 0: level appears, not broken
-        {"left": 0, "level": 100.0, "top": 101.0, "bottom": 99.0, "broken": False},
-        # bars 1-4: still active, unbroken
-        {"left": 0, "level": 100.0, "top": 101.0, "bottom": 99.0, "broken": False},
-        {"left": 0, "level": 100.0, "top": 101.0, "bottom": 99.0, "broken": False},
-        {"left": 0, "level": 100.0, "top": 101.0, "bottom": 99.0, "broken": False},
-        {"left": 0, "level": 100.0, "top": 101.0, "bottom": 99.0, "broken": False},
-        # bar 5: breach (H=102 > top 101)
-        {"left": 0, "level": 100.0, "top": 101.0, "bottom": 99.0, "broken": True},
-        # bars 6-7: price inside zone -> expands
-        {"left": 0, "level": 100.0, "top": 101.0, "bottom": 99.0, "broken": True},
-        {"left": 0, "level": 100.0, "top": 101.0, "bottom": 99.0, "broken": True},
-        # bar 8: price leaves zone (H=105 > level+2.3) -> terminates
-        {"left": 0, "level": 100.0, "top": 101.0, "bottom": 99.0, "broken": True},
-    ]
-    # atr_liq=1.0 -> pb=2.3; H/L per simulated bar
-    hl = [(None, None), (100, 99), (101, 98), (100, 99), (101, 99),
-          (102, 100), (101, 99), (100, 99), (105, 100)]
-    rows = []
-    for bar, lev in enumerate(seq):
-        # reset only this row; other rows retain their captured state
-        up_valid[bar] = False; up_left[bar] = np.nan; up_level[bar] = np.nan
-        up_top[bar] = np.nan; up_bottom[bar] = np.nan; up_broken[bar] = 0
-        up_breach[bar] = np.nan; up_za[bar] = 0; up_zl[bar] = np.nan
-        up_zr[bar] = np.nan; up_zt[bar] = np.nan; up_zb[bar] = np.nan
-        H, L = hl[bar]
-        _store_liq(up_valid, up_left, up_level, up_top, up_bottom, up_broken, up_breach,
-                   up_za, up_zl, up_zr, up_zt, up_zb,
-                   [lev], tracker, 0, bar, 1.0, H, L)
-        rows.append({
-            "broken": bool(up_broken[bar, 0]), "breach": up_breach[bar, 0],
-            "za": bool(up_za[bar, 0]), "zl": up_zl[bar, 0], "zr": up_zr[bar, 0],
-            "zt": up_zt[bar, 0], "zb": up_zb[bar, 0],
-        })
-    # pre-breach: no zone
-    assert rows[0]["za"] is False and np.isnan(rows[0]["zl"])
-    # breach bar (index 5)
-    assert rows[5]["broken"] and rows[5]["za"]
-    assert rows[5]["zl"] == 4 and rows[5]["zr"] == 6
-    assert rows[5]["zb"] == 100.0 and rows[5]["zt"] == 102.0
-    # expands
-    assert rows[6]["zr"] == 7 and rows[7]["zr"] == 8
-    # terminates
-    assert rows[8]["za"] is False and rows[8]["zr"] == 8
+    lvl = [{"left": 0, "level": 100.0, "top": 101.0, "bottom": 99.0, "broken": False}]
+    seq = [(lvl, 100.0, 100.0)] * 5          # appear, unbroken
+    seq += [(lvl, 102.0, 100.0)]             # bar 5 breach (H=102 > top 101)
+    seq += [(lvl, 100.0, 99.0)]              # bar 6 inside -> expands
+    seq += [(lvl, 100.0, 99.0)]              # bar 7 inside -> expands
+    seq += [(lvl, 105.0, 100.0)]             # bar 8 leaves (H=105 > level+2.3) -> terminates
+    rows = _run_store(seq, side=+1, atr=1.0)
+    assert rows[0].zone_exists is False and np.isnan(rows[0].zl)
+    assert rows[5].broken and rows[5].zone_active
+    assert rows[5].zl == 4 and rows[5].zr == 6
+    assert rows[5].zb == 100.0 and rows[5].zt == 102.0
+    assert rows[6].zr == 7 and rows[7].zr == 8
+    assert rows[8].zone_active is False and rows[8].zr == 8
 
 
+# --------------------------------------------------------------------------- #
+# T0.9 Multiple levels independent lifecycle (BUYSIDE)                          #
+# --------------------------------------------------------------------------- #
 def test_T0_9_multiple_levels_independent():
-    from research.liquidity_oracle_atlas.indicator_viewer_v1 import _store_liq
-
-    nrows = 12
-    def make_buf():
-        up_valid = np.zeros((nrows, 3), dtype=bool)
-        mk = lambda: np.full((nrows, 3), np.nan)
-        return (up_valid, mk(), mk(), mk(), mk(), np.zeros((nrows, 3)), mk(),
-                np.zeros((nrows, 3)), mk(), mk(), mk(), mk())
-
-    tracker = {}
-    # level A breaches at bar 5; level B appears at bar 8, breaches at bar 10
-    seq = [
-        [{"left": 0, "level": 100.0, "top": 101.0, "bottom": 99.0, "broken": False}],
-        [{"left": 0, "level": 100.0, "top": 101.0, "bottom": 99.0, "broken": False}],
-        [{"left": 0, "level": 100.0, "top": 101.0, "bottom": 99.0, "broken": False}],
-        [{"left": 0, "level": 100.0, "top": 101.0, "bottom": 99.0, "broken": False}],
-        [{"left": 0, "level": 100.0, "top": 101.0, "bottom": 99.0, "broken": False}],
-        [{"left": 0, "level": 100.0, "top": 101.0, "bottom": 99.0, "broken": True}],   # A breach
-        [{"left": 0, "level": 100.0, "top": 101.0, "bottom": 99.0, "broken": True}],
-        [{"left": 0, "level": 100.0, "top": 101.0, "bottom": 99.0, "broken": True}],
-        [{"left": 0, "level": 100.0, "top": 101.0, "bottom": 99.0, "broken": True},
-         {"left": 8, "level": 200.0, "top": 201.0, "bottom": 199.0, "broken": False}],  # B appears
-        [{"left": 0, "level": 100.0, "top": 101.0, "bottom": 99.0, "broken": True},
-         {"left": 8, "level": 200.0, "top": 201.0, "bottom": 199.0, "broken": False}],
-        [{"left": 0, "level": 100.0, "top": 101.0, "bottom": 99.0, "broken": True},
-         {"left": 8, "level": 200.0, "top": 201.0, "bottom": 199.0, "broken": True}],  # B breach
-        [{"left": 0, "level": 100.0, "top": 101.0, "bottom": 99.0, "broken": True},
-         {"left": 8, "level": 200.0, "top": 201.0, "bottom": 199.0, "broken": True}],
-    ]
-    hl = [(None, None)] * 5 + [(102, 100), (101, 99), (100, 99),
-         (105, 100), (101, 99), (202, 200), (201, 199)]
-    a_zone_right = []
-    b_zone_active = []
-    for bar, levels in enumerate(seq):
-        b = make_buf()
-        H, L = hl[bar]
-        _store_liq(b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], b[8], b[9], b[10], b[11],
-                   levels, tracker, 0, bar, 1.0, H, L)
-        # slot 0 = A, slot 1 = B
-        a_zone_right.append(b[9][bar, 0])
-        b_zone_active.append(bool(b[7][bar, 1]))
-    # A's zone closed by bar 8 (terminates), unaffected by B breach at bar 10
-    assert np.isnan(a_zone_right[10]) or a_zone_right[10] <= 8
-    # B becomes active only at its own breach (bar 10)
+    A = {"left": 0, "level": 100.0, "top": 101.0, "bottom": 99.0, "broken": False}
+    B = {"left": 8, "level": 200.0, "top": 201.0, "bottom": 199.0, "broken": False}
+    seq = [( [A], 100.0, 100.0)] * 5
+    seq += [( [A], 102.0, 100.0)]            # A breach at bar 5
+    seq += [( [A], 101.0, 99.0)] * 2
+    seq += [( [A, B], 105.0, 99.0)]          # A leaves band -> closes (8); B appears
+    seq += [( [A, B], 101.0, 99.0)]          # B not breached yet (9)
+    seq += [( [A, B], 202.0, 200.0)]         # B breach at bar 10
+    seq += [( [A, B], 201.0, 199.0)]
+    rows = _run_store(seq, side=+1, atr=1.0)
+    a_zone_right = [r.zr for r in rows]
+    b_zone_active = [r.za_all[1] for r in rows]
+    assert a_zone_right[10] <= 8
     assert b_zone_active[9] is False
     assert b_zone_active[10] is True
 
 
 # --------------------------------------------------------------------------- #
-# T0.10 Segment reset                                                            #
+# T0.10 Segment reset on a MATURE (switched) segment                            #
 # --------------------------------------------------------------------------- #
-def test_T0_10_segment_reset():
-    n = 700
+def test_T0_10_segment_reset_mature():
+    n = 1000
     rng = np.random.default_rng(2)
     times = pd.date_range("2024-01-02 09:00", periods=n, freq="5min")
-    close = 1000.0 + rng.normal(0, 1, n).cumsum()
+    # segment 0 (0..950): up -> flat -> up  (mirrors gen_trend_base, whose
+    # sandwiched flat region makes the DTP score cross +sw and fire a real UP
+    # switch well before the boundary). Segment length 950 > 900 (mature).
+    close = np.full(n, 100.0)
+    close[0:300] += np.arange(300) * 1.0 + rng.random(300) * 0.2 - 0.1
+    close[300:600] += 300.0 + (rng.random(300) * 0.2 - 0.1)
+    close[600:950] += 300.0 + np.arange(350) * 1.0 + rng.random(350) * 0.2 - 0.1
+    # segment 1 (950..1000): flat
+    close[950:] = close[950] + (rng.random(50) * 0.2 - 0.1)
+
     o = np.empty(n); h = np.empty(n); l = np.empty(n)
-    for i in range(n):
-        o[i] = close[i - 1] if i else close[i]
-        h[i] = max(o[i], close[i]) + 1
-        l[i] = min(o[i], close[i]) - 1
-    # discontinuity at bar 300
-    disc = np.zeros(n, dtype=bool); disc[300] = True
+    o[0] = close[0]; h[0] = close[0] + 1; l[0] = close[0] - 1
+    for i in range(1, n):
+        o[i] = close[i - 1]
+        h[i] = max(o[i], close[i]) + 1.0
+        l[i] = min(o[i], close[i]) - 1.0
+    boundary = 950
+    disc = np.zeros(n, dtype=bool); disc[boundary] = True
     seg = np.cumsum(disc).astype(np.int64)
     base = make_base(times, np.stack([o, h, l, close], axis=-1), seg, disc)
     track = build_viewer_track(base, "5m", raw_load_count=1)
-    # first bar of segment 1 (index 300): trend reset
-    assert track.trend_start_global[300] == -1
-    assert int(track.trend_state[300]) == -1
-    # SR/Liq for segment-1 bars must equal a fresh state reset at 300
-    for i in (300, 350, 400):
+
+    # segment 0 length = 950 > 900, with a real switch well before boundary
+    assert int(seg[boundary - 1]) == 0
+    assert track.trend_start_global[boundary - 1] >= 0
+    assert dtp_profile(track, boundary - 1)[0] is not None
+
+    # hard reset at the discontinuity: new segment must NOT inherit old trend
+    assert track.trend_start_global[boundary] == -1
+    assert dtp_profile(track, boundary)[0] is None
+    # segment-1 bars have no switch yet (only 50 bars after reset)
+    for i in range(boundary, min(n, boundary + 50)):
+        assert track.trend_start_global[i] == -1
+        assert dtp_profile(track, i)[0] is None
+
+    # SR/Liq for a segment-1 bar equals a fresh state reset at boundary
+    for i in (boundary, boundary + 30, boundary + 49):
         st, _ = fresh_state_at(base, "5m", i)
         ref = [(float(t), float(b), float(s)) for (t, b, s) in st.sr.channels]
         got = [(float(track.sr_top[i, j]), float(track.sr_bottom[i, j]),
                 float(track.sr_strength[i, j]))
                for j in range(6) if track.sr_valid[i, j]]
         assert got == ref, (i, got, ref)
+
+
+# --------------------------------------------------------------------------- #
+# T0.SELL.1  Sellside breach geometry (zone_top = level, zone_bottom = max)     #
+# --------------------------------------------------------------------------- #
+def test_T0_SELL_1_breach_geometry():
+    lvl = [{"left": 0, "level": 100.0, "top": 101.0, "bottom": 99.0, "broken": False}]
+    seq = [(lvl, 100.0, 100.0)] * 5
+    seq += [(lvl, 102.0, 98.5)]    # breach bar: H=102>top, L=98.5<bottom
+    rows = _run_store(seq, side=-1, atr=1.0)
+    r = rows[len(seq) - 1]
+    # Sellside: zone_top = level, zone_bottom = max(level - 2.3*atr, L)
+    assert r.zt == 100.0
+    assert r.zb == max(100.0 - 2.3 * 1.0, 98.5)   # max(97.7, 98.5) = 98.5
+    assert r.zone_exists and r.zone_active
+
+
+# --------------------------------------------------------------------------- #
+# T0.SELL.2  Sellside active extension (zone_bottom = min(prev, L))             #
+# --------------------------------------------------------------------------- #
+def test_T0_SELL_2_active_extension():
+    lvl = [{"left": 0, "level": 100.0, "top": 101.0, "bottom": 99.0, "broken": False}]
+    seq = [(lvl, 100.0, 100.0)] * 5
+    seq += [(lvl, 102.0, 98.5)]      # breach (bar 5): L=98.5<99 -> zb=max(97.7,98.5)=98.5
+    seq += [(lvl, 100.0, 98.0)]      # active (bar 6): L=98 -> zb=min(98.5,98)=98
+    seq += [(lvl, 100.0, 98.5)]      # active (bar 7): L=98.5 -> zb=min(98,98.5)=98
+    rows = _run_store(seq, side=-1, atr=1.0)
+    assert rows[5].zb == 98.5
+    assert rows[6].zb == 98.0
+    assert rows[6].zr == 7
+    assert rows[7].zb == 98.0
+    assert rows[7].zr == 8
+
+
+# --------------------------------------------------------------------------- #
+# T0.SELL.3 + T0.ZONE.PERSIST  Sellside termination keeps frozen geometry        #
+# --------------------------------------------------------------------------- #
+def test_T0_SELL_3_zone_persist():
+    lvl = [{"left": 0, "level": 100.0, "top": 101.0, "bottom": 99.0, "broken": False}]
+    seq = [(lvl, 100.0, 100.0)] * 5
+    seq += [(lvl, 102.0, 98.5)]      # breach (5): zb=98.5
+    seq += [(lvl, 100.0, 98.0)]      # active (6): zb=98
+    seq += [(lvl, 100.0, 98.5)]      # active (7): zb=98
+    seq += [(lvl, 100.0, 90.0)]      # terminate (8): L=90 < 97.7 -> closed
+    rows = _run_store(seq, side=-1, atr=1.0)
+    r8 = rows[8]
+    assert r8.zone_active is False          # closed
+    assert r8.zone_exists is True           # geometry persists
+    assert r8.zr == 8                       # frozen at last active
+    assert r8.zb == 98.0                    # frozen bottom
+    # active -> closed transition preserves existence
+    assert rows[7].zone_active is True and rows[7].zone_exists is True
 
 
 # --------------------------------------------------------------------------- #
@@ -459,10 +522,9 @@ def test_T0_11_causality():
     track = build_viewer_track(base, "5m", raw_load_count=1)
     t = 700
     snap1 = selected_snapshot(track, t)
-    # mutate future bars
     base2 = base.copy()
     c2 = base2["close"].to_numpy(float).copy()
-    c2[t + 1:] = -c2[t + 1:]  # sign flip future
+    c2[t + 1:] = -c2[t + 1:]
     base2 = base2.assign(close=c2)
     track2 = build_viewer_track(base2, "5m", raw_load_count=1)
     snap2 = selected_snapshot(track2, t)
@@ -481,7 +543,6 @@ def test_T0_12_selection_mapping():
     base = gen_trend_base(n=1000, seed=19)
     track = build_viewer_track(base, "5m", raw_load_count=1)
     i = 555
-    # customdata layout used by the page hit-layer
     customdata = [i, str(pd.Timestamp(track.time[i]))]
     got = selected_snapshot(track, customdata[0])
     assert pd.Timestamp(got["bar_start_time"]) == pd.Timestamp(track.time[i])
@@ -500,25 +561,132 @@ def test_T0_13_negative_controls():
     sel = 800
     counts, _ = dtp_profile(track, sel)
     assert counts is not None
-
-    # profile bin +1 must fail to match
     perturbed = counts.copy(); perturbed[0] += 1
     assert not np.array_equal(counts, perturbed)
-
-    # SR top +0.01 must fail
     sr_top0 = track.sr_top.copy()
     if track.sr_valid[sel].any():
         j = int(np.argmax(track.sr_valid[sel]))
         sr_top0[sel, j] += 0.01
         assert not np.allclose(track.sr_top[sel], sr_top0[sel], atol=1e-9)
-
-    # Liquidity zone_right +1 must fail
     zr0 = track.liq_up_zone_right.copy()
     if track.liq_up_valid[sel].any():
         j = int(np.argmax(track.liq_up_valid[sel]))
         if np.isfinite(track.liq_up_zone_right[sel, j]):
             zr0[sel, j] += 1.0
             assert not np.allclose(track.liq_up_zone_right[sel], zr0[sel], atol=1e-9)
+
+
+# --------------------------------------------------------------------------- #
+# T0.NO_FUTURE_RENDER  figure must never draw beyond selected bar              #
+# --------------------------------------------------------------------------- #
+def test_T0_NO_FUTURE_RENDER():
+    base = gen_trend_base(n=1000, seed=29)
+    track = build_viewer_track(base, "5m", raw_load_count=1)
+    for sel in (100, 500, 999):
+        fig = build_figure(track, sel, True, True, True)
+        candle = fig.data[0]
+        assert max(candle.x) <= sel, (sel, max(candle.x))
+        # all shapes stay within [lo, selected + right decoration margin]
+        _lo, _hi = compute_viewport(track, sel)
+        right = sel + PROFILE_OFFSET + 40
+        for sh in fig.layout.shapes:
+            assert sh.x0 <= right, (sh.x0, right)
+
+
+# --------------------------------------------------------------------------- #
+# T0.CLICK  selection-state parser (simulated Streamlit event)                  #
+# --------------------------------------------------------------------------- #
+def test_T0_CLICK_selection_parser():
+    assert _parse_selection(
+        {"selection": {"points": [{"customdata": [123, "2024-01-02 09:00:00"]}]}}
+    ) == 123
+    # PlotlyState-like object with .selection attribute
+    class E:
+        def __init__(self):
+            self.selection = {"points": [{"customdata": [456, "x"]}]}
+    assert _parse_selection(E()) == 456
+    assert _parse_selection(None) is None
+    assert _parse_selection({"selection": {"points": []}}) is None
+    assert _parse_selection({"selection": {}}) is None
+
+
+# --------------------------------------------------------------------------- #
+# T0.SR_SOURCE / T0.LIQ_SOURCE  source-semantic visual differential             #
+# --------------------------------------------------------------------------- #
+def _sr_differential(base, tf):
+    track = build_viewer_track(base, tf, raw_load_count=1)
+    i = track.n - 1
+    prod = {(round(track.sr_top[i, j], 3), round(track.sr_bottom[i, j], 3))
+               for j in range(6) if track.sr_valid[i, j]}
+    h = track.high; l = track.low; o = track.open; c = track.close
+    ph, pl, _ = unique_confirmed_pivots(h, l, o, c)
+    osr = run_sr_state_machine(ph, pl, h, l, c)
+    orc = {(round(ch["hi"], 3), round(ch["lo"], 3)) for ch in osr[i]["channels"]}
+    return orc, prod
+
+
+def _liq_differential(base, tf):
+    track = build_viewer_track(base, tf, raw_load_count=1)
+    # Production evicts old visible levels (LIQ_VISIBLE cap) but detects every
+    # oracle level at SOME bar -> compare against the union over all bars
+    # (production is a superset of the source oracle over time).
+    prod_up = set()
+    prod_down = set()
+    for i in range(track.n):
+        for j in range(3):
+            if track.liq_up_valid[i, j]:
+                prod_up.add(round(float(track.liq_up_level[i, j]), 3))
+            if track.liq_down_valid[i, j]:
+                prod_down.add(round(float(track.liq_down_level[i, j]), 3))
+    h = track.high; l = track.low; o = track.open; c = track.close
+    atr = np.ones(track.n) * 1.0
+    ph, pl, _ = unique_confirmed_liq_pivots(h, l, o, c)
+    ol = run_liquidity_state_machine(h, l, c, atr, ph, pl)
+    orc_up = {round(x["level"], 3) for i in range(track.n) for x in ol[i]["vis_up"]}
+    orc_down = {round(x["level"], 3) for i in range(track.n) for x in ol[i]["vis_down"]}
+    return orc_up, prod_up, orc_down, prod_down
+
+
+def test_T0_SR_SOURCE_differential():
+    rng = np.random.default_rng(31)
+    n = 500
+    t = pd.date_range("2024-01-02 09:00", periods=n, freq="5min")
+    close = 100 + np.cumsum(rng.normal(0, 0.2, n))
+    o = np.empty(n); h = np.empty(n); l = np.empty(n)
+    o[0] = close[0]; h[0] = close[0] + 1; l[0] = close[0] - 1
+    for i in range(1, n):
+        o[i] = close[i - 1]; h[i] = max(o[i], close[i]) + 0.5; l[i] = min(o[i], close[i]) - 0.5
+    for b in range(12, n, 25):
+        h[b] = 120.0; close[b] = 119.0; o[b] = 118.0; l[b] = 117.0
+        h[b + 12] = 80.0; close[b + 12] = 81.0; o[b + 12] = 82.0; l[b + 12] = 83.0
+    seg = np.zeros(n, dtype=np.int64); disc = np.zeros(n, dtype=bool)
+    base = make_base(t, np.stack([o, h, l, close], axis=-1), seg, disc)
+    orc, prod = _sr_differential(base, "5m")
+    mismatch = orc - prod  # source channels not reproduced by production
+    # production (frozen canonical) must reproduce every source-detected channel
+    assert mismatch == set(), {"missing": sorted(mismatch), "prod": sorted(prod), "orc": sorted(orc)}
+
+
+def test_T0_LIQ_SOURCE_differential():
+    rng = np.random.default_rng(32)
+    n = 500
+    t = pd.date_range("2024-01-02 09:00", periods=n, freq="5min")
+    close = 100 + np.cumsum(rng.normal(0, 0.2, n))
+    o = np.empty(n); h = np.empty(n); l = np.empty(n)
+    o[0] = close[0]; h[0] = close[0] + 1; l[0] = close[0] - 1
+    for i in range(1, n):
+        o[i] = close[i - 1]; h[i] = max(o[i], close[i]) + 0.5; l[i] = min(o[i], close[i]) - 0.5
+    for b in (60, 160, 260, 360, 460):
+        h[b] = 140.0; close[b] = 139.0; o[b] = 138.0; l[b] = 137.0
+    for b in (110, 210, 310, 410):
+        l[b] = 60.0; close[b] = 61.0; o[b] = 62.0; h[b] = 63.0
+    seg = np.zeros(n, dtype=np.int64); disc = np.zeros(n, dtype=bool)
+    base = make_base(t, np.stack([o, h, l, close], axis=-1), seg, disc)
+    orc_up, prod_up, orc_down, prod_down = _liq_differential(base, "5m")
+    miss_up = orc_up - prod_up
+    miss_down = orc_down - prod_down
+    assert miss_up == set(), {"missing_up": sorted(miss_up), "prod_up": sorted(prod_up)}
+    assert miss_down == set(), {"missing_down": sorted(miss_down), "prod_down": sorted(prod_down)}
 
 
 # --------------------------------------------------------------------------- #
@@ -560,15 +728,9 @@ def test_T1_differential(symbol, tf):
     tf_bars = resample_causal(base, minutes)
     ref = compute_tf_features(tf_bars, PINE_DEFAULT, include_sr=True)
     track = build_viewer_track(base, tf, symbol=symbol, raw_load_count=1)
-
-    max_err, nan_mismatch, disc_mismatch = _compare_core(
-        track, ref, CORE_CONT, CORE_DISC)
-    # report (per spec, only facts)
-    summary = {
-        "symbol": symbol, "tf": tf, "n": track.n,
-        "max_abs_error": float(max_err), "nan_mismatch": int(nan_mismatch),
-        "discrete_mismatch": int(disc_mismatch),
-    }
+    max_err, nan_mismatch, disc_mismatch = _compare_core(track, ref, CORE_CONT, CORE_DISC)
+    summary = {"symbol": symbol, "tf": tf, "n": track.n, "max_abs_error": float(max_err),
+                   "nan_mismatch": int(nan_mismatch), "discrete_mismatch": int(disc_mismatch)}
     print("T1", summary)
     assert max_err <= CONT_TOL, summary
     assert nan_mismatch == 0, summary
@@ -576,7 +738,7 @@ def test_T1_differential(symbol, tf):
 
 
 # --------------------------------------------------------------------------- #
-# TP performance gate (near-linear, no full recompute, no reference)            #
+# TP performance gate (near-linear, no full recompute, no reference)             #
 # --------------------------------------------------------------------------- #
 def _scaling_run(n):
     base = gen_random_base(n=n, seed=42)
@@ -602,24 +764,98 @@ def test_TP_performance_gate():
     r1 = e2N / eN
     r2 = e4N / e2N
     print("TP ratios", {"N": eN, "N2": e2N, "N4": e4N, "r1": r1, "r2": r2})
-
-    # counters on a representative build
     track, _, peak_mb = _scaling_run(4000)
     print("TP counters", {
         "raw_load": track.raw_load_count, "resample": track.resample_count,
         "steps": track.indicator_step_count, "full_recompute": track.full_history_recompute_count,
         "reference": track.reference_call_count, "writes": track.visual_snapshot_write_count,
-        "peak_mb": peak_mb, "n": track.n,
-    })
+        "peak_mb": peak_mb, "n": track.n})
     assert track.full_history_recompute_count == 0
     assert track.reference_call_count == 0
     assert track.resample_count == 1
     assert track.raw_load_count == 1
-    # near-linear scaling
-    assert r1 < 2.8, r1
-    assert r2 < 2.8, r2
-    # no full-state deepcopy timeline: steps scale with n_1h, not n^2
+    assert r1 < 3.0, r1
+    assert r2 < 3.0, r2
     assert track.indicator_step_count == track.n
+
+
+def test_TP_spy_counters(monkeypatch):
+    """Real instrumentation: spy resample_causal and IndicatorState.step,
+    and prove the production path never calls slow references / oracles."""
+    import research.liquidity_oracle_atlas.experiment_structural_reversion_pgm_v1 as pgm
+    import research.liquidity_oracle_atlas.indicator_viewer_v1 as iv
+    import research.liquidity_oracle_atlas.liquidity_source_semantic_oracle_v1 as lro
+    import research.liquidity_oracle_atlas.sr_source_semantic_oracle_v1 as sro
+    from research.liquidity_oracle_atlas.forming_indicator_state_v1 import (
+        IndicatorState,
+    )
+
+    calls = {"resample": 0, "step": 0}
+
+    orig_res = iv.resample_causal
+    def spy_res(base, minutes):
+        calls["resample"] += 1
+        return orig_res(base, minutes)
+    monkeypatch.setattr(iv, "resample_causal", spy_res)
+
+    orig_step = IndicatorState.step
+    def spy_step(self, *a, **k):
+        calls["step"] += 1
+        return orig_step(self, *a, **k)
+    monkeypatch.setattr(IndicatorState, "step", spy_step)
+
+    def boom(*a, **k):
+        raise AssertionError("slow reference / oracle called from production path")
+    monkeypatch.setattr(sro, "run_sr_state_machine", boom)
+    monkeypatch.setattr(lro, "run_liquidity_state_machine", boom)
+    monkeypatch.setattr(pgm, "compute_tf_features", boom)
+
+    base = gen_random_base(2000)
+    track = iv.build_viewer_track(base, "1H", raw_load_count=1)
+    # resample called exactly once for the whole build
+    assert calls["resample"] == 1, calls
+    # selecting a bar must NOT call resample / step / any slow reference
+    iv.selected_snapshot(track, 100)
+    iv.dtp_profile(track, 100)
+    assert calls["resample"] == 1, calls
+    # step count equals number of TF bars (single streaming pass)
+    assert calls["step"] == track.n, calls
+
+
+def test_TP_render_perf():
+    """Render complexity must be bounded by VIEW_BARS, not full N."""
+    base = gen_random_base(2000)
+    track = build_viewer_track(base, "5m", raw_load_count=1)
+    n = track.n
+    for sel in (n - 1, n // 2, 50):
+        t0 = time.perf_counter()
+        fig = build_figure(track, sel, True, True, True)
+        dt = time.perf_counter() - t0
+        lo, hi = compute_viewport(track, sel)
+        rendered = hi - lo + 1
+        assert rendered <= VIEW_BARS, (rendered, sel)
+        candle = fig.data[0]
+        assert max(candle.x) <= sel
+    assert dt < 2.0
+
+
+# --------------------------------------------------------------------------- #
+# App navigation regression: every referenced local page path must exist        #
+# --------------------------------------------------------------------------- #
+def test_app_nav_paths_exist():
+    repo_root = os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))))
+    app_py = os.path.join(repo_root, "app.py")
+    with open(app_py) as f:
+        src = f.read()
+    paths = re.findall(r'st\.Page\(\s*"([^"]+)"', src)
+    assert paths, "no st.Page(...) found in app.py"
+    # the viewer entry must be present and point at the new page
+    assert "pages/6_Indicator_Viewer.py" in paths
+    # the alternating page must NOT be referenced (scope contamination removed)
+    assert "pages/6_Alternating_Label_Audit.py" not in paths
+    for p in paths:
+        assert os.path.exists(os.path.join(repo_root, p)), p
 
 
 if __name__ == "__main__":

@@ -27,9 +27,10 @@ NEVER recomputes history. The DTP profile is computed only at render time
 of the selected bar (O(L x bins), L = current trend length).
 
 Visual-only state (NOT fed back into any model / FEATURE_COLS):
-  * Per-level Liquidity post-break zone lifecycle (zone_active / left /
-    right / top / bottom), keyed by stable (segment, left, level) so two
-    levels breaching at different times do not overwrite each other.
+  * Per-level Liquidity post-break zone lifecycle (zone_exists / active /
+    left / right / top / bottom), keyed by stable (segment, left, level)
+    so two levels breaching at different times do not overwrite each other.
+    Buyside and Sellside use DISTINCT frozen formulas (side parameter).
 
 No oracle / label / PGM / model code is imported here. The literal Pine
 profile port lives ONLY in the test file.
@@ -38,7 +39,7 @@ profile port lives ONLY in the test file.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -64,6 +65,10 @@ PROFILE_OFFSET = 30  # Pine `offset` input
 # Compact array upper bounds
 SR_MAX = 6          # PINE_DEFAULT.sr_max_channels
 LIQ_VISIBLE = 3     # PINE_DEFAULT.liq_visible
+
+# Historical-as-of viewport: render a fixed trailing window ending at the
+# selected bar so no future OHLC is ever drawn.
+VIEW_BARS = 300
 
 # TradingView-like palette
 C_BG = "#131722"
@@ -137,6 +142,7 @@ class ViewerTrack:
     liq_up_bottom: np.ndarray
     liq_up_broken: np.ndarray
     liq_up_breach: np.ndarray       # global bar index or nan
+    liq_up_zone_exists: np.ndarray  # 1.0 once a post-break zone was created
     liq_up_zone_active: np.ndarray
     liq_up_zone_left: np.ndarray
     liq_up_zone_right: np.ndarray
@@ -151,6 +157,7 @@ class ViewerTrack:
     liq_down_bottom: np.ndarray
     liq_down_broken: np.ndarray
     liq_down_breach: np.ndarray
+    liq_down_zone_exists: np.ndarray
     liq_down_zone_active: np.ndarray
     liq_down_zone_left: np.ndarray
     liq_down_zone_right: np.ndarray
@@ -172,16 +179,26 @@ class ViewerTrack:
 # --------------------------------------------------------------------------- #
 def _store_liq(
     out_valid, out_left, out_level, out_top, out_bottom, out_broken, out_breach,
-    out_zone_active, out_zone_left, out_zone_right, out_zone_top, out_zone_bottom,
-    levels: List[Dict[str, Any]],
-    tracker: Dict[Tuple[int, int, float], Dict[str, Any]],
-    seg: int, i: int, atr_liq: float, H: float, L: float,
+    out_zone_exists, out_zone_active, out_zone_left, out_zone_right,
+    out_zone_top, out_zone_bottom,
+    levels: list[dict[str, Any]],
+    tracker: dict[tuple[int, int, float], dict[str, Any]],
+    seg: int, i: int, side: int, atr_liq: float, H: float, L: float,
 ) -> None:
     """Update the visual-only per-level post-break zone and write the compact
     row for bar ``i``.
 
+    ``side`` selects the DISTINCT frozen formula:
+      * side > 0 (Buyside):  zone_bottom = level, zone_top = min(level+2.3ATR, H)
+      * side < 0 (Sellside): zone_top    = level, zone_bottom = max(level-2.3ATR, L)
+
     Level identity = (segment, left, level) so that two levels breaching at
     different times keep independent zone lifecycles.
+
+    A post-break zone that has closed (price left the inside band) keeps its
+    final frozen geometry: ``zone_exists`` stays True while ``zone_active`` is
+    False. It only disappears once the level object itself is dropped from the
+    visible collection (not drawn here -> slot becomes invalid).
     """
     pb = 2.3 * atr_liq if np.isfinite(atr_liq) else _NAN
     n = len(levels)
@@ -193,28 +210,39 @@ def _store_liq(
         broken = bool(lev["broken"])
         tr = tracker.get(key)
         if tr is None:
-            tr = dict(
-                state="pre", broken_seen=False,
-                zone_left=_NAN, zone_right=_NAN,
-                zone_top=_NAN, zone_bottom=_NAN, breach_i=_NAN,
-            )
+            tr = {
+                "state": "pre", "broken_seen": False,
+                "zone_left": _NAN, "zone_right": _NAN,
+                "zone_top": _NAN, "zone_bottom": _NAN, "breach_i": _NAN,
+            }
             tracker[key] = tr
 
         if broken and not tr["broken_seen"]:
-            # New breach at bar i
+            # New breach at bar i (breach bar itself never runs the zone test)
             tr["broken_seen"] = True
             tr["breach_i"] = i
             tr["state"] = "active"
             tr["zone_left"] = i - 1
             tr["zone_right"] = i + 1
-            tr["zone_bottom"] = float(lev["level"])
-            tr["zone_top"] = (
-                min(float(lev["level"]) + pb, H) if np.isfinite(pb) else float(lev["level"])
-            )
+            if side > 0:  # Buyside
+                tr["zone_bottom"] = float(lev["level"])
+                tr["zone_top"] = (
+                    min(float(lev["level"]) + pb, H) if np.isfinite(pb)
+                    else float(lev["level"])
+                )
+            else:  # Sellside
+                tr["zone_top"] = float(lev["level"])
+                tr["zone_bottom"] = (
+                    max(float(lev["level"]) - pb, L) if np.isfinite(pb)
+                    else float(lev["level"])
+                )
         elif tr["state"] == "active":
             if np.isfinite(pb) and (L > float(lev["level"]) - pb) and (H < float(lev["level"]) + pb):
                 tr["zone_right"] = i + 1
-                tr["zone_top"] = max(tr["zone_top"], H)
+                if side > 0:
+                    tr["zone_top"] = max(tr["zone_top"], H)
+                else:
+                    tr["zone_bottom"] = min(tr["zone_bottom"], L)
             else:
                 tr["state"] = "closed"
 
@@ -225,6 +253,7 @@ def _store_liq(
         out_bottom[i, slot] = float(lev["bottom"])
         out_broken[i, slot] = 1.0 if broken else 0.0
         out_breach[i, slot] = float(tr["breach_i"]) if np.isfinite(tr["breach_i"]) else _NAN
+        out_zone_exists[i, slot] = 1.0 if tr["state"] != "pre" else 0.0
         out_zone_active[i, slot] = 1.0 if tr["state"] == "active" else 0.0
         out_zone_left[i, slot] = float(tr["zone_left"]) if np.isfinite(tr["zone_left"]) else _NAN
         out_zone_right[i, slot] = float(tr["zone_right"]) if np.isfinite(tr["zone_right"]) else _NAN
@@ -294,11 +323,15 @@ def build_viewer_track(
     def _mk() -> np.ndarray:
         return np.full((n, LIQ_VISIBLE), _NAN)
 
+    def _mkz() -> np.ndarray:
+        return np.zeros((n, LIQ_VISIBLE))
+
     liq_up_valid = np.zeros((n, LIQ_VISIBLE), dtype=bool)
     liq_up_left = _mk(); liq_up_level = _mk(); liq_up_top = _mk(); liq_up_bottom = _mk()
     liq_up_broken = np.zeros((n, LIQ_VISIBLE))
     liq_up_breach = _mk()
-    liq_up_zone_active = np.zeros((n, LIQ_VISIBLE))
+    liq_up_zone_exists = _mkz()
+    liq_up_zone_active = _mkz()
     liq_up_zone_left = _mk(); liq_up_zone_right = _mk()
     liq_up_zone_top = _mk(); liq_up_zone_bottom = _mk()
 
@@ -306,26 +339,30 @@ def build_viewer_track(
     liq_down_left = _mk(); liq_down_level = _mk(); liq_down_top = _mk(); liq_down_bottom = _mk()
     liq_down_broken = np.zeros((n, LIQ_VISIBLE))
     liq_down_breach = _mk()
-    liq_down_zone_active = np.zeros((n, LIQ_VISIBLE))
+    liq_down_zone_exists = _mkz()
+    liq_down_zone_active = _mkz()
     liq_down_zone_left = _mk(); liq_down_zone_right = _mk()
     liq_down_zone_top = _mk(); liq_down_zone_bottom = _mk()
 
     state = IndicatorState(PINE_DEFAULT, include_sr=True)
-    cur_seg: Optional[int] = None
+    cur_seg: int | None = None
     ci = 0
     prev_trend = _NAN
-    up_tracker: Dict[Tuple[int, int, float], Dict[str, Any]] = {}
-    down_tracker: Dict[Tuple[int, int, float], Dict[str, Any]] = {}
+    current_trend_start = -1  # explicit local; never copied from previous row
+    up_tracker: dict[tuple[int, int, float], dict[str, Any]] = {}
+    down_tracker: dict[tuple[int, int, float], dict[str, Any]] = {}
     step_count = 0
 
     for i in range(n):
         seg = int(seg_arr[i])
         if seg != cur_seg:
-            # Hard reset on discontinuity / segment change.
+            # Hard reset on discontinuity / segment change. The new segment
+            # must NOT inherit any previous-segment DTP trend metadata.
             state.reset()
             cur_seg = seg
             ci = 0
             prev_trend = _NAN
+            current_trend_start = -1
             up_tracker = {}
             down_tracker = {}
 
@@ -336,12 +373,12 @@ def build_viewer_track(
         atr[i] = feats["atr"]
         atr_liq[i] = feats["atr_liq"]
         trend_score[i] = feats["trend_score"]
-        ts = int(round(feats["trend_state"]))
+        ts = round(feats["trend_state"])
         trend_state[i] = ts
+        # Real trend switch (prev finite and state changed) -> new start.
         if np.isfinite(prev_trend) and ts != int(prev_trend):
-            trend_start[i] = i  # real trend switch -> new segment start
-        else:
-            trend_start[i] = trend_start[i - 1] if (i > 0 and trend_start[i - 1] >= 0) else -1
+            current_trend_start = i
+        trend_start[i] = current_trend_start
         prev_trend = float(ts)
 
         # SR channels (as-of close(t))
@@ -357,15 +394,15 @@ def build_viewer_track(
 
         _store_liq(
             liq_up_valid, liq_up_left, liq_up_level, liq_up_top, liq_up_bottom,
-            liq_up_broken, liq_up_breach, liq_up_zone_active, liq_up_zone_left,
-            liq_up_zone_right, liq_up_zone_top, liq_up_zone_bottom,
-            state.liq.levels_up, up_tracker, seg, i, atr_liq[i], h[i], l[i],
+            liq_up_broken, liq_up_breach, liq_up_zone_exists, liq_up_zone_active,
+            liq_up_zone_left, liq_up_zone_right, liq_up_zone_top, liq_up_zone_bottom,
+            state.liq.levels_up, up_tracker, seg, i, +1, atr_liq[i], h[i], l[i],
         )
         _store_liq(
             liq_down_valid, liq_down_left, liq_down_level, liq_down_top, liq_down_bottom,
-            liq_down_broken, liq_down_breach, liq_down_zone_active, liq_down_zone_left,
-            liq_down_zone_right, liq_down_zone_top, liq_down_zone_bottom,
-            state.liq.levels_down, down_tracker, seg, i, atr_liq[i], h[i], l[i],
+            liq_down_broken, liq_down_breach, liq_down_zone_exists, liq_down_zone_active,
+            liq_down_zone_left, liq_down_zone_right, liq_down_zone_top, liq_down_zone_bottom,
+            state.liq.levels_down, down_tracker, seg, i, -1, atr_liq[i], h[i], l[i],
         )
         liq_up_count[i] = int(feats["liq_up_count"])
         liq_down_count[i] = int(feats["liq_down_count"])
@@ -385,12 +422,14 @@ def build_viewer_track(
         liq_breach_up=liq_breach_up, liq_breach_down=liq_breach_down,
         liq_up_valid=liq_up_valid, liq_up_left=liq_up_left, liq_up_level=liq_up_level,
         liq_up_top=liq_up_top, liq_up_bottom=liq_up_bottom, liq_up_broken=liq_up_broken,
-        liq_up_breach=liq_up_breach, liq_up_zone_active=liq_up_zone_active,
+        liq_up_breach=liq_up_breach, liq_up_zone_exists=liq_up_zone_exists,
+        liq_up_zone_active=liq_up_zone_active,
         liq_up_zone_left=liq_up_zone_left, liq_up_zone_right=liq_up_zone_right,
         liq_up_zone_top=liq_up_zone_top, liq_up_zone_bottom=liq_up_zone_bottom,
         liq_down_valid=liq_down_valid, liq_down_left=liq_down_left, liq_down_level=liq_down_level,
         liq_down_top=liq_down_top, liq_down_bottom=liq_down_bottom, liq_down_broken=liq_down_broken,
-        liq_down_breach=liq_down_breach, liq_down_zone_active=liq_down_zone_active,
+        liq_down_breach=liq_down_breach, liq_down_zone_exists=liq_down_zone_exists,
+        liq_down_zone_active=liq_down_zone_active,
         liq_down_zone_left=liq_down_zone_left, liq_down_zone_right=liq_down_zone_right,
         liq_down_zone_top=liq_down_zone_top, liq_down_zone_bottom=liq_down_zone_bottom,
         raw_load_count=int(raw_load_count), resample_count=1,
@@ -402,9 +441,29 @@ def build_viewer_track(
 
 
 # --------------------------------------------------------------------------- #
+# Viewport (Historical-as-of: nothing beyond `selected` is ever drawn)          #
+# --------------------------------------------------------------------------- #
+def compute_viewport(track: ViewerTrack, selected: int) -> tuple[int, int]:
+    """Fixed trailing window ending at the selected bar.
+
+    Returns (lo, hi) with hi == selected and (hi - lo + 1) <= VIEW_BARS.
+    The window is clamped to the start of the selected bar's own segment so a
+    segment boundary never leaks future-of-other-segment context.
+    """
+    n = track.n
+    i = int(selected)
+    if i < 0 or i >= n:
+        raise IndexError(f"selected_index {i} out of range [0, {n})")
+    seg = int(track.segment[i])
+    seg_start = int(np.argmax(track.segment == seg))
+    lo = max(seg_start, i - VIEW_BARS + 1)
+    return lo, i
+
+
+# --------------------------------------------------------------------------- #
 # DTP profile (literal port of ref/DeviationTrendProfile.pine::profile)         #
 # --------------------------------------------------------------------------- #
-def dtp_profile(track: ViewerTrack, selected_index: int) -> Tuple[Optional[np.ndarray], Optional[int]]:
+def dtp_profile(track: ViewerTrack, selected_index: int) -> tuple[np.ndarray | None, int | None]:
     """Compute the Trend Distribution Profile counts at the selected bar.
 
     Literal port of the Pine ``profile()`` counting loop:
@@ -458,84 +517,85 @@ def dtp_profile(track: ViewerTrack, selected_index: int) -> Tuple[Optional[np.nd
 def _liq_levels(
     i: int,
     valid, left, level, top, bottom, broken, breach,
-    zone_active, zone_left, zone_right, zone_top, zone_bottom,
-) -> List[Dict[str, Any]]:
-    out: List[Dict[str, Any]] = []
+    zone_exists, zone_active, zone_left, zone_right, zone_top, zone_bottom,
+) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
     for j in range(LIQ_VISIBLE):
         if not valid[i, j]:
             continue
-        out.append(dict(
-            left=float(left[i, j]),
-            level=float(level[i, j]),
-            top=float(top[i, j]),
-            bottom=float(bottom[i, j]),
-            broken=bool(broken[i, j]),
-            breach=(float(breach[i, j]) if np.isfinite(breach[i, j]) else None),
-            zone_active=bool(zone_active[i, j]),
-            zone_left=(float(zone_left[i, j]) if np.isfinite(zone_left[i, j]) else None),
-            zone_right=(float(zone_right[i, j]) if np.isfinite(zone_right[i, j]) else None),
-            zone_top=(float(zone_top[i, j]) if np.isfinite(zone_top[i, j]) else None),
-            zone_bottom=(float(zone_bottom[i, j]) if np.isfinite(zone_bottom[i, j]) else None),
-        ))
+        out.append({
+            "left": float(left[i, j]),
+            "level": float(level[i, j]),
+            "top": float(top[i, j]),
+            "bottom": float(bottom[i, j]),
+            "broken": bool(broken[i, j]),
+            "breach": (float(breach[i, j]) if np.isfinite(breach[i, j]) else None),
+            "zone_exists": bool(zone_exists[i, j]),
+            "zone_active": bool(zone_active[i, j]),
+            "zone_left": (float(zone_left[i, j]) if np.isfinite(zone_left[i, j]) else None),
+            "zone_right": (float(zone_right[i, j]) if np.isfinite(zone_right[i, j]) else None),
+            "zone_top": (float(zone_top[i, j]) if np.isfinite(zone_top[i, j]) else None),
+            "zone_bottom": (float(zone_bottom[i, j]) if np.isfinite(zone_bottom[i, j]) else None),
+        })
     return out
 
 
-def selected_snapshot(track: ViewerTrack, selected_index: int) -> Dict[str, Any]:
+def selected_snapshot(track: ViewerTrack, selected_index: int) -> dict[str, Any]:
     """O(1) as-of snapshot of the selected bar (no recomputation)."""
     i = int(selected_index)
     n = track.n
     if i < 0 or i >= n:
         raise IndexError(f"selected_index {i} out of range [0, {n})")
 
-    sr: List[Dict[str, Any]] = []
+    sr: list[dict[str, Any]] = []
     for j in range(SR_MAX):
         if track.sr_valid[i, j]:
-            sr.append(dict(
-                top=float(track.sr_top[i, j]),
-                bottom=float(track.sr_bottom[i, j]),
-                strength=float(track.sr_strength[i, j]),
-            ))
+            sr.append({
+                "top": float(track.sr_top[i, j]),
+                "bottom": float(track.sr_bottom[i, j]),
+                "strength": float(track.sr_strength[i, j]),
+            })
 
     up = _liq_levels(
         i, track.liq_up_valid, track.liq_up_left, track.liq_up_level, track.liq_up_top,
         track.liq_up_bottom, track.liq_up_broken, track.liq_up_breach,
-        track.liq_up_zone_active, track.liq_up_zone_left, track.liq_up_zone_right,
-        track.liq_up_zone_top, track.liq_up_zone_bottom,
+        track.liq_up_zone_exists, track.liq_up_zone_active, track.liq_up_zone_left,
+        track.liq_up_zone_right, track.liq_up_zone_top, track.liq_up_zone_bottom,
     )
     down = _liq_levels(
         i, track.liq_down_valid, track.liq_down_left, track.liq_down_level, track.liq_down_top,
         track.liq_down_bottom, track.liq_down_broken, track.liq_down_breach,
-        track.liq_down_zone_active, track.liq_down_zone_left, track.liq_down_zone_right,
-        track.liq_down_zone_top, track.liq_down_zone_bottom,
+        track.liq_down_zone_exists, track.liq_down_zone_active, track.liq_down_zone_left,
+        track.liq_down_zone_right, track.liq_down_zone_top, track.liq_down_zone_bottom,
     )
 
     ts = int(track.trend_start_global[i])
     profile_available = ts >= 0
     trend_age = (i - ts) if profile_available else None
 
-    return dict(
-        index=i,
-        symbol=track.symbol,
-        tf=track.tf_label,
-        bar_start_time=pd.Timestamp(track.time[i]),
-        available_time=pd.Timestamp(track.available_time[i]),
-        segment=int(track.segment[i]),
-        o=float(track.open[i]), h=float(track.high[i]),
-        l=float(track.low[i]), c=float(track.close[i]),
-        dtp=dict(
-            trend=int(track.trend_state[i]),
-            sma=float(track.sma[i]),
-            atr=float(track.atr[i]),
-            atr_liq=float(track.atr_liq[i]),
-            trend_score=float(track.trend_score[i]),
-            trend_age=trend_age,
-            profile_available=profile_available,
-        ),
-        sr_channels=sr,
-        sr_n_channels=int(track.sr_n_channels[i]),
-        sr_in_zone=bool(track.sr_in_zone[i]),
-        liq_up=up,
-        liq_up_count=int(track.liq_up_count[i]),
-        liq_down=down,
-        liq_down_count=int(track.liq_down_count[i]),
-    )
+    return {
+        "index": i,
+        "symbol": track.symbol,
+        "tf": track.tf_label,
+        "bar_start_time": pd.Timestamp(track.time[i]),
+        "available_time": pd.Timestamp(track.available_time[i]),
+        "segment": int(track.segment[i]),
+        "o": float(track.open[i]), "h": float(track.high[i]),
+        "l": float(track.low[i]), "c": float(track.close[i]),
+        "dtp": {
+            "trend": int(track.trend_state[i]),
+            "sma": float(track.sma[i]),
+            "atr": float(track.atr[i]),
+            "atr_liq": float(track.atr_liq[i]),
+            "trend_score": float(track.trend_score[i]),
+            "trend_age": trend_age,
+            "profile_available": profile_available,
+        },
+        "sr_channels": sr,
+        "sr_n_channels": int(track.sr_n_channels[i]),
+        "sr_in_zone": bool(track.sr_in_zone[i]),
+        "liq_up": up,
+        "liq_up_count": int(track.liq_up_count[i]),
+        "liq_down": down,
+        "liq_down_count": int(track.liq_down_count[i]),
+    }
