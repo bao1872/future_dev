@@ -34,6 +34,10 @@ pages = [
         default=True,
     ),
     st.Page(
+        "pages/5_Label_Indicator_Audit.py",
+        title="标签与指标审计",
+    ),
+    st.Page(
         "pages/3_Strategy_Lab.py",
         title="策略实验",
     ),
