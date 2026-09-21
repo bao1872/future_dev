@@ -730,6 +730,12 @@ def add_dp_oracle_overlay(fig, track: "ViewerTrack", selected: int, trades: Any)
     if not records:
         return fig
 
+    # Historical-as-of clipping: `selected` is the LAST visible bar, so NO oracle
+    # marker / connector may extend beyond it. A trade whose fill is still in the
+    # future (entry_x <= S < exit_x) shows its Entry marker ONLY; its Exit marker
+    # and any future execution price stay hidden until selected reaches exit_x.
+    S = int(selected)
+
     le = {"x": [], "y": [], "cd": [], "text": []}
     lx = {"x": [], "y": [], "cd": [], "text": []}
     se = {"x": [], "y": [], "cd": [], "text": []}
@@ -759,14 +765,19 @@ def add_dp_oracle_overlay(fig, track: "ViewerTrack", selected: int, trades: Any)
             float(row.get("MAE", np.nan)),
             str(row.get("trade_id", "")),
         )
-        if is_long:
-            _push_marker(le, ex, row["entry_fill_price"], entry_cd, "L IN")
-            _push_marker(lx, xx, row["exit_fill_price"], exit_cd, "L OUT")
-        else:
-            _push_marker(se, ex, row["entry_fill_price"], entry_cd, "S IN")
-            _push_marker(sx, xx, row["exit_fill_price"], exit_cd, "S OUT")
-        conn_x += [ex, xx, None]
-        conn_y += [float(row["entry_fill_price"]), float(row["exit_fill_price"]), None]
+        if ex <= S:
+            if is_long:
+                _push_marker(le, ex, row["entry_fill_price"], entry_cd, "L IN")
+            else:
+                _push_marker(se, ex, row["entry_fill_price"], entry_cd, "S IN")
+        if xx <= S:
+            if is_long:
+                _push_marker(lx, xx, row["exit_fill_price"], exit_cd, "L OUT")
+            else:
+                _push_marker(sx, xx, row["exit_fill_price"], exit_cd, "S OUT")
+            # connector only when the WHOLE trade lies inside the as-of view
+            conn_x += [ex, xx, None]
+            conn_y += [float(row["entry_fill_price"]), float(row["exit_fill_price"]), None]
 
     _add_marker_trace(fig, le, symbol="triangle-up", color=C_BUY,
                       name="Long Entry", textpos="top center", hovertemplate=_ENTRY_HOVER)
@@ -787,13 +798,23 @@ def add_dp_oracle_overlay(fig, track: "ViewerTrack", selected: int, trades: Any)
 
 
 def oracle_viewport_summary(track: "ViewerTrack", selected: int, trades: Any) -> dict:
-    """Audit-only summary of the visible oracle trades (no strategy verdict)."""
+    """Audit-only summary of the visible oracle trades (no strategy verdict).
+
+    Historical-as-of: PnL / holding statistics are computed over CLOSED trades
+    only (exit_x <= selected); trades still open at ``selected`` are reported
+    separately as ``open_at_selected`` so no FUTURE exit PnL leaks into the
+    audit line.
+    """
     records, mismatch = select_visible_oracle_trades(track, selected, trades)
+    S = int(selected)
+    closed = [(r, e, x) for (r, e, x) in records if x <= S]
     longs = sum(1 for (r, _e, _x) in records if str(r["direction"]) == "LONG")
-    gross = sum(float(r.get("gross_points", 0.0)) for (r, _e, _x) in records)
-    holds = [int(r.get("holding_bars", 0)) for (r, _e, _x) in records]
+    gross = sum(float(r.get("gross_points", 0.0)) for (r, _e, _x) in closed)
+    holds = [int(r.get("holding_bars", 0)) for (r, _e, _x) in closed]
     return {
         "visible_trades": len(records),
+        "closed_trades": len(closed),
+        "open_at_selected": len(records) - len(closed),
         "long_trades": longs,
         "short_trades": len(records) - longs,
         "total_gross_points": float(gross),

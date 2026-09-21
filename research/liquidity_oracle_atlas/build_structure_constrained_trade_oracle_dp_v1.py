@@ -907,6 +907,30 @@ ORACLE_ACTIONS_FILE = "oracle_actions.parquet"
 ORACLE_TRADES_FILE = "oracle_trades.parquet"
 ORACLE_METADATA_FILE = "metadata.json"
 
+# columns the Viewer overlay requires on the trades table
+ORACLE_VIEWER_TRADE_COLUMNS = (
+    "direction",
+    "entry_fill_time",
+    "entry_fill_price",
+    "exit_fill_time",
+    "exit_fill_price",
+    "trade_id",
+)
+
+
+def oracle_cache_token(root: Any, symbol: str) -> str:
+    """Cheap artifact version token (metadata mtime_ns + size).
+
+    Used as a Streamlit cache key so regenerating the SAME
+    ``root/symbol/math_version`` artifact invalidates the cached load.
+    Returns ``"missing"`` when there is no metadata file.
+    """
+    mp = Path(root) / symbol / ORACLE_METADATA_FILE
+    if not mp.exists():
+        return "missing"
+    st = mp.stat()
+    return f"{st.st_mtime_ns}:{st.st_size}"
+
 
 def write_oracle_artifact(
     result: Dict[str, Any],
@@ -990,6 +1014,19 @@ def load_oracle_artifact(
         trades = pd.read_parquet(tp)
     except (OSError, ValueError):
         return _fail("unreadable_artifact")
+
+    # integrity closure: metadata row counts must match the readable parquet
+    rc_actions = meta.get("row_count_actions")
+    rc_trades = meta.get("row_count_trades")
+    if rc_actions is not None and len(actions) != int(rc_actions):
+        return _fail("row_count_mismatch")
+    if rc_trades is not None and len(trades) != int(rc_trades):
+        return _fail("row_count_mismatch")
+
+    # the Viewer overlay needs these trade columns to exist
+    missing = [c for c in ORACLE_VIEWER_TRADE_COLUMNS if c not in trades.columns]
+    if missing:
+        return _fail("missing_trade_columns")
 
     return {
         "ok": True, "reason": None,

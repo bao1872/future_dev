@@ -7,7 +7,12 @@ Independent read-only Indicator Viewer (Task FUTURE-INDICATOR-VIEWER-V1-KERNEL-U
 Shows the three raw indicators (DTP / SR / Liquidity) as-of a selected TF bar's
 close:  IndicatorState_t  ⊆  Information_<= close(t).
 
-No Oracle / Label / PGM / model / future-path output is ever rendered.
+The BASE indicator view is causal / historical-as-of: the selected bar is the
+LAST visible candle and nothing beyond `selected` is drawn. An OPTIONAL DP
+Oracle overlay exists purely as a FUTURE / HINDSIGHT AUDIT layer (task
+FUTURE-INTRADAY-DP-ORACLE-VIEWER-R1): it is OFF by default, read-only, clipped
+to `selected`, and is NEVER a causal signal or a model feature. No Label / PGM /
+model output is rendered.
 
 Visual contract (frozen):
   * Historical-as-of: the selected bar is the LAST visible candle; nothing
@@ -38,6 +43,7 @@ from research.liquidity_oracle_atlas.build_structure_constrained_trade_oracle_dp
     ARTIFACT_ROOT_DIRNAME,
     MATH_VERSION,
     load_oracle_artifact,
+    oracle_cache_token,
 )
 from research.liquidity_oracle_atlas.git_head import git_head
 from research.liquidity_oracle_atlas.indicator_viewer_v1 import (
@@ -415,9 +421,15 @@ def build_track_cached(symbol: str, tf: str, source_sha: str):
 
 
 @st.cache_data(show_spinner="加载 DP Oracle artifact…")
-def load_oracle_artifact_cached(root: str, symbol: str, math_version: str):
-    """Read-only, fail-closed oracle artifact load. Cache key = (root, symbol,
-    math_version); the Viewer NEVER recomputes the DP on rerun."""
+def load_oracle_artifact_cached(
+    root: str, symbol: str, math_version: str, cache_token: str
+):
+    """Read-only, fail-closed oracle artifact load.
+
+    Cache key = (root, symbol, math_version, cache_token). ``cache_token`` is the
+    artifact metadata mtime/size, so REGENERATING the same root/symbol/math_version
+    artifact invalidates the cache. The Viewer NEVER recomputes the DP on rerun.
+    """
     return load_oracle_artifact(root, symbol, expected_math_version=math_version)
 
 
@@ -442,8 +454,10 @@ def resolve_selection(symbol, tf, n_bars, prev_selected, prev_ctx):
 def main() -> None:
     st.set_page_config(page_title="指标观察器", layout="wide")
     st.markdown("### 指标观察器  ·  Historical-as-of")
-    st.caption("将选中 K 线当作该时刻最后一根已形成的 K 线；只显示该 TF 三个原始指标当时的状态。"
-               "不含 Oracle / Label / PGM / 模型结论。")
+    st.caption("将选中 K 线当作该时刻最后一根已形成的 K 线；基础视图只显示该 TF 三个原始指标"
+               "当时的状态，且不绘制 selected 之后的任何内容。另有一个**可选**的 "
+               "DP Oracle **FUTURE / HINDSIGHT AUDIT** 覆盖层（默认关闭、只读、裁剪到 selected）；"
+               "它不是因果信号，也不参与任何模型。不含 Label / PGM / 模型结论。")
 
     st.session_state.setdefault("iv_symbol", SYMBOLS[0])
     st.session_state.setdefault("iv_tf", "1H")
@@ -537,7 +551,10 @@ def main() -> None:
             "trading signal and never a model feature.**"
         )
         loaded = load_oracle_artifact_cached(
-            str(ORACLE_ARTIFACT_ROOT), symbol, MATH_VERSION
+            str(ORACLE_ARTIFACT_ROOT),
+            symbol,
+            MATH_VERSION,
+            oracle_cache_token(str(ORACLE_ARTIFACT_ROOT), symbol),
         )
         if not loaded["ok"]:
             st.error(f"Oracle overlay disabled (fail-closed): `{loaded['reason']}`.")
@@ -563,7 +580,9 @@ def main() -> None:
                     st.caption(
                         f"Oracle audit · visible trades={_summ['visible_trades']} "
                         f"(L={_summ['long_trades']} / S={_summ['short_trades']}) · "
-                        f"total gross oracle PnL={_summ['total_gross_points']:.2f} pts · "
+                        f"closed(<= selected)={_summ['closed_trades']} · "
+                        f"open at selected={_summ['open_at_selected']} · "
+                        f"total gross oracle PnL (closed)={_summ['total_gross_points']:.2f} pts · "
                         f"median holding={_summ['median_holding_bars']:.0f} bars · "
                         f"objective={oracle_meta.get('objective')} · "
                         f"cost_mode={oracle_meta.get('cost_mode')}"

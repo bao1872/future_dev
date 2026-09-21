@@ -25,6 +25,7 @@ from research.liquidity_oracle_atlas.build_structure_constrained_trade_oracle_dp
     ORACLE_TRADES_FILE,
     build_artifact_frames,
     load_oracle_artifact,
+    oracle_cache_token,
     run_base_dp,
     write_oracle_artifact,
 )
@@ -358,3 +359,128 @@ def test_no_trades_adds_no_traces():
     fig = go.Figure()
     add_dp_oracle_overlay(fig, track, track.n - 1, _trades(track, []))
     assert len(fig.data) == 0
+
+
+# =========================================================================== #
+# FIX1 — Historical-as-of clipping (no marker / connector beyond selected)      #
+# =========================================================================== #
+def _all_marker_x(fig):
+    xs = []
+    for t in fig.data:
+        for x in (t.x if t.x is not None else []):
+            if x is not None:
+                xs.append(int(x))
+    return xs
+
+
+def test_asof_clipping_entry_visible_exit_hidden():
+    track = _track("5m", 200)
+    trades = _trades(track, [(20, 60, "LONG")])
+    S = 40  # entry_x=20 <= S < exit_x=60
+    fig = go.Figure()
+    add_dp_oracle_overlay(fig, track, S, trades)
+    names = {t.name for t in fig.data}
+    assert "Long Entry" in names      # entry is in the past -> visible
+    assert "Long Exit" not in names   # exit is in the future -> hidden
+    assert max(_all_marker_x(fig)) <= S
+    # trade not fully visible -> no connector at all
+    assert not any(t.mode == "lines" for t in fig.data)
+
+
+def test_asof_connector_never_beyond_selected():
+    track = _track("5m", 200)
+    trades = _trades(track, [(20, 60, "LONG"), (70, 90, "SHORT")])
+    S = 80
+    fig = go.Figure()
+    add_dp_oracle_overlay(fig, track, S, trades)
+    for c in [t for t in fig.data if t.mode == "lines"]:
+        xs = [x for x in c.x if x is not None]
+        assert max(xs) <= S
+    names = {t.name for t in fig.data}
+    assert "Long Exit" in names       # 60 <= 80 -> visible
+    assert "Short Exit" not in names  # 90 > 80  -> hidden
+    assert max(_all_marker_x(fig)) <= S
+
+
+def test_asof_full_trade_when_selected_reaches_exit():
+    track = _track("5m", 200)
+    trades = _trades(track, [(20, 60, "LONG")])
+    fig = go.Figure()
+    add_dp_oracle_overlay(fig, track, 60, trades)
+    names = {t.name for t in fig.data}
+    assert {"Long Entry", "Long Exit", "Oracle trade"} <= names
+    assert max(_all_marker_x(fig)) <= 60
+
+
+def test_asof_clipping_preserves_reversal_dual_marker():
+    # when selected is past both fills, the reversal dual marker must remain
+    track = _track("5m", 200)
+    trades = _trades(track, [(20, 35, "LONG"), (35, 50, "SHORT")])
+    fig = go.Figure()
+    add_dp_oracle_overlay(fig, track, 120, trades)
+    by_name = {t.name: t for t in fig.data if t.mode != "lines"}
+    assert 35 in list(by_name["Long Exit"].x)
+    assert 35 in list(by_name["Short Entry"].x)
+
+
+def test_asof_summary_does_not_leak_future_pnl():
+    track = _track("5m", 200)
+    trades = _trades(track, [(20, 30, "LONG"), (40, 90, "SHORT")])
+    S = 50  # the SHORT (40..90) is still open at S=50
+    summ = oracle_viewport_summary(track, S, trades)
+    assert summ["visible_trades"] == 2
+    assert summ["closed_trades"] == 1
+    assert summ["open_at_selected"] == 1
+    # PnL must only reflect the CLOSED long trade, never the open short's future exit
+    closed_gross = float(_trades(track, [(20, 30, "LONG")]).iloc[0]["gross_points"])
+    assert abs(summ["total_gross_points"] - closed_gross) < 1e-9
+
+
+# =========================================================================== #
+# FIX2 — artifact cache token invalidation                                     #
+# =========================================================================== #
+def test_cache_token_missing_and_invalidates(tmp_path):
+    assert oracle_cache_token(tmp_path, "SYNTH") == "missing"
+
+    res = run_base_dp(_base(n=900, day_len=300), KernelCounters(), symbol="SYNTH")
+    outdir = write_oracle_artifact(res, tmp_path, oracle_source_sha="A")
+    t1 = oracle_cache_token(tmp_path, "SYNTH")
+    assert t1 != "missing"
+
+    # rewrite metadata -> token must change even for the same root/symbol/math_version
+    mp = outdir / ORACLE_METADATA_FILE
+    meta = json.loads(mp.read_text())
+    meta["generated_at"] = "X" * 64
+    mp.write_text(json.dumps(meta))
+    t2 = oracle_cache_token(tmp_path, "SYNTH")
+    assert t2 != t1
+
+
+# =========================================================================== #
+# FIX3 — loader integrity closure                                              #
+# =========================================================================== #
+def test_loader_actions_row_count_mismatch(tmp_path):
+    res = run_base_dp(_base(n=900, day_len=300), KernelCounters(), symbol="SYNTH")
+    outdir = write_oracle_artifact(res, tmp_path, oracle_source_sha="S")
+    ap = outdir / ORACLE_ACTIONS_FILE
+    pd.read_parquet(ap).iloc[:-1].to_parquet(ap, index=False)
+    r = load_oracle_artifact(tmp_path, "SYNTH")
+    assert r["ok"] is False and r["reason"] == "row_count_mismatch"
+
+
+def test_loader_trades_row_count_mismatch(tmp_path):
+    res = run_base_dp(_base(n=900, day_len=300), KernelCounters(), symbol="SYNTH")
+    outdir = write_oracle_artifact(res, tmp_path, oracle_source_sha="S")
+    tp = outdir / ORACLE_TRADES_FILE
+    pd.read_parquet(tp).iloc[:-1].to_parquet(tp, index=False)
+    r = load_oracle_artifact(tmp_path, "SYNTH")
+    assert r["ok"] is False and r["reason"] == "row_count_mismatch"
+
+
+def test_loader_missing_trade_columns(tmp_path):
+    res = run_base_dp(_base(n=900, day_len=300), KernelCounters(), symbol="SYNTH")
+    outdir = write_oracle_artifact(res, tmp_path, oracle_source_sha="S")
+    tp = outdir / ORACLE_TRADES_FILE
+    pd.read_parquet(tp).drop(columns=["direction"]).to_parquet(tp, index=False)
+    r = load_oracle_artifact(tmp_path, "SYNTH")
+    assert r["ok"] is False and r["reason"] == "missing_trade_columns"
