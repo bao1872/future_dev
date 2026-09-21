@@ -20,11 +20,16 @@ from research.liquidity_oracle_atlas.experiment_entry_value_tree_core108_v1 impo
     Core108Counters,
     Core108PathTracker,
     DEFAULT_ARTIFACT_ROOT,
+    build_base_from_arrays,
+    build_base_prefix,
+    discontinuity_flags,
     core108_columns,
     FORBIDDEN_FUTURE_COLUMNS,
     join_with_r2,
+    load_raw_5m,
     reference_replay,
     run_production_kernel,
+    run_streaming,
 )
 from research.liquidity_oracle_atlas.build_structure_constrained_trade_oracle_dp_v2 import (
     load_oracle_artifact_v2,
@@ -165,19 +170,25 @@ def test_max_penetration():
 
 
 def test_outside_real_distance_rc3():
-    """RC3: OUTSIDE keeps the REAL signed distance; never 0 sentinel."""
+    """RC3: OUTSIDE keeps the REAL signed distance; never 0 sentinel.
+
+    An OUTSIDE distance is genuinely uncomputable only while no ATR estimate
+    exists (the first ~warmup bars of a segment for the higher TFs). On every
+    row where a real ATR is available the distance must be finite and non-zero.
+    """
     r, _ = _run(bars=T0_BARS, join=False)
     feat = r["feature_df"]
-    # collect all (tf,role) path columns
     roles = ["SUPPORT", "RESISTANCE", "SELLSIDE_LIQUIDITY", "BUYSIDE_LIQUIDITY"]
+    atr5m_ok = np.isfinite(feat["atr5m"].to_numpy())
     for tf in ("m5", "m15", "h1", "h4"):
         for role in roles:
             ph = feat[f"{tf}_{role}_phase"].to_numpy()
             dist = feat[f"{tf}_{role}_distance_atr"].to_numpy()
             outside = ph == "OUTSIDE"
-            # OUTSIDE must carry a finite, NON-ZERO real distance
-            assert np.all(np.isfinite(dist[outside])), f"{tf}_{role} OUTSIDE NaN"
-            assert np.all(dist[outside] != 0.0), f"{tf}_{role} OUTSIDE distance==0"
+            ok = outside & atr5m_ok
+            # OUTSIDE must carry a finite, NON-ZERO real distance where ATR exists
+            assert np.all(np.isfinite(dist[ok])), f"{tf}_{role} OUTSIDE NaN (ATR available)"
+            assert np.all(dist[ok] != 0.0), f"{tf}_{role} OUTSIDE distance==0"
 
 
 def test_missing_structure_representation_rc3():
@@ -250,20 +261,102 @@ def test_phase_no_mutate_past():
     assert (pa == pb).all()
 
 
-def test_segment_boundary_no_carryover():
-    """No (tf, role) episode age may exceed the bar-distance from the current
-    segment start (i.e. an episode must never survive a segment reset)."""
-    r, _ = _run(bars=T1_BARS, join=False)
-    feat = r["feature_df"]
-    # segment start bar per row: from raw base we only have bar indices;
-    # approximate by requiring age <= decision_bar_index + 1 (causality floor).
+def _info_with_extra_discontinuity(symbol, d, bars):
+    """Build a base (true prefix) but inject a SYNTHETIC discontinuity at bar d,
+    so a real segment boundary is created inside the data. Forming MTF + DTP are
+    segmented consistently via the modified disc."""
+    raw = load_raw_5m(symbol).sort_values("bar_start_time").reset_index(drop=True)
+    disc = np.asarray(discontinuity_flags(symbol), dtype=bool)
+    if bars and bars < len(raw):
+        raw = raw.iloc[: int(bars)].reset_index(drop=True)
+        disc = disc[: int(bars)]
+    c = Core108Counters()
+    disc[int(d)] = True  # synthetic gap
+    info = build_base_from_arrays(
+        pd.to_datetime(raw["bar_start_time"]).to_numpy(),
+        pd.to_datetime(raw["trading_day"]).to_numpy(),
+        raw["open"].to_numpy(float),
+        raw["high"].to_numpy(float),
+        raw["low"].to_numpy(float),
+        raw["close"].to_numpy(float),
+        disc,
+        c,
+    )
+    info["base_time"] = pd.to_datetime(raw["bar_start_time"]).to_numpy()
+    return info
+
+
+def test_discontinuity_synthetic_resets_episode_age():
+    """Reviewer-requested: a real (injected) discontinuity must reset every
+    (tf, role) episode so that NO active path can carry a start bar before the
+    boundary. Invariant: for every emitted active row with decision_bar_index>=d,
+    ``episode_age_5m <= decision_bar_index - d + 1`` (it can only have started at
+    or after the boundary, even though it may not be EMITTED until later bars).
+    This directly proves the segment reset reaches the path trackers."""
+    d = 800
+    bars = 4000
+    info = _info_with_extra_discontinuity(SYMBOL, d, bars)
+    feat = run_streaming(info, Core108Counters(), SYMBOL, max_bars=bars)
     roles = ["SUPPORT", "RESISTANCE", "SELLSIDE_LIQUIDITY", "BUYSIDE_LIQUIDITY"]
-    for tf in ("m5", "m15", "h1", "h4"):
+    tfs = ("m5", "m15", "h1", "h4")
+    any_active = False
+    for tf in tfs:
         for role in roles:
-            age = feat[f"{tf}_{role}_episode_age_5m"].to_numpy()
+            col = f"{tf}_{role}_episode_age_5m"
+            ph = feat[f"{tf}_{role}_phase"].to_numpy()
+            age = feat[col].to_numpy()
             bi = feat["decision_bar_index"].to_numpy()
-            active = age > 0
-            assert np.all(age[active] <= bi[active] + 1), f"{tf}_{role} age overflow"
+            active_after = (age > 0) & (bi >= d)
+            if active_after.any():
+                any_active = True
+                bound = bi[active_after] - d + 1
+                assert np.all(age[active_after] <= bound), (
+                    f"{tf}_{role} episode carries a start bar before the synthetic "
+                    f"boundary (age {age[active_after].max()} > {bound.max()})"
+                )
+    assert any_active, "synthetic discontinuity test is vacuous (no active episode after d)"
+
+
+def test_causality_current_geom_not_used_for_current_path():
+    """Reviewer-requested negative causality test.
+
+    Hold the PREVIOUS geometry fixed; scramble ONLY the CURRENT bar's geometry.
+    The current bar's CORE108 path must be COMPLETELY UNCHANGED (it reads
+    prev_geom == geometry_{t-1}), while the change is allowed to surface on a
+    later bar (which reads the mutated geometry as its prev_geom)."""
+    c0 = Core108Counters()
+    info = build_base_prefix(SYMBOL, c0, max_bars=2000)
+    feat0 = run_streaming(info, Core108Counters(), SYMBOL, max_bars=2000)
+    t = int(feat0["decision_bar_index"].iloc[30])
+
+    def mutator(i, geom):
+        # scramble bar t's CURRENT geometry only: shove every structure to a far
+        # price so it can never match real price; previous bars untouched.
+        if i != t:
+            return geom
+        out = {}
+        for tf in geom:
+            _ch, _lu, _ld, atr = geom[tf]
+            out[tf] = ([(1e6, 1e6 - 1.0, 1.0)], [], [], atr)
+        return out
+
+    feat1 = run_streaming(
+        info, Core108Counters(), SYMBOL, max_bars=2000, geom_mutator=mutator
+    )
+
+    cols = core108_columns()
+    num_cols = [c for c in cols if not c.endswith("_phase")]
+    r0 = feat0[feat0["decision_bar_index"] == t].iloc[0]
+    r1 = feat1[feat1["decision_bar_index"] == t].iloc[0]
+    assert np.allclose(
+        np.nan_to_num(r0[num_cols].to_numpy(dtype=float)),
+        np.nan_to_num(r1[num_cols].to_numpy(dtype=float)),
+        atol=1e-9,
+    ), "current bar path changed when only current geometry was scrambled"
+    # the scrambled geometry must propagate to the FUTURE (next bar reads it as prev)
+    assert not feat0[cols].equals(feat1[cols]), (
+        "scrambled current geometry did not affect any future bar (timing bug?)"
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -435,24 +528,52 @@ def test_t1_proximity_parity_gate():
 # TP — performance gate (N / 2N / 4N)                                          #
 # --------------------------------------------------------------------------- #
 def test_tp_performance_gate():
-    """Feature builder scales linearly on true prefixes; invariants hold."""
+    """Feature builder scales linearly on true prefixes; invariants hold.
+
+    Evidence Packet fields (printed, not just asserted): T_N / T_2N / T_4N,
+    ratio_2N, ratio_4N, peak memory (tracemalloc), and the counters.
+    """
     N, N2, N4 = 10000, 20000, 40000
     import time
+    import tracemalloc
 
     def time_build(n):
         c = Core108Counters()
+        tracemalloc.start()
         t0 = time.perf_counter()
         r = run_production_kernel(SYMBOL, c, max_bars=n, join=False)
         dt = time.perf_counter() - t0
-        return dt, c, r
+        _, peak = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+        return dt, c, r, peak / (1024 * 1024)  # MB
 
-    dt1, c1, r1 = time_build(N)
-    dt2, c2, r2 = time_build(N2)
-    dt3, c3, r3 = time_build(N4)
+    dt1, c1, r1, mem1 = time_build(N)
+    dt2, c2, r2, mem2 = time_build(N2)
+    dt3, c3, r3, mem3 = time_build(N4)
+
+    ratio_2n = dt2 / dt1
+    ratio_4n = dt3 / dt2
+
+    # ---- Evidence Packet output (verbatim numbers for the reviewer) ----
+    print("\n=== TP EVIDENCE (AG true prefixes) ===")
+    print(f"N={N}      T_N={dt1:.4f}s  peak_mem={mem1:.1f}MB  rows={c1.feature_row_count}")
+    print(f"2N={N2}    T_2N={dt2:.4f}s  peak_mem={mem2:.1f}MB  rows={c2.feature_row_count}")
+    print(f"4N={N4}    T_4N={dt3:.4f}s  peak_mem={mem3:.1f}MB  rows={c3.feature_row_count}")
+    print(f"ratio_2N={ratio_2n:.4f}  ratio_4N={ratio_4n:.4f}")
+    print(
+        "counters: raw_load/resample/precompute/rows = "
+        f"{c3.raw_load_count}/{c3.resample_count}/{c3.feature_precompute_count}/{c3.feature_row_count}"
+    )
+    print(
+        "invariants(full_hist/ref/concat/oracle_recomp) = "
+        f"{c3.full_history_recompute_count}/{c3.reference_call_count}/"
+        f"{c3.concat_count}/{c3.oracle_recompute_count}"
+    )
 
     # wide gate
-    assert dt2 / dt1 < 2.8, f"T_2N/T_N={dt2/dt1:.3f} >= 2.8"
-    assert dt3 / dt2 < 2.8, f"T_4N/T_2N={dt3/dt2:.3f} >= 2.8"
+    assert ratio_2n < 2.8, f"T_2N/T_N={ratio_2n:.3f} >= 2.8"
+    assert ratio_4n < 2.8, f"T_4N/T_2N={ratio_4n:.3f} >= 2.8"
+    assert mem3 < 4096, f"peak memory {mem3:.1f}MB too high"
 
     # structural invariants (no forbidden recompute paths)
     for c in (c1, c2, c3):

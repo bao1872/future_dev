@@ -358,11 +358,19 @@ def run_streaming(
     counters: Core108Counters,
     symbol: str,
     max_bars: Optional[int] = None,
+    geom_mutator: Optional[Callable[[int, Dict[str, Tuple]], Dict[str, Tuple]]] = None,
 ) -> pd.DataFrame:
     """Single-pass streaming: 4TF IndicatorState + 16 Core108PathTrackers.
 
     Returns a DataFrame with ONE ROW PER proximity_any bar (the candidate set),
     carrying the 108 CORE108 features + audit columns. O(N x 4 x 4) linear.
+
+    ``geom_mutator`` is a TEST-ONLY seam: when provided, it receives
+    ``(bar_index, geom_by_tf)`` after the per-TF preview and returns the geometry
+    dict used for the path/structure interaction. It never affects production
+    (defaults to None -> identity). It lets a test scramble the CURRENT bar's
+    geometry to prove the path consumes ``prev_geom`` (geometry_{t-1}), not
+    ``geom_by_tf`` (geometry_t).
     """
     base = info["base"]
     form = info["form"]
@@ -462,6 +470,11 @@ def run_streaming(
             liq_down = [dict(x) for x in pv.liq.levels_down]
             geom_by_tf[tf] = (channels, liq_up, liq_down, atr_tf)
 
+        # TEST-ONLY seam: optionally scramble the CURRENT bar's geometry so a test
+        # can prove the path consumes prev_geom (geometry_{t-1}), not this one.
+        if geom_mutator is not None:
+            geom_by_tf = geom_mutator(i, geom_by_tf)
+
         # ---- recompute proximity from PREVIOUS close geometry (RC6) ----
         pb = int(
             proximity_bits_from_prev_geometry(
@@ -469,15 +482,16 @@ def run_streaming(
             )
         )
         pa = bool(pb != 0)
-        prev_geom_by_tf = {
-            tf: (
-                geom_by_tf[tf][0],
-                geom_by_tf[tf][1],
-                geom_by_tf[tf][2],
-                geom_by_tf[tf][3],
-            )
-            for tf in TF_ORDER
-        }
+
+        # ---- CORE108 path interacts with PREVIOUS-close known structure ----
+        # The structure-to-path interaction (select_target / in_proximity /
+        # owner-change / OUTSIDE distance / episode start ATR) must use the
+        # geometry that existed BEFORE this bar started (interaction_geom_by_tf ==
+        # prev_geom_by_tf). geom_by_tf (current preview) is used only for DTP,
+        # forming MTF, and to become the NEXT bar's prev_geom_by_tf. This is RC4
+        # (frozen A_path comes from previous geometry) and avoids "self-made
+        # structure" (forming a structure this bar then claiming to touch it).
+        interaction_geom_by_tf = prev_geom_by_tf
 
         # ---- per (tf, role) episode lifecycle + path update (RC2/RC3/RC4) ----
         O = O5[i]
@@ -487,12 +501,20 @@ def run_streaming(
         path_feats: Dict[Tuple[str, str], Tuple[float, str, int, float, float, float]] = {}
 
         for tf in TF_ORDER:
-            channels, liq_up, liq_down, atr_tf = geom_by_tf[tf]
+            _g = interaction_geom_by_tf.get(tf) if interaction_geom_by_tf else None
+            if _g is not None:
+                channels, liq_up, liq_down, atr_tf = _g
+            else:
+                channels, liq_up, liq_down, atr_tf = None, _NAN, _NAN, _NAN
             for role in ROLES:
                 key = (tf, role)
                 ep = active[key]
-                cand = select_target(
-                    role, channels, liq_up, liq_down, C, atr_tf, tf, seg, i, sr_first_seen
+                cand = (
+                    select_target(
+                        role, channels, liq_up, liq_down, C, atr_tf, tf, seg, i, sr_first_seen
+                    )
+                    if channels is not None
+                    else None
                 )
 
                 if ep is None:
@@ -557,14 +579,36 @@ def run_streaming(
                     if cand is not None:
                         s = REV_SIGN[role]
                         sE = s * cand["near_edge"]
+                        # OUTSIDE has no frozen episode ATR; scale by the previous
+                        # known structure's per-TF ATR when available, else the
+                        # current bar's per-TF ATR, else the 5m ATR, so the REAL
+                        # signed distance stays finite & non-zero (RC3), never 0.
+                        denom = atr_tf
+                        if not (np.isfinite(denom) and denom > 0):
+                            denom = geom_by_tf[tf][3]
+                        if not (np.isfinite(denom) and denom > 0):
+                            denom = atr5m[i]
                         d_out = (
-                            (s * C - sE) / atr_tf
-                            if (np.isfinite(atr_tf) and atr_tf > 0)
+                            (s * C - sE) / denom
+                            if (np.isfinite(denom) and denom > 0)
                             else _NAN
                         )
                         path_feats[key] = (d_out, "OUTSIDE", 0, 0.0, 0.0, 0.0)
                     else:
                         path_feats[key] = (_NAN, "NO_STRUCTURE", 0, 0.0, 0.0, 0.0)
+
+        # advance: current preview geometry becomes the NEXT bar's previous-known
+        # structure. The path of bar t used prev_geom_by_tf (geometry_{t-1});
+        # geometry_t is only now promoted, so bar t+1's path will see it.
+        prev_geom_by_tf = {
+            tf: (
+                geom_by_tf[tf][0],
+                geom_by_tf[tf][1],
+                geom_by_tf[tf][2],
+                geom_by_tf[tf][3],
+            )
+            for tf in TF_ORDER
+        }
 
         if not pa:
             continue
@@ -656,6 +700,7 @@ def reference_replay(
 
     sr_first_seen: Dict[Tuple, int] = {}
     prev_seg = None
+    prev_geom_by_tf: Optional[Dict[str, Tuple]] = None
 
     result: Dict[Tuple[int, str, str], Tuple[float, str, int, float, float, float]] = {}
     target_set = {(t["t"], t["tf"], t["role"]) for t in targets}
@@ -680,6 +725,7 @@ def reference_replay(
                 cur_seg_per_tf[tf] = seg
                 ci_per_tf[tf] = 0
                 seg_list_per_tf[tf] = seg_completed[tf].get(seg, [])
+            prev_geom_by_tf = None
             prev_seg = seg
 
         geom_by_tf: Dict[str, Tuple] = {}
@@ -710,14 +756,26 @@ def reference_replay(
         L = L5[i]
         C = C5[i]
 
+        # CORE108 path must interact with PREVIOUS-close known structure
+        # (mirrors production: geometry_{t-1} + Bar_t -> Path_t).
+        interaction_geom_by_tf = prev_geom_by_tf
+
         for tf in TF_ORDER:
-            channels, liq_up, liq_down, atr_tf = geom_by_tf[tf]
+            _g = interaction_geom_by_tf.get(tf) if interaction_geom_by_tf else None
+            if _g is not None:
+                channels, liq_up, liq_down, atr_tf = _g
+            else:
+                channels, liq_up, liq_down, atr_tf = None, _NAN, _NAN, _NAN
             for role in ROLES:
                 key = (tf, role)
                 ep = active[key]
                 st = inline[key]
-                cand = select_target(
-                    role, channels, liq_up, liq_down, C, atr_tf, tf, seg, i, sr_first_seen
+                cand = (
+                    select_target(
+                        role, channels, liq_up, liq_down, C, atr_tf, tf, seg, i, sr_first_seen
+                    )
+                    if channels is not None
+                    else None
                 )
                 if ep is None:
                     if cand is not None:
@@ -825,14 +883,31 @@ def reference_replay(
                         if cand is not None:
                             s = REV_SIGN[role]
                             sE = s * cand["near_edge"]
+                            denom = atr_tf
+                            if not (np.isfinite(denom) and denom > 0):
+                                denom = geom_by_tf[tf][3]
+                            if not (np.isfinite(denom) and denom > 0):
+                                denom = atr5m[i]
                             d_out = (
-                                (s * C - sE) / atr_tf
-                                if (np.isfinite(atr_tf) and atr_tf > 0)
+                                (s * C - sE) / denom
+                                if (np.isfinite(denom) and denom > 0)
                                 else _NAN
                             )
                             result[(i, tf, role)] = (d_out, "OUTSIDE", 0, 0.0, 0.0, 0.0)
                         else:
                             result[(i, tf, role)] = (_NAN, "NO_STRUCTURE", 0, 0.0, 0.0, 0.0)
+
+        # advance: current preview geometry becomes the NEXT bar's previous-known
+        # structure (mirrors production).
+        prev_geom_by_tf = {
+            tf: (
+                geom_by_tf[tf][0],
+                geom_by_tf[tf][1],
+                geom_by_tf[tf][2],
+                geom_by_tf[tf][3],
+            )
+            for tf in TF_ORDER
+        }
     return result
 
 
@@ -949,10 +1024,13 @@ def run_production_kernel(
     max_bars: Optional[int] = None,
     artifact_root: Any = DEFAULT_ARTIFACT_ROOT,
     join: bool = True,
+    geom_mutator: Optional[Callable[[int, Dict[str, Tuple]], Dict[str, Tuple]]] = None,
 ) -> Dict[str, Any]:
     counters = counters or Core108Counters()
     info = build_base_prefix(symbol, counters, max_bars=max_bars)
-    feature_df = run_streaming(info, counters, symbol, max_bars=max_bars)
+    feature_df = run_streaming(
+        info, counters, symbol, max_bars=max_bars, geom_mutator=geom_mutator
+    )
     out: Dict[str, Any] = {
         "symbol": symbol,
         "feature_df": feature_df,
