@@ -2,18 +2,21 @@
 test_structure_constrained_trade_oracle_dp_v1
 =============================================
 
-T0 gates + T1 differential + TP performance gate for the Structure-Constrained
-Trade Oracle DP V1 (task FUTURE-STRATEGY-DP-ORACLE-V1).
+T0 gates + T1 differential + TP performance/memory gate for the Intraday
+Structure-Constrained Trade Oracle DP V1 (task FUTURE-INTRADAY-DP-ORACLE-R1).
 
-Contract covered:
-  * allowed-action set + entry/reversal gating,
-  * next-open execution (decision t -> fill t+1),
-  * per-segment natural terminal (flat start/end, no cross-discontinuity),
-  * primary objective = gross open-to-open PnL (c_roundtrip_atr = 0),
-  * independent brute-force reference equivalence,
-  * T1 real-data differential MUST slice already-causal DP inputs from the
-    full-history streaming run (it MUST NOT rebuild SR/Liquidity/DTP from the
-    short window); the short-window terminal is TEST-ONLY.
+Contract covered (§19):
+  * entry mask = current 5m range touches a PRE-EXISTING SR/Liquidity zone
+    (delta = 0), 8-bit TF x {SR,LIQ}; broken liquidity excluded; a structure
+    formed by the current bar can never retroactively qualify the current bar;
+  * no 0.5*ATR proximity on the DP entry;
+  * Flat->entry / reversal only when eligible; exit free anywhere;
+  * per (trading_day, segment) unit, Flat at both ends, no cross day / segment;
+  * next-open execution; gross PnL objective with a cost interface (V1 c=0);
+  * full 3x3 Q counterfactuals;
+  * production DP == independent exhaustive reference;
+  * PnL reconstruction == Bellman value; sign symmetry; true tie;
+  * N/2N/4N time + memory scaling.
 
 Run with the project interpreter (Python 3.11+):
     .venv/bin/python -m pytest research/liquidity_oracle_atlas/test_structure_constrained_trade_oracle_dp_v1.py -v
@@ -27,68 +30,58 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from research.liquidity_oracle_atlas.experiment_structure_interaction_entry_v1 import (
-    KernelCounters,
-    build_base_from_arrays,
-    stream_from_base,
-)
 from research.liquidity_oracle_atlas.build_structure_constrained_trade_oracle_dp_v1 import (
     DATA_END,
     DISCONTINUITY,
-    INVALID_ACTION,
     P2I,
     POS,
-    _allowed_actions,
-    _ref_allowed,
-    _transition_label,
+    TRADING_DAY_END,
     artifact_metadata,
-    backtrack_segment,
     build_artifact_frames,
-    reference_solve_segment,
+    build_intraday_units,
+    exhaustive_reference,
     run_base_dp,
     run_symbol_dp,
-    solve_segment_dp,
+    solve_day_dp,
+)
+from research.liquidity_oracle_atlas.experiment_structure_interaction_entry_v1 import (
+    MASK_BIT,
+    KernelCounters,
+    bar_hits_zone,
+    build_base_from_arrays,
+    entry_bits_from_prev_geometry,
+    stream_from_base,
 )
 
 
 # --------------------------------------------------------------------------- #
 # Helpers                                                                      #
 # --------------------------------------------------------------------------- #
-def run_seg(opens, entry_ok, atr5=None, seg_start=0, seg_end=None):
+def prod_path(core, start, end):
+    p = 0
+    out = []
+    for t in range(start, end):
+        pi = P2I[p]
+        a = int(core["actions"][t, pi])
+        out.append(a)
+        p = a
+    return out
+
+
+def _solve(opens, entry_ok, cost=None, start=0, end=None):
     opens = np.asarray(opens, float)
-    if seg_end is None:
-        seg_end = len(opens) - 2
-    if atr5 is None:
-        atr5 = np.ones(len(opens))
-    else:
-        atr5 = np.asarray(atr5, float)
     entry_ok = np.asarray(entry_ok, bool)
-    core = solve_segment_dp(opens, atr5, entry_ok, seg_start, seg_end)
-    ref = reference_solve_segment(opens, atr5, entry_ok, seg_start, seg_end)
-    return core, ref, seg_start, seg_end
+    if cost is None:
+        cost = np.zeros(len(opens))
+    cost = np.asarray(cost, float)
+    if end is None:
+        end = len(opens) - 2
+    core = solve_day_dp(opens, entry_ok, cost, start, end)
+    best, paths = exhaustive_reference(opens, entry_ok, cost, start, end)
+    return core, best, paths, start, end, opens, entry_ok, cost
 
 
-def prod_path(core, s, e):
-    p = 0
-    out = []
-    for t in range(s, e):
-        q = int(core["action"][t, P2I[p]])
-        out.append(q)
-        p = q
-    return out
-
-
-def ref_path(ref, s, e):
-    p = 0
-    out = []
-    for t in range(s, e):
-        q = int(ref["chosen"][(t, p)])
-        out.append(q)
-        p = q
-    return out
-
-
-def _synth_ohlc(n, seed=0, disc_index=None):
+def _synth_ohlc(n, seed=0, disc_index=None, day_len=None):
     rng = np.random.default_rng(seed)
     x = 100.0
     o = np.empty(n)
@@ -103,343 +96,387 @@ def _synth_ohlc(n, seed=0, disc_index=None):
         h[i] = max(o[i], c[i]) + abs(rng.normal(0.0, 0.4))
         l[i] = min(o[i], c[i]) - abs(rng.normal(0.0, 0.4))
     t = pd.date_range("2024-01-01 09:00", periods=n, freq="5min")
-    day = pd.to_datetime(["2024-01-01"] * n)
+    # trading_day: bump every `day_len` bars (default: single day)
+    day_len = day_len or n
+    day_codes = np.arange(n) // day_len
+    day = pd.to_datetime("2024-01-01") + pd.to_timedelta(day_codes, unit="D")
     disc = np.zeros(n, dtype=bool)
     if disc_index is not None:
         disc[disc_index] = True
-    return t, day, o, h, l, c, disc
+    return t, day.to_numpy(), o, h, l, c, disc
 
 
-def _synth_base(n=400, seed=0, disc_index=None):
-    t, day, o, h, l, c, disc = _synth_ohlc(n, seed=seed, disc_index=disc_index)
+def _synth_base(n=900, seed=0, disc_index=None, day_len=None):
+    t, day, o, h, l, c, disc = _synth_ohlc(
+        n, seed=seed, disc_index=disc_index, day_len=day_len
+    )
     return build_base_from_arrays(t, day, o, h, l, c, disc, KernelCounters())["base"]
 
 
-def assert_dp_matches_reference(core, ref, s, e, collected):
-    """Accumulate value/chosen/ambiguous mismatches into ``collected``."""
-    for t in range(s, e):
-        for p in POS:
-            pi = P2I[int(p)]
-            pv = float(core["value"][t, pi])
-            rv = float(ref["value"][(t, int(p))])
-            if not math.isclose(pv, rv, rel_tol=1e-9, abs_tol=1e-6):
-                collected["value"] += 1
-            if int(core["action"][t, pi]) != int(ref["chosen"][(t, int(p))]):
-                collected["chosen"] += 1
-            if bool(core["ambiguous"][t, pi]) != bool(ref["ambiguous"][(t, int(p))]):
-                collected["ambiguous"] += 1
-            # best-action-set consistency
-            acts = ref["best_actions"][(t, int(p))]
-            if bool(core["ambiguous"][t, pi]):
-                if len(acts) <= 1 or int(core["action"][t, pi]) not in acts:
-                    collected["best_set"] += 1
-            else:
-                if len(acts) != 1 or int(core["action"][t, pi]) not in acts:
-                    collected["best_set"] += 1
+def _geom(channels=None, liq_up=None, liq_down=None):
+    return {
+        "m5": (
+            list(channels or []),
+            list(liq_up or []),
+            list(liq_down or []),
+        )
+    }
 
 
-def invariant_violations(action_rows):
-    """Return a list of illegal-entry / illegal-reversal violations."""
-    bad = []
-    for r in action_rows:
-        pb = int(r["oracle_position_before"])
-        pa = int(r["oracle_position_after"])
-        eligible = bool(r["entry_eligible"])
-        if pb == 0 and pa != 0 and not eligible:
-            bad.append(("illegal_entry", r["decision_bar_index"]))
-        if pb != 0 and pa == -pb and not eligible:
-            bad.append(("illegal_reversal", r["decision_bar_index"]))
-    return bad
+def _liq(level, top, bottom, broken=False):
+    return {
+        "left": 10,
+        "level": level,
+        "top": top,
+        "bottom": bottom,
+        "broken": broken,
+        "breach_i": None,
+    }
 
 
 # =========================================================================== #
-# T0 gates (§24)                                                               #
+# T0 — Entry mask (kernel)                                                     #
 # =========================================================================== #
-def test_T0_no_structure_always_flat():
-    opens = [100, 100, 105, 110, 115, 120, 125]  # rising, but no entry allowed
-    entry_ok = [False] * 5
-    core, ref, s, e = run_seg(opens, entry_ok)
-    assert prod_path(core, s, e) == [0, 0, 0, 0, 0]
-    assert float(core["value"][s, P2I[0]]) == 0.0
-    assert ref_path(ref, s, e) == [0, 0, 0, 0, 0]
+def test_mask_sr_touch_eligible():
+    prev = _geom(channels=[(105.0, 100.0, 2.0)])  # zone [100,105]
+    assert entry_bits_from_prev_geometry(99.0, 101.0, prev) != 0
+    bit = MASK_BIT[("m5", "SR")]
+    assert entry_bits_from_prev_geometry(99.0, 101.0, prev) == (1 << bit)
 
 
-def test_T0_long_synthetic():
-    opens = [100, 100, 100, 105, 110, 115, 120]
-    entry_ok = [False, True, False, False, False]
-    core, ref, s, e = run_seg(opens, entry_ok)
-    assert int(core["action"][1, P2I[0]]) == 1  # LONG_ENTRY
-    assert _transition_label(0, 1) == "LONG_ENTRY"
-    path = prod_path(core, s, e)
-    assert path[0] == 0 and path[1] == 1  # flat then long
-    assert path[-1] == 0  # terminal flat
-    assert path == ref_path(ref, s, e)
+def test_mask_sr_touch_then_close_far_still_eligible():
+    # range touches the zone but close is far away -> still eligible (range based)
+    prev = _geom(channels=[(105.0, 100.0, 2.0)])
+    assert bar_hits_zone(98.0, 100.5, 100.0, 105.0) is True
+    assert entry_bits_from_prev_geometry(98.0, 100.5, prev) != 0
 
 
-def test_T0_short_synthetic():
-    opens = [100, 100, 100, 95, 90, 85, 80]
-    entry_ok = [False, True, False, False, False]
-    core, ref, s, e = run_seg(opens, entry_ok)
-    assert int(core["action"][1, P2I[0]]) == -1  # SHORT_ENTRY
-    assert _transition_label(0, -1) == "SHORT_ENTRY"
-    assert prod_path(core, s, e) == ref_path(ref, s, e)
-    assert prod_path(core, s, e)[-1] == 0
+def test_mask_liquidity_touch_eligible():
+    prev = _geom(liq_up=[_liq(103.0, 104.0, 102.0)])
+    bit = MASK_BIT[("m5", "LIQ")]
+    assert entry_bits_from_prev_geometry(101.5, 103.5, prev) == (1 << bit)
 
 
-def test_T0_illegal_entry_blocked():
-    # unit level
-    assert _allowed_actions(0, False, False) == (0,)
-    assert _allowed_actions(0, True, False) == (-1, 0, 1)
-    assert _ref_allowed(0, False, False) == (0,)
-    assert _ref_allowed(0, True, False) == (-1, 0, 1)
-    # DP level: no entry when all-ineligible
-    opens = [100, 101, 102, 103, 104, 105, 106]
-    core, _ref, s, e = run_seg(opens, [False] * 5)
-    for t in range(s, e):
-        assert int(core["action"][t, P2I[0]]) == 0
+def test_mask_no_touch_ineligible():
+    prev = _geom(channels=[(105.0, 100.0, 2.0)], liq_down=[_liq(90.0, 91.0, 89.0)])
+    assert entry_bits_from_prev_geometry(120.0, 121.0, prev) == 0
+    assert entry_bits_from_prev_geometry(80.0, 81.0, prev) == 0
 
 
-def test_T0_free_exit_where_mask_zero():
-    # enter long at t=1, then price falls; the optimal exit happens at t=2,
-    # where entry mask == 0 (exits are unrestricted).
-    opens = [100, 100, 100, 110, 105, 100, 95]
-    entry_ok = [False, True, False, False, False]
-    core, ref, s, e = run_seg(opens, entry_ok)
-    transitions = backtrack_segment(core, np.asarray(opens, float),
-                                    np.ones(len(opens)), np.arange(len(opens)),
-                                    s, e)
-    by_t = {int(tr["decision_bar_index"]): tr["transition"] for tr in transitions}
-    assert by_t.get(1) == "LONG_ENTRY"
-    assert by_t.get(2) == "LONG_EXIT"      # exit at a non-eligible decision
-    assert entry_ok[2] is False
-    assert prod_path(core, s, e) == ref_path(ref, s, e)
+def test_mask_broken_liquidity_excluded():
+    prev = _geom(liq_up=[_liq(103.0, 104.0, 102.0, broken=True)])
+    assert entry_bits_from_prev_geometry(101.5, 103.5, prev) == 0
 
 
-def test_T0_reversal_requires_entry_mask():
-    # unit level
-    assert -1 in _allowed_actions(1, True, False)
-    assert _allowed_actions(1, False, False) == (1, 0)
-    assert -1 in _ref_allowed(1, True, False)
-    assert _ref_allowed(1, False, False) == (1, 0)
-    # DP level: after a long entry, no reversal while ineligible.
-    opens = [100, 100, 100, 105, 100, 95, 90]
-    entry_ok = [True, False, False, False, False]
-    core, _ref, s, e = run_seg(opens, entry_ok)
-    path = prod_path(core, s, e)
-    for k in range(1, len(path)):
-        assert not (path[k - 1] != 0 and path[k] == -path[k - 1]), "illegal reversal"
+def test_mask_new_structure_cannot_retroactively_qualify():
+    # The mask is a pure function of the PREVIOUS geometry: a zone present only
+    # "now" (empty prev) can never make the current bar eligible.
+    assert entry_bits_from_prev_geometry(100.0, 106.0, {}) == 0
+    # first bar of a stream / segment has no previous geometry -> mask 0
+    base = _synth_base(n=900, seed=2)
+    r = stream_from_base(
+        base, KernelCounters(), capture_entry_mask=True, emit_events=False
+    )
+    assert int(r["entry_mask"][0]) == 0
 
 
-def test_T0_next_open_fill():
-    opens = [100, 100, 100, 105, 110, 115, 120]
-    entry_ok = [False, True, False, False, False]
-    arr = np.asarray(opens, float)
-    core, _ref, s, e = run_seg(opens, entry_ok)
-    times = np.arange(len(opens))
-    transitions = backtrack_segment(core, arr, np.ones(len(opens)), times, s, e)
-    assert transitions, "expected at least one transition"
-    for tr in transitions:
-        assert tr["fill_bar_index"] == tr["decision_bar_index"] + 1
-        assert tr["fill_price"] == arr[tr["decision_bar_index"] + 1]
-
-
-def test_T0_no_cross_segment():
-    # segments must be long enough for the ATR200/SR warmup to produce structure
-    base = _synth_base(n=900, seed=5, disc_index=450)
-    res = run_base_dp(base, KernelCounters(), symbol="SYNTH")
-    seg = res["segment"]
-    trades = res["trades"]
-    assert trades, "expected some trades on synthetic data"
-    for tr in trades:
-        ei, xi = int(tr["entry_fill_index"]), int(tr["exit_fill_index"])
-        assert seg[ei] == seg[xi], "trade crosses a discontinuity boundary"
-    # every segment must be flat at its own end
-    for segm in res["segments"]:
-        s, e = segm["seg_start"], segm["seg_end"]
-        if e - s < 2:
-            continue
-        core = res["cores"][(s, e)]
-        p = 0
-        for t in range(s, e):
-            p = int(core["action"][t, P2I[p]])
-        assert p == 0, "segment did not terminate flat"
-
-
-def test_T0_terminal_flat():
-    opens = [100, 101, 103, 106, 110, 115, 121]
-    core, _ref, s, e = run_seg(opens, [True] * 5)
-    assert prod_path(core, s, e)[-1] == 0
-    # terminal decision forces a=0 for every state
-    for p in POS:
-        assert int(core["action"][e - 1, P2I[int(p)]]) == 0
-
-
-def test_T0_sign_symmetry():
-    opens = np.array([100, 101, 103, 106, 110, 115, 121], float)
-    c = 100.0
-    mirror = 2.0 * c - opens
-    entry_ok = [True] * 5
-    core_a, _ra, s, e = run_seg(opens, entry_ok)
-    core_b, _rb, sb, eb = run_seg(mirror, entry_ok)
-    pa = prod_path(core_a, s, e)
-    pb = prod_path(core_b, sb, eb)
-    assert pa == [-x for x in pb]
-    assert pa[0] == 1 and pb[0] == -1
-    va = float(core_a["value"][s, P2I[0]])
-    vb = float(core_b["value"][sb, P2I[0]])
-    assert math.isclose(va, vb, rel_tol=1e-9, abs_tol=1e-9)
-
-
-def test_T0_brute_force_equivalence():
-    collected = {"value": 0, "chosen": 0, "ambiguous": 0, "best_set": 0}
-    for seed in range(60):
-        rng = np.random.default_rng(seed)
-        D = 6 + seed % 5
-        base = 100.0
-        opens = np.array([base] + list(base + np.cumsum(rng.normal(0, 1.0, D + 1))))
-        entry_ok = rng.random(D + 2) < 0.5
-        s, e = 0, D
-        core, ref, s, e = run_seg(opens, entry_ok, seg_start=s, seg_end=e)
-        assert_dp_matches_reference(core, ref, s, e, collected)
-        # production flat-start path must be an optimal reference path
-        pp = tuple(prod_path(core, s, e))
-        opt = {tuple(pth) for pth in ref["optimal_paths"]}
-        assert pp in opt, f"seed {seed}: production path not optimal"
-    assert collected == {"value": 0, "chosen": 0, "ambiguous": 0, "best_set": 0}, collected
-
-
-def test_T0_future_mutation_entry_mask():
-    n = 400
-    base = _synth_base(n=n, seed=2)
-    res_a = stream_from_base(base, KernelCounters(), symbol="SYNTH",
-                             capture_entry_bits=True, emit_events=False)
-    bits_a = res_a["entry_candidate_bits"]
-    assert int((bits_a != 0).sum()) > 0
+def test_mask_future_mutation_unchanged():
+    n = 900
+    base = _synth_base(n=n, seed=3)
+    a = stream_from_base(
+        base, KernelCounters(), capture_entry_mask=True, emit_events=False
+    )
+    mask_a = a["entry_mask"]
+    assert int((mask_a != 0).sum()) > 0
 
     K = n - 1
     base2 = base.copy().reset_index(drop=True)
     base2.at[base2.index[K], "close"] = float(base["close"].iloc[K]) + 5.0
-    res_b = stream_from_base(base2, KernelCounters(), symbol="SYNTH",
-                             capture_entry_bits=True, emit_events=False)
-    bits_b = res_b["entry_candidate_bits"]
-    assert np.array_equal(bits_a[:K], bits_b[:K]), "future bar changed past entry mask"
+    b = stream_from_base(
+        base2, KernelCounters(), capture_entry_mask=True, emit_events=False
+    )
+    assert np.array_equal(mask_a[:K], b["entry_mask"][:K]), (
+        "future bar changed past mask"
+    )
 
 
-def test_T0_capture_does_not_change_events():
-    base = _synth_base(n=400, seed=3)
-    r0 = stream_from_base(base, KernelCounters(), symbol="SYNTH",
-                          capture_entry_bits=False, emit_events=True)
-    r1 = stream_from_base(base, KernelCounters(), symbol="SYNTH",
-                          capture_entry_bits=True, emit_events=True)
-    ev0 = [(e["event_type"], e["decision_bar_index"], e["structure_id"],
-            e["near_edge"], e["far_edge"]) for e in r0["events"]]
-    ev1 = [(e["event_type"], e["decision_bar_index"], e["structure_id"],
-            e["near_edge"], e["far_edge"]) for e in r1["events"]]
-    assert ev0 == ev1, "capture_entry_bits changed the emitted event rows"
-    assert len(ev0) > 0
-
-    # emit_events=False must not change the entry mask
-    r2 = stream_from_base(base, KernelCounters(), symbol="SYNTH",
-                          capture_entry_bits=True, emit_events=False)
-    assert r2["events"] == []
-    assert np.array_equal(r1["entry_candidate_bits"], r2["entry_candidate_bits"])
+def test_mask_8bit_range():
+    base = _synth_base(n=900, seed=4)
+    r = stream_from_base(
+        base, KernelCounters(), capture_entry_mask=True, emit_events=False
+    )
+    assert int(r["entry_mask"].max()) < 256
+    assert r["entry_eligible"].dtype == bool
 
 
-def test_T0_data_end_censored():
-    # (a) single segment -> DATA_END (censored, training_eligible=False)
-    base = _synth_base(n=300, seed=4)
+# =========================================================================== #
+# T0 — DP action space                                                         #
+# =========================================================================== #
+def test_dp_flat_entry_only_when_eligible():
+    opens = [100, 100, 105, 110, 115, 120, 125]
+    core, _best, _paths, s, e, *_ = _solve(opens, [False] * 5)
+    for t in range(s, e):
+        assert int(core["actions"][t, P2I[0]]) == 0  # never enters when ineligible
+
+
+def test_dp_exit_allowed_anywhere():
+    # enter long at t=1 (eligible), price falls; optimal exit occurs while the
+    # entry mask is 0 (exit is unrestricted).
+    opens = [100, 100, 100, 110, 105, 100, 95]
+    entry = [False, True, False, False, False]
+    core = solve_day_dp(
+        np.asarray(opens, float),
+        np.asarray(entry, bool),
+        np.zeros(len(opens)),
+        0,
+        len(opens) - 2,
+    )
+    path = prod_path(core, 0, 5)
+    assert path[1] == 1 and path[2] == 0  # long entry then exit at a non-eligible bar
+    assert entry[2] is False
+
+
+def test_dp_reversal_requires_eligible():
+    # reversal candidate present but ineligible -> no reversal happens
+    opens = [100, 100, 100, 100, 100, 100, 100]
+    entry = [True, False, False, False, False]
+    core = solve_day_dp(
+        np.asarray(opens, float),
+        np.asarray(entry, bool),
+        np.zeros(len(opens)),
+        0,
+        len(opens) - 2,
+    )
+    path = prod_path(core, 0, 5)
+    assert path[0] == 0  # flat stays flat (no eligible, no move)
+    for k in range(1, len(path)):
+        assert not (path[k - 1] != 0 and path[k] == -path[k - 1])
+
+
+def test_dp_day_start_end_flat():
+    opens = [100, 101, 103, 106, 110, 115, 121]
+    core, _b, _p, s, e, *_ = _solve(opens, [True] * 5)
+    assert prod_path(core, s, e)[0] in (-1, 0, 1)  # start decision
+    assert prod_path(core, s, e)[-1] == 0  # terminal forced flat
+    for p in POS:
+        assert int(core["actions"][e - 1, P2I[int(p)]]) == 0
+
+
+def test_dp_next_open_fill():
+    base = _synth_base(n=900, seed=5, day_len=300)
     res = run_base_dp(base, KernelCounters(), symbol="SYNTH")
-    assert len(res["segments"]) == 1
-    assert res["segments"][0]["terminal_reason"] == DATA_END
-    assert all(r["terminal_reason"] == DATA_END for r in res["action_rows"])
-    assert all(r["training_eligible"] is False for r in res["action_rows"])
-
-    # (b) multi-segment: first ends by DISCONTINUITY (eligible), last is DATA_END
-    base2 = _synth_base(n=300, seed=4, disc_index=150)
-    res2 = run_base_dp(base2, KernelCounters(), symbol="SYNTH")
-    assert len(res2["segments"]) == 2
-    assert res2["segments"][0]["terminal_reason"] == DISCONTINUITY
-    assert res2["segments"][0]["training_eligible"] is True
-    assert res2["segments"][-1]["terminal_reason"] == DATA_END
-    assert res2["segments"][-1]["training_eligible"] is False
-    first_seg_rows = [r for r in res2["action_rows"]
-                      if r["segment"] == res2["segments"][0]["seg_start"]
-                      or r["decision_bar_index"] <= res2["segments"][0]["seg_end"]]
-    assert any(r["terminal_reason"] == DISCONTINUITY for r in first_seg_rows)
+    assert res["trades"], "expected trades"
+    for tr in res["trades"]:
+        assert tr["entry_fill_index"] == tr["entry_decision_index"] + 1
+        assert tr["exit_fill_index"] == tr["exit_decision_index"] + 1
 
 
-def test_T0_negative_control_illegal_entry_must_fail():
-    good_rows = [
-        {"decision_bar_index": 0, "oracle_position_before": 0,
-         "oracle_position_after": 1, "entry_eligible": True},
-        {"decision_bar_index": 1, "oracle_position_before": 1,
-         "oracle_position_after": 1, "entry_eligible": False},
-        {"decision_bar_index": 2, "oracle_position_before": 1,
-         "oracle_position_after": 0, "entry_eligible": False},
-    ]
-    assert invariant_violations(good_rows) == []
-
-    # deliberately inject an illegal Flat->Long when not eligible; the checker
-    # MUST flag it (this is the negative control: it must FAIL, not pass).
-    bad_entry = list(good_rows)
-    bad_entry[0] = dict(bad_entry[0], entry_eligible=False)
-    assert invariant_violations(bad_entry) != []
-
-    bad_rev = good_rows + [{"decision_bar_index": 3, "oracle_position_before": 1,
-                            "oracle_position_after": -1, "entry_eligible": False}]
-    assert invariant_violations(bad_rev) != []
+def test_dp_no_cross_unit():
+    base = _synth_base(n=900, seed=6, disc_index=450, day_len=200)
+    res = run_base_dp(base, KernelCounters(), symbol="SYNTH")
+    td = pd.to_datetime(res["trading_day"]).to_numpy()
+    seg = res["segment"]
+    assert res["trades"], "expected trades"
+    for tr in res["trades"]:
+        ei, xi = int(tr["entry_fill_index"]), int(tr["exit_fill_index"])
+        assert td[ei] == td[xi], "trade crosses trading_day"
+        assert seg[ei] == seg[xi], "trade crosses discontinuity"
+    # no unit ends non-flat
+    for u in res["units"]:
+        e = u["seg_end"]
+        if u["seg_end"] - u["seg_start"] < 2:
+            continue
+        assert int(res["decision"]["pos_after"][e - 1]) == 0
 
 
-def test_T0_artifact_frames_schema():
-    """The oracle tables carry the frozen §14 columns (no disk write here)."""
-    base = _synth_base(n=900, seed=5, disc_index=450)
+def test_build_intraday_units():
+    td = np.array(["2024-01-01"] * 3 + ["2024-01-02"] * 3, dtype="datetime64[ns]")
+    seg = np.array([0, 0, 0, 0, 0, 0])
+    starts, ends = build_intraday_units(td, seg)
+    assert list(starts) == [0, 3]
+    assert list(ends) == [2, 5]
+
+    seg2 = np.array([0, 0, 1, 1, 1, 1])  # discontinuity mid-day
+    starts2, ends2 = build_intraday_units(td, seg2)
+    assert list(starts2) == [0, 2, 3]
+    assert list(ends2) == [1, 2, 5]
+
+
+# =========================================================================== #
+# T0 — correctness vs exhaustive reference / reconstruction / symmetry / tie    #
+# =========================================================================== #
+def test_dp_production_equals_reference():
+    mism = {"val": 0, "path": 0, "state": 0}
+    for seed in range(50):
+        rng = np.random.default_rng(seed)
+        D = 5 + seed % 6
+        opens = np.array([100.0] + list(100.0 + np.cumsum(rng.normal(0, 1.0, D + 1))))
+        entry = rng.random(D + 2) < 0.5
+        cost = np.zeros(len(opens))
+        core, best, paths, s, e, *_ = _solve(opens, entry, cost, end=D)
+        v = float(np.nanmax(core["Q"][0, P2I[0], :]))
+        if abs(v - best) > 1e-6:
+            mism["val"] += 1
+        pp = tuple(prod_path(core, s, e))
+        if pp not in paths:
+            mism["path"] += 1
+        for p0 in POS:
+            b2, _ = exhaustive_reference(
+                np.asarray(opens, float),
+                np.asarray(entry, bool),
+                cost,
+                0,
+                D,
+                start_pos=int(p0),
+            )
+            vv = float(np.nanmax(core["Q"][0, P2I[int(p0)], :]))
+            if abs(vv - b2) > 1e-6:
+                mism["state"] += 1
+    assert mism == {"val": 0, "path": 0, "state": 0}, mism
+
+
+def test_dp_pnl_reconstruction_equals_value():
+    base = _synth_base(n=900, seed=7, day_len=300)
+    res = run_base_dp(base, KernelCounters(), symbol="SYNTH")
+    total_val = sum(res["unit_values"])
+    total_gross = sum(float(t["gross_points"]) for t in res["trades"])
+    assert math.isclose(total_val, total_gross, rel_tol=1e-9, abs_tol=1e-6)
+    for tr in res["trades"]:
+        assert tr["holding_bars"] >= 1
+        assert tr["entry_fill_index"] < tr["exit_fill_index"]
+        assert tr["MFE"] >= tr["gross_points"] - 1e-9
+        assert tr["MAE"] <= tr["gross_points"] + 1e-9
+        assert math.isclose(
+            tr["net_points"],
+            tr["gross_points"] - tr["cost_points"],
+            rel_tol=1e-12,
+            abs_tol=1e-12,
+        )
+
+
+def test_dp_sign_symmetry():
+    opens = np.array([100, 101, 103, 106, 110, 115, 121], float)
+    mirror = 200.0 - opens
+    entry = [True] * 5
+    ca, _ba, _pa, s, e, *_ = _solve(opens, entry)
+    cb, _bb, _pb, sb, eb, *_ = _solve(mirror, entry)
+    pa = prod_path(ca, s, e)
+    pb = prod_path(cb, sb, eb)
+    assert pa == [-x for x in pb]
+    assert pa[0] == 1 and pb[0] == -1
+
+
+def test_dp_true_tie():
+    opens = np.array([100.0] * 7)
+    entry = [True] * 5
+    core, best, paths, s, _e, *_ = _solve(opens, entry, end=5)
+    # flat prices -> every action ties at value 0; tie prefers no turnover
+    assert int(core["actions"][s, P2I[0]]) == 0
+    assert bool(core["ambiguous"][s, 1]) is True
+    assert best == 0.0
+    assert (0, 0, 0, 0, 0) in paths
+
+
+def test_cost_interface_active():
+    # a large cost must suppress trading entirely (cost interface is wired)
+    opens = np.array([100, 101, 103, 106, 110, 115, 121], float)
+    entry = [True] * 5
+    cost_big = np.full(len(opens), 1000.0)
+    core = solve_day_dp(opens, np.asarray(entry, bool), cost_big, 0, 5)
+    assert prod_path(core, 0, 5) == [0, 0, 0, 0, 0]
+    # with zero cost a strictly rising series must trade
+    core0 = solve_day_dp(opens, np.asarray(entry, bool), np.zeros(len(opens)), 0, 5)
+    assert prod_path(core0, 0, 5)[0] == 1
+
+
+# =========================================================================== #
+# Artifact schema                                                              #
+# =========================================================================== #
+def test_artifact_schema():
+    base = _synth_base(n=900, seed=8, disc_index=450, day_len=300)
     res = run_base_dp(base, KernelCounters(), symbol="SYNTH")
     frames = build_artifact_frames(res)
-
     action_cols = {
-        "symbol", "decision_bar_index", "decision_time", "segment",
-        "entry_candidate_bits", "entry_eligible", "oracle_position_before",
-        "oracle_position_after", "oracle_transition", "oracle_edge_points",
-        "oracle_edge_ATR", "oracle_ambiguous", "label_available_time",
-        "terminal_reason", "training_eligible",
+        "symbol",
+        "trading_day",
+        "decision_bar_index",
+        "decision_time",
+        "entry_eligible",
+        "entry_source_bits",
+        "Q_F_S",
+        "Q_F_F",
+        "Q_F_L",
+        "best_flat_action",
+        "flat_edge",
+        "Q_L_S",
+        "Q_L_F",
+        "Q_L_L",
+        "best_long_action",
+        "long_edge",
+        "Q_S_S",
+        "Q_S_F",
+        "Q_S_L",
+        "best_short_action",
+        "short_edge",
+        "position_before",
+        "position_after",
+        "transition",
+        "ambiguous",
+        "label_available_time",
+        "terminal_reason",
+        "training_eligible",
     }
     trade_cols = {
-        "trade_id", "symbol", "direction", "entry_decision_index",
-        "entry_fill_index", "entry_fill_time", "entry_fill_price",
-        "entry_candidate_bits", "exit_decision_index", "exit_fill_index",
-        "exit_fill_time", "exit_fill_price", "holding_bars", "gross_points",
-        "gross_ATR", "MFE_ATR", "MAE_ATR", "entry_edge_ATR", "exit_edge_ATR",
+        "trade_id",
+        "symbol",
+        "trading_day",
+        "direction",
+        "entry_decision_index",
+        "entry_fill_index",
+        "entry_fill_time",
+        "entry_fill_price",
+        "entry_source_bits",
+        "exit_decision_index",
+        "exit_fill_index",
+        "exit_fill_time",
+        "exit_fill_price",
+        "holding_bars",
+        "gross_points",
+        "cost_points",
+        "net_points",
+        "MFE",
+        "MAE",
         "terminal_reason",
+        "training_eligible",
     }
     assert action_cols <= set(frames["oracle_actions"].columns)
     assert trade_cols <= set(frames["oracle_trades"].columns)
 
-    meta = artifact_metadata("deadbeef", "SYNTH", "2024-01-01", "2024-01-02")
-    for k in ("source_sha", "task_id", "math_version", "NEAR_ATR",
-              "execution_semantics", "objective", "c_roundtrip_atr"):
+    meta = artifact_metadata("deadbeef", "SYNTH")
+    for k in (
+        "source_sha",
+        "task_id",
+        "math_version",
+        "entry_semantics",
+        "execution_semantics",
+        "objective",
+        "cost_mode",
+    ):
         assert k in meta
-    assert meta["c_roundtrip_atr"] == 0.0
+
+
+def test_data_end_and_trading_day_end_reasons():
+    base = _synth_base(n=900, seed=9, day_len=300)
+    res = run_base_dp(base, KernelCounters(), symbol="SYNTH")
+    reasons = [u["terminal_reason"] for u in res["units"]]
+    assert reasons[-1] == DATA_END
+    assert all(r in (TRADING_DAY_END, DISCONTINUITY) for r in reasons[:-1])
+    assert res["units"][-1]["training_eligible"] is False
+    assert all(u["training_eligible"] for u in res["units"][:-1])
 
 
 # =========================================================================== #
-# T1 tie handling — a TRUE tie must never be counted as a mismatch             #
-# =========================================================================== #
-def test_T1_tie_not_counted_as_mismatch():
-    # flat prices -> every action ties at value 0
-    opens = [100.0] * 7
-    entry_ok = [True] * 5
-    core, ref, s, e = run_seg(opens, entry_ok)
-    assert bool(core["ambiguous"][s, P2I[0]]) is True
-    assert int(core["action"][s, P2I[0]]) == 0  # tie prefers no turnover
-    assert ref["best_actions"][(s, 0)] == frozenset({-1, 0, 1})
-    collected = {"value": 0, "chosen": 0, "ambiguous": 0, "best_set": 0}
-    assert_dp_matches_reference(core, ref, s, e, collected)
-    assert collected == {"value": 0, "chosen": 0, "ambiguous": 0, "best_set": 0}
-
-
-# =========================================================================== #
-# T1 — real-data differential (already-causal inputs sliced from the full      #
-#      streaming run) + long-segment invariants                                #
+# T1 — real-data: already-causal unit inputs sliced into short windows          #
 # =========================================================================== #
 @pytest.mark.parametrize("symbol", ["AG", "CU"])
 def test_T1_real_data(symbol):
@@ -447,7 +484,6 @@ def test_T1_real_data(symbol):
     counters = KernelCounters()
     res = run_symbol_dp(symbol, counters, max_bars=N)
 
-    # --- counter contract (production path) ---
     assert counters.raw_load_count == 1
     assert counters.resample_count == 4
     assert counters.reference_call_count == 0
@@ -456,128 +492,105 @@ def test_T1_real_data(symbol):
     assert counters.dp_state_count > 0
 
     opens = res["open"]
-    atr5 = res["atr5"]
     entry_ok = res["entry_eligible"]
+    cost = res["cost_points"]
+    n = res["n"]
 
-    # --- T1-B: slice SHORT windows from the ALREADY-CAUSAL DP inputs ---
-    # (never rebuild SR/Liquidity/DTP from the window)
-    seg0 = next(sm for sm in res["segments"] if sm["seg_end"] - sm["seg_start"] >= 40)
-    s, e = seg0["seg_start"], seg0["seg_end"]
-    n_cap = min(e, res["n"] - 1)
+    collected = {"val": 0, "path": 0, "state": 0}
+    n_win = 0
+    eligible_win = 0
 
-    windows: list = []
-    eligible_idx = [int(i) for i in np.where(entry_ok[: e + 1])[0] if int(i) >= s]
-    if eligible_idx:
-        step = max(1, len(eligible_idx) // 10)
-        for idx in eligible_idx[::step]:
-            D = 8 + (idx % 3)  # 8..10 decisions
-            ws = max(s, idx - 3)
-            we = ws + D
-            if we > n_cap:
-                we = n_cap
-                ws = we - D
-            if ws >= s and 7 <= (we - ws) <= 10:
-                windows.append((ws, we))
-            if len(windows) >= 10:
+    def _run_window(ws, we):
+        nonlocal n_win, eligible_win
+        D = we - ws
+        os_ = opens[ws : we + 2]
+        es_ = entry_ok[ws:we]
+        cs_ = cost[ws:we]
+        core = solve_day_dp(os_, es_, cs_, 0, D)
+        best, paths = exhaustive_reference(os_, es_, cs_, 0, D)
+        v = float(np.nanmax(core["Q"][0, P2I[0], :]))
+        if abs(v - best) > 1e-6:
+            collected["val"] += 1
+        pp = tuple(int(core["actions"][t, P2I[p]]) for t, p in _walk_path(core, D))
+        if pp not in paths:
+            collected["path"] += 1
+        for p0 in POS:
+            b2, _ = exhaustive_reference(os_, es_, cs_, 0, D, start_pos=int(p0))
+            vv = float(np.nanmax(core["Q"][0, P2I[int(p0)], :]))
+            if abs(vv - b2) > 1e-6:
+                collected["state"] += 1
+        if bool(es_.any()):
+            eligible_win += 1
+        n_win += 1
+
+    for u in res["units"]:
+        s, e = u["seg_start"], u["seg_end"]
+        if e - s < 12 or n_win >= 12:
+            continue
+        cap = min(e, n - 2)
+        elig = [t for t in range(s, cap) if bool(entry_ok[t])]
+        if not elig:
+            continue
+        step = max(1, len(elig) // 8)
+        for idx in elig[::step]:
+            if n_win >= 12:
                 break
-    # a few all-ineligible windows (entry mask == 0 over the whole window)
-    for idx in range(s, max(s, n_cap - 11)):
-        if not entry_ok[idx: idx + 8].any():
-            windows.append((idx, idx + 8))
-        if len(windows) >= 12:
-            break
+            D = 8
+            ws = max(s, idx - 4)
+            we = ws + D
+            if we > cap:
+                we = cap
+                ws = we - D
+            if ws < s or (we - ws) < 7 or we + 2 > n:
+                continue
+            _run_window(ws, we)
 
-    seen = set()
-    uniq = []
-    for w in windows:
-        if w not in seen:
-            seen.add(w)
-            uniq.append(w)
-    windows = uniq
-    assert len(windows) >= 5, f"{symbol}: too few T1 windows ({len(windows)})"
+    assert n_win >= 5, f"{symbol}: too few windows ({n_win})"
+    assert eligible_win >= 1, f"{symbol}: no eligible window"
+    assert collected == {"val": 0, "path": 0, "state": 0}, collected
 
-    collected = {"value": 0, "chosen": 0, "ambiguous": 0, "best_set": 0}
-    eligible_windows = 0
-    for (ws, we) in windows:
-        core = solve_segment_dp(opens, atr5, entry_ok, ws, we)
-        ref = reference_solve_segment(opens, atr5, entry_ok, ws, we)
-        assert_dp_matches_reference(core, ref, ws, we, collected)
-        # value_start parity (V(s;-1), V(s;0), V(s;+1))
-        for p in POS:
-            pv = float(core["value"][ws, P2I[int(p)]])
-            rv = float(ref["value"][(ws, int(p))])
-            assert math.isclose(pv, rv, rel_tol=1e-9, abs_tol=1e-6)
-        # production flat-start path must be an optimal reference path
-        pp = tuple(prod_path(core, ws, we))
-        opt = {tuple(pth) for pth in ref["optimal_paths"]}
-        assert pp in opt, f"{symbol}: window {ws}-{we} path not optimal"
-        assert pp[-1] == 0, "window terminal must be flat"
-        # illegal entry / reversal must be zero on the realised path
-        p = 0
-        if bool(entry_ok[ws:we].any()):
-            eligible_windows += 1
-        for t in range(ws, we):
-            q = int(core["action"][t, P2I[p]])
-            if p == 0 and q != 0:
-                assert bool(entry_ok[t]), "illegal entry on window path"
-            if p != 0 and q == -p:
-                assert bool(entry_ok[t]), "illegal reversal on window path"
-            p = q
-
-    assert collected == {"value": 0, "chosen": 0, "ambiguous": 0, "best_set": 0}, collected
-    assert eligible_windows >= 1, f"{symbol}: no eligible window exercised"
-
-    # --- long-segment invariants (no brute force on the full segment) ---
-    ar = res["action_rows"]
-    assert ar, "expected action rows"
-    assert ar[0]["oracle_position_before"] == 0
-    assert invariant_violations(ar) == []
-
-    seg_arr = res["segment"]
+    # long-unit invariants
+    td = pd.to_datetime(res["trading_day"]).to_numpy()
+    seg = res["segment"]
+    assert res["trades"]
     for tr in res["trades"]:
         ei, xi = int(tr["entry_fill_index"]), int(tr["exit_fill_index"])
-        assert seg_arr[ei] == seg_arr[xi], "trade crosses a discontinuity"
+        assert td[ei] == td[xi]
+        assert seg[ei] == seg[xi]
         assert tr["entry_fill_index"] == tr["entry_decision_index"] + 1
         assert tr["exit_fill_index"] == tr["exit_decision_index"] + 1
-        assert tr["holding_bars"] >= 1
-        assert tr["entry_fill_index"] < tr["exit_fill_index"]
-        assert tr["MFE_ATR"] >= tr["gross_ATR"] - 1e-9
-        assert tr["MAE_ATR"] <= tr["gross_ATR"] + 1e-9
-
-    for sm in res["segments"]:
-        s2, e2 = sm["seg_start"], sm["seg_end"]
-        if (s2, e2) not in res["cores"]:
+    for u in res["units"]:
+        e = u["seg_end"]
+        if u["seg_end"] - u["seg_start"] < 2:
             continue
-        core = res["cores"][(s2, e2)]
-        p = 0
-        for t in range(s2, e2):
-            q = int(core["action"][t, P2I[p]])
-            assert q != int(INVALID_ACTION)
-            p = q
-        assert p == 0, "segment did not terminate flat"
+        assert int(res["decision"]["pos_after"][e - 1]) == 0
 
-    # reconstruction PnL == DP value (flat-start) across all segments
-    total_val = sum(
-        float(res["cores"][(sm["seg_start"], sm["seg_end"])]["value"][sm["seg_start"], P2I[0]])
-        for sm in res["segments"]
-        if (sm["seg_start"], sm["seg_end"]) in res["cores"]
-    )
+    total_val = sum(res["unit_values"])
     total_gross = sum(float(t["gross_points"]) for t in res["trades"])
-    assert math.isclose(total_val, total_gross, rel_tol=1e-9, abs_tol=1e-6), (
-        f"{symbol}: DP value {total_val} != reconstruction PnL {total_gross}"
-    )
+    assert math.isclose(total_val, total_gross, rel_tol=1e-9, abs_tol=1e-6)
+
+
+def _walk_path(core, D):
+    p = 0
+    for t in range(D):
+        pi = P2I[p]
+        a = int(core["actions"][t, pi])
+        yield t, p
+        p = a
 
 
 # =========================================================================== #
-# TP — performance gate (5k / 10k / 20k)                                        #
+# TP — performance + memory scaling (N / 2N / 4N)                              #
 # =========================================================================== #
 def test_TP_performance_gate():
     sizes = [5000, 10000, 20000]
     times = {}
+    peaks = {}
     for N in sizes:
         c = KernelCounters()
-        res = run_symbol_dp("AG", c, max_bars=N)
+        res = run_symbol_dp("AG", c, max_bars=N, profile_memory=True)
         times[N] = res["runtime_total_sec"]
+        peaks[N] = res["peak_tracemalloc_mb"]
         assert c.reference_call_count == 0
         assert c.full_history_recompute_count == 0
         assert c.concat_count == 0
@@ -589,7 +602,13 @@ def test_TP_performance_gate():
     r2 = times[20000] / times[10000]
     print(
         f"  TP timing: 5k={times[5000]:.2f}s 10k={times[10000]:.2f}s "
-        f"20k={times[20000]:.2f}s  ratios={r1:.2f}/{r2:.2f}"
+        f"20k={times[20000]:.2f}s ratios={r1:.2f}/{r2:.2f}"
+    )
+    print(
+        f"  TP peak memory MB: 5k={peaks[5000]:.2f} 10k={peaks[10000]:.2f} "
+        f"20k={peaks[20000]:.2f}"
     )
     assert r1 < 2.8, f"5k->10k scaling {r1} exceeds 2.8"
     assert r2 < 2.8, f"10k->20k scaling {r2} exceeds 2.8"
+    # memory must not blow up super-linearly (loose sanity gate)
+    assert peaks[20000] < 6.0 * peaks[5000] + 100.0

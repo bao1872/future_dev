@@ -89,12 +89,14 @@ REV_SIGN = {
     "BUYSIDE_LIQUIDITY": -1,
 }
 
-# Frozen 16-bit mapping for the DP entry-candidate mask (contract §12).
-# bit position = tf_index * 4 + role_index  ->  4 TF x 4 roles = 16 bits.
-BIT_INDEX = {
-    (tf, role): ti * 4 + ri
+# Frozen 8-bit mapping for the DP entry mask (contract §7 / §8).
+# bit position = tf_index * 2 + family_index  ->  4 TF x {SR, LIQ} = 8 bits.
+# NOTE: the DP entry mask deliberately carries NO Support/Resistance/Buyside/
+# Sellside semantics; those are re-joined later only to INTERPRET the oracle.
+MASK_BIT = {
+    (tf, family): ti * 2 + fi
     for ti, tf in enumerate(TF_ORDER)
-    for ri, role in enumerate(ROLES)
+    for fi, family in enumerate(("SR", "LIQ"))
 }
 
 # Data-collection proximity radius (ATR units). Frozen. Never tuned.
@@ -442,7 +444,12 @@ def select_target(
 
 def in_proximity(cand: Dict[str, Any], O, H, L, C, atr: float) -> bool:
     """Contract §8: start episode when distance <= 0.5 ATR, or the bar
-    touches / is already inside the structure (gap into zone)."""
+    touches / is already inside the structure (gap into zone).
+
+    NOTE: this governs the EVENT/episode machine only. The DP entry mask uses
+    ``entry_bits_from_prev_geometry`` (true touch against pre-existing zones,
+    delta=0), NOT this proximity radius.
+    """
     s = REV_SIGN[cand["role"]]
     close = C
     u = s * close
@@ -455,6 +462,56 @@ def in_proximity(cand: Dict[str, Any], O, H, L, C, atr: float) -> bool:
     else:
         approach_ok = True  # inside / through the structure
     return touch or approach_ok
+
+
+# --------------------------------------------------------------------------- #
+# DP entry mask (contract §7 / §8): 8-bit TF x {SR, LIQ}, delta = 0 touch      #
+# against structures that were ALREADY KNOWN at the previous 5m close.         #
+# --------------------------------------------------------------------------- #
+def bar_hits_zone(low5: float, high5: float, bottom: float, top: float) -> bool:
+    """True iff the current 5m bar range [low5, high5] intersects [bottom, top]."""
+    return high5 >= bottom and low5 <= top
+
+
+def entry_bits_from_prev_geometry(
+    low5: float,
+    high5: float,
+    prev_geom_by_tf: Dict[str, Tuple],
+) -> int:
+    """8-bit entry mask: current 5m range touches a PRE-EXISTING SR / Liquidity.
+
+    ``prev_geom_by_tf[tf] = (channels, liq_up, liq_down)`` where ``channels`` is
+    the canonical ``sr.channels`` list of ``(top, bottom, strength)`` and
+    ``liq_up/liq_down`` are canonical liquidity level dicts with ``top`` /
+    ``bottom`` / ``broken``.
+
+    ONLY the geometry known at the PREVIOUS 5m close may qualify (causal): a
+    structure formed by the current bar can never retroactively make the
+    current bar eligible. ``broken`` liquidity is excluded.
+    """
+    bits = 0
+    for tf in TF_ORDER:
+        g = prev_geom_by_tf.get(tf)
+        if g is None:
+            continue
+        channels, liq_up, liq_down = g
+
+        hit_sr = any(
+            bar_hits_zone(low5, high5, float(bottom), float(top))
+            for top, bottom, _strength in channels
+        )
+        if hit_sr:
+            bits |= 1 << MASK_BIT[(tf, "SR")]
+
+        hit_liq = any(
+            (not bool(z["broken"]))
+            and bar_hits_zone(low5, high5, float(z["bottom"]), float(z["top"]))
+            for z in (*liq_up, *liq_down)
+        )
+        if hit_liq:
+            bits |= 1 << MASK_BIT[(tf, "LIQ")]
+
+    return int(bits)
 
 
 # --------------------------------------------------------------------------- #
@@ -938,7 +995,7 @@ def run_symbol_streaming(
     counters: KernelCounters,
     max_bars: Optional[int] = None,
     capture_geom: bool = False,
-    capture_entry_bits: bool = False,
+    capture_entry_mask: bool = False,
     emit_events: bool = True,
 ) -> Dict[str, Any]:
     """Single-pass causal event engine for one symbol (real data path).
@@ -947,16 +1004,17 @@ def run_symbol_streaming(
     no slow-reference call, no hot-loop concat.
 
     ``capture_geom`` records the per-decision production geometry for the T1
-    differential harness. ``capture_entry_bits`` records the frozen 16-bit
-    entry-candidate mask (contract §12). ``emit_events=False`` is the DP fast
-    path: episode/state is still maintained, but no event dict is built and
+    differential harness. ``capture_entry_mask`` records the frozen 8-bit
+    entry mask (contract §7 / §8): current 5m range touching a PRE-EXISTING
+    SR / Liquidity zone. ``emit_events=False`` is the DP fast path: episode /
+    state is still maintained, but no event dict is built and
     ``compute_outcome`` is never called. All three NEVER call the slow
     reference.
     """
     info = build_base_frame(symbol, counters)
     return _stream_from_base(
         info["base"], info["form"], info["seg_completed"], counters,
-        max_bars, symbol, capture_geom, capture_entry_bits, emit_events,
+        max_bars, symbol, capture_geom, capture_entry_mask, emit_events,
     )
 
 
@@ -966,7 +1024,7 @@ def stream_from_base(
     max_bars: Optional[int] = None,
     symbol: str = "SYNTH",
     capture_geom: bool = False,
-    capture_entry_bits: bool = False,
+    capture_entry_mask: bool = False,
     emit_events: bool = True,
 ) -> Dict[str, Any]:
     """Streaming entry point for a prebuilt base frame (synthetic T0 tests).
@@ -984,7 +1042,7 @@ def stream_from_base(
     counters.resample_count += len(TF_ORDER)
     return _stream_from_base(
         base, form, seg_completed, counters, max_bars, symbol, capture_geom,
-        capture_entry_bits, emit_events,
+        capture_entry_mask, emit_events,
     )
 
 
@@ -996,7 +1054,7 @@ def _stream_from_base(
     max_bars: Optional[int] = None,
     symbol: str = "SYNTH",
     capture_geom: bool = False,
-    capture_entry_bits: bool = False,
+    capture_entry_mask: bool = False,
     emit_events: bool = True,
 ) -> Dict[str, Any]:
     """Core single-pass streaming loop (shared by all entry points)."""
@@ -1037,7 +1095,9 @@ def _stream_from_base(
 
     events: List[Dict[str, Any]] = []
     decision_geom: List[Dict[str, Any]] = [] if capture_geom else None
-    entry_bits = np.zeros(n, dtype=np.uint16) if capture_entry_bits else None
+    entry_mask = np.zeros(n, dtype=np.uint16) if capture_entry_mask else None
+    # geometry known at the PREVIOUS 5m close (causal entry mask input)
+    prev_geom_by_tf: Optional[Dict[str, Tuple]] = None
     prev_seg = None
 
     for i in range(n):
@@ -1054,6 +1114,10 @@ def _stream_from_base(
                 cur_seg_per_tf[tf] = seg
                 ci_per_tf[tf] = 0
                 seg_list_per_tf[tf] = seg_completed[tf].get(seg, [])
+            # Canonical IndicatorState reset -> the pre-existing structure set
+            # must reset too (the first bar of a new segment can never touch a
+            # previous segment's structures).
+            prev_geom_by_tf = None
             prev_seg = seg
 
         # ---- per-TF commit + preview (geometry snapshot)
@@ -1094,6 +1158,19 @@ def _stream_from_base(
         if capture_geom:
             decision_geom.append({tf: geom_by_tf[tf] for tf in TF_ORDER})
 
+        if capture_entry_mask:
+            # current 5m bar range vs geometry known at the PREVIOUS close
+            entry_mask[i] = np.uint16(
+                entry_bits_from_prev_geometry(
+                    float(L5[i]), float(H5[i]), prev_geom_by_tf or {}
+                )
+            )
+            # geometry 只算一次 -> 下一根 5m 用它
+            prev_geom_by_tf = {
+                tf: (geom_by_tf[tf][0], geom_by_tf[tf][1], geom_by_tf[tf][2])
+                for tf in TF_ORDER
+            }
+
         # ---- per (tf, role) episode lifecycle + event labeling
         for tf in TF_ORDER:
             channels, liq_up, liq_down, atr_tf = geom_by_tf[tf]
@@ -1113,13 +1190,11 @@ def _stream_from_base(
                     role, channels, liq_up, liq_down, C, atr_tf, tf, seg, i, sr_first_seen
                 )
                 # Proximity is evaluated exactly ONCE per (tf, role) and reused
-                # for both the episode state machine and the frozen 16-bit
-                # entry-candidate mask. This is a behaviour-preserving refactor
-                # (contract §12); it must not change any event row.
+                # for the episode state machine (start / owner-changed). This is
+                # a behaviour-preserving refactor; it must not change any event
+                # row. NOTE: it no longer feeds the DP entry mask (that mask is
+                # the 8-bit touch mask computed above, contract §7 / §8).
                 prox = cand is not None and in_proximity(cand, O, H, L, C, atr_tf)
-
-                if capture_entry_bits and prox:
-                    entry_bits[i] |= np.uint16(1 << BIT_INDEX[(tf, role)])
 
                 if ep is None:
                     if prox:
@@ -1192,9 +1267,9 @@ def _stream_from_base(
     }
     if capture_geom:
         result["decision_geom"] = decision_geom
-    if capture_entry_bits:
-        result["entry_candidate_bits"] = entry_bits
-        result["entry_eligible"] = entry_bits != 0
+    if capture_entry_mask:
+        result["entry_mask"] = entry_mask
+        result["entry_eligible"] = entry_mask != 0
     return result
 
 

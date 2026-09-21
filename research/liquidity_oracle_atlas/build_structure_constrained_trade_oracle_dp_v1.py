@@ -2,54 +2,54 @@
 build_structure_constrained_trade_oracle_dp_v1
 ==============================================
 
-Research 1 (continuation) — Structure-Constrained Trade Oracle DP V1.
+Intraday Structure-Constrained Trade Oracle DP V1.
 
-Task ID : FUTURE-STRATEGY-DP-ORACLE-V1
-Base SHA: 096a659171d461ccea683214c6dbe55ab2ddd8df
+Task ID : FUTURE-INTRADAY-DP-ORACLE-R1
+Base SHA: 956c7957d1051d23f203355be853f48d8a7851f0
 
-This module answers ONE research question:
+The model is deliberately "clean": the DP only answers
 
-    Under the causal constraint that new positions may only be initiated when
-    price is near an as-of SR or Liquidity structure, what is the executable
-    hindsight-optimal Long/Short/Flat position path within each continuous 5m
-    segment, and what entry/exit points does that path imply?
+    "during one trading day (further split by discontinuity), which executable
+     Long/Short/Flat position path maximizes that day's gross PnL?"
 
-It is the EXECUTOR. It returns an Evidence Packet (oracle labels + counters
-+ performance). It defines NO trading rule and draws NO research conclusion.
+SR / Liquidity only tell the DP WHERE a new position may be opened; penetration,
+reclaim, trend, DTP, event taxonomy never enter the DP (they are re-joined later
+only to INTERPRET the oracle labels).
 
-Frozen contract (must not be changed by the executor):
-  * Decision clock  = close(5m bar t);  a position change fills at O_{t+1}.
-  * position p_t in {-1,0,+1};  action a_t in {-1,0,+1} (chosen at t, executes
-    at O_{t+1}).
-  * Entry mask M_t = 1{any TF in {5m,15m,1H,4H} has an SR or Liquidity within
-    proximity} — reuses the frozen structure kernel (`select_target` +
-    `in_proximity`, R_near = 0.5 x ATR_structureTF). It never "reinvents"
-    proximity.
+Frozen contract:
+  * Solve separately per (trading_day, segment) block ("unit"); every boundary
+    must be Flat. Decision i = close(bar i); a change fills at Open_{i+1}; the
+    last decision of a unit is forced Flat at Open[end] (no last-5-minute carry).
+  * position p in {-1,0,+1} (Short/Flat/Long); single unit, no add, no partial.
+  * Entry mask M_i = 1{ current 5m range [L_i,H_i] intersects a PRE-EXISTING
+    canonical SR / Liquidity zone } (delta = 0, true touch). 8-bit TF x {SR,LIQ}.
+    The 0.5*ATR proximity is NOT used for the DP entry.
   * Allowed actions:
-        p=0,  M=1 -> {-1,0,+1}
         p=0,  M=0 -> {0}
-        p!=0, M=1 -> {p,0,-p}      (direct reversal is a NEW entry)
+        p=0,  M=1 -> {-1,0,+1}
         p!=0, M=0 -> {p,0}
-    i.e. Exits may happen anywhere; new Entry / Reversal only near structure.
-  * Primary objective = gross open-to-open PnL  a_t (O_{t+2} - O_{t+1}).
-    c_roundtrip_ATR = 0 for V1 (gross hindsight upper-bound oracle).
-  * No fixed H=6/12/24; natural terminal per continuous segment (Flat at both
-    ends, no crossing a discontinuity).
-  * Single position, 1 unit, no add, no partial.
-  * No DTP/SR/Liquidity term inside the reward.
+        p!=0, M=1 -> {p,0,-p}
+    Exit is FREE anywhere; a direct reversal is a new entry (requires M=1).
+  * Objective V1 = max GROSS PnL: r_i = a_i (O_{i+2} - O_{i+1}) - c_i |a_i - p_i|
+    with cost in PRICE POINTS, c_i = cost_points[i], V1 c_i = 0 (gross oracle).
+    No 6/12/24 horizon, no MAE penalty / RR / slope reward / DTP / event term.
+  * Bellman:  V_i(p) = max_{a in A_i(p)} [ a(O_{i+2}-O_{i+1}) - c_i|a-p| + V_{i+1}(a) ]
+    with V_{end}(0)=0 and p_start = p_end = 0.
+  * Outputs TWO answers: (A) the global optimal position path, and (B) the full
+    3x3 Q_i(p,a) counterfactual table (best action / edge / ambiguous) so that a
+    future Entry model has labels even when the oracle was not flat.
 
-Complexity contract:  Production DP = O(N * S * A) = O(N)  (S=3, A<=3).
-Forbidden: per-decision history rerun, future-exit scans, SR/Liquidity rebuild,
-per-trade raw reload.
+Complexity: DP O(N * S * A) = O(N); structure streaming O(N * 4TF * bounded).
+Forbidden: per-decision history rebuild, future-exit scans, per-day raw reload,
+per-parameter indicator rebuild, hot-loop dict append.
 
 Canonical owner reused (READ ONLY):
   research.liquidity_oracle_atlas.experiment_structure_interaction_entry_v1
-    KernelCounters, build_base_frame, _stream_from_base
+    KernelCounters, build_base_frame, stream_from_base, _stream_from_base
 """
 
 from __future__ import annotations
 
-import math
 import time
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -58,506 +58,525 @@ import pandas as pd
 
 from research.liquidity_oracle_atlas.experiment_structure_interaction_entry_v1 import (
     KernelCounters,
-    TF_ORDER,
+    _stream_from_base,
     build_base_frame,
     stream_from_base,
-    _stream_from_base,
 )
 
-try:  # optional metric (kept cheap / dependency-free)
-    import tracemalloc  # noqa: F401
-except Exception:  # pragma: no cover
+try:  # optional; used only for the TP peak-memory profile
+    import tracemalloc
+except ImportError:  # pragma: no cover
     tracemalloc = None
 
 
 # --------------------------------------------------------------------------- #
-# Frozen DP constants (contract §11 — do NOT change)                           #
+# Frozen DP constants (contract §10 — do NOT redesign)                         #
 # --------------------------------------------------------------------------- #
 POS = np.array([-1, 0, 1], dtype=np.int8)
 P2I = {-1: 0, 0: 1, 1: 2}
 INVALID_ACTION = np.int8(127)
-EPS = 1e-6
+EPS = 1e-9
 
-MATH_VERSION = "structure_constrained_trade_oracle_dp_v1"
-TASK_ID = "FUTURE-STRATEGY-DP-ORACLE-V1"
-NEAR_ATR_CONTRACT = 0.50
+# rows = current p, cols = next a  (order: Short, Flat, Long)
+TURNOVER = np.abs(POS[:, None] - POS[None, :]).astype(float)
 
-DATA_END = "DATA_END"
-DISCONTINUITY = "DISCONTINUITY"
+ALLOW_NO_ENTRY = np.array(
+    [
+        [True, True, False],  # Short -> Short / Flat
+        [False, True, False],  # Flat  -> Flat only
+        [False, True, True],  # Long  -> Flat / Long
+    ],
+    dtype=bool,
+)
 
+ALLOW_ENTRY = np.ones((3, 3), dtype=bool)
 
-# --------------------------------------------------------------------------- #
-# Allowed actions + tie-aware selection (contract §11 — verbatim, frozen)      #
-# --------------------------------------------------------------------------- #
-def _allowed_actions(p: int, entry_ok: bool, terminal: bool):
-    if terminal:
-        return (0,)
+TERMINAL = np.array(
+    [
+        [False, True, False],
+        [False, True, False],
+        [False, True, False],
+    ],
+    dtype=bool,
+)
 
-    if p == 0:
-        return (-1, 0, 1) if entry_ok else (0,)
+MATH_VERSION = "intraday_dp_oracle_r1"
+TASK_ID = "FUTURE-INTRADAY-DP-ORACLE-R1"
 
-    # existing position may always hold or exit.
-    # direct reversal is a new entry, so only allowed near structure.
-    if entry_ok:
-        return (p, 0, -p)
-    return (p, 0)
-
-
-def _choose_tie_aware(actions, values, current_pos, eps=EPS):
-    values = np.asarray(values, float)
-    vmax = float(np.max(values))
-
-    best = [
-        int(a)
-        for a, v in zip(actions, values)
-        if abs(float(v) - vmax) <= eps
-    ]
-
-    ambiguous = len(best) > 1
-
-    # Among true value ties prefer no unnecessary turnover.
-    if current_pos in best:
-        chosen = current_pos
-    elif 0 in best:
-        chosen = 0
-    else:
-        # Extremely rare symmetric Long/Short tie.
-        # Deterministic only for path reconstruction; label remains ambiguous.
-        chosen = min(best)
-
-    sv = np.sort(values)[::-1]
-    second = float(sv[1]) if len(sv) > 1 else -np.inf
-    edge = vmax - second if np.isfinite(second) else np.nan
-
-    return int(chosen), bool(ambiguous), float(edge), vmax
-
-
-def _switch_cost(p: int, q: int, atr_t: float, c_roundtrip_atr: float) -> float:
-    """Transition friction in PRICE POINTS (fail-closed if scale missing)."""
-    if c_roundtrip_atr == 0.0:
-        return 0.0
-    if not np.isfinite(atr_t) or atr_t <= 0:
-        return np.inf if int(q) != int(p) else 0.0
-    return 0.5 * c_roundtrip_atr * float(atr_t) * abs(int(q) - int(p))
+# unit terminal vocabulary (contract §14 / §15)
+DATA_END = "DATA_END"  # censored: last bars available
+DISCONTINUITY = "DISCONTINUITY"  # unit ended by a segment break
+TRADING_DAY_END = "TRADING_DAY_END"  # normal intraday terminal
 
 
 # --------------------------------------------------------------------------- #
-# Production DP (contract §11 — verbatim core, frozen)                         #
+# Core DP (contract §10 — verbatim, frozen)                                    #
 # --------------------------------------------------------------------------- #
-def solve_segment_dp(
+def choose_actions(Q: np.ndarray, eps: float = EPS):
+    """Q: [3 current states, 3 next actions].
+
+    Tie preference: 1. keep same position  2. Flat  3. deterministic fallback.
+    A true value tie is still separately marked ambiguous (never forced).
+    """
+    vmax = np.max(Q, axis=1)
+    best = np.abs(Q - vmax[:, None]) <= eps
+    ambiguous = best.sum(axis=1) > 1
+
+    chosen = np.empty(3, dtype=np.int8)
+    for pi in range(3):
+        if best[pi, pi]:
+            chosen[pi] = POS[pi]
+        elif best[pi, 1]:
+            chosen[pi] = 0
+        else:
+            j = int(np.flatnonzero(best[pi])[0])
+            chosen[pi] = POS[j]
+
+    sortq = np.sort(Q, axis=1)
+    edge = sortq[:, -1] - sortq[:, -2]
+
+    return chosen, ambiguous, edge, vmax
+
+
+def solve_day_dp(
     opens: np.ndarray,
-    atr5: np.ndarray,
-    entry_ok: np.ndarray,
-    seg_start: int,
-    seg_end: int,
-    *,
-    c_roundtrip_atr: float = 0.0,
-):
+    entry_eligible: np.ndarray,
+    cost_points: np.ndarray,
+    start: int,
+    end: int,
+) -> Dict[str, np.ndarray]:
+    """Bars in unit: [start, end] inclusive; decisions start ... end-1.
+
+    Decision end-1 is forced Flat at Open[end]. Returns the full per-decision
+    Q[3,3] table plus best action / edge / ambiguity for every state.
     """
-    Segment bars are [seg_start, seg_end], inclusive.
-
-    Decision t occurs at close(t).
-    A position change fills at open(t+1).
-
-    Last decision is t = seg_end - 1 and is forced Flat,
-    so every trade exits inside the same segment.
-
-    Complexity:
-        O(N_segment * 3 states * <=3 actions)
-    """
-
     n = len(opens)
 
-    action = np.full((n, 3), INVALID_ACTION, dtype=np.int8)
+    actions = np.full((n, 3), INVALID_ACTION, dtype=np.int8)
     ambiguous = np.zeros((n, 3), dtype=bool)
-    edge = np.full((n, 3), np.nan, dtype=float)
-    value = np.full((n, 3), np.nan, dtype=float)
+    edges = np.full((n, 3), np.nan, dtype=float)
+    Q_all = np.full((n, 3, 3), np.nan, dtype=float)
 
-    # V_{t+1}(position)
     V_next = np.zeros(3, dtype=float)
 
-    if seg_end - seg_start < 2:
-        return {
-            "action": action,
-            "ambiguous": ambiguous,
-            "edge": edge,
-            "value": value,
-        }
+    delta = np.zeros(n, dtype=float)
+    idx = np.arange(start, end - 1)
+    if len(idx):
+        delta[idx] = opens[idx + 2] - opens[idx + 1]
 
-    for t in range(seg_end - 1, seg_start - 1, -1):
-        terminal = (t == seg_end - 1)
-        V_cur = np.full(3, -np.inf, dtype=float)
+    for t in range(end - 1, start - 1, -1):
+        terminal = t == end - 1
 
-        for pi, p in enumerate(POS):
-            acts = _allowed_actions(
-                int(p),
-                bool(entry_ok[t]),
-                terminal,
-            )
+        pnl = POS[None, :] * delta[t]
+        cost = float(cost_points[t]) * TURNOVER
+        Q = pnl - cost + V_next[None, :]
 
-            qvals = []
+        if terminal:
+            allowed = TERMINAL
+        elif entry_eligible[t]:
+            allowed = ALLOW_ENTRY
+        else:
+            allowed = ALLOW_NO_ENTRY
 
-            for q in acts:
-                qi = P2I[int(q)]
+        Q = np.where(allowed, Q, -np.inf)
 
-                switch_cost = _switch_cost(
-                    int(p), int(q), atr5[t], c_roundtrip_atr
-                )
+        chosen, amb, edge, V_cur = choose_actions(Q)
 
-                if terminal:
-                    price_move = 0.0
-                else:
-                    # action q fills at O[t+1] and is held to O[t+2]
-                    price_move = (
-                        float(q)
-                        * (float(opens[t + 2]) - float(opens[t + 1]))
-                    )
-
-                qv = (
-                    price_move
-                    - switch_cost
-                    + V_next[qi]
-                )
-                qvals.append(qv)
-
-            chosen, amb, ed, best = _choose_tie_aware(
-                acts, qvals, int(p)
-            )
-
-            action[t, pi] = np.int8(chosen)
-            ambiguous[t, pi] = amb
-            edge[t, pi] = ed
-            value[t, pi] = best
-            V_cur[pi] = best
+        actions[t] = chosen
+        ambiguous[t] = amb
+        edges[t] = edge
+        Q_all[t] = Q
 
         V_next = V_cur
 
     return {
-        "action": action,
+        "actions": actions,
         "ambiguous": ambiguous,
-        "edge": edge,
-        "value": value,
+        "edges": edges,
+        "Q": Q_all,
     }
 
 
 # --------------------------------------------------------------------------- #
-# Backtrack (contract §11 — verbatim, frozen)                                  #
+# Intraday unit boundaries (contract §11 — vectorized, no pandas groupby)      #
 # --------------------------------------------------------------------------- #
-def backtrack_segment(
-    core,
-    opens,
-    atr5,
-    times,
-    seg_start,
-    seg_end,
-):
-    p = 0
-    transitions = []
+def build_intraday_units(
+    trading_day: np.ndarray, segment: np.ndarray
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Contiguous (trading_day, segment) blocks -> (starts, ends) inclusive."""
+    trading_day = np.asarray(trading_day)
+    segment = np.asarray(segment)
 
-    for t in range(seg_start, seg_end):
-        pi = P2I[p]
-        q = int(core["action"][t, pi])
+    boundary = np.empty(len(segment), dtype=bool)
+    boundary[0] = True
+    if len(segment) > 1:
+        boundary[1:] = (trading_day[1:] != trading_day[:-1]) | (
+            segment[1:] != segment[:-1]
+        )
 
-        if q == int(INVALID_ACTION):
-            raise RuntimeError(f"missing DP action at t={t}, p={p}")
-
-        if q != p:
-            transitions.append({
-                "decision_bar_index": int(t),
-                "decision_time": times[t] + np.timedelta64(5, "m"),
-                "fill_bar_index": int(t + 1),
-                "fill_time": times[t + 1],
-                "fill_price": float(opens[t + 1]),
-                "position_before": int(p),
-                "position_after": int(q),
-                "transition": (
-                    "LONG_ENTRY" if p == 0 and q == 1 else
-                    "SHORT_ENTRY" if p == 0 and q == -1 else
-                    "LONG_EXIT" if p == 1 and q == 0 else
-                    "SHORT_EXIT" if p == -1 and q == 0 else
-                    "LONG_TO_SHORT" if p == 1 and q == -1 else
-                    "SHORT_TO_LONG"
-                ),
-                "oracle_ambiguous": bool(
-                    core["ambiguous"][t, pi]
-                ),
-                "oracle_edge_points": float(core["edge"][t, pi]),
-                "oracle_edge_atr": (
-                    float(core["edge"][t, pi]) / float(atr5[t])
-                    if np.isfinite(atr5[t]) and atr5[t] > 0
-                    else np.nan
-                ),
-            })
-
-        p = q
-
-    if p != 0:
-        raise AssertionError("segment DP did not terminate flat")
-
-    return transitions
-
-
-def _transition_label(p: int, q: int) -> str:
-    """Full-sweep transition label (includes Hold/Flat)."""
-    if p == q:
-        return "HOLD" if p != 0 else "FLAT"
-    if p == 0 and q == 1:
-        return "LONG_ENTRY"
-    if p == 0 and q == -1:
-        return "SHORT_ENTRY"
-    if p == 1 and q == 0:
-        return "LONG_EXIT"
-    if p == -1 and q == 0:
-        return "SHORT_EXIT"
-    if p == 1 and q == -1:
-        return "LONG_TO_SHORT"
-    if p == -1 and q == 1:
-        return "SHORT_TO_LONG"
-    raise ValueError(f"impossible transition {p} -> {q}")
+    starts = np.flatnonzero(boundary)
+    ends = np.r_[starts[1:] - 1, len(segment) - 1]
+    return starts, ends
 
 
 # --------------------------------------------------------------------------- #
-# Independent brute-force Reference (T0 / T1 ONLY — never on production path)  #
+# Independent exhaustive reference (contract §13 — T0 / T1 ONLY)               #
 # --------------------------------------------------------------------------- #
-def _ref_allowed(p: int, entry_ok: bool, terminal: bool) -> Tuple[int, ...]:
-    """Independent re-implementation of the allowed-action contract.
-
-    Deliberately does NOT reuse production `_allowed_actions` so the reference
-    is a genuinely independent oracle.
-    """
-    if terminal:
-        return (0,)
-    if p == 0:
-        if entry_ok:
-            return (-1, 0, 1)
-        return (0,)
-    if entry_ok:
-        return (p, 0, -p)
-    return (p, 0)
-
-
-def _ref_reward(
-    t: int,
-    p: int,
-    q: int,
-    terminal: bool,
+def exhaustive_reference(
     opens: np.ndarray,
-    atr5: np.ndarray,
-    c_roundtrip_atr: float,
-) -> float:
-    if terminal:
-        price_move = 0.0
-    else:
-        price_move = float(q) * (float(opens[t + 2]) - float(opens[t + 1]))
-    return price_move - _switch_cost(int(p), int(q), atr5[t], c_roundtrip_atr)
-
-
-def reference_solve_segment(
-    opens: np.ndarray,
-    atr5: np.ndarray,
     entry_ok: np.ndarray,
-    seg_start: int,
-    seg_end: int,
-    *,
-    c_roundtrip_atr: float = 0.0,
-) -> Dict[str, Any]:
-    """Exhaustive enumeration over the legal action tree (with memoization).
+    cost: np.ndarray,
+    start: int,
+    end: int,
+    start_pos: int = 0,
+) -> Tuple[float, set]:
+    """True DFS over ALL legal paths (NO memo, NO production helper).
 
-    Independent of the production downward-array DP. Returns, for every
-    (t, p) in the segment:
-
-        value[(t, p)]        = V_t(p)
-        best_actions[(t, p)] = frozenset of actions attaining V_t(p)
-        chosen[(t, p)]       = deterministic tie-aware pick (shared rule)
-        ambiguous[(t, p)]    = len(best_actions) > 1
-
-    plus:
-        value_start : [V_{seg_start}(-1), V_{seg_start}(0), V_{seg_start}(+1)]
-        best_value  : V_{seg_start}(0)
-        optimal_paths : all flat-start position paths attaining best_value
+    ``start_pos`` defaults to 0 (flat start, the frozen contract). It is exposed
+    only so tests can validate the counterfactual value V_t(p) for p != 0.
+    Returns (best_value, set(best_action_paths)).
     """
-    # decisions are t in [seg_start, seg_end - 1]; terminal decision = seg_end - 1
-    memo: Dict[Tuple[int, int], Tuple[float, frozenset]] = {}
+    best = -np.inf
+    best_paths: List[tuple] = []
 
-    def enum(t: int, p: int) -> Tuple[float, frozenset]:
-        if t == seg_end:
-            # past last decision: only a Flat position is a legal terminal
-            if p == 0:
-                return 0.0, frozenset()
-            return -np.inf, frozenset()
+    def dfs(t: int, p: int, pnl: float, path: List[int]) -> None:
+        nonlocal best, best_paths
+        if t == end:
+            if p != 0:
+                return
+            if pnl > best + 1e-9:
+                best = pnl
+                best_paths = [tuple(path)]
+            elif abs(pnl - best) <= 1e-9:
+                best_paths.append(tuple(path))
+            return
 
-        key = (t, p)
-        if key in memo:
-            return memo[key]
+        terminal = t == end - 1
+        if terminal:
+            acts = (0,)
+        elif p == 0:
+            acts = (-1, 0, 1) if entry_ok[t] else (0,)
+        elif entry_ok[t]:
+            acts = (p, 0, -p)
+        else:
+            acts = (p, 0)
 
-        terminal = (t == seg_end - 1)
-        acts = _ref_allowed(p, bool(entry_ok[t]), terminal)
+        for a in acts:
+            move = 0.0 if terminal else a * (opens[t + 2] - opens[t + 1])
+            fee = float(cost[t]) * abs(a - p)
+            path.append(int(a))
+            dfs(t + 1, a, pnl + move - fee, path)
+            path.pop()
 
-        best_v = -np.inf
-        best_acts = set()
-        for q in acts:
-            reward = _ref_reward(
-                t, p, q, terminal, opens, atr5, c_roundtrip_atr
-            )
-            sub_v, _ = enum(t + 1, q)
-            total = reward + sub_v
-            if total > best_v + EPS:
-                best_v = total
-                best_acts = {int(q)}
-            elif abs(total - best_v) <= EPS:
-                best_acts.add(int(q))
+    dfs(start, int(start_pos), 0.0, [])
+    return best, set(best_paths)
 
-        res = (float(best_v), frozenset(best_acts))
-        memo[key] = res
-        return res
 
-    value: Dict[Tuple[int, int], float] = {}
-    best_actions: Dict[Tuple[int, int], frozenset] = {}
-    chosen: Dict[Tuple[int, int], int] = {}
-    ambiguous: Dict[Tuple[int, int], bool] = {}
+# --------------------------------------------------------------------------- #
+# Helpers                                                                      #
+# --------------------------------------------------------------------------- #
+def _transition_label(p: int, a: int) -> str:
+    if p == a:
+        return "HOLD" if p != 0 else "FLAT"
+    if p == 0 and a == 1:
+        return "LONG_ENTRY"
+    if p == 0 and a == -1:
+        return "SHORT_ENTRY"
+    if p == 1 and a == 0:
+        return "LONG_EXIT"
+    if p == -1 and a == 0:
+        return "SHORT_EXIT"
+    if p == 1 and a == -1:
+        return "LONG_TO_SHORT"
+    if p == -1 and a == 1:
+        return "SHORT_TO_LONG"
+    raise ValueError(f"impossible transition {p} -> {a}")
 
-    if seg_end - seg_start < 2:
+
+def _unit_terminal_reason(end: int, n: int, seg_arr: np.ndarray) -> str:
+    if end >= n - 1:
+        return DATA_END
+    if seg_arr[end + 1] != seg_arr[end]:
+        return DISCONTINUITY
+    return TRADING_DAY_END
+
+
+def _solve_unit(
+    opens: np.ndarray,
+    entry_ok: np.ndarray,
+    cost: np.ndarray,
+    start: int,
+    end: int,
+) -> Tuple[Dict[str, np.ndarray], int]:
+    """Solve one unit on a slice so the total DP cost stays O(N).
+
+    The frozen ``solve_day_dp`` allocates O(len(opens)); calling it on the unit
+    slice [start, end+2] keeps the sum over units O(N).
+    """
+    length = end - start
+    core = solve_day_dp(
+        opens[start : end + 2],
+        entry_ok[start:end],
+        cost[start:end],
+        0,
+        length,
+    )
+    return core, length
+
+
+def _trade_excursion(
+    direction_sign: int,
+    entry_price: float,
+    exit_price: float,
+    entry_fill: int,
+    exit_fill: int,
+    highs: np.ndarray,
+    lows: np.ndarray,
+) -> Tuple[float, float]:
+    """MFE / MAE in PRICE POINTS over [entry_fill, exit_fill-1] + entry/exit pts."""
+    lo_i = int(entry_fill)
+    hi_i = int(exit_fill)
+    if hi_i > lo_i:
+        pts_hi = max(float(np.max(highs[lo_i:hi_i])), exit_price, entry_price)
+        pts_lo = min(float(np.min(lows[lo_i:hi_i])), exit_price, entry_price)
+    else:
+        pts_hi = max(exit_price, entry_price)
+        pts_lo = min(exit_price, entry_price)
+    if direction_sign == 1:
+        return pts_hi - entry_price, pts_lo - entry_price
+    return entry_price - pts_lo, entry_price - pts_hi
+
+
+def _append_unit_trades(
+    trades: List[Dict[str, Any]],
+    symbol: str,
+    td_arr: np.ndarray,
+    times: np.ndarray,
+    opens: np.ndarray,
+    highs: np.ndarray,
+    lows: np.ndarray,
+    entry_mask: np.ndarray,
+    cost: np.ndarray,
+    path: List[Tuple[int, int, int]],
+    terminal_reason: str,
+    training_eligible: bool,
+) -> None:
+    """Reconstruct complete trades from the unit's optimal (t, p, a) path."""
+    open_trade: Optional[Dict[str, Any]] = None
+
+    def start(t: int, a: int) -> Dict[str, Any]:
+        fill = t + 1
+        direction = "LONG" if a == 1 else "SHORT"
         return {
-            "value": value,
-            "best_actions": best_actions,
-            "chosen": chosen,
-            "ambiguous": ambiguous,
-            "value_start": [np.nan, np.nan, np.nan],
-            "best_value": np.nan,
-            "optimal_paths": [],
+            "trade_id": f"{symbol}_{direction}_{fill}",
+            "symbol": symbol,
+            "trading_day": td_arr[t],
+            "direction": direction,
+            "entry_decision_index": int(t),
+            "entry_fill_index": fill,
+            "entry_fill_time": times[fill],
+            "entry_fill_price": float(opens[fill]),
+            "entry_source_bits": int(entry_mask[t]),
+            "terminal_reason": terminal_reason,
+            "training_eligible": bool(training_eligible),
         }
 
-    def _value_at(t: int, p: int) -> float:
-        if t == seg_end:
-            return 0.0 if p == 0 else -np.inf
-        return value[(t, p)]
+    def close(tr: Dict[str, Any], t: int) -> Dict[str, Any]:
+        fill = t + 1
+        tr = dict(tr)
+        tr.update(
+            {
+                "exit_decision_index": int(t),
+                "exit_fill_index": fill,
+                "exit_fill_time": times[fill],
+                "exit_fill_price": float(opens[fill]),
+            }
+        )
+        s = 1 if tr["direction"] == "LONG" else -1
+        entry = float(tr["entry_fill_price"])
+        exit_p = float(tr["exit_fill_price"])
+        tr["holding_bars"] = int(fill - int(tr["entry_fill_index"]))
+        tr["gross_points"] = s * (exit_p - entry)
+        # one leg of turnover is attributable to this trade at entry and one at
+        # exit (a reversal's 2c is split across the two adjacent trades).
+        tr["cost_points"] = float(cost[int(tr["entry_decision_index"])]) + float(
+            cost[int(tr["exit_decision_index"])]
+        )
+        tr["net_points"] = tr["gross_points"] - tr["cost_points"]
+        mfe, mae = _trade_excursion(
+            s,
+            entry,
+            exit_p,
+            tr["entry_fill_index"],
+            tr["exit_fill_index"],
+            highs,
+            lows,
+        )
+        tr["MFE"] = mfe
+        tr["MAE"] = mae
+        return tr
 
-    # pass 1: exhaustively enumerate V_t(p) for all (t, p)
-    for t in range(seg_start, seg_end):
-        for p in POS:
-            v, acts = enum(t, int(p))
-            value[(t, int(p))] = float(v)
-            best_actions[(t, int(p))] = acts
+    for t, p, a in path:
+        if open_trade is None:
+            if p == 0 and a != 0:
+                open_trade = start(t, a)
+        else:
+            if a == 0:
+                trades.append(close(open_trade, t))
+                open_trade = None
+            elif a == -p:  # reversal: close old + open new at the same fill
+                trades.append(close(open_trade, t))
+                open_trade = start(t, a)
 
-    # pass 2: derive the deterministic tie-aware choice from real Q values
-    for t in range(seg_start, seg_end):
-        for p in POS:
-            acts = best_actions[(t, int(p))]
-            ordered = sorted(acts) if acts else []
-            if not ordered:
-                chosen[(t, int(p))] = int(INVALID_ACTION)
-                ambiguous[(t, int(p))] = False
-                continue
-            terminal = (t == seg_end - 1)
-            qvals = [
-                _ref_reward(t, int(p), int(q), terminal, opens, atr5, c_roundtrip_atr)
-                + _value_at(t + 1, int(q))
-                for q in ordered
-            ]
-            pick, amb, _edge, _vmax = _choose_tie_aware(
-                ordered, qvals, int(p)
-            )
-            chosen[(t, int(p))] = int(pick)
-            ambiguous[(t, int(p))] = bool(amb)
-
-    # all flat-start optimal position paths
-    best_value = value[(seg_start, 0)]
-    optimal_paths: List[List[int]] = []
-
-    def collect(t: int, p: int, acc: List[int]) -> None:
-        if t == seg_end:
-            if p == 0:
-                optimal_paths.append(list(acc))
-            return
-        for q in sorted(best_actions[(t, p)]):
-            reward = _ref_reward(
-                t, p, q, (t == seg_end - 1), opens, atr5, c_roundtrip_atr
-            )
-            if abs(reward + _value_at(t + 1, q) - value[(t, p)]) <= 1e-6:
-                acc.append(int(q))
-                collect(t + 1, q, acc)
-                acc.pop()
-
-    if math.isfinite(best_value):
-        collect(seg_start, 0, [])
-
-    return {
-        "value": value,
-        "best_actions": best_actions,
-        "chosen": chosen,
-        "ambiguous": ambiguous,
-        "value_start": [value[(seg_start, int(p))] for p in POS],
-        "best_value": float(best_value),
-        "optimal_paths": optimal_paths,
-    }
+    if open_trade is not None:
+        raise AssertionError("unit DP left an unclosed trade")
 
 
 # --------------------------------------------------------------------------- #
-# Segment enumeration + production runner                                      #
+# Runner                                                                       #
 # --------------------------------------------------------------------------- #
-def segment_bounds(seg_arr: np.ndarray, n: int) -> List[Tuple[int, int]]:
-    """Contiguous inclusive [start, end] runs of equal segment id."""
-    if n <= 0:
-        return []
-    bounds: List[Tuple[int, int]] = []
-    s = 0
-    for i in range(1, n):
-        if seg_arr[i] != seg_arr[i - 1]:
-            bounds.append((s, i - 1))
-            s = i
-    bounds.append((s, n - 1))
-    return bounds
-
-
 def _dp_from_stream(
     symbol: str,
     base: pd.DataFrame,
     res: Dict[str, Any],
     counters: KernelCounters,
     *,
-    c_roundtrip_atr: float = 0.0,
+    cost_points: Optional[np.ndarray] = None,
 ) -> Dict[str, Any]:
-    """DP stage only: given a base frame + a structure-stream result, run the
-    per-segment DP and reconstruct action rows / trades.
-
-    Shared by the real-data runner and the synthetic/testing runner so the DP
-    logic is never duplicated.
-    """
+    """DP stage: base frame + structure-stream result -> per-unit DP + artifact."""
     n = int(res["n"])
     opens = base["open"].to_numpy(float)[:n]
     highs = base["high"].to_numpy(float)[:n]
     lows = base["low"].to_numpy(float)[:n]
     times = base["time"].to_numpy()[:n]
     seg_arr = base["segment"].to_numpy(np.int64)[:n]
-    atr5 = res["atr5m"]
-    entry_bits = res["entry_candidate_bits"]
-    entry_ok = res["entry_eligible"]
+    td_arr = pd.to_datetime(base["trading_day"]).to_numpy()[:n]
+    entry_mask = res["entry_mask"]
+    entry_ok = np.asarray(res["entry_eligible"], dtype=bool)
+    if cost_points is None:
+        cost = np.zeros(n, dtype=float)
+    else:
+        cost = np.asarray(cost_points, dtype=float)
 
-    bounds = segment_bounds(seg_arr, n)
-    segments: List[Dict[str, Any]] = []
-    cores: Dict[Tuple[int, int], Any] = {}
-    for (s, e) in bounds:
-        terminal_reason = DATA_END if e == n - 1 else DISCONTINUITY
-        segments.append({
-            "seg_start": int(s),
-            "seg_end": int(e),
-            "terminal_reason": terminal_reason,
-            "training_eligible": terminal_reason != DATA_END,
-        })
+    starts, ends = build_intraday_units(td_arr, seg_arr)
+
+    # preallocated per-decision output arrays (no hot-loop dict append)
+    valid = np.zeros(n, dtype=bool)
+    dec: Dict[str, np.ndarray] = {
+        "pos_before": np.zeros(n, dtype=np.int8),
+        "pos_after": np.zeros(n, dtype=np.int8),
+        "transition": np.empty(n, dtype=object),
+        "q_f_s": np.full(n, np.nan),
+        "q_f_f": np.full(n, np.nan),
+        "q_f_l": np.full(n, np.nan),
+        "best_flat_action": np.zeros(n, dtype=np.int8),
+        "flat_edge": np.full(n, np.nan),
+        "flat_ambiguous": np.zeros(n, dtype=bool),
+        "q_l_s": np.full(n, np.nan),
+        "q_l_f": np.full(n, np.nan),
+        "q_l_l": np.full(n, np.nan),
+        "best_long_action": np.zeros(n, dtype=np.int8),
+        "long_edge": np.full(n, np.nan),
+        "long_ambiguous": np.zeros(n, dtype=bool),
+        "q_s_s": np.full(n, np.nan),
+        "q_s_f": np.full(n, np.nan),
+        "q_s_l": np.full(n, np.nan),
+        "best_short_action": np.zeros(n, dtype=np.int8),
+        "short_edge": np.full(n, np.nan),
+        "short_ambiguous": np.zeros(n, dtype=bool),
+        "ambiguous": np.zeros(n, dtype=bool),
+        "terminal_reason": np.empty(n, dtype=object),
+        "training_eligible": np.zeros(n, dtype=bool),
+        "label_available_time": np.full(
+            n, np.datetime64("NaT", "ns"), dtype="datetime64[ns]"
+        ),
+    }
+
+    trades: List[Dict[str, Any]] = []
+    units: List[Dict[str, Any]] = []
+    unit_values: List[float] = []
+
+    for s, e in zip((int(x) for x in starts), (int(x) for x in ends)):
+        term = _unit_terminal_reason(e, n, seg_arr)
+        eligible = term != DATA_END
+        lav = times[e] + np.timedelta64(5, "m")
+        units.append(
+            {
+                "seg_start": s,
+                "seg_end": e,
+                "terminal_reason": term,
+                "training_eligible": eligible,
+            }
+        )
         if e - s < 2:
             continue
-        core = solve_segment_dp(
-            opens, atr5, entry_ok, s, e, c_roundtrip_atr=c_roundtrip_atr
-        )
-        cores[(s, e)] = core
+
+        core, length = _solve_unit(opens, entry_ok, cost, s, e)
         counters.dp_state_count += (e - s) * len(POS)
 
-    action_rows = build_oracle_action_rows(
-        symbol, times, seg_arr, atr5, entry_bits, cores, segments
-    )
-    trades = build_oracle_trades(
-        symbol, times, opens, highs, lows, atr5, action_rows
-    )
+        actions = core["actions"]
+        Q = core["Q"]
+        edges = core["edges"]
+        ambg = core["ambiguous"]
+        unit_values.append(float(np.nanmax(Q[0, P2I[0], :])))
+
+        # oracle path from flat start (local index -> global t = s + local)
+        p = 0
+        path: List[Tuple[int, int, int]] = []
+        for local in range(length):
+            pi = P2I[p]
+            a = int(actions[local, pi])
+            if a == int(INVALID_ACTION):
+                raise RuntimeError(f"missing DP action at t={s + local}, p={p}")
+            path.append((s + local, p, a))
+            p = a
+        if p != 0:
+            raise AssertionError("unit did not terminate flat")
+
+        for t, pb, pa in path:
+            valid[t] = True
+            dec["pos_before"][t] = pb
+            dec["pos_after"][t] = pa
+            dec["transition"][t] = _transition_label(pb, pa)
+            dec["q_f_s"][t] = Q[t - s, 1, 0]
+            dec["q_f_f"][t] = Q[t - s, 1, 1]
+            dec["q_f_l"][t] = Q[t - s, 1, 2]
+            dec["best_flat_action"][t] = actions[t - s, 1]
+            dec["flat_edge"][t] = edges[t - s, 1]
+            dec["flat_ambiguous"][t] = ambg[t - s, 1]
+            dec["q_l_s"][t] = Q[t - s, 2, 0]
+            dec["q_l_f"][t] = Q[t - s, 2, 1]
+            dec["q_l_l"][t] = Q[t - s, 2, 2]
+            dec["best_long_action"][t] = actions[t - s, 2]
+            dec["long_edge"][t] = edges[t - s, 2]
+            dec["long_ambiguous"][t] = ambg[t - s, 2]
+            dec["q_s_s"][t] = Q[t - s, 0, 0]
+            dec["q_s_f"][t] = Q[t - s, 0, 1]
+            dec["q_s_l"][t] = Q[t - s, 0, 2]
+            dec["best_short_action"][t] = actions[t - s, 0]
+            dec["short_edge"][t] = edges[t - s, 0]
+            dec["short_ambiguous"][t] = ambg[t - s, 0]
+            dec["ambiguous"][t] = ambg[t - s, P2I[pb]]
+            dec["terminal_reason"][t] = term
+            dec["training_eligible"][t] = eligible
+            dec["label_available_time"][t] = lav
+
+        _append_unit_trades(
+            trades,
+            symbol,
+            td_arr,
+            times,
+            opens,
+            highs,
+            lows,
+            entry_mask,
+            cost,
+            path,
+            term,
+            eligible,
+        )
+
+    sel = np.flatnonzero(valid)
     return {
         "symbol": symbol,
         "n": n,
@@ -565,15 +584,18 @@ def _dp_from_stream(
         "high": highs,
         "low": lows,
         "time": times,
+        "trading_day": td_arr,
         "segment": seg_arr,
-        "atr5": atr5,
-        "entry_candidate_bits": entry_bits,
+        "entry_mask": entry_mask,
         "entry_eligible": entry_ok,
-        "segments": segments,
-        "cores": cores,
-        "action_rows": action_rows,
+        "cost_points": cost,
+        "sel": sel,
+        "decision": dec,
+        "starts": starts,
+        "ends": ends,
+        "units": units,
+        "unit_values": unit_values,
         "trades": trades,
-        "c_roundtrip_atr": c_roundtrip_atr,
     }
 
 
@@ -582,27 +604,41 @@ def run_symbol_dp(
     counters: KernelCounters,
     max_bars: Optional[int] = None,
     *,
-    c_roundtrip_atr: float = 0.0,
+    cost_points: Optional[np.ndarray] = None,
+    profile_memory: bool = False,
 ) -> Dict[str, Any]:
     """Single-pass production runner for one symbol.
 
     raw load once -> build_base_frame once -> structure streaming once
-    (capture_entry_bits=True, emit_events=False) -> DP once per segment.
+    (capture_entry_mask=True, emit_events=False) -> DP once per intraday unit.
 
-    Returns the oracle inputs, per-decision action rows and trades. Nothing is
-    written to disk here (artifact sampling is a later stage).
+    ``profile_memory`` wraps ONLY the DP stage with ``tracemalloc`` (the artifact
+    arrays are the memory that scales with N; the full-history base load is a
+    constant and tracing it would dominate the runtime).
     """
     t0 = time.perf_counter()
     info = build_base_frame(symbol, counters)
     base = info["base"]
     res = _stream_from_base(
-        info["base"], info["form"], info["seg_completed"], counters,
-        max_bars, symbol,
-        capture_entry_bits=True, emit_events=False,
+        info["base"],
+        info["form"],
+        info["seg_completed"],
+        counters,
+        max_bars,
+        symbol,
+        capture_entry_mask=True,
+        emit_events=False,
     )
     t1 = time.perf_counter()
-    out = _dp_from_stream(symbol, base, res, counters,
-                          c_roundtrip_atr=c_roundtrip_atr)
+
+    if profile_memory and tracemalloc is not None:
+        tracemalloc.start()
+    out = _dp_from_stream(symbol, base, res, counters, cost_points=cost_points)
+    if profile_memory and tracemalloc is not None:
+        _cur, peak = tracemalloc.get_traced_memory()
+        out["peak_tracemalloc_mb"] = peak / (1024.0 * 1024.0)
+        tracemalloc.stop()
+
     t2 = time.perf_counter()
     out["runtime_candidate_sec"] = t1 - t0
     out["runtime_dp_sec"] = t2 - t1
@@ -616,226 +652,173 @@ def run_base_dp(
     symbol: str = "SYNTH",
     max_bars: Optional[int] = None,
     *,
-    c_roundtrip_atr: float = 0.0,
+    cost_points: Optional[np.ndarray] = None,
 ) -> Dict[str, Any]:
-    """Synthetic/testing entry point: prebuilt base frame -> streaming -> DP.
-
-    No disk load. Reuses the canonical streaming path so synthetic tests exercise
-    exactly the same DP contract as the real-data runner.
-    """
+    """Synthetic/testing entry: prebuilt base frame -> streaming -> intraday DP."""
     res = stream_from_base(
-        base, counters, max_bars=max_bars, symbol=symbol,
-        capture_entry_bits=True, emit_events=False,
+        base,
+        counters,
+        max_bars=max_bars,
+        symbol=symbol,
+        capture_entry_mask=True,
+        emit_events=False,
     )
-    return _dp_from_stream(symbol, base, res, counters,
-                           c_roundtrip_atr=c_roundtrip_atr)
+    return _dp_from_stream(symbol, base, res, counters, cost_points=cost_points)
 
 
 def run_stage_dp(
     symbols: Sequence[str],
     max_bars: Optional[int] = None,
     *,
-    c_roundtrip_atr: float = 0.0,
+    cost_points: Optional[np.ndarray] = None,
+    profile_memory: bool = False,
 ) -> Dict[str, Any]:
-    """Run the DP oracle over a list of symbols; aggregate rows + counters."""
+    """Run the intraday DP oracle over symbols; one DataFrame build at the end."""
     counters = KernelCounters()
-    action_rows: List[Dict[str, Any]] = []
-    trades: List[Dict[str, Any]] = []
-    per_symbol: Dict[str, Dict[str, int]] = {}
-    runtime = {"candidate_sec": 0.0, "dp_sec": 0.0, "total_sec": 0.0}
+    results: List[Dict[str, Any]] = []
     for sym in symbols:
-        res = run_symbol_dp(sym, counters, max_bars, c_roundtrip_atr=c_roundtrip_atr)
-        action_rows.extend(res["action_rows"])
-        trades.extend(res["trades"])
-        runtime["candidate_sec"] += res["runtime_candidate_sec"]
-        runtime["dp_sec"] += res["runtime_dp_sec"]
-        runtime["total_sec"] += res["runtime_total_sec"]
-        per_symbol[sym] = {
-            "decisions": len(res["action_rows"]),
-            "trades": len(res["trades"]),
-            "segments": len(res["segments"]),
-        }
+        results.append(
+            run_symbol_dp(
+                sym,
+                counters,
+                max_bars,
+                cost_points=cost_points,
+                profile_memory=profile_memory,
+            )
+        )
+    frames = [build_artifact_frames(r) for r in results]
+    oracle_actions = (
+        pd.concat([f["oracle_actions"] for f in frames], ignore_index=True)
+        if frames
+        else pd.DataFrame()
+    )
+    oracle_trades = (
+        pd.concat([f["oracle_trades"] for f in frames], ignore_index=True)
+        if frames
+        else pd.DataFrame()
+    )
+    runtime = {
+        "candidate_sec": sum(r["runtime_candidate_sec"] for r in results),
+        "dp_sec": sum(r["runtime_dp_sec"] for r in results),
+        "total_sec": sum(r["runtime_total_sec"] for r in results),
+    }
+    peak_mb = max((r.get("peak_tracemalloc_mb", 0.0) for r in results), default=0.0)
     return {
-        "action_rows": action_rows,
-        "trades": trades,
+        "oracle_actions": oracle_actions,
+        "oracle_trades": oracle_trades,
         "counters": counters,
-        "per_symbol": per_symbol,
         "runtime": runtime,
+        "peak_tracemalloc_mb": peak_mb,
+        "per_symbol": {
+            r["symbol"]: {
+                "decisions": int(len(r["sel"])),  # noqa: RUF046 (len() is an int)
+                "trades": len(r["trades"]),
+                "units": len(r["units"]),
+            }
+            for r in results
+        },
+        "_results": results,
     }
 
 
 # --------------------------------------------------------------------------- #
-# Oracle action rows + trades (contract §14)                                   #
-# --------------------------------------------------------------------------- #
-def _edge_atr(edge_points: float, atr_t: float) -> float:
-    if np.isfinite(atr_t) and atr_t > 0 and np.isfinite(edge_points):
-        return float(edge_points) / float(atr_t)
-    return float("inf") if np.isinf(edge_points) else float("nan")
-
-
-def build_oracle_action_rows(
-    symbol: str,
-    times: np.ndarray,
-    seg_arr: np.ndarray,
-    atr5: np.ndarray,
-    entry_bits: Optional[np.ndarray],
-    cores: Dict[Tuple[int, int], Any],
-    segments: List[Dict[str, Any]],
-) -> List[Dict[str, Any]]:
-    """One row per 5m decision: the optimal action + its edge (contract §14)."""
-    rows: List[Dict[str, Any]] = []
-    for seg in segments:
-        s, e = int(seg["seg_start"]), int(seg["seg_end"])
-        if (s, e) not in cores:
-            continue
-        core = cores[(s, e)]
-        label_available_time = pd.Timestamp(times[e]) + pd.Timedelta(minutes=5)
-        p = 0
-        for t in range(s, e):
-            pi = P2I[p]
-            q = int(core["action"][t, pi])
-            if q == int(INVALID_ACTION):
-                raise RuntimeError(f"missing DP action at t={t}, p={p}")
-
-            bits = int(entry_bits[t]) if entry_bits is not None else 0
-            edge_points = float(core["edge"][t, pi])
-            rows.append({
-                "symbol": symbol,
-                "decision_bar_index": int(t),
-                "decision_time": pd.Timestamp(times[t]) + pd.Timedelta(minutes=5),
-                "segment": int(seg_arr[t]),
-                "entry_candidate_bits": bits,
-                "entry_eligible": bool(bits != 0),
-                "oracle_position_before": int(p),
-                "oracle_position_after": int(q),
-                "oracle_transition": _transition_label(int(p), int(q)),
-                "oracle_edge_points": edge_points,
-                "oracle_edge_ATR": _edge_atr(edge_points, float(atr5[t])),
-                "oracle_ambiguous": bool(core["ambiguous"][t, pi]),
-                "label_available_time": label_available_time,
-                "terminal_reason": seg["terminal_reason"],
-                "training_eligible": bool(seg["training_eligible"]),
-            })
-            p = q
-    return rows
-
-
-def build_oracle_trades(
-    symbol: str,
-    times: np.ndarray,
-    opens: np.ndarray,
-    highs: np.ndarray,
-    lows: np.ndarray,
-    atr5: np.ndarray,
-    action_rows: List[Dict[str, Any]],
-) -> List[Dict[str, Any]]:
-    """Pair entries/exits (incl. reversals) into complete trade rows (§14)."""
-    trades: List[Dict[str, Any]] = []
-    open_trade: Optional[Dict[str, Any]] = None
-
-    def start(r: Dict[str, Any]) -> Dict[str, Any]:
-        fill = int(r["decision_bar_index"]) + 1
-        direction = "LONG" if int(r["oracle_position_after"]) == 1 else "SHORT"
-        return {
-            "trade_id": f"{symbol}_{direction}_{fill}",
-            "symbol": symbol,
-            "direction": direction,
-            "entry_decision_index": int(r["decision_bar_index"]),
-            "entry_fill_index": fill,
-            "entry_fill_time": pd.Timestamp(times[fill]),
-            "entry_fill_price": float(opens[fill]),
-            "entry_candidate_bits": int(r["entry_candidate_bits"]),
-            "entry_edge_ATR": float(r["oracle_edge_ATR"]),
-            "terminal_reason": r["terminal_reason"],
-            "training_eligible": bool(r["training_eligible"]),
-        }
-
-    def close(tr: Dict[str, Any], r: Dict[str, Any]) -> Dict[str, Any]:
-        fill = int(r["decision_bar_index"]) + 1
-        tr = dict(tr)
-        tr.update({
-            "exit_decision_index": int(r["decision_bar_index"]),
-            "exit_fill_index": fill,
-            "exit_fill_time": pd.Timestamp(times[fill]),
-            "exit_fill_price": float(opens[fill]),
-            "exit_edge_ATR": float(r["oracle_edge_ATR"]),
-        })
-        s = 1 if tr["direction"] == "LONG" else -1
-        entry = float(tr["entry_fill_price"])
-        exit_p = float(tr["exit_fill_price"])
-        a0 = float(atr5[int(tr["entry_decision_index"])])
-        tr["holding_bars"] = int(fill - int(tr["entry_fill_index"]))
-        tr["gross_points"] = s * (exit_p - entry)
-        tr["gross_ATR"] = (
-            tr["gross_points"] / a0 if np.isfinite(a0) and a0 > 0 else np.nan
-        )
-        # MFE / MAE over the holding path: bars [entry_fill_index, exit_fill_index-1]
-        # PLUS the entry point and the exit fill point (both are reached, so the
-        # realized gross return always lies inside [MAE, MFE]).
-        lo_i = int(tr["entry_fill_index"])
-        hi_i = int(tr["exit_fill_index"])
-        if hi_i > lo_i:
-            pts_hi = max(float(np.max(highs[lo_i:hi_i])), exit_p, entry)
-            pts_lo = min(float(np.min(lows[lo_i:hi_i])), exit_p, entry)
-            if s == 1:
-                mfe_pts, mae_pts = pts_hi - entry, pts_lo - entry
-            else:
-                mfe_pts, mae_pts = entry - pts_lo, entry - pts_hi
-            tr["MFE_ATR"] = mfe_pts / a0 if np.isfinite(a0) and a0 > 0 else np.nan
-            tr["MAE_ATR"] = mae_pts / a0 if np.isfinite(a0) and a0 > 0 else np.nan
-        else:
-            tr["MFE_ATR"] = 0.0
-            tr["MAE_ATR"] = 0.0
-        return tr
-
-    for r in action_rows:
-        pb = int(r["oracle_position_before"])
-        pa = int(r["oracle_position_after"])
-        if open_trade is None:
-            if pb == 0 and pa != 0:
-                open_trade = start(r)
-        else:
-            if pa == 0:
-                trades.append(close(open_trade, r))
-                open_trade = None
-            elif pa == -pb:  # reversal: close old + open new at same fill
-                trades.append(close(open_trade, r))
-                open_trade = start(r)
-            # else: hold, nothing to do
-
-    if open_trade is not None:
-        raise AssertionError("segment DP left an unclosed trade")
-    return trades
-
-
-# --------------------------------------------------------------------------- #
-# Artifact construction (capability only — NO disk write in this stage)        #
+# Artifact construction (contract §14 — capability only, NO disk write here)   #
 # --------------------------------------------------------------------------- #
 def build_artifact_frames(result: Dict[str, Any]) -> Dict[str, pd.DataFrame]:
-    """Build the two oracle tables WITHOUT writing them to disk (contract §14)."""
-    actions = pd.DataFrame(result["action_rows"])
-    trades = pd.DataFrame(result["trades"])
-    return {"oracle_actions": actions, "oracle_trades": trades}
+    """Build the two oracle tables from preallocated arrays (one gather, no per-row dict)."""
+    sel = result["sel"]
+    times = result["time"]
+    dec = result["decision"]
+    symbol = result["symbol"]
+
+    oracle_actions = pd.DataFrame(
+        {
+            "symbol": symbol,
+            "trading_day": pd.to_datetime(result["trading_day"][sel]),
+            "decision_bar_index": sel,
+            "decision_time": pd.to_datetime(times[sel]) + pd.Timedelta(minutes=5),
+            "entry_eligible": result["entry_eligible"][sel],
+            "entry_source_bits": result["entry_mask"][sel],
+            "Q_F_S": dec["q_f_s"][sel],
+            "Q_F_F": dec["q_f_f"][sel],
+            "Q_F_L": dec["q_f_l"][sel],
+            "best_flat_action": dec["best_flat_action"][sel],
+            "flat_edge": dec["flat_edge"][sel],
+            "flat_ambiguous": dec["flat_ambiguous"][sel],
+            "Q_L_S": dec["q_l_s"][sel],
+            "Q_L_F": dec["q_l_f"][sel],
+            "Q_L_L": dec["q_l_l"][sel],
+            "best_long_action": dec["best_long_action"][sel],
+            "long_edge": dec["long_edge"][sel],
+            "long_ambiguous": dec["long_ambiguous"][sel],
+            "Q_S_S": dec["q_s_s"][sel],
+            "Q_S_F": dec["q_s_f"][sel],
+            "Q_S_L": dec["q_s_l"][sel],
+            "best_short_action": dec["best_short_action"][sel],
+            "short_edge": dec["short_edge"][sel],
+            "short_ambiguous": dec["short_ambiguous"][sel],
+            "position_before": dec["pos_before"][sel],
+            "position_after": dec["pos_after"][sel],
+            "transition": dec["transition"][sel],
+            "ambiguous": dec["ambiguous"][sel],
+            "label_available_time": pd.to_datetime(dec["label_available_time"][sel]),
+            "terminal_reason": dec["terminal_reason"][sel],
+            "training_eligible": dec["training_eligible"][sel],
+        }
+    )
+
+    trade_cols = [
+        "trade_id",
+        "symbol",
+        "trading_day",
+        "direction",
+        "entry_decision_index",
+        "entry_fill_index",
+        "entry_fill_time",
+        "entry_fill_price",
+        "entry_source_bits",
+        "exit_decision_index",
+        "exit_fill_index",
+        "exit_fill_time",
+        "exit_fill_price",
+        "holding_bars",
+        "gross_points",
+        "cost_points",
+        "net_points",
+        "MFE",
+        "MAE",
+        "terminal_reason",
+        "training_eligible",
+    ]
+    if result["trades"]:
+        oracle_trades = pd.DataFrame(result["trades"])
+        for c in trade_cols:
+            if c not in oracle_trades.columns:
+                oracle_trades[c] = np.nan
+        oracle_trades = oracle_trades[trade_cols]
+    else:
+        oracle_trades = pd.DataFrame(columns=trade_cols)
+
+    return {"oracle_actions": oracle_actions, "oracle_trades": oracle_trades}
 
 
 def artifact_metadata(
     source_sha: str,
     symbol: str,
-    data_start: Any,
-    data_end: Any,
-    c_roundtrip_atr: float = 0.0,
+    data_start: Any = None,
+    data_end: Any = None,
+    cost_mode: str = "gross_points_zero_cost",
 ) -> Dict[str, Any]:
-    """Artifact provenance (contract §19) — fail-closed for the future UI."""
+    """Artifact provenance (contract §14 / §19) — consumed by the future UI."""
     return {
         "source_sha": source_sha,
         "task_id": TASK_ID,
         "math_version": MATH_VERSION,
-        "NEAR_ATR": NEAR_ATR_CONTRACT,
-        "execution_semantics": "decision=close(t); fill=open(t+1)",
+        "entry_semantics": "current_5m_range_touch_pre_existing_SR_LIQ_zone_delta0",
+        "execution_semantics": "decision=close(i); fill=open(i+1); unit_flat_both_ends",
         "objective": "gross_open_to_open_pnl",
-        "c_roundtrip_atr": c_roundtrip_atr,
+        "cost_mode": cost_mode,
         "symbol": symbol,
         "data_start": str(data_start),
         "data_end": str(data_end),
-        "tf_order": list(TF_ORDER),
     }
