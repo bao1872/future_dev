@@ -47,6 +47,7 @@ from research.liquidity_oracle_atlas.build_structure_constrained_trade_oracle_dp
     write_oracle_artifact_v2,
     load_oracle_artifact_v2,
     check_oracle_invariants_v2,
+    STATE_LABELS,
 )
 
 
@@ -507,3 +508,46 @@ def test_regression_r1_artifacts_untouched_dirname():
     # V2 writes to its own directory name; R1 dirname must remain distinct.
     assert ARTIFACT_ROOT_DIRNAME != "intraday_dp_oracle_r1"
     assert MATH_VERSION != "intraday_dp_oracle_r1"
+
+
+def test_full_q_artifact_persistence():
+    # FIX1: every valid decision row must persist the FULL 6-state x 3-action
+    # Bellman output (all 18 Q cells populated; illegal actions as -inf, never
+    # NaN), plus best/edge/amb for all six states. This is the regression guard
+    # for the path-state-only persistence bug.
+    base = _synthetic_base(600, seed=13)
+    res = run_base_dp_v2(base, KernelCounters(), symbol="SYNTH")
+    dec = res["decision"]
+    opens = base["open"].to_numpy(float)
+    prox = res["proximity_any"]
+    cost = res["cost_points"]
+    starts = [int(x) for x in res["starts"]]
+    ends = [int(x) for x in res["ends"]]
+    sel = [int(x) for x in res["sel"]]
+    assert sel, "no valid decisions produced"
+    t = sel[0]
+    s = next(ss for ss, ee in zip(starts, ends) if ss <= t < ee)
+    e = next(ee for ss, ee in zip(starts, ends) if ss <= t < ee)
+    length = e - s
+    local = t - s
+    core = solve_day_dp_v2(opens[s : e + 2], prox[s:e], cost[s:e], 0, length)
+    all_q = []
+    for sj, label in enumerate(STATE_LABELS):
+        for a_idx, a_letter in enumerate(("s", "f", "l")):
+            artifact_val = float(dec[f"q_{label}_{a_letter}"][t])
+            core_val = float(core["Q"][local, sj, a_idx])
+            assert not math.isnan(artifact_val), (label, a_letter)
+            assert math.isfinite(artifact_val) or artifact_val == -math.inf
+            assert artifact_val == core_val, (label, a_letter, artifact_val, core_val)
+            all_q.append(artifact_val)
+        assert int(dec[f"best_{label}"][t]) == int(core["actions"][local, sj])
+        _edge_a = float(dec[f"edge_{label}"][t])
+        _edge_b = float(core["edges"][local, sj])
+        # edge is +inf when 2 of 3 actions are illegal (finite - (-inf)); == handles it
+        assert _edge_a == _edge_b or abs(_edge_a - _edge_b) < 1e-12
+        assert bool(dec[f"amb_{label}"][t]) == bool(core["ambiguous"][local, sj])
+    # all 18 Q cells populated across the full 6x3 grid (no residual NaN)
+    assert len(all_q) == 18
+    assert not any(math.isnan(v) for v in all_q)
+    # illegal actions are explicitly -inf, not NaN, in the artifact
+    assert any(v == -math.inf for v in all_q)

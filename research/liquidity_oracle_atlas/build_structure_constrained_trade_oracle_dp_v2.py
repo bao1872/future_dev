@@ -487,13 +487,16 @@ def _dp_from_stream_v2(
             dec["entry_right_after"][t] = d["qa"]
             dec["new_entry_consumed"][t] = d["ne"]
             dec["transition"][t] = _transition_label(d["pb"], d["pa"])
-            label = STATE_LABELS[si]
-            for a_idx, a_letter in enumerate(("s", "f", "l")):
-                dec[f"q_{label}_{a_letter}"][t] = float(Q[local, si, a_idx])
-            dec[f"best_{label}"][t] = actions[local, si]
-            dec[f"edge_{label}"][t] = edges[local, si]
-            dec[f"amb_{label}"][t] = ambg[local, si]
-            dec["ambiguous"][t] = ambg[local, si]
+            # FULL 6-state x 3-action Bellman output persisted for every decision
+            # row, not only the path state. Illegal actions stay -inf (never NaN).
+            for sj, label in enumerate(STATE_LABELS):
+                for a_idx, a_letter in enumerate(("s", "f", "l")):
+                    dec[f"q_{label}_{a_letter}"][t] = float(Q[local, sj, a_idx])
+                dec[f"best_{label}"][t] = actions[local, sj]
+                dec[f"edge_{label}"][t] = edges[local, sj]
+                dec[f"amb_{label}"][t] = bool(ambg[local, sj])
+            # ambiguous marker reflects the ACTUAL path state only
+            dec["ambiguous"][t] = bool(ambg[local, si])
             dec["terminal_reason"][t] = term
             dec["training_eligible"][t] = eligible
             dec["label_available_time"][t] = lav
