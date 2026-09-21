@@ -1,0 +1,10 @@
+symbol,split,rows,ready_rows,ready_fraction
+AG,train,20489,16355,0.7982331983015276
+AG,validation,7563,7563,1.0
+AG,test,7639,7639,1.0
+RB,train,14190,10923,0.7697674418604651
+RB,validation,5134,5134,1.0
+RB,test,5128,5128,1.0
+ALL,train,34679,27278,0.7865855416822861
+ALL,validation,12697,12697,1.0
+ALL,test,12767,12767,1.0

@@ -1,0 +1,7 @@
+symbol,split,rows,episodes,trading_days
+AG,train,20489,926,240
+AG,validation,7563,227,81
+AG,test,7639,239,81
+RB,train,14190,478,240
+RB,validation,5134,113,81
+RB,test,5128,138,81
