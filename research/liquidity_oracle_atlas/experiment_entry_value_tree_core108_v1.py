@@ -51,8 +51,10 @@ RC2  The canonical ``Episode.approach_velocity`` STOPS updating after the first
 
 RC3  ``OUTSIDE`` keeps the REAL signed distance; 0 is reserved for "at the
      boundary". No structure -> phase=NO_STRUCTURE, distance_atr=NaN, rest 0.
-     Structure exists but not yet in an interaction episode -> phase=OUTSIDE,
-     distance_atr=real value, rest 0.
+     Structure exists but not yet in an interaction episode -> phase=OUTSIDE.
+     distance_atr is the REAL signed distance scaled ONLY by the same-TF
+     previous-geometry ATR (one consistent unit per column); when that per-TF ATR
+     is unavailable it is NaN (no cross-TF / 5m fallback). rest 0.
 
 RC4  Two distinct ATRs:
        * Path ATR  A^{path} = ATR_{TF, tau}, frozen at role-episode start and
@@ -520,7 +522,13 @@ def run_streaming(
                 if ep is None:
                     if cand is not None:
                         prox = in_proximity(cand, O, H, L, C, atr_tf)
-                        if prox:
+                        # FIX-C: a new (tf, role) episode requires a defined per-TF
+                        # ATR (previous-geometry). Without it the proximity radius
+                        # and the frozen A_path are undefined, so no episode may
+                        # start. (in_proximity's touch branch can be True even with
+                        # atr_tf=NaN, hence the explicit guard.) The bar falls
+                        # through to OUTSIDE/NaN below.
+                        if prox and np.isfinite(atr_tf) and atr_tf > 0:
                             ep = start_episode(
                                 symbol, tf, role, cand, i, seg, time_arr[i], C
                             )
@@ -534,7 +542,7 @@ def run_streaming(
                         ep = None
                         if cand is not None:
                             prox = in_proximity(cand, O, H, L, C, atr_tf)
-                            if prox:
+                            if prox and np.isfinite(atr_tf) and atr_tf > 0:
                                 ep = start_episode(
                                     symbol, tf, role, cand, i, seg, time_arr[i], C
                                 )
@@ -579,18 +587,15 @@ def run_streaming(
                     if cand is not None:
                         s = REV_SIGN[role]
                         sE = s * cand["near_edge"]
-                        # OUTSIDE has no frozen episode ATR; scale by the previous
-                        # known structure's per-TF ATR when available, else the
-                        # current bar's per-TF ATR, else the 5m ATR, so the REAL
-                        # signed distance stays finite & non-zero (RC3), never 0.
-                        denom = atr_tf
-                        if not (np.isfinite(denom) and denom > 0):
-                            denom = geom_by_tf[tf][3]
-                        if not (np.isfinite(denom) and denom > 0):
-                            denom = atr5m[i]
+                        # FIX-A/B: OUTSIDE distance is scaled ONLY by the same-TF
+                        # previous-geometry ATR (atr_tf). No current-TF / 5m ATR
+                        # fallback: a missing per-TF ATR means the column unit is
+                        # undefined, so it stays NaN (LightGBM handles missing
+                        # natively). This keeps every {tf}_*_distance_atr in one
+                        # consistent unit (never a mix of 4h-ATR and 5m-ATR rows).
                         d_out = (
-                            (s * C - sE) / denom
-                            if (np.isfinite(denom) and denom > 0)
+                            (s * C - sE) / atr_tf
+                            if (np.isfinite(atr_tf) and atr_tf > 0)
                             else _NAN
                         )
                         path_feats[key] = (d_out, "OUTSIDE", 0, 0.0, 0.0, 0.0)
@@ -780,7 +785,10 @@ def reference_replay(
                 if ep is None:
                     if cand is not None:
                         prox = in_proximity(cand, O, H, L, C, atr_tf)
-                        if prox:
+                        # FIX-C: require a defined per-TF ATR to start a new episode
+                        # (mirrors production; in_proximity's touch branch is True
+                        # even with atr_tf=NaN).
+                        if prox and math.isfinite(atr_tf) and atr_tf > 0:
                             ep = start_episode(
                                 symbol, tf, role, cand, i, seg, time_arr[i], C
                             )
@@ -800,7 +808,7 @@ def reference_replay(
                         ep = None
                         if cand is not None:
                             prox = in_proximity(cand, O, H, L, C, atr_tf)
-                            if prox:
+                            if prox and math.isfinite(atr_tf) and atr_tf > 0:
                                 ep = start_episode(
                                     symbol, tf, role, cand, i, seg, time_arr[i], C
                                 )
@@ -883,14 +891,12 @@ def reference_replay(
                         if cand is not None:
                             s = REV_SIGN[role]
                             sE = s * cand["near_edge"]
-                            denom = atr_tf
-                            if not (np.isfinite(denom) and denom > 0):
-                                denom = geom_by_tf[tf][3]
-                            if not (np.isfinite(denom) and denom > 0):
-                                denom = atr5m[i]
+                            # FIX-A/B: OUTSIDE distance scaled ONLY by the
+                            # same-TF previous-geometry ATR; no cross-TF
+                            # fallback (matches production).
                             d_out = (
-                                (s * C - sE) / denom
-                                if (np.isfinite(denom) and denom > 0)
+                                (s * C - sE) / atr_tf
+                                if (np.isfinite(atr_tf) and atr_tf > 0)
                                 else _NAN
                             )
                             result[(i, tf, role)] = (d_out, "OUTSIDE", 0, 0.0, 0.0, 0.0)

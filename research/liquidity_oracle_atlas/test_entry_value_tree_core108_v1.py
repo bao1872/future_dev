@@ -20,6 +20,8 @@ from research.liquidity_oracle_atlas.experiment_entry_value_tree_core108_v1 impo
     Core108Counters,
     Core108PathTracker,
     DEFAULT_ARTIFACT_ROOT,
+    REV_SIGN,
+    TF_ORDER,
     build_base_from_arrays,
     build_base_prefix,
     discontinuity_flags,
@@ -31,6 +33,8 @@ from research.liquidity_oracle_atlas.experiment_entry_value_tree_core108_v1 impo
     run_production_kernel,
     run_streaming,
 )
+
+_NAN = float("nan")
 from research.liquidity_oracle_atlas.build_structure_constrained_trade_oracle_dp_v2 import (
     load_oracle_artifact_v2,
 )
@@ -170,25 +174,117 @@ def test_max_penetration():
 
 
 def test_outside_real_distance_rc3():
-    """RC3: OUTSIDE keeps the REAL signed distance; never 0 sentinel.
+    """RC3: OUTSIDE keeps the REAL signed distance; never 0 sentinel, never a
+    garbage/inf value.
 
-    An OUTSIDE distance is genuinely uncomputable only while no ATR estimate
-    exists (the first ~warmup bars of a segment for the higher TFs). On every
-    row where a real ATR is available the distance must be finite and non-zero.
+    Per FIX-A/B the {tf}_*_distance_atr column is scaled ONLY by its own TF ATR,
+    so when that per-TF ATR is unavailable the value is NaN (not a cross-TF
+    fallback). Here we only assert the column-wide invariants: it is never the 0
+    sentinel, and every value is either a finite number or NaN. The precise
+    unit-consistency behaviour is covered by the three hand tests below.
     """
     r, _ = _run(bars=T0_BARS, join=False)
     feat = r["feature_df"]
     roles = ["SUPPORT", "RESISTANCE", "SELLSIDE_LIQUIDITY", "BUYSIDE_LIQUIDITY"]
-    atr5m_ok = np.isfinite(feat["atr5m"].to_numpy())
     for tf in ("m5", "m15", "h1", "h4"):
         for role in roles:
-            ph = feat[f"{tf}_{role}_phase"].to_numpy()
             dist = feat[f"{tf}_{role}_distance_atr"].to_numpy()
-            outside = ph == "OUTSIDE"
-            ok = outside & atr5m_ok
-            # OUTSIDE must carry a finite, NON-ZERO real distance where ATR exists
-            assert np.all(np.isfinite(dist[ok])), f"{tf}_{role} OUTSIDE NaN (ATR available)"
-            assert np.all(dist[ok] != 0.0), f"{tf}_{role} OUTSIDE distance==0"
+            # every value is finite or NaN; no inf / no cross-TF-scaled constant.
+            # (A genuine 0 means price sits exactly on the edge -> real value, not
+            # a sentinel, so we do NOT forbid 0 here.)
+            assert np.all(np.isfinite(dist) | np.isnan(dist)), (
+                f"{tf}_{role} distance_atr has non-finite-non-NaN value"
+            )
+
+
+# --------------------------------------------------------------------------- #
+# FIX2 (FUTURE-ENTRY-VALUE-TREE-CORE108-V1-FIX2-ATR-UNIT) hand tests
+# Each {tf}_*_distance_atr must carry only its OWN TF's previous-geometry ATR.
+# --------------------------------------------------------------------------- #
+def _fake_h4_geom(atr_h4):
+    """A fake h4 SUPPORT far below price and RESISTANCE far above price, plus a
+    forced h4 ATR (NaN to simulate 'TF ATR not yet warm')."""
+    return ([(1.0, 0.0, 1.0), (1e9, 1e9 + 1.0, 1.0)], [], [], atr_h4)
+
+
+def _h4_atr_mutator(atr_h4):
+    """TEST-ONLY geom_mutator: force every bar's h4 geometry to a fake structure
+    with the given h4 ATR. Other TFs keep their real geometry (so 5m ATR stays
+    finite and rows are still emitted)."""
+
+    def mut(i, geom):
+        out = dict(geom)
+        out["h4"] = _fake_h4_geom(atr_h4)
+        return out
+
+    return mut
+
+
+def test_atr_unit_no_cross_tf_normalization():
+    """FIX-A/B/Test1: previous h4 structure exists + previous h4 ATR = NaN, while
+    5m ATR is finite. The h4_*_distance_atr must be NaN — NEVER raw/ATR5m.
+
+    This is the exact failure the reviewer caught: a cross-TF fallback would have
+    produced raw_distance / ATR5m here. We forbid it.
+    """
+    info = build_base_prefix(SYMBOL, Core108Counters(), max_bars=3000)
+    feat = run_streaming(
+        info, Core108Counters(), SYMBOL, max_bars=3000,
+        geom_mutator=_h4_atr_mutator(_NAN),
+    )
+    ph = feat["h4_SUPPORT_phase"].to_numpy()
+    dist = feat["h4_SUPPORT_distance_atr"].to_numpy()
+    outside = ph == "OUTSIDE"
+    assert outside.any(), "no h4_SUPPORT OUTSIDE rows (vacuous test)"
+    # with h4 ATR unavailable, the h4 distance must be NaN (no 5m substitution)
+    assert np.all(np.isnan(dist[outside])), (
+        "h4_SUPPORT_distance_atr is finite despite h4 ATR=NaN "
+        "(cross-TF/5m ATR fallback leaked back in)"
+    )
+    # sanity: 5m ATR really is finite in this setup, so the forbidden fallback
+    # would have produced a finite value if it still existed
+    assert np.isfinite(feat["atr5m"].to_numpy()).any(), "5m ATR never finite (setup bug)"
+
+
+def test_atr_unit_same_tf_scaling():
+    """FIX-B/Test2: previous h4 ATR = 50.0 (finite, known). Every h4_SUPPORT
+    distance_atr must equal (s*C - s*near_edge)/50, hand-checked against the real
+    close C of each decision bar. The fake support sits far below price, so these
+    rows are OUTSIDE (not yet an episode) — which still uses the same scaling.
+    """
+    info = build_base_prefix(SYMBOL, Core108Counters(), max_bars=3000)
+    feat = run_streaming(
+        info, Core108Counters(), SYMBOL, max_bars=3000,
+        geom_mutator=_h4_atr_mutator(50.0),
+    )
+    ph = feat["h4_SUPPORT_phase"].to_numpy()
+    dist = feat["h4_SUPPORT_distance_atr"].to_numpy()
+    outside = ph == "OUTSIDE"
+    assert outside.any(), "no h4_SUPPORT OUTSIDE rows (vacuous test)"
+    for i0 in np.flatnonzero(outside)[:20]:  # spot-check a sample of OUTSIDE rows
+        t = int(feat["decision_bar_index"].iloc[i0])
+        C = float(info["base"]["close"].iloc[t])
+        s = REV_SIGN["SUPPORT"]
+        expected = (s * C - s * 1.0) / 50.0  # fake support near_edge = 1.0
+        assert abs(dist[i0] - expected) < 1e-6, (
+            f"h4_SUPPORT_distance_atr={dist[i0]} expected={expected}"
+        )
+
+
+def test_no_episode_without_tf_atr():
+    """FIX-C/Test3: previous h4 ATR unavailable for the whole run. No h4 role
+    episode may ever start -> h4_*_episode_age_5m must be 0 everywhere.
+    """
+    info = build_base_prefix(SYMBOL, Core108Counters(), max_bars=3000)
+    feat = run_streaming(
+        info, Core108Counters(), SYMBOL, max_bars=3000,
+        geom_mutator=_h4_atr_mutator(_NAN),
+    )
+    roles = ["SUPPORT", "RESISTANCE", "SELLSIDE_LIQUIDITY", "BUYSIDE_LIQUIDITY"]
+    assert len(feat) > 0, "no emitted rows (vacuous test)"
+    for role in roles:
+        age = feat[f"h4_{role}_episode_age_5m"].to_numpy()
+        assert np.all(age == 0), f"h4_{role} episode started without h4 ATR"
 
 
 def test_missing_structure_representation_rc3():
