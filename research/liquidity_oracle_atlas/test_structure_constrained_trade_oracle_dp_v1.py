@@ -457,13 +457,16 @@ def test_artifact_schema():
 
     meta = artifact_metadata("deadbeef", "SYNTH")
     for k in (
-        "source_sha",
+        "oracle_source_sha",
         "task_id",
         "math_version",
         "entry_semantics",
         "execution_semantics",
         "objective",
         "cost_mode",
+        "generated_at",
+        "row_count_actions",
+        "row_count_trades",
     ):
         assert k in meta
 

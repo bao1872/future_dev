@@ -43,6 +43,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+import plotly.graph_objects as go
 
 from research.liquidity_oracle_atlas.experiment_structural_reversion_pgm_v1 import (
     PINE_DEFAULT,
@@ -598,4 +599,204 @@ def selected_snapshot(track: ViewerTrack, selected_index: int) -> dict[str, Any]
         "liq_up_count": int(track.liq_up_count[i]),
         "liq_down": down,
         "liq_down_count": int(track.liq_down_count[i]),
+    }
+
+
+# --------------------------------------------------------------------------- #
+# DP Oracle overlay (Checkpoint B — FUTURE / HINDSIGHT AUDIT, read-only)        #
+# --------------------------------------------------------------------------- #
+# The oracle is defined on the 5m decision clock. Executions are matched to the
+# ViewerTrack by TIME (never by decision_bar_index) and validated against the
+# bar open. This overlay is a HINDSIGHT audit label; it is NOT a causal signal
+# and never modifies any DTP / SR / Liquidity array.
+ORACLE_TF_ONLY = "5m"
+ORACLE_ALIGN_RTOL = 1e-9
+ORACLE_ALIGN_ATOL = 1e-6
+
+_ENTRY_HOVER = (
+    "<b>%{customdata[0]} ENTRY</b><br>"
+    "fill %{customdata[1]}<br>"
+    "price %{customdata[2]}<br>"
+    "source_bits %{customdata[3]}<br>"
+    "trading_day %{customdata[4]}<br>"
+    "%{customdata[5]}<extra></extra>"
+)
+_EXIT_HOVER = (
+    "<b>%{customdata[0]} EXIT (Gross Oracle)</b><br>"
+    "fill %{customdata[1]}<br>"
+    "price %{customdata[2]}<br>"
+    "gross %{customdata[3]:.2f} pts<br>"
+    "net %{customdata[4]:.2f} pts<br>"
+    "holding %{customdata[5]} bars<br>"
+    "MFE %{customdata[6]:.2f} / MAE %{customdata[7]:.2f}<br>"
+    "%{customdata[8]}<extra></extra>"
+)
+
+
+def oracle_fill_index(
+    track: "ViewerTrack",
+    fill_time: Any,
+    fill_price: float,
+    *,
+    rtol: float = ORACLE_ALIGN_RTOL,
+    atol: float = ORACLE_ALIGN_ATOL,
+) -> int:
+    """Map an oracle execution ``(fill_time, fill_price)`` to a ViewerTrack x index.
+
+    Alignment uses TIME as the semantic key (never ``decision_bar_index``), then
+    VALIDATES ``open(fill) == fill_price``. Returns -1 on any mismatch (non-5m
+    track, missing bar, or price mismatch) so a discontinuity / missing bar /
+    reindexed series can never silently draw the wrong position.
+    """
+    if track.tf_label != ORACLE_TF_ONLY:
+        return -1
+    ft = np.datetime64(pd.Timestamp(fill_time).to_datetime64(), "ns")
+    idx = np.flatnonzero(track.time == ft)
+    if idx.size == 0:
+        return -1
+    x = int(idx[0])
+    if not np.isclose(float(track.open[x]), float(fill_price), rtol=rtol, atol=atol):
+        return -1
+    return x
+
+
+def select_visible_oracle_trades(track: "ViewerTrack", selected: int, trades: Any):
+    """Vectorized viewport filter, then per-trade time->index alignment.
+
+    Returns ``(records, mismatch_count)`` where ``records`` is a list of
+    ``(row_dict, entry_x, exit_x)``. Non-5m tracks return ``([], 0)`` so the
+    overlay never draws execution markers on 15m / 1H / 4H.
+    """
+    if track.tf_label != ORACLE_TF_ONLY:
+        return [], 0
+    if trades is None:
+        return [], 0
+    if not isinstance(trades, pd.DataFrame):
+        trades = pd.DataFrame(trades)
+    if len(trades) == 0:
+        return [], 0
+
+    lo, hi = compute_viewport(track, selected)
+    t_lo = track.time[lo]
+    t_hi = track.time[hi]
+    ent_t = pd.to_datetime(trades["entry_fill_time"]).to_numpy()
+    ext_t = pd.to_datetime(trades["exit_fill_time"]).to_numpy()
+    mask = (ext_t >= t_lo) & (ent_t <= t_hi)
+    visible = trades.loc[mask]
+
+    records: list = []
+    mismatch = 0
+    for row in visible.to_dict("records"):
+        ex = oracle_fill_index(track, row["entry_fill_time"], row["entry_fill_price"])
+        xx = oracle_fill_index(track, row["exit_fill_time"], row["exit_fill_price"])
+        if ex < 0 or xx < 0:
+            mismatch += 1
+            continue
+        records.append((row, ex, xx))
+    return records, mismatch
+
+
+def _push_marker(d, x, y, cd, text):
+    d["x"].append(x)
+    d["y"].append(float(y))
+    d["cd"].append(cd)
+    d["text"].append(text)
+
+
+def _add_marker_trace(fig, d, *, symbol, color, name, textpos, hovertemplate):
+    if not d["x"]:
+        return
+    fig.add_trace(go.Scatter(
+        x=d["x"], y=d["y"], mode="markers+text",
+        marker={"symbol": symbol, "size": 12, "color": color},
+        text=d["text"], textposition=textpos,
+        textfont={"size": 9, "color": color},
+        customdata=d["cd"], hovertemplate=hovertemplate,
+        name=name, showlegend=True,
+    ))
+
+
+def add_dp_oracle_overlay(fig, track: "ViewerTrack", selected: int, trades: Any):
+    """Add the hindsight oracle Entry/Exit/Reversal markers to ``fig`` (5m only).
+
+    At most FOUR marker traces (Long Entry/Exit, Short Entry/Exit) plus ONE
+    connector trace are added, regardless of how many trades are visible.
+    A reversal (e.g. LONG -> SHORT) naturally yields BOTH an exit marker of the
+    closing trade and an entry marker of the opening trade at the same fill.
+    """
+    if track.tf_label != ORACLE_TF_ONLY:
+        return fig
+    records, _mismatch = select_visible_oracle_trades(track, selected, trades)
+    if not records:
+        return fig
+
+    le = {"x": [], "y": [], "cd": [], "text": []}
+    lx = {"x": [], "y": [], "cd": [], "text": []}
+    se = {"x": [], "y": [], "cd": [], "text": []}
+    sx = {"x": [], "y": [], "cd": [], "text": []}
+    conn_x: list = []
+    conn_y: list = []
+
+    for row, ex, xx in records:
+        direction = str(row["direction"])
+        is_long = direction == "LONG"
+        entry_cd = (
+            direction,
+            str(pd.Timestamp(row["entry_fill_time"])),
+            float(row["entry_fill_price"]),
+            int(row.get("entry_source_bits", 0)),
+            str(row.get("trading_day", "")),
+            str(row.get("trade_id", "")),
+        )
+        exit_cd = (
+            direction,
+            str(pd.Timestamp(row["exit_fill_time"])),
+            float(row["exit_fill_price"]),
+            float(row.get("gross_points", np.nan)),
+            float(row.get("net_points", np.nan)),
+            int(row.get("holding_bars", 0)),
+            float(row.get("MFE", np.nan)),
+            float(row.get("MAE", np.nan)),
+            str(row.get("trade_id", "")),
+        )
+        if is_long:
+            _push_marker(le, ex, row["entry_fill_price"], entry_cd, "L IN")
+            _push_marker(lx, xx, row["exit_fill_price"], exit_cd, "L OUT")
+        else:
+            _push_marker(se, ex, row["entry_fill_price"], entry_cd, "S IN")
+            _push_marker(sx, xx, row["exit_fill_price"], exit_cd, "S OUT")
+        conn_x += [ex, xx, None]
+        conn_y += [float(row["entry_fill_price"]), float(row["exit_fill_price"]), None]
+
+    _add_marker_trace(fig, le, symbol="triangle-up", color=C_BUY,
+                      name="Long Entry", textpos="top center", hovertemplate=_ENTRY_HOVER)
+    _add_marker_trace(fig, lx, symbol="x", color=C_BUY,
+                      name="Long Exit", textpos="bottom center", hovertemplate=_EXIT_HOVER)
+    _add_marker_trace(fig, se, symbol="triangle-down", color=C_SELL,
+                      name="Short Entry", textpos="bottom center", hovertemplate=_ENTRY_HOVER)
+    _add_marker_trace(fig, sx, symbol="x", color=C_SELL,
+                      name="Short Exit", textpos="top center", hovertemplate=_EXIT_HOVER)
+
+    if conn_x:
+        fig.add_trace(go.Scatter(
+            x=conn_x, y=conn_y, mode="lines",
+            line={"width": 1, "dash": "dot", "color": C_TEXT}, opacity=0.35,
+            name="Oracle trade", showlegend=False, hoverinfo="skip",
+        ))
+    return fig
+
+
+def oracle_viewport_summary(track: "ViewerTrack", selected: int, trades: Any) -> dict:
+    """Audit-only summary of the visible oracle trades (no strategy verdict)."""
+    records, mismatch = select_visible_oracle_trades(track, selected, trades)
+    longs = sum(1 for (r, _e, _x) in records if str(r["direction"]) == "LONG")
+    gross = sum(float(r.get("gross_points", 0.0)) for (r, _e, _x) in records)
+    holds = [int(r.get("holding_bars", 0)) for (r, _e, _x) in records]
+    return {
+        "visible_trades": len(records),
+        "long_trades": longs,
+        "short_trades": len(records) - longs,
+        "total_gross_points": float(gross),
+        "median_holding_bars": float(np.median(holds)) if holds else 0.0,
+        "alignment_mismatch": int(mismatch),
     }

@@ -23,6 +23,8 @@ Visual contract (frozen):
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -32,19 +34,33 @@ from research.liquidity_oracle_atlas.audit_view_v1 import SYMBOLS
 from research.liquidity_oracle_atlas.build_forming_environment_v1 import (
     FormingEnvironmentBuilder,
 )
+from research.liquidity_oracle_atlas.build_structure_constrained_trade_oracle_dp_v1 import (
+    ARTIFACT_ROOT_DIRNAME,
+    MATH_VERSION,
+    load_oracle_artifact,
+)
 from research.liquidity_oracle_atlas.git_head import git_head
 from research.liquidity_oracle_atlas.indicator_viewer_v1 import (
     BINS,
     LIQ_VISIBLE,
+    ORACLE_TF_ONLY,
     PROFILE_OFFSET,
     SR_MAX,
+    add_dp_oracle_overlay,
     build_viewer_track,
     compute_viewport,
     dtp_profile,
+    oracle_viewport_summary,
+    select_visible_oracle_trades,
     selected_snapshot,
 )
 
 TF_LABELS = ["5m", "15m", "1H", "4H"]
+
+# DP Oracle audit artifacts live outside the indicator pipeline (read-only).
+ORACLE_ARTIFACT_ROOT = (
+    Path(__file__).resolve().parents[1] / "artifacts" / ARTIFACT_ROOT_DIRNAME
+)
 
 # --- palette --------------------------------------------------------------- #
 C_BG = "#131722"
@@ -398,6 +414,13 @@ def build_track_cached(symbol: str, tf: str, source_sha: str):
     return build_viewer_track(base, tf, symbol=symbol, source_sha=source_sha)
 
 
+@st.cache_data(show_spinner="加载 DP Oracle artifact…")
+def load_oracle_artifact_cached(root: str, symbol: str, math_version: str):
+    """Read-only, fail-closed oracle artifact load. Cache key = (root, symbol,
+    math_version); the Viewer NEVER recomputes the DP on rerun."""
+    return load_oracle_artifact(root, symbol, expected_math_version=math_version)
+
+
 def resolve_selection(symbol, tf, n_bars, prev_selected, prev_ctx):
     """Pure data-selection contract for Symbol / Timeframe switching.
 
@@ -427,6 +450,7 @@ def main() -> None:
     st.session_state.setdefault("iv_show_dtp", True)
     st.session_state.setdefault("iv_show_sr", True)
     st.session_state.setdefault("iv_show_liq", True)
+    st.session_state.setdefault("iv_show_oracle", False)
 
     # ---- toolbar columns ------------------------------------------------ #
     col_sym, col_tf, col_date, col_bt, col_prev, col_next, c1, c2, c3 = st.columns(
@@ -448,6 +472,14 @@ def main() -> None:
         st.session_state.iv_show_sr = st.checkbox("SR", value=st.session_state.iv_show_sr)
     with c3:
         st.session_state.iv_show_liq = st.checkbox("Liquidity", value=st.session_state.iv_show_liq)
+
+    # DP Oracle audit overlay — OFF by default, read-only, 5m-clock only.
+    st.session_state.iv_show_oracle = st.checkbox(
+        "DP Oracle — FUTURE / HINDSIGHT AUDIT",
+        value=st.session_state.iv_show_oracle,
+        help="Future-derived hindsight labels. For manual audit only; NOT a causal "
+             "trading signal and never a model feature.",
+    )
 
     # (2) NOW build the track from the CURRENT widget values, so the chart
     #     always corresponds to the dropdown in the SAME rerun.
@@ -494,11 +526,62 @@ def main() -> None:
     selected = int(st.session_state.iv_selected)
     snap = selected_snapshot(track, selected)
 
+    # ---- DP Oracle audit overlay (read-only, fail-closed, 5m only) ------- #
+    show_oracle = bool(st.session_state.iv_show_oracle)
+    oracle_trades = None
+    oracle_meta = None
+    if show_oracle:
+        st.warning(
+            "**DP Oracle uses future prices to find hindsight-optimal intraday "
+            "trades. It is for audit / research labels only — NOT a causal "
+            "trading signal and never a model feature.**"
+        )
+        loaded = load_oracle_artifact_cached(
+            str(ORACLE_ARTIFACT_ROOT), symbol, MATH_VERSION
+        )
+        if not loaded["ok"]:
+            st.error(f"Oracle overlay disabled (fail-closed): `{loaded['reason']}`.")
+        else:
+            oracle_trades = loaded["trades"]
+            oracle_meta = loaded["metadata"]
+            if tf != ORACLE_TF_ONLY:
+                st.info(
+                    "Oracle executions are defined on the 5m clock. Switch to 5m "
+                    "to inspect exact Entry / Exit points."
+                )
+                oracle_trades = None
+            else:
+                _rec, _mism = select_visible_oracle_trades(track, selected, oracle_trades)
+                if _mism > 0:
+                    st.error(
+                        f"Oracle overlay disabled (fail-closed): time alignment "
+                        f"mismatch on {_mism} visible trade(s)."
+                    )
+                    oracle_trades = None
+                else:
+                    _summ = oracle_viewport_summary(track, selected, oracle_trades)
+                    st.caption(
+                        f"Oracle audit · visible trades={_summ['visible_trades']} "
+                        f"(L={_summ['long_trades']} / S={_summ['short_trades']}) · "
+                        f"total gross oracle PnL={_summ['total_gross_points']:.2f} pts · "
+                        f"median holding={_summ['median_holding_bars']:.0f} bars · "
+                        f"objective={oracle_meta.get('objective')} · "
+                        f"cost_mode={oracle_meta.get('cost_mode')}"
+                    )
+                    if oracle_meta.get("oracle_source_sha") != git_head():
+                        st.warning(
+                            "Oracle artifact oracle_source_sha="
+                            f"`{oracle_meta.get('oracle_source_sha')}` != current "
+                            f"HEAD=`{git_head()}` — possibly stale artifact."
+                        )
+
     # ---- main + snapshot ------------------------------------------------ #
     chart_col, snap_col = st.columns([4, 1])
     with chart_col:
         fig = build_figure(track, selected, st.session_state.iv_show_dtp,
                            st.session_state.iv_show_sr, st.session_state.iv_show_liq)
+        if show_oracle and oracle_trades is not None and tf == ORACLE_TF_ONLY:
+            fig = add_dp_oracle_overlay(fig, track, selected, oracle_trades)
         event = st.plotly_chart(
             fig, key="iv_chart", on_select="rerun", selection_mode="points",
             use_container_width=True)

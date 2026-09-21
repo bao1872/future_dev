@@ -50,7 +50,10 @@ Canonical owner reused (READ ONLY):
 
 from __future__ import annotations
 
+import json
 import time
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -868,22 +871,127 @@ def build_artifact_frames(result: Dict[str, Any]) -> Dict[str, pd.DataFrame]:
 
 
 def artifact_metadata(
-    source_sha: str,
+    oracle_source_sha: str,
     symbol: str,
     data_start: Any = None,
     data_end: Any = None,
-    cost_mode: str = "gross_points_zero_cost",
+    *,
+    cost_mode: str = "zero_cost",
+    generated_at: Optional[str] = None,
+    row_count_actions: int = 0,
+    row_count_trades: int = 0,
 ) -> Dict[str, Any]:
-    """Artifact provenance (contract §14 / §19) — consumed by the future UI."""
+    """Artifact provenance (contract §14 / §19) — consumed by the Viewer UI."""
     return {
-        "source_sha": source_sha,
         "task_id": TASK_ID,
         "math_version": MATH_VERSION,
-        "entry_semantics": "current_5m_range_touch_pre_existing_SR_LIQ_zone_delta0",
-        "execution_semantics": "decision=close(i); fill=open(i+1); unit_flat_both_ends",
-        "objective": "gross_open_to_open_pnl",
-        "cost_mode": cost_mode,
+        "oracle_source_sha": oracle_source_sha,
         "symbol": symbol,
         "data_start": str(data_start),
         "data_end": str(data_end),
+        "objective": "gross_open_to_open_pnl",
+        "cost_mode": cost_mode,
+        "entry_semantics": "current_5m_range_touch_pre_existing_SR_LIQ_zone_delta0",
+        "execution_semantics": "decision=close(i); fill=open(i+1); unit_flat_both_ends",
+        "generated_at": generated_at or datetime.now(timezone.utc).isoformat(),
+        "row_count_actions": int(row_count_actions),
+        "row_count_trades": int(row_count_trades),
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Artifact writer / reader (Checkpoint B)                                      #
+# --------------------------------------------------------------------------- #
+ARTIFACT_ROOT_DIRNAME = "intraday_dp_oracle_r1"
+ORACLE_ACTIONS_FILE = "oracle_actions.parquet"
+ORACLE_TRADES_FILE = "oracle_trades.parquet"
+ORACLE_METADATA_FILE = "metadata.json"
+
+
+def write_oracle_artifact(
+    result: Dict[str, Any],
+    root: Any,
+    *,
+    oracle_source_sha: str,
+    generated_at: Optional[str] = None,
+) -> Path:
+    """Write ``<root>/<symbol>/{oracle_actions,oracle_trades,metadata.json}``.
+
+    ``result`` is a ``run_symbol_dp`` / ``run_base_dp`` / ``run_arrays_dp`` output.
+    NO DP math is touched; this only persists the already-computed oracle labels.
+    """
+    symbol = result["symbol"]
+    outdir = Path(root) / symbol
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    frames = build_artifact_frames(result)
+    actions = frames["oracle_actions"]
+    trades = frames["oracle_trades"]
+    actions.to_parquet(outdir / ORACLE_ACTIONS_FILE, index=False)
+    trades.to_parquet(outdir / ORACLE_TRADES_FILE, index=False)
+
+    times = result["time"]
+    meta = artifact_metadata(
+        oracle_source_sha,
+        symbol,
+        data_start=pd.Timestamp(times[0]),
+        data_end=pd.Timestamp(times[-1]),
+        generated_at=generated_at,
+        row_count_actions=len(actions),
+        row_count_trades=len(trades),
+    )
+    (outdir / ORACLE_METADATA_FILE).write_text(
+        json.dumps(meta, indent=2, default=str)
+    )
+    return outdir
+
+
+def load_oracle_artifact(
+    root: Any,
+    symbol: str,
+    *,
+    expected_math_version: Optional[str] = MATH_VERSION,
+    expected_source_sha: Optional[str] = None,
+) -> Dict[str, Any]:
+    """FAIL-CLOSED artifact loader.
+
+    Returns ``{"ok": bool, "reason": str|None, "actions", "trades", "metadata"}``.
+    Never silently falls back to another file / symbol.
+    """
+    def _fail(reason: str) -> Dict[str, Any]:
+        return {
+            "ok": False, "reason": reason,
+            "actions": None, "trades": None, "metadata": None,
+        }
+
+    outdir = Path(root) / symbol
+    ap = outdir / ORACLE_ACTIONS_FILE
+    tp = outdir / ORACLE_TRADES_FILE
+    mp = outdir / ORACLE_METADATA_FILE
+    if not (ap.exists() and tp.exists() and mp.exists()):
+        return _fail("missing_artifact")
+
+    try:
+        meta = json.loads(mp.read_text())
+    except (OSError, ValueError):
+        return _fail("missing_metadata")
+    if not isinstance(meta, dict) or "math_version" not in meta:
+        return _fail("missing_metadata")
+
+    if expected_math_version is not None and meta.get("math_version") != expected_math_version:
+        return _fail("math_version_mismatch")
+    if meta.get("symbol") != symbol:
+        return _fail("symbol_mismatch")
+    if expected_source_sha is not None and meta.get("oracle_source_sha") != expected_source_sha:
+        return _fail("source_sha_mismatch")
+
+    try:
+        actions = pd.read_parquet(ap)
+        trades = pd.read_parquet(tp)
+    except (OSError, ValueError):
+        return _fail("unreadable_artifact")
+
+    return {
+        "ok": True, "reason": None,
+        "actions": actions, "trades": trades, "metadata": meta,
     }
