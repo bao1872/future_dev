@@ -132,6 +132,11 @@ class KernelCounters:
     concat_count: int = 0
     # DP-side accounting (incremented by the trade-oracle DP runner, not here)
     dp_state_count: int = 0
+    # Event-engine mechanical counters. On the DP mask-only fast path all three
+    # MUST stay 0 (proves the episode/event machinery is not executed).
+    event_role_iteration_count: int = 0
+    event_classifier_call_count: int = 0
+    outcome_call_count: int = 0
 
 
 # --------------------------------------------------------------------------- #
@@ -997,6 +1002,7 @@ def run_symbol_streaming(
     capture_geom: bool = False,
     capture_entry_mask: bool = False,
     emit_events: bool = True,
+    mask_only: bool = False,
 ) -> Dict[str, Any]:
     """Single-pass causal event engine for one symbol (real data path).
 
@@ -1006,15 +1012,16 @@ def run_symbol_streaming(
     ``capture_geom`` records the per-decision production geometry for the T1
     differential harness. ``capture_entry_mask`` records the frozen 8-bit
     entry mask (contract §7 / §8): current 5m range touching a PRE-EXISTING
-    SR / Liquidity zone. ``emit_events=False`` is the DP fast path: episode /
-    state is still maintained, but no event dict is built and
-    ``compute_outcome`` is never called. All three NEVER call the slow
-    reference.
+    SR / Liquidity zone. ``emit_events=False`` skips event-row construction
+    (no ``compute_outcome``). ``mask_only=True`` is the true DP fast path: the
+    (tf, role) episode/event lifecycle is NOT executed at all and no DTP context
+    arrays are stored. None of these call the slow reference.
     """
     info = build_base_frame(symbol, counters)
     return _stream_from_base(
         info["base"], info["form"], info["seg_completed"], counters,
         max_bars, symbol, capture_geom, capture_entry_mask, emit_events,
+        mask_only,
     )
 
 
@@ -1026,6 +1033,7 @@ def stream_from_base(
     capture_geom: bool = False,
     capture_entry_mask: bool = False,
     emit_events: bool = True,
+    mask_only: bool = False,
 ) -> Dict[str, Any]:
     """Streaming entry point for a prebuilt base frame (synthetic T0 tests).
 
@@ -1042,7 +1050,7 @@ def stream_from_base(
     counters.resample_count += len(TF_ORDER)
     return _stream_from_base(
         base, form, seg_completed, counters, max_bars, symbol, capture_geom,
-        capture_entry_mask, emit_events,
+        capture_entry_mask, emit_events, mask_only,
     )
 
 
@@ -1056,6 +1064,7 @@ def _stream_from_base(
     capture_geom: bool = False,
     capture_entry_mask: bool = False,
     emit_events: bool = True,
+    mask_only: bool = False,
 ) -> Dict[str, Any]:
     """Core single-pass streaming loop (shared by all entry points)."""
     n = len(base)
@@ -1075,21 +1084,25 @@ def _stream_from_base(
     ci_per_tf = {tf: 0 for tf in TF_ORDER}
     seg_list_per_tf = {tf: [] for tf in TF_ORDER}
 
-    # per-decision DTP context per TF + m5 atr for outcomes
-    dtp_ctx = {
-        tf: {
-            "dev": np.full(n, _NAN),
-            "slope_atr": np.full(n, _NAN),
-            "trend_state": np.full(n, _NAN),
-            "atr": np.full(n, _NAN),
+    # per-decision DTP context per TF + m5 atr for outcomes. These are ONLY
+    # needed by the event experiment; the DP mask-only path neither allocates
+    # nor stores them (contract FIX1).
+    if mask_only:
+        dtp_ctx = None
+        atr5m = None
+        active: Dict[Tuple[str, str], Optional[Episode]] = {}
+    else:
+        dtp_ctx = {
+            tf: {
+                "dev": np.full(n, _NAN),
+                "slope_atr": np.full(n, _NAN),
+                "trend_state": np.full(n, _NAN),
+                "atr": np.full(n, _NAN),
+            }
+            for tf in TF_ORDER
         }
-        for tf in TF_ORDER
-    }
-    atr5m = np.full(n, _NAN)
-
-    active: Dict[Tuple[str, str], Optional[Episode]] = {
-        (tf, role): None for tf in TF_ORDER for role in ROLES
-    }
+        atr5m = np.full(n, _NAN)
+        active = {(tf, role): None for tf in TF_ORDER for role in ROLES}
 
     sr_first_seen: Dict[Tuple, int] = {}
 
@@ -1143,12 +1156,13 @@ def _stream_from_base(
             counters.preview_count += 1
 
             atr_tf = feats["atr"]
-            dtp_ctx[tf]["dev"][i] = feats["dev"]
-            dtp_ctx[tf]["slope_atr"][i] = feats["slope_atr"]
-            dtp_ctx[tf]["trend_state"][i] = feats["trend_state"]
-            dtp_ctx[tf]["atr"][i] = atr_tf
-            if tf == "m5":
-                atr5m[i] = atr_tf
+            if not mask_only:
+                dtp_ctx[tf]["dev"][i] = feats["dev"]
+                dtp_ctx[tf]["slope_atr"][i] = feats["slope_atr"]
+                dtp_ctx[tf]["trend_state"][i] = feats["trend_state"]
+                dtp_ctx[tf]["atr"][i] = atr_tf
+                if tf == "m5":
+                    atr5m[i] = atr_tf
 
             channels = list(pv.sr.channels)
             liq_up = [dict(x) for x in pv.liq.levels_up]
@@ -1171,10 +1185,17 @@ def _stream_from_base(
                 for tf in TF_ORDER
             }
 
+        # DP mask-only fast path: geometry + mask only. The (tf, role) episode /
+        # event lifecycle is deliberately NOT executed and no DTP context is
+        # stored (contract FIX1).
+        if mask_only:
+            continue
+
         # ---- per (tf, role) episode lifecycle + event labeling
         for tf in TF_ORDER:
             channels, liq_up, liq_down, atr_tf = geom_by_tf[tf]
             for role in ROLES:
+                counters.event_role_iteration_count += 1
                 key = (tf, role)
                 ep = active[key]
 
@@ -1216,6 +1237,7 @@ def _stream_from_base(
                         continue
 
                 # classify this bar
+                counters.event_classifier_call_count += 1
                 ev = classify_bar(ep, O, H, L, C)
                 track_approach(ep, C, atr_tf)
                 if ev is not None:
@@ -1223,6 +1245,7 @@ def _stream_from_base(
                         finalize_approach(ep)
                         ep.first_event_emitted = True
                     if emit_events:
+                        counters.outcome_call_count += 1
                         row = build_event_row(
                             ep, tf, role, f"{role}_{ev}", i, time_arr[i], dtp_ctx, geom_by_tf,
                             C, atr5m, O5, H5, L5, C5,
@@ -1243,6 +1266,7 @@ def _stream_from_base(
                     elif recedes_without_touch(ep, C, atr):
                         # no-touch approach that receded without any interaction
                         if emit_events:
+                            counters.outcome_call_count += 1
                             row = build_event_row(
                                 ep, tf, role, f"{role}_APPROACH_NO_TOUCH_REJECT", i,
                                 time_arr[i], dtp_ctx, geom_by_tf, C, atr5m,
@@ -1264,6 +1288,7 @@ def _stream_from_base(
         "events": events,
         "dtp_ctx": dtp_ctx,
         "atr5m": atr5m,
+        "mask_only": mask_only,
     }
     if capture_geom:
         result["decision_geom"] = decision_geom

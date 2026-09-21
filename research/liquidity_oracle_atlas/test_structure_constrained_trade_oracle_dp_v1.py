@@ -30,6 +30,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from research.export_ob_trigger_execution_v21 import load_raw_5m
 from research.liquidity_oracle_atlas.build_structure_constrained_trade_oracle_dp_v1 import (
     DATA_END,
     DISCONTINUITY,
@@ -40,6 +41,7 @@ from research.liquidity_oracle_atlas.build_structure_constrained_trade_oracle_dp
     build_artifact_frames,
     build_intraday_units,
     exhaustive_reference,
+    run_arrays_dp,
     run_base_dp,
     run_symbol_dp,
     solve_day_dp,
@@ -52,6 +54,7 @@ from research.liquidity_oracle_atlas.experiment_structure_interaction_entry_v1 i
     entry_bits_from_prev_geometry,
     stream_from_base,
 )
+from research.phase1_tradability.phase1_contract_v1 import discontinuity_flags
 
 
 # --------------------------------------------------------------------------- #
@@ -580,35 +583,108 @@ def _walk_path(core, D):
 
 
 # =========================================================================== #
-# TP — performance + memory scaling (N / 2N / 4N)                              #
+# FIX1 — true mask-only fast path                                              #
+# =========================================================================== #
+def test_mask_only_differential_and_counters():
+    """mask_only must be byte-identical to the normal mask path AND must not
+    execute any of the (tf, role) event machinery."""
+    base = _synth_base(n=900, seed=5, disc_index=450, day_len=300)
+
+    c_norm = KernelCounters()
+    r_norm = stream_from_base(
+        base, c_norm, capture_entry_mask=True, emit_events=False, mask_only=False
+    )
+    c_fast = KernelCounters()
+    r_fast = stream_from_base(
+        base, c_fast, capture_entry_mask=True, emit_events=False, mask_only=True
+    )
+
+    # exact entry-mask equality
+    assert np.array_equal(r_norm["entry_mask"], r_fast["entry_mask"])
+    assert np.array_equal(r_norm["entry_eligible"], r_fast["entry_eligible"])
+
+    # mask-only: no event machinery at all, no DTP context allocated
+    assert c_fast.event_role_iteration_count == 0
+    assert c_fast.event_classifier_call_count == 0
+    assert c_fast.outcome_call_count == 0
+    assert r_fast["dtp_ctx"] is None
+    assert r_fast["atr5m"] is None
+    assert r_fast["events"] == []
+
+    # normal path (emit_events=False) still runs the role loop but no outcome
+    assert c_norm.event_role_iteration_count > 0
+    assert c_norm.event_classifier_call_count > 0
+    assert c_norm.outcome_call_count == 0
+
+
+def _raw_ag():
+    raw = load_raw_5m("AG").sort_values("bar_start_time").reset_index(drop=True)
+    disc = np.asarray(discontinuity_flags("AG"), dtype=bool)
+    return (
+        raw["bar_start_time"].to_numpy(),
+        raw["trading_day"].to_numpy(),
+        raw["open"].to_numpy(float),
+        raw["high"].to_numpy(float),
+        raw["low"].to_numpy(float),
+        raw["close"].to_numpy(float),
+        disc,
+    )
+
+
+# =========================================================================== #
+# TP — TRUE N / 2N / 4N prefix benchmark (time and memory pass separated)       #
 # =========================================================================== #
 def test_TP_performance_gate():
+    # raw load happens ONCE, outside every timed section
+    T, D, O, H, L, C, disc = _raw_ag()
     sizes = [5000, 10000, 20000]
+
+    # ---- TIME pass: tracemalloc OFF (min of reps: robust to load noise) --- #
+    REPS = 2
     times = {}
-    peaks = {}
     for N in sizes:
-        c = KernelCounters()
-        res = run_symbol_dp("AG", c, max_bars=N, profile_memory=True)
-        times[N] = res["runtime_total_sec"]
-        peaks[N] = res["peak_tracemalloc_mb"]
-        assert c.reference_call_count == 0
-        assert c.full_history_recompute_count == 0
-        assert c.concat_count == 0
-        assert c.raw_load_count == 1
-        assert c.resample_count == 4
-        assert c.dp_state_count > 0
+        best = float("inf")
+        for _ in range(REPS):
+            c = KernelCounters()
+            res = run_arrays_dp(
+                T[:N], D[:N], O[:N], H[:N], L[:N], C[:N], disc[:N], c, symbol="AG"
+            )
+            best = min(best, res["runtime_total_sec"])
+            assert c.reference_call_count == 0
+            assert c.full_history_recompute_count == 0
+            assert c.concat_count == 0
+            assert c.dp_state_count > 0
+            # true mask-only path -> event machinery is never executed
+            assert c.event_role_iteration_count == 0
+            assert c.event_classifier_call_count == 0
+            assert c.outcome_call_count == 0
+        times[N] = best
 
     r1 = times[10000] / times[5000]
     r2 = times[20000] / times[10000]
     print(
-        f"  TP timing: 5k={times[5000]:.2f}s 10k={times[10000]:.2f}s "
+        f"  TP-TIME  5k={times[5000]:.2f}s 10k={times[10000]:.2f}s "
         f"20k={times[20000]:.2f}s ratios={r1:.2f}/{r2:.2f}"
     )
+    assert r1 < 2.8, f"5k->10k time scaling {r1} exceeds 2.8"
+    assert r2 < 2.8, f"10k->20k time scaling {r2} exceeds 2.8"
+
+    # ---- MEMORY pass: tracemalloc ON, separate run ------------------------ #
+    peaks = {}
+    for N in sizes:
+        c = KernelCounters()
+        res = run_arrays_dp(
+            T[:N], D[:N], O[:N], H[:N], L[:N], C[:N], disc[:N], c,
+            symbol="AG", profile_memory=True,
+        )
+        peaks[N] = res["peak_tracemalloc_mb"]
+
+    m1 = peaks[10000] / peaks[5000]
+    m2 = peaks[20000] / peaks[10000]
     print(
-        f"  TP peak memory MB: 5k={peaks[5000]:.2f} 10k={peaks[10000]:.2f} "
-        f"20k={peaks[20000]:.2f}"
+        f"  TP-MEM   5k={peaks[5000]:.2f}MB 10k={peaks[10000]:.2f}MB "
+        f"20k={peaks[20000]:.2f}MB ratios={m1:.2f}/{m2:.2f}"
     )
-    assert r1 < 2.8, f"5k->10k scaling {r1} exceeds 2.8"
-    assert r2 < 2.8, f"10k->20k scaling {r2} exceeds 2.8"
-    # memory must not blow up super-linearly (loose sanity gate)
+    # approximately linear memory (loose sanity gate)
     assert peaks[20000] < 6.0 * peaks[5000] + 100.0
+    assert m1 < 3.2 and m2 < 3.2, f"memory scaling {m1}/{m2} grew super-linearly"

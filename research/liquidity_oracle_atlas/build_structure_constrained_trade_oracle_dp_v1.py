@@ -60,6 +60,7 @@ from research.liquidity_oracle_atlas.experiment_structure_interaction_entry_v1 i
     KernelCounters,
     _stream_from_base,
     build_base_frame,
+    build_base_from_arrays,
     stream_from_base,
 )
 
@@ -610,7 +611,8 @@ def run_symbol_dp(
     """Single-pass production runner for one symbol.
 
     raw load once -> build_base_frame once -> structure streaming once
-    (capture_entry_mask=True, emit_events=False) -> DP once per intraday unit.
+    (capture_entry_mask=True, emit_events=False, mask_only=True) -> DP once per
+    intraday unit.
 
     ``profile_memory`` wraps ONLY the DP stage with ``tracemalloc`` (the artifact
     arrays are the memory that scales with N; the full-history base load is a
@@ -628,6 +630,7 @@ def run_symbol_dp(
         symbol,
         capture_entry_mask=True,
         emit_events=False,
+        mask_only=True,
     )
     t1 = time.perf_counter()
 
@@ -662,8 +665,70 @@ def run_base_dp(
         symbol=symbol,
         capture_entry_mask=True,
         emit_events=False,
+        mask_only=True,
     )
     return _dp_from_stream(symbol, base, res, counters, cost_points=cost_points)
+
+
+def run_arrays_dp(
+    time_arr,
+    trading_day_arr,
+    o,
+    h,
+    l,
+    c,
+    disc,
+    counters: KernelCounters,
+    symbol: str = "PREFIX",
+    *,
+    cost_points: Optional[np.ndarray] = None,
+    profile_memory: bool = False,
+) -> Dict[str, Any]:
+    """TRUE prefix runner for the N/2N/4N TP benchmark.
+
+    Given already-sliced (aligned, causal) raw arrays, this times the WHOLE
+    prefix pipeline:
+
+        canonical raw_frame_from_owner + resample/forming precompute
+          -> mask-only structure streaming
+          -> intraday DP
+
+    There is NO full-history precompute: the caller slices the prefix and the
+    raw load happens outside the timed section, so the measured input is exactly
+    the prefix length. ``profile_memory`` wraps the whole prefix pipeline.
+    """
+    if profile_memory and tracemalloc is not None:
+        tracemalloc.start()
+
+    t0 = time.perf_counter()
+    info = build_base_from_arrays(
+        time_arr, trading_day_arr, o, h, l, c, disc, counters
+    )
+    base = info["base"]
+    res = _stream_from_base(
+        info["base"],
+        info["form"],
+        info["seg_completed"],
+        counters,
+        None,
+        symbol,
+        capture_entry_mask=True,
+        emit_events=False,
+        mask_only=True,
+    )
+    t1 = time.perf_counter()
+    out = _dp_from_stream(symbol, base, res, counters, cost_points=cost_points)
+    t2 = time.perf_counter()
+
+    if profile_memory and tracemalloc is not None:
+        _cur, peak = tracemalloc.get_traced_memory()
+        out["peak_tracemalloc_mb"] = peak / (1024.0 * 1024.0)
+        tracemalloc.stop()
+
+    out["runtime_candidate_sec"] = t1 - t0
+    out["runtime_dp_sec"] = t2 - t1
+    out["runtime_total_sec"] = t2 - t0
+    return out
 
 
 def run_stage_dp(
