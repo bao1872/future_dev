@@ -89,6 +89,14 @@ REV_SIGN = {
     "BUYSIDE_LIQUIDITY": -1,
 }
 
+# Frozen 16-bit mapping for the DP entry-candidate mask (contract §12).
+# bit position = tf_index * 4 + role_index  ->  4 TF x 4 roles = 16 bits.
+BIT_INDEX = {
+    (tf, role): ti * 4 + ri
+    for ti, tf in enumerate(TF_ORDER)
+    for ri, role in enumerate(ROLES)
+}
+
 # Data-collection proximity radius (ATR units). Frozen. Never tuned.
 NEAR_ATR = 0.50
 
@@ -120,6 +128,8 @@ class KernelCounters:
     full_history_recompute_count: int = 0
     reference_call_count: int = 0
     concat_count: int = 0
+    # DP-side accounting (incremented by the trade-oracle DP runner, not here)
+    dp_state_count: int = 0
 
 
 # --------------------------------------------------------------------------- #
@@ -928,6 +938,8 @@ def run_symbol_streaming(
     counters: KernelCounters,
     max_bars: Optional[int] = None,
     capture_geom: bool = False,
+    capture_entry_bits: bool = False,
+    emit_events: bool = True,
 ) -> Dict[str, Any]:
     """Single-pass causal event engine for one symbol (real data path).
 
@@ -935,12 +947,16 @@ def run_symbol_streaming(
     no slow-reference call, no hot-loop concat.
 
     ``capture_geom`` records the per-decision production geometry for the T1
-    differential harness. It NEVER calls the slow reference.
+    differential harness. ``capture_entry_bits`` records the frozen 16-bit
+    entry-candidate mask (contract §12). ``emit_events=False`` is the DP fast
+    path: episode/state is still maintained, but no event dict is built and
+    ``compute_outcome`` is never called. All three NEVER call the slow
+    reference.
     """
     info = build_base_frame(symbol, counters)
     return _stream_from_base(
         info["base"], info["form"], info["seg_completed"], counters,
-        max_bars, symbol, capture_geom,
+        max_bars, symbol, capture_geom, capture_entry_bits, emit_events,
     )
 
 
@@ -950,6 +966,8 @@ def stream_from_base(
     max_bars: Optional[int] = None,
     symbol: str = "SYNTH",
     capture_geom: bool = False,
+    capture_entry_bits: bool = False,
+    emit_events: bool = True,
 ) -> Dict[str, Any]:
     """Streaming entry point for a prebuilt base frame (synthetic T0 tests).
 
@@ -965,7 +983,8 @@ def stream_from_base(
     }
     counters.resample_count += len(TF_ORDER)
     return _stream_from_base(
-        base, form, seg_completed, counters, max_bars, symbol, capture_geom
+        base, form, seg_completed, counters, max_bars, symbol, capture_geom,
+        capture_entry_bits, emit_events,
     )
 
 
@@ -977,6 +996,8 @@ def _stream_from_base(
     max_bars: Optional[int] = None,
     symbol: str = "SYNTH",
     capture_geom: bool = False,
+    capture_entry_bits: bool = False,
+    emit_events: bool = True,
 ) -> Dict[str, Any]:
     """Core single-pass streaming loop (shared by all entry points)."""
     n = len(base)
@@ -1016,6 +1037,7 @@ def _stream_from_base(
 
     events: List[Dict[str, Any]] = []
     decision_geom: List[Dict[str, Any]] = [] if capture_geom else None
+    entry_bits = np.zeros(n, dtype=np.uint16) if capture_entry_bits else None
     prev_seg = None
 
     for i in range(n):
@@ -1090,9 +1112,17 @@ def _stream_from_base(
                 cand = select_target(
                     role, channels, liq_up, liq_down, C, atr_tf, tf, seg, i, sr_first_seen
                 )
+                # Proximity is evaluated exactly ONCE per (tf, role) and reused
+                # for both the episode state machine and the frozen 16-bit
+                # entry-candidate mask. This is a behaviour-preserving refactor
+                # (contract §12); it must not change any event row.
+                prox = cand is not None and in_proximity(cand, O, H, L, C, atr_tf)
+
+                if capture_entry_bits and prox:
+                    entry_bits[i] |= np.uint16(1 << BIT_INDEX[(tf, role)])
 
                 if ep is None:
-                    if cand is not None and in_proximity(cand, O, H, L, C, atr_tf):
+                    if prox:
                         ep = start_episode(symbol, tf, role, cand, i, seg, time_arr[i], C)
                         active[key] = ep
                     else:
@@ -1102,7 +1132,7 @@ def _stream_from_base(
                 if cand is not None and cand["structure_id"] != ep.structure_id:
                     ep.termination_reason = "STRUCTURE_OWNER_CHANGED"
                     active[key] = None
-                    if cand is not None and in_proximity(cand, O, H, L, C, atr_tf):
+                    if prox:
                         ep = start_episode(
                             symbol, tf, role, cand, i, seg, time_arr[i], C
                         )
@@ -1117,11 +1147,12 @@ def _stream_from_base(
                     if not ep.first_event_emitted:
                         finalize_approach(ep)
                         ep.first_event_emitted = True
-                    row = build_event_row(
-                        ep, tf, role, f"{role}_{ev}", i, time_arr[i], dtp_ctx, geom_by_tf,
-                        C, atr5m, O5, H5, L5, C5,
-                    )
-                    events.append(row)
+                    if emit_events:
+                        row = build_event_row(
+                            ep, tf, role, f"{role}_{ev}", i, time_arr[i], dtp_ctx, geom_by_tf,
+                            C, atr5m, O5, H5, L5, C5,
+                        )
+                        events.append(row)
                     ep.events_emitted += 1
 
                 # termination (never on the start bar)
@@ -1136,12 +1167,13 @@ def _stream_from_base(
                         active[key] = None
                     elif recedes_without_touch(ep, C, atr):
                         # no-touch approach that receded without any interaction
-                        row = build_event_row(
-                            ep, tf, role, f"{role}_APPROACH_NO_TOUCH_REJECT", i,
-                            time_arr[i], dtp_ctx, geom_by_tf, C, atr5m,
-                            O5, H5, L5, C5,
-                        )
-                        events.append(row)
+                        if emit_events:
+                            row = build_event_row(
+                                ep, tf, role, f"{role}_APPROACH_NO_TOUCH_REJECT", i,
+                                time_arr[i], dtp_ctx, geom_by_tf, C, atr5m,
+                                O5, H5, L5, C5,
+                            )
+                            events.append(row)
                         ep.termination_reason = "REJECTED_AWAY"
                         active[key] = None
                     elif u - u_near > NEAR_ATR * atr:
@@ -1160,6 +1192,9 @@ def _stream_from_base(
     }
     if capture_geom:
         result["decision_geom"] = decision_geom
+    if capture_entry_bits:
+        result["entry_candidate_bits"] = entry_bits
+        result["entry_eligible"] = entry_bits != 0
     return result
 
 
