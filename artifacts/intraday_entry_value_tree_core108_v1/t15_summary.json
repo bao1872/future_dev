@@ -1,0 +1,1786 @@
+{
+  "task_id": "FUTURE-ENTRY-VALUE-TREE-CORE108-V1-T1.5",
+  "base_sha": "641b5c435763dfebef40d36b44fa01f865af1a72",
+  "code_sha": {
+    "sha": "641b5c435763dfebef40d36b44fa01f865af1a72",
+    "dirty": false,
+    "ok": true
+  },
+  "symbols": [
+    "AG",
+    "RB"
+  ],
+  "prefix_bars": 10000,
+  "lightgbm_version": "4.7.0",
+  "core108_feature_count": 108,
+  "seed": 20260921,
+  "base_params": {
+    "objective": "regression",
+    "learning_rate": 0.05,
+    "num_leaves": 31,
+    "max_depth": -1,
+    "min_child_samples": 100,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "reg_alpha": 0.1,
+    "reg_lambda": 1.0,
+    "n_estimators": 2000,
+    "random_state": 20260921,
+    "n_jobs": -1
+  },
+  "early_stopping_rounds": 100,
+  "split_fracs": [
+    0.6,
+    0.2,
+    0.2
+  ],
+  "python": "3.12.14",
+  "platform": "macOS-26.5.1-arm64-arm-64bit",
+  "removed_final_trading_day": {
+    "AG": "2025-05-26",
+    "RB": "2025-08-11"
+  },
+  "split_boundaries": {
+    "n_trading_days": 144,
+    "train_days": [
+      "2025-01-06",
+      "2025-01-07",
+      "2025-01-08",
+      "2025-01-09",
+      "2025-01-10",
+      "2025-01-13",
+      "2025-01-14",
+      "2025-01-15",
+      "2025-01-16",
+      "2025-01-17",
+      "2025-01-20",
+      "2025-01-21",
+      "2025-01-22",
+      "2025-01-23",
+      "2025-01-24",
+      "2025-01-27",
+      "2025-02-05",
+      "2025-02-06",
+      "2025-02-07",
+      "2025-02-10",
+      "2025-02-11",
+      "2025-02-12",
+      "2025-02-13",
+      "2025-02-14",
+      "2025-02-17",
+      "2025-02-18",
+      "2025-02-19",
+      "2025-02-20",
+      "2025-02-21",
+      "2025-02-24",
+      "2025-02-25",
+      "2025-02-26",
+      "2025-02-27",
+      "2025-02-28",
+      "2025-03-03",
+      "2025-03-04",
+      "2025-03-05",
+      "2025-03-06",
+      "2025-03-07",
+      "2025-03-10",
+      "2025-03-11",
+      "2025-03-12",
+      "2025-03-13",
+      "2025-03-14",
+      "2025-03-17",
+      "2025-03-18",
+      "2025-03-19",
+      "2025-03-20",
+      "2025-03-21",
+      "2025-03-24",
+      "2025-03-25",
+      "2025-03-26",
+      "2025-03-27",
+      "2025-03-28",
+      "2025-03-31",
+      "2025-04-01",
+      "2025-04-02",
+      "2025-04-03",
+      "2025-04-07",
+      "2025-04-08",
+      "2025-04-09",
+      "2025-04-10",
+      "2025-04-11",
+      "2025-04-14",
+      "2025-04-15",
+      "2025-04-16",
+      "2025-04-17",
+      "2025-04-18",
+      "2025-04-21",
+      "2025-04-22",
+      "2025-04-23",
+      "2025-04-24",
+      "2025-04-25",
+      "2025-04-28",
+      "2025-04-29",
+      "2025-04-30",
+      "2025-05-06",
+      "2025-05-07",
+      "2025-05-08",
+      "2025-05-09",
+      "2025-05-12",
+      "2025-05-13",
+      "2025-05-14",
+      "2025-05-15",
+      "2025-05-16",
+      "2025-05-19"
+    ],
+    "validation_days": [
+      "2025-05-20",
+      "2025-05-21",
+      "2025-05-22",
+      "2025-05-23",
+      "2025-05-26",
+      "2025-05-27",
+      "2025-05-28",
+      "2025-05-29",
+      "2025-05-30",
+      "2025-06-03",
+      "2025-06-04",
+      "2025-06-05",
+      "2025-06-06",
+      "2025-06-09",
+      "2025-06-10",
+      "2025-06-11",
+      "2025-06-12",
+      "2025-06-13",
+      "2025-06-16",
+      "2025-06-17",
+      "2025-06-18",
+      "2025-06-19",
+      "2025-06-20",
+      "2025-06-23",
+      "2025-06-24",
+      "2025-06-25",
+      "2025-06-26",
+      "2025-06-27",
+      "2025-06-30"
+    ],
+    "test_days": [
+      "2025-07-01",
+      "2025-07-02",
+      "2025-07-03",
+      "2025-07-04",
+      "2025-07-07",
+      "2025-07-08",
+      "2025-07-09",
+      "2025-07-10",
+      "2025-07-11",
+      "2025-07-14",
+      "2025-07-15",
+      "2025-07-16",
+      "2025-07-17",
+      "2025-07-18",
+      "2025-07-21",
+      "2025-07-22",
+      "2025-07-23",
+      "2025-07-24",
+      "2025-07-25",
+      "2025-07-28",
+      "2025-07-29",
+      "2025-07-30",
+      "2025-07-31",
+      "2025-08-01",
+      "2025-08-04",
+      "2025-08-05",
+      "2025-08-06",
+      "2025-08-07",
+      "2025-08-08"
+    ],
+    "i_train": 86,
+    "i_val": 115
+  },
+  "split_day_ranges": {
+    "train": [
+      "2025-01-06",
+      "2025-05-19"
+    ],
+    "validation": [
+      "2025-05-20",
+      "2025-06-30"
+    ],
+    "test": [
+      "2025-07-01",
+      "2025-08-08"
+    ]
+  },
+  "purge": {
+    "before": {
+      "train": 12118,
+      "validation": 2155,
+      "test": 1694
+    },
+    "after": {
+      "train": 12118,
+      "validation": 2155,
+      "test": 1694
+    },
+    "removed": {
+      "train": 0,
+      "validation": 0,
+      "test": 0
+    },
+    "validation_start_time": "2025-05-19 21:05:00",
+    "test_start_time": "2025-06-30 21:05:00"
+  },
+  "weight_raw_means": {
+    "train_raw_mean": 0.04398415580128734,
+    "validation_raw_mean": 0.02691415313225058,
+    "test_raw_mean": 0.04250295159386069
+  },
+  "weight_audit": {
+    "episodes_total": 663,
+    "episodes_complete_sum1": 663,
+    "episodes_incomplete": 0,
+    "max_abs_deviation": 1.1102230246251565e-16,
+    "rows_per_episode_min": 1,
+    "rows_per_episode_max": 109
+  },
+  "counts_by_split": {
+    "train": {
+      "rows": 12118,
+      "episodes": 533,
+      "trading_days": 86,
+      "by_symbol": {
+        "AG": 7601,
+        "RB": 4517
+      }
+    },
+    "validation": {
+      "rows": 2155,
+      "episodes": 58,
+      "trading_days": 29,
+      "by_symbol": {
+        "AG": 434,
+        "RB": 1721
+      }
+    },
+    "test": {
+      "rows": 1694,
+      "episodes": 72,
+      "trading_days": 29,
+      "by_symbol": {
+        "AG": 0,
+        "RB": 1694
+      }
+    }
+  },
+  "rows_total": 15967,
+  "episodes_total": 663,
+  "phase_counts_total_rows": 255472,
+  "runtime": {
+    "feature_build_seconds": {
+      "AG": 8.788874291989487,
+      "RB": 8.745020125003066
+    },
+    "dataset_assembly_seconds": 0.040146415994968265,
+    "fit_seconds": {
+      "long": 0.7019604590022936,
+      "short": 0.6741309170029126
+    },
+    "permutation_seconds": 0.910006793012144,
+    "peak_memory_mb": 583.25
+  },
+  "model": {
+    "long": {
+      "best_iteration": 19,
+      "fit_seconds": 0.7019604590022936,
+      "baseline_train_weighted_mean": -0.8407382474658998,
+      "target_quantiles": {
+        "min": -17.456153246473377,
+        "p1": -12.17388066543388,
+        "p5": -7.76741597852249,
+        "p25": -3.3279879137558224,
+        "p50": -1.3588797063031584,
+        "p75": -0.35210121686746215,
+        "p95": 0.5883948838222764,
+        "p99": 1.8057264039761012,
+        "max": 20.249188061763892
+      },
+      "metrics": {
+        "baseline_validation": {
+          "rows": 2155,
+          "mae": 1.5120165864588315,
+          "rmse": 2.0886886634724955,
+          "r2": -0.2711582840831308,
+          "spearman": null,
+          "w_mae": 1.4045601338315692,
+          "w_rmse": 2.078412598109306,
+          "w_r2": -0.0456867686758482,
+          "w_spearman": null
+        },
+        "baseline_test": {
+          "rows": 1694,
+          "mae": 1.8281562945548784,
+          "rmse": 2.7869950882902317,
+          "r2": -0.18906808762547844,
+          "spearman": null,
+          "w_mae": 1.5768910955271103,
+          "w_rmse": 2.265601707558099,
+          "w_r2": -0.009974830589994488,
+          "w_spearman": null
+        },
+        "model_validation": {
+          "rows": 2155,
+          "mae": 1.4915773887008306,
+          "rmse": 1.9342413582078692,
+          "r2": -0.09011808172582425,
+          "spearman": 0.08381812433503645,
+          "w_mae": 1.3428540041131503,
+          "w_rmse": 1.9164269886121001,
+          "w_r2": 0.11095726562069386,
+          "w_spearman": null
+        },
+        "model_test": {
+          "rows": 1694,
+          "mae": 1.8651456099387338,
+          "rmse": 2.7993940796256003,
+          "r2": -0.19967165158637146,
+          "spearman": 0.026839771407449323,
+          "w_mae": 1.5956534883064017,
+          "w_rmse": 2.2854059425552022,
+          "w_r2": -0.02770892682458803,
+          "w_spearman": null
+        }
+      },
+      "per_symbol_test": {
+        "RB": {
+          "rows": 1694,
+          "episodes": 72,
+          "mae": 1.8651456099387338,
+          "rmse": 2.7993940796256003,
+          "spearman": 0.026839771407449323,
+          "w_mae": 1.5956534883064017,
+          "top_decile_weighted_actual_mean_y": -0.9819765733290701
+        }
+      }
+    },
+    "short": {
+      "best_iteration": 16,
+      "fit_seconds": 0.6741309170029126,
+      "baseline_train_weighted_mean": -0.9519481126284076,
+      "target_quantiles": {
+        "min": -28.324046859987558,
+        "p1": -14.652740370125702,
+        "p5": -8.012249705580274,
+        "p25": -3.3710549762769233,
+        "p50": -1.4617875811665701,
+        "p75": -0.39701590400941733,
+        "p95": 0.5523311516566758,
+        "p99": 1.5977203268649598,
+        "max": 9.152386106382808
+      },
+      "metrics": {
+        "baseline_validation": {
+          "rows": 2155,
+          "mae": 1.846106609843858,
+          "rmse": 2.695057540215428,
+          "r2": -0.27221776127497455,
+          "spearman": null,
+          "w_mae": 1.7574745477457956,
+          "w_rmse": 2.603489160033552,
+          "w_r2": -0.001718503885375977,
+          "w_spearman": null
+        },
+        "baseline_test": {
+          "rows": 1694,
+          "mae": 2.662385599955496,
+          "rmse": 4.684724089675494,
+          "r2": -0.2263670236127453,
+          "spearman": null,
+          "w_mae": 2.0439904904735107,
+          "w_rmse": 3.5142777682238866,
+          "w_r2": -0.0349994255531052,
+          "w_spearman": null
+        },
+        "model_validation": {
+          "rows": 2155,
+          "mae": 1.8264638747487092,
+          "rmse": 2.629768437035514,
+          "r2": -0.2113241833477486,
+          "spearman": -0.07436435588358806,
+          "w_mae": 1.6946172582951078,
+          "w_rmse": 2.557306994331882,
+          "w_r2": 0.03350439930412086,
+          "w_spearman": null
+        },
+        "model_test": {
+          "rows": 1694,
+          "mae": 2.6224353383317585,
+          "rmse": 4.664301275858264,
+          "r2": -0.2156977624843699,
+          "spearman": -0.0052049427147008685,
+          "w_mae": 2.092865492277742,
+          "w_rmse": 3.52771412376773,
+          "w_r2": -0.042928909907516966,
+          "w_spearman": null
+        }
+      },
+      "per_symbol_test": {
+        "RB": {
+          "rows": 1694,
+          "episodes": 72,
+          "mae": 2.6224353383317585,
+          "rmse": 4.664301275858264,
+          "spearman": -0.0052049427147008685,
+          "w_mae": 2.092865492277742,
+          "top_decile_weighted_actual_mean_y": -2.3765975490510836
+        }
+      }
+    }
+  },
+  "oracle": {
+    "AG": {
+      "math_version": "intraday_dp_oracle_r2_one_entry_proximity",
+      "oracle_source_sha": "cc7891723beb7298aa5225275b0697969d8e19bb",
+      "cost_mode": "zero_cost",
+      "candidate_rows": 8087,
+      "unmatched_feature_rows": 81,
+      "duplicate_feature_keys": 0,
+      "duplicate_oracle_keys": 0
+    },
+    "RB": {
+      "math_version": "intraday_dp_oracle_r2_one_entry_proximity",
+      "oracle_source_sha": "cc7891723beb7298aa5225275b0697969d8e19bb",
+      "cost_mode": "zero_cost",
+      "candidate_rows": 7978,
+      "unmatched_feature_rows": 112,
+      "duplicate_feature_keys": 0,
+      "duplicate_oracle_keys": 0
+    }
+  },
+  "integrity_by_symbol": {
+    "AG": {
+      "feature_rows": 8250,
+      "candidate_rows": 8087,
+      "unmatched_feature_rows": 81,
+      "duplicate_feature_keys": 0,
+      "duplicate_oracle_keys": 0,
+      "math_version": "intraday_dp_oracle_r2_one_entry_proximity",
+      "oracle_source_sha": "cc7891723beb7298aa5225275b0697969d8e19bb",
+      "cost_mode": "zero_cost",
+      "nan_by_family": {
+        "distance_atr": 8087,
+        "phase": 0,
+        "episode_age_5m": 0,
+        "approach_velocity": 0,
+        "path_efficiency": 0,
+        "max_penetration_atr": 0,
+        "trend_state": 0,
+        "slope_atr": 4134,
+        "dev": 4134
+      }
+    },
+    "RB": {
+      "feature_rows": 8205,
+      "candidate_rows": 7978,
+      "unmatched_feature_rows": 112,
+      "duplicate_feature_keys": 0,
+      "duplicate_oracle_keys": 0,
+      "math_version": "intraday_dp_oracle_r2_one_entry_proximity",
+      "oracle_source_sha": "cc7891723beb7298aa5225275b0697969d8e19bb",
+      "cost_mode": "zero_cost",
+      "nan_by_family": {
+        "distance_atr": 7978,
+        "phase": 0,
+        "episode_age_5m": 0,
+        "approach_velocity": 0,
+        "path_efficiency": 0,
+        "max_penetration_atr": 0,
+        "trend_state": 0,
+        "slope_atr": 3267,
+        "dev": 3267
+      }
+    }
+  },
+  "phase_counts": [
+    {
+      "tf": "m5",
+      "role": "SUPPORT",
+      "phase": "NO_STRUCTURE",
+      "rows": 1643
+    },
+    {
+      "tf": "m5",
+      "role": "SUPPORT",
+      "phase": "OUTSIDE",
+      "rows": 9802
+    },
+    {
+      "tf": "m5",
+      "role": "SUPPORT",
+      "phase": "APPROACH",
+      "rows": 669
+    },
+    {
+      "tf": "m5",
+      "role": "SUPPORT",
+      "phase": "REJECTED",
+      "rows": 2302
+    },
+    {
+      "tf": "m5",
+      "role": "SUPPORT",
+      "phase": "ZONE",
+      "rows": 86
+    },
+    {
+      "tf": "m5",
+      "role": "SUPPORT",
+      "phase": "BREAK",
+      "rows": 39
+    },
+    {
+      "tf": "m5",
+      "role": "SUPPORT",
+      "phase": "BREAK_EXTENSION",
+      "rows": 13
+    },
+    {
+      "tf": "m5",
+      "role": "SUPPORT",
+      "phase": "BREAK_RETURNING",
+      "rows": 2
+    },
+    {
+      "tf": "m5",
+      "role": "SUPPORT",
+      "phase": "BREAK_HOLD",
+      "rows": 77
+    },
+    {
+      "tf": "m5",
+      "role": "SUPPORT",
+      "phase": "PARTIAL_RECLAIM",
+      "rows": 94
+    },
+    {
+      "tf": "m5",
+      "role": "SUPPORT",
+      "phase": "FULL_RECLAIM",
+      "rows": 1240
+    },
+    {
+      "tf": "m5",
+      "role": "SUPPORT",
+      "phase": "REBREAK",
+      "rows": 0
+    },
+    {
+      "tf": "m5",
+      "role": "RESISTANCE",
+      "phase": "NO_STRUCTURE",
+      "rows": 1720
+    },
+    {
+      "tf": "m5",
+      "role": "RESISTANCE",
+      "phase": "OUTSIDE",
+      "rows": 9703
+    },
+    {
+      "tf": "m5",
+      "role": "RESISTANCE",
+      "phase": "APPROACH",
+      "rows": 736
+    },
+    {
+      "tf": "m5",
+      "role": "RESISTANCE",
+      "phase": "REJECTED",
+      "rows": 2277
+    },
+    {
+      "tf": "m5",
+      "role": "RESISTANCE",
+      "phase": "ZONE",
+      "rows": 71
+    },
+    {
+      "tf": "m5",
+      "role": "RESISTANCE",
+      "phase": "BREAK",
+      "rows": 39
+    },
+    {
+      "tf": "m5",
+      "role": "RESISTANCE",
+      "phase": "BREAK_EXTENSION",
+      "rows": 17
+    },
+    {
+      "tf": "m5",
+      "role": "RESISTANCE",
+      "phase": "BREAK_RETURNING",
+      "rows": 8
+    },
+    {
+      "tf": "m5",
+      "role": "RESISTANCE",
+      "phase": "BREAK_HOLD",
+      "rows": 73
+    },
+    {
+      "tf": "m5",
+      "role": "RESISTANCE",
+      "phase": "PARTIAL_RECLAIM",
+      "rows": 126
+    },
+    {
+      "tf": "m5",
+      "role": "RESISTANCE",
+      "phase": "FULL_RECLAIM",
+      "rows": 1197
+    },
+    {
+      "tf": "m5",
+      "role": "RESISTANCE",
+      "phase": "REBREAK",
+      "rows": 0
+    },
+    {
+      "tf": "m5",
+      "role": "BUYSIDE_LIQUIDITY",
+      "phase": "NO_STRUCTURE",
+      "rows": 7592
+    },
+    {
+      "tf": "m5",
+      "role": "BUYSIDE_LIQUIDITY",
+      "phase": "OUTSIDE",
+      "rows": 7143
+    },
+    {
+      "tf": "m5",
+      "role": "BUYSIDE_LIQUIDITY",
+      "phase": "APPROACH",
+      "rows": 166
+    },
+    {
+      "tf": "m5",
+      "role": "BUYSIDE_LIQUIDITY",
+      "phase": "REJECTED",
+      "rows": 514
+    },
+    {
+      "tf": "m5",
+      "role": "BUYSIDE_LIQUIDITY",
+      "phase": "ZONE",
+      "rows": 219
+    },
+    {
+      "tf": "m5",
+      "role": "BUYSIDE_LIQUIDITY",
+      "phase": "BREAK",
+      "rows": 27
+    },
+    {
+      "tf": "m5",
+      "role": "BUYSIDE_LIQUIDITY",
+      "phase": "BREAK_EXTENSION",
+      "rows": 12
+    },
+    {
+      "tf": "m5",
+      "role": "BUYSIDE_LIQUIDITY",
+      "phase": "BREAK_RETURNING",
+      "rows": 1
+    },
+    {
+      "tf": "m5",
+      "role": "BUYSIDE_LIQUIDITY",
+      "phase": "BREAK_HOLD",
+      "rows": 42
+    },
+    {
+      "tf": "m5",
+      "role": "BUYSIDE_LIQUIDITY",
+      "phase": "PARTIAL_RECLAIM",
+      "rows": 234
+    },
+    {
+      "tf": "m5",
+      "role": "BUYSIDE_LIQUIDITY",
+      "phase": "FULL_RECLAIM",
+      "rows": 17
+    },
+    {
+      "tf": "m5",
+      "role": "BUYSIDE_LIQUIDITY",
+      "phase": "REBREAK",
+      "rows": 0
+    },
+    {
+      "tf": "m5",
+      "role": "SELLSIDE_LIQUIDITY",
+      "phase": "NO_STRUCTURE",
+      "rows": 8293
+    },
+    {
+      "tf": "m5",
+      "role": "SELLSIDE_LIQUIDITY",
+      "phase": "OUTSIDE",
+      "rows": 6735
+    },
+    {
+      "tf": "m5",
+      "role": "SELLSIDE_LIQUIDITY",
+      "phase": "APPROACH",
+      "rows": 148
+    },
+    {
+      "tf": "m5",
+      "role": "SELLSIDE_LIQUIDITY",
+      "phase": "REJECTED",
+      "rows": 377
+    },
+    {
+      "tf": "m5",
+      "role": "SELLSIDE_LIQUIDITY",
+      "phase": "ZONE",
+      "rows": 166
+    },
+    {
+      "tf": "m5",
+      "role": "SELLSIDE_LIQUIDITY",
+      "phase": "BREAK",
+      "rows": 31
+    },
+    {
+      "tf": "m5",
+      "role": "SELLSIDE_LIQUIDITY",
+      "phase": "BREAK_EXTENSION",
+      "rows": 13
+    },
+    {
+      "tf": "m5",
+      "role": "SELLSIDE_LIQUIDITY",
+      "phase": "BREAK_RETURNING",
+      "rows": 1
+    },
+    {
+      "tf": "m5",
+      "role": "SELLSIDE_LIQUIDITY",
+      "phase": "BREAK_HOLD",
+      "rows": 32
+    },
+    {
+      "tf": "m5",
+      "role": "SELLSIDE_LIQUIDITY",
+      "phase": "PARTIAL_RECLAIM",
+      "rows": 162
+    },
+    {
+      "tf": "m5",
+      "role": "SELLSIDE_LIQUIDITY",
+      "phase": "FULL_RECLAIM",
+      "rows": 9
+    },
+    {
+      "tf": "m5",
+      "role": "SELLSIDE_LIQUIDITY",
+      "phase": "REBREAK",
+      "rows": 0
+    },
+    {
+      "tf": "m15",
+      "role": "SUPPORT",
+      "phase": "NO_STRUCTURE",
+      "rows": 1845
+    },
+    {
+      "tf": "m15",
+      "role": "SUPPORT",
+      "phase": "OUTSIDE",
+      "rows": 10649
+    },
+    {
+      "tf": "m15",
+      "role": "SUPPORT",
+      "phase": "APPROACH",
+      "rows": 950
+    },
+    {
+      "tf": "m15",
+      "role": "SUPPORT",
+      "phase": "REJECTED",
+      "rows": 1633
+    },
+    {
+      "tf": "m15",
+      "role": "SUPPORT",
+      "phase": "ZONE",
+      "rows": 74
+    },
+    {
+      "tf": "m15",
+      "role": "SUPPORT",
+      "phase": "BREAK",
+      "rows": 25
+    },
+    {
+      "tf": "m15",
+      "role": "SUPPORT",
+      "phase": "BREAK_EXTENSION",
+      "rows": 25
+    },
+    {
+      "tf": "m15",
+      "role": "SUPPORT",
+      "phase": "BREAK_RETURNING",
+      "rows": 7
+    },
+    {
+      "tf": "m15",
+      "role": "SUPPORT",
+      "phase": "BREAK_HOLD",
+      "rows": 62
+    },
+    {
+      "tf": "m15",
+      "role": "SUPPORT",
+      "phase": "PARTIAL_RECLAIM",
+      "rows": 81
+    },
+    {
+      "tf": "m15",
+      "role": "SUPPORT",
+      "phase": "FULL_RECLAIM",
+      "rows": 616
+    },
+    {
+      "tf": "m15",
+      "role": "SUPPORT",
+      "phase": "REBREAK",
+      "rows": 0
+    },
+    {
+      "tf": "m15",
+      "role": "RESISTANCE",
+      "phase": "NO_STRUCTURE",
+      "rows": 1873
+    },
+    {
+      "tf": "m15",
+      "role": "RESISTANCE",
+      "phase": "OUTSIDE",
+      "rows": 10304
+    },
+    {
+      "tf": "m15",
+      "role": "RESISTANCE",
+      "phase": "APPROACH",
+      "rows": 1078
+    },
+    {
+      "tf": "m15",
+      "role": "RESISTANCE",
+      "phase": "REJECTED",
+      "rows": 1849
+    },
+    {
+      "tf": "m15",
+      "role": "RESISTANCE",
+      "phase": "ZONE",
+      "rows": 115
+    },
+    {
+      "tf": "m15",
+      "role": "RESISTANCE",
+      "phase": "BREAK",
+      "rows": 25
+    },
+    {
+      "tf": "m15",
+      "role": "RESISTANCE",
+      "phase": "BREAK_EXTENSION",
+      "rows": 18
+    },
+    {
+      "tf": "m15",
+      "role": "RESISTANCE",
+      "phase": "BREAK_RETURNING",
+      "rows": 11
+    },
+    {
+      "tf": "m15",
+      "role": "RESISTANCE",
+      "phase": "BREAK_HOLD",
+      "rows": 40
+    },
+    {
+      "tf": "m15",
+      "role": "RESISTANCE",
+      "phase": "PARTIAL_RECLAIM",
+      "rows": 143
+    },
+    {
+      "tf": "m15",
+      "role": "RESISTANCE",
+      "phase": "FULL_RECLAIM",
+      "rows": 511
+    },
+    {
+      "tf": "m15",
+      "role": "RESISTANCE",
+      "phase": "REBREAK",
+      "rows": 0
+    },
+    {
+      "tf": "m15",
+      "role": "BUYSIDE_LIQUIDITY",
+      "phase": "NO_STRUCTURE",
+      "rows": 8269
+    },
+    {
+      "tf": "m15",
+      "role": "BUYSIDE_LIQUIDITY",
+      "phase": "OUTSIDE",
+      "rows": 6816
+    },
+    {
+      "tf": "m15",
+      "role": "BUYSIDE_LIQUIDITY",
+      "phase": "APPROACH",
+      "rows": 229
+    },
+    {
+      "tf": "m15",
+      "role": "BUYSIDE_LIQUIDITY",
+      "phase": "REJECTED",
+      "rows": 346
+    },
+    {
+      "tf": "m15",
+      "role": "BUYSIDE_LIQUIDITY",
+      "phase": "ZONE",
+      "rows": 203
+    },
+    {
+      "tf": "m15",
+      "role": "BUYSIDE_LIQUIDITY",
+      "phase": "BREAK",
+      "rows": 9
+    },
+    {
+      "tf": "m15",
+      "role": "BUYSIDE_LIQUIDITY",
+      "phase": "BREAK_EXTENSION",
+      "rows": 1
+    },
+    {
+      "tf": "m15",
+      "role": "BUYSIDE_LIQUIDITY",
+      "phase": "BREAK_RETURNING",
+      "rows": 3
+    },
+    {
+      "tf": "m15",
+      "role": "BUYSIDE_LIQUIDITY",
+      "phase": "BREAK_HOLD",
+      "rows": 21
+    },
+    {
+      "tf": "m15",
+      "role": "BUYSIDE_LIQUIDITY",
+      "phase": "PARTIAL_RECLAIM",
+      "rows": 67
+    },
+    {
+      "tf": "m15",
+      "role": "BUYSIDE_LIQUIDITY",
+      "phase": "FULL_RECLAIM",
+      "rows": 3
+    },
+    {
+      "tf": "m15",
+      "role": "BUYSIDE_LIQUIDITY",
+      "phase": "REBREAK",
+      "rows": 0
+    },
+    {
+      "tf": "m15",
+      "role": "SELLSIDE_LIQUIDITY",
+      "phase": "NO_STRUCTURE",
+      "rows": 8694
+    },
+    {
+      "tf": "m15",
+      "role": "SELLSIDE_LIQUIDITY",
+      "phase": "OUTSIDE",
+      "rows": 6138
+    },
+    {
+      "tf": "m15",
+      "role": "SELLSIDE_LIQUIDITY",
+      "phase": "APPROACH",
+      "rows": 210
+    },
+    {
+      "tf": "m15",
+      "role": "SELLSIDE_LIQUIDITY",
+      "phase": "REJECTED",
+      "rows": 372
+    },
+    {
+      "tf": "m15",
+      "role": "SELLSIDE_LIQUIDITY",
+      "phase": "ZONE",
+      "rows": 266
+    },
+    {
+      "tf": "m15",
+      "role": "SELLSIDE_LIQUIDITY",
+      "phase": "BREAK",
+      "rows": 13
+    },
+    {
+      "tf": "m15",
+      "role": "SELLSIDE_LIQUIDITY",
+      "phase": "BREAK_EXTENSION",
+      "rows": 7
+    },
+    {
+      "tf": "m15",
+      "role": "SELLSIDE_LIQUIDITY",
+      "phase": "BREAK_RETURNING",
+      "rows": 3
+    },
+    {
+      "tf": "m15",
+      "role": "SELLSIDE_LIQUIDITY",
+      "phase": "BREAK_HOLD",
+      "rows": 31
+    },
+    {
+      "tf": "m15",
+      "role": "SELLSIDE_LIQUIDITY",
+      "phase": "PARTIAL_RECLAIM",
+      "rows": 229
+    },
+    {
+      "tf": "m15",
+      "role": "SELLSIDE_LIQUIDITY",
+      "phase": "FULL_RECLAIM",
+      "rows": 4
+    },
+    {
+      "tf": "m15",
+      "role": "SELLSIDE_LIQUIDITY",
+      "phase": "REBREAK",
+      "rows": 0
+    },
+    {
+      "tf": "h1",
+      "role": "SUPPORT",
+      "phase": "NO_STRUCTURE",
+      "rows": 5075
+    },
+    {
+      "tf": "h1",
+      "role": "SUPPORT",
+      "phase": "OUTSIDE",
+      "rows": 9340
+    },
+    {
+      "tf": "h1",
+      "role": "SUPPORT",
+      "phase": "APPROACH",
+      "rows": 611
+    },
+    {
+      "tf": "h1",
+      "role": "SUPPORT",
+      "phase": "REJECTED",
+      "rows": 706
+    },
+    {
+      "tf": "h1",
+      "role": "SUPPORT",
+      "phase": "ZONE",
+      "rows": 28
+    },
+    {
+      "tf": "h1",
+      "role": "SUPPORT",
+      "phase": "BREAK",
+      "rows": 5
+    },
+    {
+      "tf": "h1",
+      "role": "SUPPORT",
+      "phase": "BREAK_EXTENSION",
+      "rows": 8
+    },
+    {
+      "tf": "h1",
+      "role": "SUPPORT",
+      "phase": "BREAK_RETURNING",
+      "rows": 3
+    },
+    {
+      "tf": "h1",
+      "role": "SUPPORT",
+      "phase": "BREAK_HOLD",
+      "rows": 26
+    },
+    {
+      "tf": "h1",
+      "role": "SUPPORT",
+      "phase": "PARTIAL_RECLAIM",
+      "rows": 61
+    },
+    {
+      "tf": "h1",
+      "role": "SUPPORT",
+      "phase": "FULL_RECLAIM",
+      "rows": 104
+    },
+    {
+      "tf": "h1",
+      "role": "SUPPORT",
+      "phase": "REBREAK",
+      "rows": 0
+    },
+    {
+      "tf": "h1",
+      "role": "RESISTANCE",
+      "phase": "NO_STRUCTURE",
+      "rows": 5592
+    },
+    {
+      "tf": "h1",
+      "role": "RESISTANCE",
+      "phase": "OUTSIDE",
+      "rows": 8325
+    },
+    {
+      "tf": "h1",
+      "role": "RESISTANCE",
+      "phase": "APPROACH",
+      "rows": 780
+    },
+    {
+      "tf": "h1",
+      "role": "RESISTANCE",
+      "phase": "REJECTED",
+      "rows": 1044
+    },
+    {
+      "tf": "h1",
+      "role": "RESISTANCE",
+      "phase": "ZONE",
+      "rows": 41
+    },
+    {
+      "tf": "h1",
+      "role": "RESISTANCE",
+      "phase": "BREAK",
+      "rows": 3
+    },
+    {
+      "tf": "h1",
+      "role": "RESISTANCE",
+      "phase": "BREAK_EXTENSION",
+      "rows": 1
+    },
+    {
+      "tf": "h1",
+      "role": "RESISTANCE",
+      "phase": "BREAK_RETURNING",
+      "rows": 4
+    },
+    {
+      "tf": "h1",
+      "role": "RESISTANCE",
+      "phase": "BREAK_HOLD",
+      "rows": 29
+    },
+    {
+      "tf": "h1",
+      "role": "RESISTANCE",
+      "phase": "PARTIAL_RECLAIM",
+      "rows": 23
+    },
+    {
+      "tf": "h1",
+      "role": "RESISTANCE",
+      "phase": "FULL_RECLAIM",
+      "rows": 125
+    },
+    {
+      "tf": "h1",
+      "role": "RESISTANCE",
+      "phase": "REBREAK",
+      "rows": 0
+    },
+    {
+      "tf": "h1",
+      "role": "BUYSIDE_LIQUIDITY",
+      "phase": "NO_STRUCTURE",
+      "rows": 10488
+    },
+    {
+      "tf": "h1",
+      "role": "BUYSIDE_LIQUIDITY",
+      "phase": "OUTSIDE",
+      "rows": 4583
+    },
+    {
+      "tf": "h1",
+      "role": "BUYSIDE_LIQUIDITY",
+      "phase": "APPROACH",
+      "rows": 224
+    },
+    {
+      "tf": "h1",
+      "role": "BUYSIDE_LIQUIDITY",
+      "phase": "REJECTED",
+      "rows": 251
+    },
+    {
+      "tf": "h1",
+      "role": "BUYSIDE_LIQUIDITY",
+      "phase": "ZONE",
+      "rows": 227
+    },
+    {
+      "tf": "h1",
+      "role": "BUYSIDE_LIQUIDITY",
+      "phase": "BREAK",
+      "rows": 4
+    },
+    {
+      "tf": "h1",
+      "role": "BUYSIDE_LIQUIDITY",
+      "phase": "BREAK_EXTENSION",
+      "rows": 0
+    },
+    {
+      "tf": "h1",
+      "role": "BUYSIDE_LIQUIDITY",
+      "phase": "BREAK_RETURNING",
+      "rows": 13
+    },
+    {
+      "tf": "h1",
+      "role": "BUYSIDE_LIQUIDITY",
+      "phase": "BREAK_HOLD",
+      "rows": 42
+    },
+    {
+      "tf": "h1",
+      "role": "BUYSIDE_LIQUIDITY",
+      "phase": "PARTIAL_RECLAIM",
+      "rows": 135
+    },
+    {
+      "tf": "h1",
+      "role": "BUYSIDE_LIQUIDITY",
+      "phase": "FULL_RECLAIM",
+      "rows": 0
+    },
+    {
+      "tf": "h1",
+      "role": "BUYSIDE_LIQUIDITY",
+      "phase": "REBREAK",
+      "rows": 0
+    },
+    {
+      "tf": "h1",
+      "role": "SELLSIDE_LIQUIDITY",
+      "phase": "NO_STRUCTURE",
+      "rows": 9196
+    },
+    {
+      "tf": "h1",
+      "role": "SELLSIDE_LIQUIDITY",
+      "phase": "OUTSIDE",
+      "rows": 5864
+    },
+    {
+      "tf": "h1",
+      "role": "SELLSIDE_LIQUIDITY",
+      "phase": "APPROACH",
+      "rows": 244
+    },
+    {
+      "tf": "h1",
+      "role": "SELLSIDE_LIQUIDITY",
+      "phase": "REJECTED",
+      "rows": 204
+    },
+    {
+      "tf": "h1",
+      "role": "SELLSIDE_LIQUIDITY",
+      "phase": "ZONE",
+      "rows": 307
+    },
+    {
+      "tf": "h1",
+      "role": "SELLSIDE_LIQUIDITY",
+      "phase": "BREAK",
+      "rows": 4
+    },
+    {
+      "tf": "h1",
+      "role": "SELLSIDE_LIQUIDITY",
+      "phase": "BREAK_EXTENSION",
+      "rows": 4
+    },
+    {
+      "tf": "h1",
+      "role": "SELLSIDE_LIQUIDITY",
+      "phase": "BREAK_RETURNING",
+      "rows": 3
+    },
+    {
+      "tf": "h1",
+      "role": "SELLSIDE_LIQUIDITY",
+      "phase": "BREAK_HOLD",
+      "rows": 13
+    },
+    {
+      "tf": "h1",
+      "role": "SELLSIDE_LIQUIDITY",
+      "phase": "PARTIAL_RECLAIM",
+      "rows": 128
+    },
+    {
+      "tf": "h1",
+      "role": "SELLSIDE_LIQUIDITY",
+      "phase": "FULL_RECLAIM",
+      "rows": 0
+    },
+    {
+      "tf": "h1",
+      "role": "SELLSIDE_LIQUIDITY",
+      "phase": "REBREAK",
+      "rows": 0
+    },
+    {
+      "tf": "h4",
+      "role": "SUPPORT",
+      "phase": "NO_STRUCTURE",
+      "rows": 13408
+    },
+    {
+      "tf": "h4",
+      "role": "SUPPORT",
+      "phase": "OUTSIDE",
+      "rows": 2010
+    },
+    {
+      "tf": "h4",
+      "role": "SUPPORT",
+      "phase": "APPROACH",
+      "rows": 271
+    },
+    {
+      "tf": "h4",
+      "role": "SUPPORT",
+      "phase": "REJECTED",
+      "rows": 238
+    },
+    {
+      "tf": "h4",
+      "role": "SUPPORT",
+      "phase": "ZONE",
+      "rows": 0
+    },
+    {
+      "tf": "h4",
+      "role": "SUPPORT",
+      "phase": "BREAK",
+      "rows": 0
+    },
+    {
+      "tf": "h4",
+      "role": "SUPPORT",
+      "phase": "BREAK_EXTENSION",
+      "rows": 0
+    },
+    {
+      "tf": "h4",
+      "role": "SUPPORT",
+      "phase": "BREAK_RETURNING",
+      "rows": 0
+    },
+    {
+      "tf": "h4",
+      "role": "SUPPORT",
+      "phase": "BREAK_HOLD",
+      "rows": 0
+    },
+    {
+      "tf": "h4",
+      "role": "SUPPORT",
+      "phase": "PARTIAL_RECLAIM",
+      "rows": 0
+    },
+    {
+      "tf": "h4",
+      "role": "SUPPORT",
+      "phase": "FULL_RECLAIM",
+      "rows": 40
+    },
+    {
+      "tf": "h4",
+      "role": "SUPPORT",
+      "phase": "REBREAK",
+      "rows": 0
+    },
+    {
+      "tf": "h4",
+      "role": "RESISTANCE",
+      "phase": "NO_STRUCTURE",
+      "rows": 13117
+    },
+    {
+      "tf": "h4",
+      "role": "RESISTANCE",
+      "phase": "OUTSIDE",
+      "rows": 1993
+    },
+    {
+      "tf": "h4",
+      "role": "RESISTANCE",
+      "phase": "APPROACH",
+      "rows": 373
+    },
+    {
+      "tf": "h4",
+      "role": "RESISTANCE",
+      "phase": "REJECTED",
+      "rows": 399
+    },
+    {
+      "tf": "h4",
+      "role": "RESISTANCE",
+      "phase": "ZONE",
+      "rows": 7
+    },
+    {
+      "tf": "h4",
+      "role": "RESISTANCE",
+      "phase": "BREAK",
+      "rows": 2
+    },
+    {
+      "tf": "h4",
+      "role": "RESISTANCE",
+      "phase": "BREAK_EXTENSION",
+      "rows": 2
+    },
+    {
+      "tf": "h4",
+      "role": "RESISTANCE",
+      "phase": "BREAK_RETURNING",
+      "rows": 3
+    },
+    {
+      "tf": "h4",
+      "role": "RESISTANCE",
+      "phase": "BREAK_HOLD",
+      "rows": 12
+    },
+    {
+      "tf": "h4",
+      "role": "RESISTANCE",
+      "phase": "PARTIAL_RECLAIM",
+      "rows": 19
+    },
+    {
+      "tf": "h4",
+      "role": "RESISTANCE",
+      "phase": "FULL_RECLAIM",
+      "rows": 40
+    },
+    {
+      "tf": "h4",
+      "role": "RESISTANCE",
+      "phase": "REBREAK",
+      "rows": 0
+    },
+    {
+      "tf": "h4",
+      "role": "BUYSIDE_LIQUIDITY",
+      "phase": "NO_STRUCTURE",
+      "rows": 14651
+    },
+    {
+      "tf": "h4",
+      "role": "BUYSIDE_LIQUIDITY",
+      "phase": "OUTSIDE",
+      "rows": 695
+    },
+    {
+      "tf": "h4",
+      "role": "BUYSIDE_LIQUIDITY",
+      "phase": "APPROACH",
+      "rows": 22
+    },
+    {
+      "tf": "h4",
+      "role": "BUYSIDE_LIQUIDITY",
+      "phase": "REJECTED",
+      "rows": 232
+    },
+    {
+      "tf": "h4",
+      "role": "BUYSIDE_LIQUIDITY",
+      "phase": "ZONE",
+      "rows": 278
+    },
+    {
+      "tf": "h4",
+      "role": "BUYSIDE_LIQUIDITY",
+      "phase": "BREAK",
+      "rows": 0
+    },
+    {
+      "tf": "h4",
+      "role": "BUYSIDE_LIQUIDITY",
+      "phase": "BREAK_EXTENSION",
+      "rows": 0
+    },
+    {
+      "tf": "h4",
+      "role": "BUYSIDE_LIQUIDITY",
+      "phase": "BREAK_RETURNING",
+      "rows": 2
+    },
+    {
+      "tf": "h4",
+      "role": "BUYSIDE_LIQUIDITY",
+      "phase": "BREAK_HOLD",
+      "rows": 11
+    },
+    {
+      "tf": "h4",
+      "role": "BUYSIDE_LIQUIDITY",
+      "phase": "PARTIAL_RECLAIM",
+      "rows": 76
+    },
+    {
+      "tf": "h4",
+      "role": "BUYSIDE_LIQUIDITY",
+      "phase": "FULL_RECLAIM",
+      "rows": 0
+    },
+    {
+      "tf": "h4",
+      "role": "BUYSIDE_LIQUIDITY",
+      "phase": "REBREAK",
+      "rows": 0
+    },
+    {
+      "tf": "h4",
+      "role": "SELLSIDE_LIQUIDITY",
+      "phase": "NO_STRUCTURE",
+      "rows": 11858
+    },
+    {
+      "tf": "h4",
+      "role": "SELLSIDE_LIQUIDITY",
+      "phase": "OUTSIDE",
+      "rows": 4080
+    },
+    {
+      "tf": "h4",
+      "role": "SELLSIDE_LIQUIDITY",
+      "phase": "APPROACH",
+      "rows": 18
+    },
+    {
+      "tf": "h4",
+      "role": "SELLSIDE_LIQUIDITY",
+      "phase": "REJECTED",
+      "rows": 11
+    },
+    {
+      "tf": "h4",
+      "role": "SELLSIDE_LIQUIDITY",
+      "phase": "ZONE",
+      "rows": 0
+    },
+    {
+      "tf": "h4",
+      "role": "SELLSIDE_LIQUIDITY",
+      "phase": "BREAK",
+      "rows": 0
+    },
+    {
+      "tf": "h4",
+      "role": "SELLSIDE_LIQUIDITY",
+      "phase": "BREAK_EXTENSION",
+      "rows": 0
+    },
+    {
+      "tf": "h4",
+      "role": "SELLSIDE_LIQUIDITY",
+      "phase": "BREAK_RETURNING",
+      "rows": 0
+    },
+    {
+      "tf": "h4",
+      "role": "SELLSIDE_LIQUIDITY",
+      "phase": "BREAK_HOLD",
+      "rows": 0
+    },
+    {
+      "tf": "h4",
+      "role": "SELLSIDE_LIQUIDITY",
+      "phase": "PARTIAL_RECLAIM",
+      "rows": 0
+    },
+    {
+      "tf": "h4",
+      "role": "SELLSIDE_LIQUIDITY",
+      "phase": "FULL_RECLAIM",
+      "rows": 0
+    },
+    {
+      "tf": "h4",
+      "role": "SELLSIDE_LIQUIDITY",
+      "phase": "REBREAK",
+      "rows": 0
+    }
+  ],
+  "missingness_summary": {
+    "by_tf": [
+      {
+        "name": "h1",
+        "missing": 35851,
+        "missing_fraction": 0.08315994330900074
+      },
+      {
+        "name": "h4",
+        "missing": 70964,
+        "missing_fraction": 0.16460802256505896
+      },
+      {
+        "name": "m15",
+        "missing": 21587,
+        "missing_fraction": 0.05007318334806279
+      },
+      {
+        "name": "m5",
+        "missing": 19248,
+        "missing_fraction": 0.04464764131576933
+      }
+    ],
+    "by_family": [
+      {
+        "name": "BUYSIDE_LIQUIDITY",
+        "missing": 41106,
+        "missing_fraction": 0.1072681154881944
+      },
+      {
+        "name": "DTP",
+        "missing": 20260,
+        "missing_fraction": 0.10573891985553538
+      },
+      {
+        "name": "RESISTANCE",
+        "missing": 22302,
+        "missing_fraction": 0.05819815870232354
+      },
+      {
+        "name": "SELLSIDE_LIQUIDITY",
+        "missing": 42011,
+        "missing_fraction": 0.10962975720757395
+      },
+      {
+        "name": "SUPPORT",
+        "missing": 21971,
+        "missing_fraction": 0.0573343980292687
+      }
+    ],
+    "by_property": [
+      {
+        "name": "age",
+        "missing": 0,
+        "missing_fraction": 0.0
+      },
+      {
+        "name": "dev",
+        "missing": 10130,
+        "missing_fraction": 0.15860837978330306
+      },
+      {
+        "name": "distance",
+        "missing": 127390,
+        "missing_fraction": 0.4986456441410409
+      },
+      {
+        "name": "efficiency",
+        "missing": 0,
+        "missing_fraction": 0.0
+      },
+      {
+        "name": "penetration",
+        "missing": 0,
+        "missing_fraction": 0.0
+      },
+      {
+        "name": "phase",
+        "missing": 0,
+        "missing_fraction": 0.0
+      },
+      {
+        "name": "slope_atr",
+        "missing": 10130,
+        "missing_fraction": 0.15860837978330306
+      },
+      {
+        "name": "trend_state",
+        "missing": 0,
+        "missing_fraction": 0.0
+      },
+      {
+        "name": "velocity",
+        "missing": 0,
+        "missing_fraction": 0.0
+      }
+    ],
+    "columns_with_any_missing": 22
+  },
+  "artifacts": {
+    "t15_metrics.csv": {
+      "path": "artifacts/intraday_entry_value_tree_core108_v1/t15_metrics.csv",
+      "rows": 8,
+      "bytes": 1302,
+      "sha256": "9256ba8c80c3676cbb34e3df42d5ed4d5e21e06341aec6f90ce2e929ebe93e34"
+    },
+    "t15_deciles.csv": {
+      "path": "artifacts/intraday_entry_value_tree_core108_v1/t15_deciles.csv",
+      "rows": 20,
+      "bytes": 2370,
+      "sha256": "ebf26e2c5e4d3928fe90547de2884a5c07dd1fecb744f04b80b6bc8b3b6f588d"
+    },
+    "t15_feature_gain.csv": {
+      "path": "artifacts/intraday_entry_value_tree_core108_v1/t15_feature_gain.csv",
+      "rows": 216,
+      "bytes": 11553,
+      "sha256": "87e00044714397f851e130c480b7c97d24e9102ceddd0725703a28d2977f43dc"
+    },
+    "t15_group_permutation.csv": {
+      "path": "artifacts/intraday_entry_value_tree_core108_v1/t15_group_permutation.csv",
+      "rows": 30,
+      "bytes": 2642,
+      "sha256": "b1eebf3d1ac72d4122c44508fd40ca84d648adfde644d3fdb1363e661728d5a6"
+    },
+    "t15_missingness.csv": {
+      "path": "artifacts/intraday_entry_value_tree_core108_v1/t15_missingness.csv",
+      "rows": 126,
+      "bytes": 9232,
+      "sha256": "98cf3e8d69c1e74ccf59644fcd0c6d713ccaca279f3da7fb33f90169c37522bc"
+    }
+  }
+}
