@@ -102,6 +102,10 @@ MASK_BIT = {
 # Data-collection proximity radius (ATR units). Frozen. Never tuned.
 NEAR_ATR = 0.50
 
+# Oracle V2 entry-proximity radius (ATR units of the structure timeframe).
+# Frozen for R2; the 0.25/0.5/0.75/1.0 sensitivity study is a SEPARATE task.
+ENTRY_PROX_ATR = 0.50
+
 # Outcome horizons (5m bars). Frozen.
 HORIZONS = (6, 12, 24)
 
@@ -499,7 +503,7 @@ def entry_bits_from_prev_geometry(
         g = prev_geom_by_tf.get(tf)
         if g is None:
             continue
-        channels, liq_up, liq_down = g
+        channels, liq_up, liq_down, *_ = g
 
         hit_sr = any(
             bar_hits_zone(low5, high5, float(bottom), float(top))
@@ -513,6 +517,89 @@ def entry_bits_from_prev_geometry(
             and bar_hits_zone(low5, high5, float(z["bottom"]), float(z["top"]))
             for z in (*liq_up, *liq_down)
         )
+        if hit_liq:
+            bits |= 1 << MASK_BIT[(tf, "LIQ")]
+
+    return int(bits)
+
+
+# --------------------------------------------------------------------------- #
+# Oracle V2 proximity kernel (contract FUTURE-INTRADAY-DP-ORACLE-R2-*)         #
+# Distance-based proximity: a bar is "near" a structure when its range lies     #
+# within ENTRY_PROX_ATR of ANY pre-existing SR / Liquidity zone. This is the   #
+# DP entry gate for V2 (NOT the true-touch entry_bits_from_prev_geometry).      #
+# --------------------------------------------------------------------------- #
+def bar_zone_distance(
+    low5: float,
+    high5: float,
+    bottom: float,
+    top: float,
+) -> float:
+    """Distance between the current 5m price interval and a structure zone.
+
+    d = 0  when the range truly touches / is inside the zone,
+    d = L - top  when the price is ABOVE the zone,
+    d = bottom - H  when the price is BELOW the zone.
+    """
+    return max(
+        float(bottom) - float(high5),
+        float(low5) - float(top),
+        0.0,
+    )
+
+
+def proximity_bits_from_prev_geometry(
+    low5: float,
+    high5: float,
+    prev_geom_by_tf: dict,
+    *,
+    alpha: float = ENTRY_PROX_ATR,
+) -> int:
+    """8-bit (TF x {SR, LIQ}) proximity mask computed from the geometry known at
+    the PREVIOUS 5m close.
+
+    A bit is set iff the current 5m range [low5, high5] lies within
+    ``alpha * ATR_tf`` of the corresponding pre-existing SR / Liquidity zone.
+    A structure formed by the CURRENT bar can never retroactively qualify the
+    current bar because only ``prev_geom_by_tf`` (previous close) is consulted.
+    Broken liquidity is excluded. ``prev_geom_by_tf[tf]`` is the 4-tuple
+    ``(channels, liq_up, liq_down, atr_tf)``.
+    """
+    bits = 0
+    for tf in TF_ORDER:
+        g = prev_geom_by_tf.get(tf)
+        if g is None:
+            continue
+
+        channels, liq_up, liq_down, atr_tf = g
+
+        if not (np.isfinite(atr_tf) and atr_tf > 0):
+            continue
+
+        radius = float(alpha) * float(atr_tf)
+
+        hit_sr = False
+        for top, bottom, _strength in channels:
+            if bar_zone_distance(low5, high5, bottom, top) <= radius:
+                hit_sr = True
+                break
+        if hit_sr:
+            bits |= 1 << MASK_BIT[(tf, "SR")]
+
+        hit_liq = False
+        for z in liq_up:
+            if bool(z.get("broken")):
+                continue
+            if bar_zone_distance(low5, high5, z["bottom"], z["top"]) <= radius:
+                hit_liq = True
+                break
+        if not hit_liq:
+            for z in liq_down:
+                if bool(z.get("broken")):
+                    continue
+                if bar_zone_distance(low5, high5, z["bottom"], z["top"]) <= radius:
+                    hit_liq = True
+                    break
         if hit_liq:
             bits |= 1 << MASK_BIT[(tf, "LIQ")]
 
@@ -1003,6 +1090,7 @@ def run_symbol_streaming(
     capture_entry_mask: bool = False,
     emit_events: bool = True,
     mask_only: bool = False,
+    capture_proximity: bool = False,
 ) -> Dict[str, Any]:
     """Single-pass causal event engine for one symbol (real data path).
 
@@ -1012,16 +1100,18 @@ def run_symbol_streaming(
     ``capture_geom`` records the per-decision production geometry for the T1
     differential harness. ``capture_entry_mask`` records the frozen 8-bit
     entry mask (contract §7 / §8): current 5m range touching a PRE-EXISTING
-    SR / Liquidity zone. ``emit_events=False`` skips event-row construction
-    (no ``compute_outcome``). ``mask_only=True`` is the true DP fast path: the
-    (tf, role) episode/event lifecycle is NOT executed at all and no DTP context
-    arrays are stored. None of these call the slow reference.
+    SR / Liquidity zone. ``capture_proximity`` records the Oracle V2 distance-
+    based proximity mask (within ENTRY_PROX_ATR of a pre-existing SR / Liquidity
+    zone) used as the V2 DP entry gate. ``emit_events=False`` skips event-row
+    construction (no ``compute_outcome``). ``mask_only=True`` is the true DP
+    fast path: the (tf, role) episode/event lifecycle is NOT executed at all and
+    no DTP context arrays are stored. None of these call the slow reference.
     """
     info = build_base_frame(symbol, counters)
     return _stream_from_base(
         info["base"], info["form"], info["seg_completed"], counters,
         max_bars, symbol, capture_geom, capture_entry_mask, emit_events,
-        mask_only,
+        mask_only, capture_proximity,
     )
 
 
@@ -1034,6 +1124,7 @@ def stream_from_base(
     capture_entry_mask: bool = False,
     emit_events: bool = True,
     mask_only: bool = False,
+    capture_proximity: bool = False,
 ) -> Dict[str, Any]:
     """Streaming entry point for a prebuilt base frame (synthetic T0 tests).
 
@@ -1050,7 +1141,7 @@ def stream_from_base(
     counters.resample_count += len(TF_ORDER)
     return _stream_from_base(
         base, form, seg_completed, counters, max_bars, symbol, capture_geom,
-        capture_entry_mask, emit_events, mask_only,
+        capture_entry_mask, emit_events, mask_only, capture_proximity,
     )
 
 
@@ -1065,6 +1156,7 @@ def _stream_from_base(
     capture_entry_mask: bool = False,
     emit_events: bool = True,
     mask_only: bool = False,
+    capture_proximity: bool = False,
 ) -> Dict[str, Any]:
     """Core single-pass streaming loop (shared by all entry points)."""
     n = len(base)
@@ -1109,6 +1201,8 @@ def _stream_from_base(
     events: List[Dict[str, Any]] = []
     decision_geom: List[Dict[str, Any]] = [] if capture_geom else None
     entry_mask = np.zeros(n, dtype=np.uint16) if capture_entry_mask else None
+    proximity_bits = np.zeros(n, dtype=np.uint16) if capture_proximity else None
+    proximity_any = np.zeros(n, dtype=bool) if capture_proximity else None
     # geometry known at the PREVIOUS 5m close (causal entry mask input)
     prev_geom_by_tf: Optional[Dict[str, Tuple]] = None
     prev_seg = None
@@ -1172,16 +1266,33 @@ def _stream_from_base(
         if capture_geom:
             decision_geom.append({tf: geom_by_tf[tf] for tf in TF_ORDER})
 
-        if capture_entry_mask:
+        capture_geom_prev = capture_entry_mask or capture_proximity
+        if capture_geom_prev:
             # current 5m bar range vs geometry known at the PREVIOUS close
-            entry_mask[i] = np.uint16(
-                entry_bits_from_prev_geometry(
-                    float(L5[i]), float(H5[i]), prev_geom_by_tf or {}
+            if capture_entry_mask:
+                entry_mask[i] = np.uint16(
+                    entry_bits_from_prev_geometry(
+                        float(L5[i]), float(H5[i]), prev_geom_by_tf or {}
+                    )
                 )
-            )
-            # geometry 只算一次 -> 下一根 5m 用它
+            if capture_proximity:
+                pb = int(
+                    proximity_bits_from_prev_geometry(
+                        float(L5[i]), float(H5[i]), prev_geom_by_tf or {},
+                        alpha=ENTRY_PROX_ATR,
+                    )
+                )
+                proximity_bits[i] = np.uint16(pb)
+                proximity_any[i] = bool(pb != 0)
+            # geometry computed once -> the NEXT 5m bar consumes it
+            # (now carries ATR so the V2 proximity gate can scale by TF ATR)
             prev_geom_by_tf = {
-                tf: (geom_by_tf[tf][0], geom_by_tf[tf][1], geom_by_tf[tf][2])
+                tf: (
+                    geom_by_tf[tf][0],
+                    geom_by_tf[tf][1],
+                    geom_by_tf[tf][2],
+                    geom_by_tf[tf][3],
+                )
                 for tf in TF_ORDER
             }
 
@@ -1295,6 +1406,9 @@ def _stream_from_base(
     if capture_entry_mask:
         result["entry_mask"] = entry_mask
         result["entry_eligible"] = entry_mask != 0
+    if capture_proximity:
+        result["proximity_bits"] = proximity_bits
+        result["proximity_any"] = proximity_any
     return result
 
 

@@ -617,9 +617,10 @@ _ENTRY_HOVER = (
     "<b>%{customdata[0]} ENTRY</b><br>"
     "fill %{customdata[1]}<br>"
     "price %{customdata[2]}<br>"
-    "source_bits %{customdata[3]}<br>"
-    "trading_day %{customdata[4]}<br>"
-    "%{customdata[5]}<extra></extra>"
+    "prox_bits %{customdata[3]}<br>"
+    "prox_episode %{customdata[4]}<br>"
+    "trading_day %{customdata[5]}<br>"
+    "%{customdata[6]}<extra></extra>"
 )
 _EXIT_HOVER = (
     "<b>%{customdata[0]} EXIT (Gross Oracle)</b><br>"
@@ -750,7 +751,8 @@ def add_dp_oracle_overlay(fig, track: "ViewerTrack", selected: int, trades: Any)
             direction,
             str(pd.Timestamp(row["entry_fill_time"])),
             float(row["entry_fill_price"]),
-            int(row.get("entry_source_bits", 0)),
+            int(row.get("entry_proximity_bits", row.get("entry_source_bits", 0))),
+            int(row.get("entry_proximity_episode_id", -1)),
             str(row.get("trading_day", "")),
             str(row.get("trade_id", "")),
         )

@@ -39,10 +39,12 @@ from research.liquidity_oracle_atlas.audit_view_v1 import SYMBOLS
 from research.liquidity_oracle_atlas.build_forming_environment_v1 import (
     FormingEnvironmentBuilder,
 )
-from research.liquidity_oracle_atlas.build_structure_constrained_trade_oracle_dp_v1 import (
+from research.liquidity_oracle_atlas.build_structure_constrained_trade_oracle_dp_v2 import (
     ARTIFACT_ROOT_DIRNAME,
     MATH_VERSION,
-    load_oracle_artifact,
+    load_oracle_artifact_v2 as load_oracle_artifact,
+)
+from research.liquidity_oracle_atlas.build_structure_constrained_trade_oracle_dp_v1 import (
     oracle_cache_token,
 )
 from research.liquidity_oracle_atlas.git_head import git_head
