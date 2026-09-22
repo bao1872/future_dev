@@ -1,0 +1,7 @@
+{
+  "task_id": "FUTURE-ENTRY-VALUE-M1-STRUCT44-COST-ROBUSTNESS-V1",
+  "parity_symbols": 15,
+  "parity_all_ok": true,
+  "forward_atr_gate": "PASS",
+  "performance_gate": "PASS"
+}

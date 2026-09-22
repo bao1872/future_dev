@@ -1157,6 +1157,7 @@ def _stream_from_base(
     emit_events: bool = True,
     mask_only: bool = False,
     capture_proximity: bool = False,
+    capture_atr5m: bool = False,
 ) -> Dict[str, Any]:
     """Core single-pass streaming loop (shared by all entry points)."""
     n = len(base)
@@ -1181,7 +1182,10 @@ def _stream_from_base(
     # nor stores them (contract FIX1).
     if mask_only:
         dtp_ctx = None
-        atr5m = None
+        # NEW (cost robustness): allow capturing the already-computed m5 ATR even
+        # on the mask-only fast path. Default False preserves old behaviour
+        # (atr5m stays None, no extra array).
+        atr5m = np.full(n, _NAN) if capture_atr5m else None
         active: Dict[Tuple[str, str], Optional[Episode]] = {}
     else:
         dtp_ctx = {
@@ -1255,8 +1259,12 @@ def _stream_from_base(
                 dtp_ctx[tf]["slope_atr"][i] = feats["slope_atr"]
                 dtp_ctx[tf]["trend_state"][i] = feats["trend_state"]
                 dtp_ctx[tf]["atr"][i] = atr_tf
-                if tf == "m5":
-                    atr5m[i] = atr_tf
+            # NEW (cost robustness): capture the m5 ATR whenever atr5m is
+            # allocated (both full and mask_only+capture_atr5m paths). This is
+            # the causal ATR5m[t] used by the cost kernel; it is a byproduct of
+            # the canonical preview, so it adds no extra computation.
+            if atr5m is not None and tf == "m5":
+                atr5m[i] = atr_tf
 
             channels = list(pv.sr.channels)
             liq_up = [dict(x) for x in pv.liq.levels_up]
