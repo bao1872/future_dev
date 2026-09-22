@@ -1,0 +1,233 @@
+{
+  "task_id": "FUTURE-ENTRY-VALUE-M1-STRUCT44-COST-ROBUSTNESS-V1-PHASE2-FORMAL",
+  "parent_task_id": "FUTURE-ENTRY-VALUE-M1-STRUCT44-COST-ROBUSTNESS-V1",
+  "dataset": "artifacts/intraday_entry_value_tree_core108_v1/t2/t2_dataset.parquet",
+  "kappas": [
+    0.0,
+    0.005,
+    0.01,
+    0.02,
+    0.05
+  ],
+  "core_friction_max": 0.02,
+  "stress_kappa": 0.05,
+  "models": [
+    "M0",
+    "M1"
+  ],
+  "comparisons": [
+    "M0-Baseline",
+    "M1-M0"
+  ],
+  "lightgbm_version": "4.7.0",
+  "seed": 20260921,
+  "base_params": {
+    "objective": "regression",
+    "learning_rate": 0.05,
+    "num_leaves": 31,
+    "max_depth": -1,
+    "min_child_samples": 100,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "reg_alpha": 0.1,
+    "reg_lambda": 1.0,
+    "n_estimators": 2000,
+    "random_state": 20260921,
+    "n_jobs": -1
+  },
+  "early_stopping_rounds": 100,
+  "symbols": [
+    "AG",
+    "AU",
+    "CU",
+    "AL",
+    "SN",
+    "NI",
+    "RB",
+    "I",
+    "SC",
+    "RU",
+    "MA",
+    "TA",
+    "M",
+    "P",
+    "CF"
+  ],
+  "n_symbols": 15,
+  "join_audit": {
+    "hard_gate_universe_identical": true,
+    "matched_rows_per_kappa": {
+      "0.0": 426038,
+      "0.005": 426038,
+      "0.01": 426038,
+      "0.02": 426038,
+      "0.05": 426038
+    },
+    "n_t2_rows": 426038
+  },
+  "primary_statistic": "DeltaSTRUCT(kappa) = WRMSE(M0) - WRMSE(M1) on Test",
+  "delta_struct": {
+    "0.0": {
+      "long": {
+        "pooled_test_delta_wrmse": 0.10688890593131273,
+        "symbols_improved": 15,
+        "median_symbol_delta": 0.09719657358612421
+      },
+      "short": {
+        "pooled_test_delta_wrmse": 0.12943235276248455,
+        "symbols_improved": 14,
+        "median_symbol_delta": 0.12355982206123794
+      }
+    },
+    "0.005": {
+      "long": {
+        "pooled_test_delta_wrmse": 0.10786658425473616,
+        "symbols_improved": 15,
+        "median_symbol_delta": 0.08681575246310391
+      },
+      "short": {
+        "pooled_test_delta_wrmse": 0.12680845610603964,
+        "symbols_improved": 14,
+        "median_symbol_delta": 0.12616696878536748
+      }
+    },
+    "0.01": {
+      "long": {
+        "pooled_test_delta_wrmse": 0.10335228423291953,
+        "symbols_improved": 14,
+        "median_symbol_delta": 0.09491164433492605
+      },
+      "short": {
+        "pooled_test_delta_wrmse": 0.12847670121777943,
+        "symbols_improved": 14,
+        "median_symbol_delta": 0.11999779268692023
+      }
+    },
+    "0.02": {
+      "long": {
+        "pooled_test_delta_wrmse": 0.10333244272083997,
+        "symbols_improved": 15,
+        "median_symbol_delta": 0.10689821492782725
+      },
+      "short": {
+        "pooled_test_delta_wrmse": 0.12174206299965462,
+        "symbols_improved": 14,
+        "median_symbol_delta": 0.11544230107388298
+      }
+    },
+    "0.05": {
+      "long": {
+        "pooled_test_delta_wrmse": 0.10464762497925317,
+        "symbols_improved": 14,
+        "median_symbol_delta": 0.09828831327077125
+      },
+      "short": {
+        "pooled_test_delta_wrmse": 0.11800815910461937,
+        "symbols_improved": 14,
+        "median_symbol_delta": 0.11522626165144345
+      }
+    }
+  },
+  "rubric_inputs": {
+    "0.0": {
+      "long": {
+        "bootstrap_ci_lower": 0.09093848941280937,
+        "bootstrap_ci_upper": 0.12251252958168012,
+        "ci_excludes_zero": true,
+        "unseen_symbol_deltaSTRUCT": 0.09499683029982364,
+        "symbols_improved": 15,
+        "n_symbols": 15,
+        "meets_rubric": true
+      },
+      "short": {
+        "bootstrap_ci_lower": 0.10944573556800694,
+        "bootstrap_ci_upper": 0.15177492744015952,
+        "ci_excludes_zero": true,
+        "unseen_symbol_deltaSTRUCT": 0.11399115804102733,
+        "symbols_improved": 14,
+        "n_symbols": 15,
+        "meets_rubric": true
+      }
+    },
+    "0.005": {
+      "long": {
+        "bootstrap_ci_lower": 0.09161216484268267,
+        "bootstrap_ci_upper": 0.12410968866965359,
+        "ci_excludes_zero": true,
+        "unseen_symbol_deltaSTRUCT": 0.09569704195130813,
+        "symbols_improved": 15,
+        "n_symbols": 15,
+        "meets_rubric": true
+      },
+      "short": {
+        "bootstrap_ci_lower": 0.10900903711338224,
+        "bootstrap_ci_upper": 0.1476772822258647,
+        "ci_excludes_zero": true,
+        "unseen_symbol_deltaSTRUCT": 0.11065466119091427,
+        "symbols_improved": 14,
+        "n_symbols": 15,
+        "meets_rubric": true
+      }
+    },
+    "0.01": {
+      "long": {
+        "bootstrap_ci_lower": 0.08615697252818552,
+        "bootstrap_ci_upper": 0.11959328153161843,
+        "ci_excludes_zero": true,
+        "unseen_symbol_deltaSTRUCT": 0.09510347036649769,
+        "symbols_improved": 14,
+        "n_symbols": 15,
+        "meets_rubric": true
+      },
+      "short": {
+        "bootstrap_ci_lower": 0.10974422174666446,
+        "bootstrap_ci_upper": 0.14935565220156619,
+        "ci_excludes_zero": true,
+        "unseen_symbol_deltaSTRUCT": 0.11027529281156001,
+        "symbols_improved": 14,
+        "n_symbols": 15,
+        "meets_rubric": true
+      }
+    },
+    "0.02": {
+      "long": {
+        "bootstrap_ci_lower": 0.08783666079492707,
+        "bootstrap_ci_upper": 0.1179500430196775,
+        "ci_excludes_zero": true,
+        "unseen_symbol_deltaSTRUCT": 0.0913613030247955,
+        "symbols_improved": 15,
+        "n_symbols": 15,
+        "meets_rubric": true
+      },
+      "short": {
+        "bootstrap_ci_lower": 0.10411526645758415,
+        "bootstrap_ci_upper": 0.14159072801530032,
+        "ci_excludes_zero": true,
+        "unseen_symbol_deltaSTRUCT": 0.11348123526253717,
+        "symbols_improved": 14,
+        "n_symbols": 15,
+        "meets_rubric": true
+      }
+    },
+    "0.05": {
+      "long": {
+        "bootstrap_ci_lower": 0.08896008786592455,
+        "bootstrap_ci_upper": 0.12042381313172192,
+        "ci_excludes_zero": true,
+        "unseen_symbol_deltaSTRUCT": 0.09162112570104108,
+        "symbols_improved": 14,
+        "n_symbols": 15,
+        "meets_rubric": true
+      },
+      "short": {
+        "bootstrap_ci_lower": 0.10021382728102143,
+        "bootstrap_ci_upper": 0.1384006829413045,
+        "ci_excludes_zero": true,
+        "unseen_symbol_deltaSTRUCT": 0.10495966165194082,
+        "symbols_improved": 14,
+        "n_symbols": 15,
+        "meets_rubric": true
+      }
+    }
+  }
+}
