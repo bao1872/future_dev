@@ -41,12 +41,15 @@ from research.export_ob_trigger_execution_v21 import load_raw_5m
 from research.liquidity_oracle_atlas.build_candidate_gate_r3_v1 import (
     ALL_SYMBOLS,
     CANDIDATE_MATH_VERSION,
+    derive_nextbar_candidate_gate,
     gate_alignment_mismatch_count,
     load_candidate_gate_verified,
+    load_candidate_proof_verified,
     validate_gate_against_raw,
 )
 from research.liquidity_oracle_atlas.experiment_structure_interaction_entry_v1 import (
     KernelCounters,
+    MASK_BIT,
     _stream_from_base,
     build_base_frame,
     entry_bits_from_prev_geometry,
@@ -80,11 +83,53 @@ def _independent_entry_mask(symbol, max_bars):
     return entry_mask, rec
 
 
+def _proof_checks(symbol: str, gate: pd.DataFrame) -> dict:
+    """FIX2 proof sidecar consistency (read via the verified loader)."""
+    try:
+        proof = load_candidate_proof_verified(symbol)
+    except Exception as e:  # noqa: BLE001
+        return {
+            "proof_sha_verified": False,
+            "proof_bit_consistency_mismatch": None,
+            "candidate_reconstruction_mismatch": None,
+            "error": f"PROOF_FAIL:{e}",
+        }
+    # a) reconstruct the 8-bit touch mask from the proof rows; must equal the
+    #    artifact touch_bits at every trigger bar. This is the single strongest
+    #    check that the proof and the candidate math share one touch fact.
+    tb = gate["touch_bits"].to_numpy().astype(np.uint16)
+    n = len(tb)
+    recon = np.zeros(n, dtype=np.uint16)
+    for r in proof.itertuples(index=False):
+        key = (str(r.tf), str(r.family))
+        if key in MASK_BIT:
+            recon[int(r.trigger_bar_index)] |= np.uint16(1) << np.uint16(MASK_BIT[key])
+    proof_bit_consistency = int(np.sum(recon != tb))
+
+    # b) reconstruct candidate_any from the artifact touch_bits (same gate math)
+    #    and confirm it reproduces the stored candidate_any exactly.
+    seg = gate["segment"].to_numpy(np.int64)
+    td = pd.to_datetime(gate["trading_day"]).to_numpy()
+    recomputed = derive_nextbar_candidate_gate(tb, seg, td)["candidate_any"]
+    cand_recon = int(
+        np.sum(recomputed.astype(bool) != gate["candidate_any"].to_numpy(bool))
+    )
+    return {
+        "proof_sha_verified": True,
+        "proof_bit_consistency_mismatch": proof_bit_consistency,
+        "candidate_reconstruction_mismatch": cand_recon,
+        "error": None,
+    }
+
+
 def verify_symbol(symbol: str) -> dict:
     out: dict = {
         "artifact_sha_verified": False,
         "alignment_mismatch": None,
         "touch_mismatch": None,
+        "proof_sha_verified": False,
+        "proof_bit_consistency_mismatch": None,
+        "candidate_reconstruction_mismatch": None,
         "error": None,
     }
     # 1) fail-closed SHA / manifest / rows / version gate
@@ -115,6 +160,13 @@ def verify_symbol(symbol: str) -> dict:
         out["touch_mismatch"] = int(abs(len(em) - len(df_bits))) + len(df_bits)
         return out
     out["touch_mismatch"] = int(np.sum(em != df_bits))
+
+    # 4) FIX2 proof sidecar consistency
+    proof = _proof_checks(symbol, gate)
+    out.update(proof)
+    if proof.get("error"):
+        out["error"] = proof["error"]
+        return out
     return out
 
 
@@ -138,6 +190,9 @@ def main() -> int:
             r["artifact_sha_verified"]
             and r["alignment_mismatch"] == 0
             and r["touch_mismatch"] == 0
+            and r["proof_sha_verified"]
+            and r["proof_bit_consistency_mismatch"] == 0
+            and r["candidate_reconstruction_mismatch"] == 0
             and r["error"] is None
         )
         if not ok:
@@ -145,6 +200,9 @@ def main() -> int:
         print(
             f"  {sym}: sha_ok={r['artifact_sha_verified']} "
             f"align={r['alignment_mismatch']} touch={r['touch_mismatch']} "
+            f"proof_ok={r['proof_sha_verified']} "
+            f"bit_cons={r['proof_bit_consistency_mismatch']} "
+            f"cand_recon={r['candidate_reconstruction_mismatch']} "
             f"{'OK' if ok else 'FAIL ' + str(r['error'])}"
         )
 

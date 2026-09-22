@@ -6,90 +6,135 @@
       "artifact_sha_verified": true,
       "alignment_mismatch": 0,
       "touch_mismatch": 0,
+      "proof_sha_verified": true,
+      "proof_bit_consistency_mismatch": 0,
+      "candidate_reconstruction_mismatch": 0,
       "error": null
     },
     "AL": {
       "artifact_sha_verified": true,
       "alignment_mismatch": 0,
       "touch_mismatch": 0,
+      "proof_sha_verified": true,
+      "proof_bit_consistency_mismatch": 0,
+      "candidate_reconstruction_mismatch": 0,
       "error": null
     },
     "AU": {
       "artifact_sha_verified": true,
       "alignment_mismatch": 0,
       "touch_mismatch": 0,
+      "proof_sha_verified": true,
+      "proof_bit_consistency_mismatch": 0,
+      "candidate_reconstruction_mismatch": 0,
       "error": null
     },
     "CF": {
       "artifact_sha_verified": true,
       "alignment_mismatch": 0,
       "touch_mismatch": 0,
+      "proof_sha_verified": true,
+      "proof_bit_consistency_mismatch": 0,
+      "candidate_reconstruction_mismatch": 0,
       "error": null
     },
     "CU": {
       "artifact_sha_verified": true,
       "alignment_mismatch": 0,
       "touch_mismatch": 0,
+      "proof_sha_verified": true,
+      "proof_bit_consistency_mismatch": 0,
+      "candidate_reconstruction_mismatch": 0,
       "error": null
     },
     "I": {
       "artifact_sha_verified": true,
       "alignment_mismatch": 0,
       "touch_mismatch": 0,
+      "proof_sha_verified": true,
+      "proof_bit_consistency_mismatch": 0,
+      "candidate_reconstruction_mismatch": 0,
       "error": null
     },
     "M": {
       "artifact_sha_verified": true,
       "alignment_mismatch": 0,
       "touch_mismatch": 0,
+      "proof_sha_verified": true,
+      "proof_bit_consistency_mismatch": 0,
+      "candidate_reconstruction_mismatch": 0,
       "error": null
     },
     "MA": {
       "artifact_sha_verified": true,
       "alignment_mismatch": 0,
       "touch_mismatch": 0,
+      "proof_sha_verified": true,
+      "proof_bit_consistency_mismatch": 0,
+      "candidate_reconstruction_mismatch": 0,
       "error": null
     },
     "NI": {
       "artifact_sha_verified": true,
       "alignment_mismatch": 0,
       "touch_mismatch": 0,
+      "proof_sha_verified": true,
+      "proof_bit_consistency_mismatch": 0,
+      "candidate_reconstruction_mismatch": 0,
       "error": null
     },
     "P": {
       "artifact_sha_verified": true,
       "alignment_mismatch": 0,
       "touch_mismatch": 0,
+      "proof_sha_verified": true,
+      "proof_bit_consistency_mismatch": 0,
+      "candidate_reconstruction_mismatch": 0,
       "error": null
     },
     "RB": {
       "artifact_sha_verified": true,
       "alignment_mismatch": 0,
       "touch_mismatch": 0,
+      "proof_sha_verified": true,
+      "proof_bit_consistency_mismatch": 0,
+      "candidate_reconstruction_mismatch": 0,
       "error": null
     },
     "RU": {
       "artifact_sha_verified": true,
       "alignment_mismatch": 0,
       "touch_mismatch": 0,
+      "proof_sha_verified": true,
+      "proof_bit_consistency_mismatch": 0,
+      "candidate_reconstruction_mismatch": 0,
       "error": null
     },
     "SC": {
       "artifact_sha_verified": true,
       "alignment_mismatch": 0,
       "touch_mismatch": 0,
+      "proof_sha_verified": true,
+      "proof_bit_consistency_mismatch": 0,
+      "candidate_reconstruction_mismatch": 0,
       "error": null
     },
     "SN": {
       "artifact_sha_verified": true,
       "alignment_mismatch": 0,
       "touch_mismatch": 0,
+      "proof_sha_verified": true,
+      "proof_bit_consistency_mismatch": 0,
+      "candidate_reconstruction_mismatch": 0,
       "error": null
     },
     "TA": {
       "artifact_sha_verified": true,
       "alignment_mismatch": 0,
       "touch_mismatch": 0,
+      "proof_sha_verified": true,
+      "proof_bit_consistency_mismatch": 0,
+      "candidate_reconstruction_mismatch": 0,
       "error": null
     }
   },

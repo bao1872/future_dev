@@ -212,3 +212,82 @@ def test_touch_bit_array():
 
 def test_candidate_math_version_constant():
     assert CANDIDATE_MATH_VERSION == "r3_m5_touch_nextbar_gate_v1"
+
+
+# --------------------------------------------------------------------------- #
+# FIX2: canonical touch owner provenance (bits + hit-zone proof in one pass)    #
+# --------------------------------------------------------------------------- #
+from research.liquidity_oracle_atlas.experiment_structure_interaction_entry_v1 import (  # noqa: E402
+    MASK_BIT as _MASK,
+    entry_bits_from_prev_geometry,
+    entry_touch_from_prev_geometry,
+)
+
+
+def _fake_geom():
+    """Synthetic prev_geom_by_tf: 5m SR#0 + 5m LIQ(up) hit; h1 nothing."""
+    low5, high5 = 15812.0, 15848.0  # bar range used by the assertions below
+    geom = {
+        "m5": (
+            # channels: (top, bottom, strength); only #0 is hit
+            [(15860.0, 15835.0, 1.0), (15780.0, 15750.0, 0.5)],
+            # liq_up
+            [{"top": 15852.0, "bottom": 15840.0, "level": 15846.0, "broken": False}],
+            # liq_down
+            [{"top": 15760.0, "bottom": 15740.0, "level": 15750.0, "broken": False}],
+            12.0,
+        ),
+        "h1": (
+            [(15900.0, 15870.0, 0.8)],
+            [{"top": 15855.0, "bottom": 15850.0, "level": 15852.0, "broken": False}],
+            [],
+            60.0,
+        ),
+    }
+    return low5, high5, geom
+
+
+def test_entry_touch_provenance_captures_hit_zones():
+    low5, high5, geom = _fake_geom()
+    bits, matches = entry_touch_from_prev_geometry(low5, high5, geom, capture_provenance=True)
+    expected = (1 << _MASK[("m5", "SR")]) | (1 << _MASK[("m5", "LIQ")])
+    assert bits == expected
+    # exactly the 5m SR#0 and 5m LIQ(up)#0 were hit
+    assert len(matches) == 2
+    kinds = {(m["tf"], m["family"], m["slot"]) for m in matches}
+    assert ("m5", "SR", 0) in kinds
+    assert ("m5", "LIQ", 0) in kinds
+    for m in matches:
+        # every match records the exact zone actually intersected
+        assert m["intersects"] is True
+        assert m["top"] >= m["bottom"]
+        if m["family"] == "LIQ":
+            assert m["side"] in ("BUY", "SELL")
+            assert m["level"] is not None
+        else:
+            assert m["strength"] is not None
+
+
+def test_entry_touch_without_provenance_returns_no_matches():
+    low5, high5, geom = _fake_geom()
+    bits, matches = entry_touch_from_prev_geometry(low5, high5, geom, capture_provenance=False)
+    expected = (1 << _MASK[("m5", "SR")]) | (1 << _MASK[("m5", "LIQ")])
+    assert bits == expected
+    assert matches == []
+
+
+def test_entry_bits_wrapper_is_bit_identical():
+    low5, high5, geom = _fake_geom()
+    bits_full, _ = entry_touch_from_prev_geometry(low5, high5, geom, capture_provenance=True)
+    bits_wrapper = entry_bits_from_prev_geometry(low5, high5, geom)
+    assert bits_wrapper == int(bits_full)
+
+
+def test_proof_reconstructs_bits():
+    """The proof rows must reconstruct the SAME 8-bit mask the bits came from."""
+    low5, high5, geom = _fake_geom()
+    bits, matches = entry_touch_from_prev_geometry(low5, high5, geom, capture_provenance=True)
+    recon = 0
+    for m in matches:
+        recon |= 1 << _MASK[(m["tf"], m["family"])]
+    assert recon == bits

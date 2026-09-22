@@ -172,12 +172,46 @@ def touch_bit(bits, tf: str, family: str) -> np.ndarray:
 # --------------------------------------------------------------------------- #
 # Per-symbol artifact generation                                                #
 # --------------------------------------------------------------------------- #
-def build_candidate_gate_for_symbol(symbol: str) -> Tuple[pd.DataFrame, str]:
-    """Generate the canonical candidate artifact for one symbol.
+def _build_proof_df(symbol, entry_matches, base, times):
+    """Flatten per-bar trigger matches into a compact long-format proof table.
 
-    Returns (df, sha256_hex). Persists <symbol>.parquet under ARTIFACT_DIR.
-    The 4TF true-touch mask is produced by the existing canonical mask-only
-    stream (NOT recomputed here).
+    Only ACTUAL matches are stored (one row per (trigger_bar, hit_zone)); the full
+    historical geometry is NOT persisted. ``trigger_bar_index`` == the bar at which
+    the touch occurred (= ``candidate_any`` is True at ``trigger_bar + 1``).
+    """
+    n = len(base)
+    rows = []
+    for i in range(n):
+        for m in entry_matches[i]:
+            rows.append({
+                "symbol": symbol,
+                "trigger_bar_index": int(i),
+                "trigger_decision_time": pd.Timestamp(times[i]),
+                "tf": m["tf"],
+                "family": m["family"],
+                "side": m.get("side"),
+                "slot": int(m["slot"]),
+                "top": float(m["top"]),
+                "bottom": float(m["bottom"]),
+                "level": (
+                    float(m["level"]) if m.get("level") is not None else np.nan
+                ),
+                "strength": (
+                    float(m["strength"]) if m.get("strength") is not None else np.nan
+                ),
+                "intersects": bool(m.get("intersects", True)),
+            })
+    return pd.DataFrame(rows)
+
+
+def build_candidate_gate_for_symbol(symbol: str) -> Tuple[pd.DataFrame, str, str, int]:
+    """Generate the canonical candidate artifact + touch-proof sidecar for one symbol.
+
+    Returns (df, candidate_sha256, proof_sha256, proof_rows). Persists
+    <symbol>.parquet (candidate gate) and <symbol>_touch_proof.parquet (FIX2
+    trigger proof) under ARTIFACT_DIR. The 4TF true-touch mask AND the per-trigger
+    hit-zone provenance are produced by the SAME canonical mask-only stream pass
+    (no second divergent touch computation). Candidate math is unchanged.
     """
     counters = KernelCounters()
     info = build_base_frame(symbol, counters)
@@ -192,6 +226,7 @@ def build_candidate_gate_for_symbol(symbol: str) -> Tuple[pd.DataFrame, str]:
         False,   # emit_events
         True,    # mask_only
         False,   # capture_proximity
+        capture_provenance=True,  # FIX2: record hit zones in the SAME pass
     )
     # IMPORTANT: this is the existing canonical TRUE-TOUCH mask, not the
     # distance-based proximity gate used by the R2 DP.
@@ -237,7 +272,13 @@ def build_candidate_gate_for_symbol(symbol: str) -> Tuple[pd.DataFrame, str]:
     out_path = ARTIFACT_DIR / f"{symbol}.parquet"
     df.to_parquet(out_path, index=False)
     sha = hashlib.sha256(out_path.read_bytes()).hexdigest()
-    return df, sha
+
+    # ---- FIX2: compact touch-proof sidecar (actual matches only) ------------ #
+    proof_df = _build_proof_df(symbol, stream["entry_matches"], base, times)
+    proof_path = ARTIFACT_DIR / f"{symbol}_touch_proof.parquet"
+    proof_df.to_parquet(proof_path, index=False)
+    proof_sha = hashlib.sha256(proof_path.read_bytes()).hexdigest()
+    return df, sha, proof_sha, int(len(proof_df))
 
 
 def build_all_candidate_gates(symbols: List[str]) -> Dict[str, Any]:
@@ -254,14 +295,16 @@ def build_all_candidate_gates(symbols: List[str]) -> Dict[str, Any]:
         "symbol_artifacts": {},
     }
     for sym in symbols:
-        df, sha = build_candidate_gate_for_symbol(sym)
+        df, sha, proof_sha, proof_rows = build_candidate_gate_for_symbol(sym)
         cand_rows = int(df["candidate_any"].sum())
         touch_rows = int((df["touch_bits"] != 0).sum())
         summary["symbol_artifacts"][sym] = {
             "sha256": sha,
+            "proof_sha256": proof_sha,
             "rows": int(len(df)),
             "touch_rows": touch_rows,
             "candidate_rows": cand_rows,
+            "proof_rows": proof_rows,
         }
     SUMMARY_FILE.write_text(json.dumps(summary, indent=2, default=str))
     return summary
@@ -272,6 +315,10 @@ def build_all_candidate_gates(symbols: List[str]) -> Dict[str, Any]:
 # --------------------------------------------------------------------------- #
 def gate_path(symbol: str) -> Path:
     return ARTIFACT_DIR / f"{symbol}.parquet"
+
+
+def proof_path(symbol: str) -> Path:
+    return ARTIFACT_DIR / f"{symbol}_touch_proof.parquet"
 
 
 def load_candidate_gate(symbol: str) -> pd.DataFrame:
@@ -349,6 +396,38 @@ def load_candidate_gate_verified(symbol: str) -> pd.DataFrame:
         raise RuntimeError(f"STOP_R3_GATE_SUMMARY_VERSION_MISMATCH:{symbol}")
 
     return df
+
+
+def load_candidate_proof_verified(symbol: str) -> pd.DataFrame:
+    """The ONLY sanctioned reader for the R3 touch-proof sidecar.
+
+    The proof artifact records, for every trigger (touch) bar, the EXACT SR /
+    Liquidity zones that the canonical ``entry_touch_from_prev_geometry`` flagged
+    (FIX2). It is the single source of "which structure was actually hit", shared
+    verbatim by the Viewer / DP / Model — the Viewer must never re-run
+    ``bar_hits_zone`` itself.
+
+    Fails closed (raises RuntimeError) on:
+      * artifact missing               -> STOP_R3_PROOF_MISSING
+      * symbol absent from manifest    -> STOP_R3_PROOF_MANIFEST_MISSING
+      * on-disk SHA != manifest SHA     -> STOP_R3_PROOF_SHA_MISMATCH
+    """
+    p = proof_path(symbol)
+    if not p.exists():
+        raise RuntimeError(f"STOP_R3_PROOF_MISSING:{symbol}")
+    summary = load_candidate_gate_summary()
+    spec = summary.get("symbol_artifacts", {}).get(symbol)
+    if spec is None:
+        raise RuntimeError(f"STOP_R3_PROOF_MANIFEST_MISSING:{symbol}")
+    expected = spec.get("proof_sha256")
+    if expected is None:
+        raise RuntimeError(f"STOP_R3_PROOF_MANIFEST_MISSING:{symbol}")
+    actual = hashlib.sha256(p.read_bytes()).hexdigest()
+    if actual != expected:
+        raise RuntimeError(
+            f"STOP_R3_PROOF_SHA_MISMATCH:{symbol}:{expected}:{actual}"
+        )
+    return pd.read_parquet(p)
 
 
 def gate_alignment_mismatch_count(gate: pd.DataFrame, raw: pd.DataFrame) -> int:

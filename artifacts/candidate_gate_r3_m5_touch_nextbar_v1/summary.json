@@ -5,93 +5,123 @@
   "symbol_artifacts": {
     "AG": {
       "sha256": "5395b98e105120432d98e2b99b316e8d581dd1f0de059cf4d1445d3d78438064",
+      "proof_sha256": "835a1e3a1a02409c229c25b9d2b64c3fc32f03421fc125dee6c12da9f957efd5",
       "rows": 44451,
       "touch_rows": 28088,
-      "candidate_rows": 17463
+      "candidate_rows": 17463,
+      "proof_rows": 52326
     },
     "AL": {
       "sha256": "7e6eca0ba38f9b04b34154e32879273e7fa7aa875f1b4306bcc6f4247520fbf7",
+      "proof_sha256": "82fc81a976672d2f216ab48ac2573ba0c47a444ea3a2af41f54378f365063c7a",
       "rows": 37323,
       "touch_rows": 27163,
-      "candidate_rows": 18644
+      "candidate_rows": 18644,
+      "proof_rows": 59456
     },
     "AU": {
       "sha256": "77099835771dd88bb12267a8ba56164bfb33f6f8f6b94d074df8006a3048d204",
+      "proof_sha256": "18a89ca89c68bbb21c486fb9185a320c8c6f0562b01be4d8568bf8c548c566e1",
       "rows": 44451,
       "touch_rows": 26846,
-      "candidate_rows": 16972
+      "candidate_rows": 16972,
+      "proof_rows": 48219
     },
     "CF": {
       "sha256": "a63fd136e111dd0b50e0f8544548ac41be232fc4d9b11297e40c978427f7106c",
+      "proof_sha256": "9af90a8cdd23bac38f215c4ff3d8ce734d2aa9c0b1fba037165d466b2308588c",
       "rows": 27819,
       "touch_rows": 21124,
-      "candidate_rows": 15449
+      "candidate_rows": 15449,
+      "proof_rows": 49236
     },
     "CU": {
       "sha256": "e82ca8be2536c7b97a05e65b84bb071b9a612205f3d893202f31562de7e628d7",
+      "proof_sha256": "c6748a863b5405c68ff5ca131f08ed87d21cd6b89ab7806c08c303bc90868b64",
       "rows": 37323,
       "touch_rows": 26135,
-      "candidate_rows": 17074
+      "candidate_rows": 17074,
+      "proof_rows": 55304
     },
     "I": {
       "sha256": "0968b9bf3ecf1ed9d7831a0a46e9fe4181bc265eeebe7d32db42d2eb53b7504b",
+      "proof_sha256": "51cb637cb0901ad64f12a5ed2e5c11ea703c244d55c8f6bb7358c54c2301ca67",
       "rows": 27819,
       "touch_rows": 22631,
-      "candidate_rows": 15863
+      "candidate_rows": 15863,
+      "proof_rows": 54824
     },
     "M": {
       "sha256": "5d6a962d463b970dd16e4e887fb250b1b96257d59e22b80422f3ef41cce9c04a",
+      "proof_sha256": "9fe3ade4dfbf5bda0d5034595469da8ef52056e3b00fcd19b6db27649127523e",
       "rows": 27819,
       "touch_rows": 20693,
-      "candidate_rows": 14015
+      "candidate_rows": 14015,
+      "proof_rows": 43365
     },
     "MA": {
       "sha256": "3a7bd072c8bd8b583dcc2d2a8e1c6f01d48d5803b52e5dc8966e29c786d7c682",
+      "proof_sha256": "f3d6f0a79babc384840480a62d3a3f9ab7155dd29a00418afafb951a6ab823b4",
       "rows": 27819,
       "touch_rows": 19825,
-      "candidate_rows": 13337
+      "candidate_rows": 13337,
+      "proof_rows": 41464
     },
     "NI": {
       "sha256": "2f8a107bc5bfb7adb8dc378f3b961ef61c54e2eae81710d73196da1c752d3f39",
+      "proof_sha256": "766ed16e6c016ed94404fc4ae8940d43674251336098dcb40267238bb8f1ea13",
       "rows": 37323,
       "touch_rows": 26482,
-      "candidate_rows": 17280
+      "candidate_rows": 17280,
+      "proof_rows": 56158
     },
     "P": {
       "sha256": "fa2ff65600ba339ead5ad44839427adc1cab4ddc04513e79b3f6a2476d14392c",
+      "proof_sha256": "37443b259c715cf5affd5f7993b34baa2867be94e1d09509937cf55557d424af",
       "rows": 27819,
       "touch_rows": 19427,
-      "candidate_rows": 12510
+      "candidate_rows": 12510,
+      "proof_rows": 38833
     },
     "RB": {
       "sha256": "6da9aded82e75fa72420809873b28784465869321847b42cfc4c263233c45681",
+      "proof_sha256": "7de5008f82cb314427520994ac23cd3f2fefc19d264423a96509d18a93138dbd",
       "rows": 27819,
       "touch_rows": 21520,
-      "candidate_rows": 14873
+      "candidate_rows": 14873,
+      "proof_rows": 49174
     },
     "RU": {
       "sha256": "ed1f08914777049cd8b1f34733137071f4544a5a007ab2736ec9187df31e6083",
+      "proof_sha256": "d5be3ff53005fe25dd0a38757023d1d7341f0fb34d04ac54c27de3a03505473f",
       "rows": 27819,
       "touch_rows": 19989,
-      "candidate_rows": 13811
+      "candidate_rows": 13811,
+      "proof_rows": 41505
     },
     "SC": {
       "sha256": "13e055ba5f843e2f96ebc185f3a7a92140c9269eda8a797fcf6c2194273bcefe",
+      "proof_sha256": "24a53be9c6f59c5dc5797f8bbc36bc35952426bf5387201ef812f30819ef9149",
       "rows": 44449,
       "touch_rows": 28634,
-      "candidate_rows": 18097
+      "candidate_rows": 18097,
+      "proof_rows": 54335
     },
     "SN": {
       "sha256": "55b835d6e2d1fcfb71cb33dcb42c33e0401499ce8401da4496bd0e1a33f2fbec",
+      "proof_sha256": "7165e827d05b0b5f37ab49cf1539530bbaff97fb4e3900c2b817cd8d142d346e",
       "rows": 37323,
       "touch_rows": 25028,
-      "candidate_rows": 15681
+      "candidate_rows": 15681,
+      "proof_rows": 53131
     },
     "TA": {
       "sha256": "112d3212a34f7c2e55c21111c6411c533fe9391aef5e4d60abff724a83ec5a0a",
+      "proof_sha256": "5750de9edf225594ad6480d6eec2a10aa8e03ceb0e3dfa8f531668ecf26a48b1",
       "rows": 27819,
       "touch_rows": 20554,
-      "candidate_rows": 13957
+      "candidate_rows": 13957,
+      "proof_rows": 47176
     }
   }
 }

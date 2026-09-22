@@ -75,6 +75,7 @@ from research.liquidity_oracle_atlas.indicator_viewer_candidate_overlay_v1 impor
 )
 from research.liquidity_oracle_atlas.build_candidate_gate_r3_v1 import (
     load_candidate_gate_summary,
+    load_candidate_proof_verified,
     touch_bit,
 )
 
@@ -468,6 +469,17 @@ def candidate_segments_cached(symbol: str, source_sha: str):
     return build_candidate_segments(cand_sym, track5)
 
 
+@st.cache_data(show_spinner="加载触发证据 (touch proof)…")
+def load_candidate_proof_cached(symbol: str):
+    """Per-symbol R3 touch-proof sidecar (FIX2: exact hit zones per trigger bar).
+
+    Reads the canonical proof artifact via the verified loader — the Viewer must
+    never re-run ``bar_hits_zone`` itself. Keyed by symbol only (string arg), so
+    cache hits are cheap; the proof is computed once at artifact-generation time.
+    """
+    return load_candidate_proof_verified(symbol)
+
+
 @st.cache_resource(show_spinner="构建 forming-MTF 环境…")
 def load_forming_env_cached(symbol: str):
     # Canonical forming-MTF owner (build_forming_environment_v1). Returns the
@@ -722,13 +734,51 @@ def main() -> None:
                 # makes the "previous-bar touch -> next-bar candidate" rule visible.
                 _dt = pd.Timestamp(track.available_time[selected])
                 _cstate = candidate_state_at(cand_by_time, _dt)
-                if _cstate["is_candidate"] and _cstate["trigger_bar_index"] >= 0:
+                if _cstate["is_candidate"] and int(_cstate["trigger_bar_index"]) >= 0:
                     _tbi = int(_cstate["trigger_bar_index"])
                     if 0 <= _tbi < len(track.available_time):
                         fig.add_vline(
                             x=_tbi, line_color="gold", line_width=1.5,
                             opacity=0.9,
                         )
+                        # FIX2: draw ONLY the exact zones actually hit at the
+                        # trigger bar (from the proof artifact), local to
+                        # [trigger-0.5, candidate+0.5]. Never extends across the
+                        # whole viewport, and the Viewer never re-judges
+                        # bar_hits_zone here — the proof is the single source.
+                        try:
+                            _proof = load_candidate_proof_cached(symbol)
+                            _sel = _proof[_proof["trigger_bar_index"] == _tbi]
+                            _x0, _x1 = _tbi - 0.5, selected + 0.5
+                            for _m in _sel.to_dict("records"):
+                                _is_m5 = _m["tf"] == "m5"
+                                if _m["family"] == "SR":
+                                    _color = "rgba(255,193,7,1)" if _is_m5 else "rgba(120,170,255,0.95)"
+                                    _label = (
+                                        f"5m SR #{int(_m['slot'])}" if _is_m5
+                                        else f"{_m['tf']} SR #{int(_m['slot'])} (conf)"
+                                    )
+                                else:
+                                    _color = "rgba(255,140,0,1)" if _is_m5 else "rgba(170,130,255,0.95)"
+                                    _label = (
+                                        f"5m LIQ {_m.get('side')} #{int(_m['slot'])}" if _is_m5
+                                        else f"{_m['tf']} LIQ {_m.get('side')} #{int(_m['slot'])} (conf)"
+                                    )
+                                fig.add_shape(
+                                    type="rect", xref="x", yref="y",
+                                    x0=_x0, x1=_x1,
+                                    y0=float(_m["bottom"]), y1=float(_m["top"]),
+                                    fillcolor="rgba(0,0,0,0)",
+                                    line={"color": _color, "width": 2.5},
+                                    layer="above",
+                                )
+                                fig.add_annotation(
+                                    x=_x1, y=float(_m["top"]), text=_label,
+                                    showarrow=False, xanchor="left", yanchor="bottom",
+                                    font={"color": _color, "size": 10},
+                                )
+                        except Exception as _e:  # proof missing -> skip draw, keep bands
+                            st.warning(f"touch proof unavailable: {_e}")
                 timing["plot_segment_count"] = len(visible)
                 timing["full_symbol_segments"] = len(segments)
                 st.caption(
@@ -753,6 +803,26 @@ def main() -> None:
                             if nxt:
                                 st.session_state.iv_selected = int(min(nxt))
                                 st.rerun()
+
+                    # FIX2: per-Candidate navigation (jump to the next candidate
+                    # BAR, not just episode start) for fast trigger-zone review.
+                    cand_idx = sorted(
+                        {i for s in segments for i in range(s.start_idx, s.end_idx + 1)}
+                    )
+                    if cand_idx:
+                        cp2, cn2 = st.columns(2)
+                        with cp2:
+                            if st.button("◀ Prev Candidate"):
+                                prev = [x for x in cand_idx if x < selected]
+                                if prev:
+                                    st.session_state.iv_selected = int(max(prev))
+                                    st.rerun()
+                        with cn2:
+                            if st.button("Next Candidate ▶"):
+                                nxt = [x for x in cand_idx if x > selected]
+                                if nxt:
+                                    st.session_state.iv_selected = int(min(nxt))
+                                    st.rerun()
             else:
                 st.info(
                     "Candidate zones are defined on the 5m decision axis. "
@@ -874,6 +944,49 @@ def _render_candidate_audit(track, symbol, selected, cand_by_time, cand_audit, s
         kind = "ELIG" if tf == "m5" else "conf"
         st.text(f"  {tf} {fam:3s} : {'YES' if hit else 'no '}  ({kind})")
     st.text("  5m SR/LIQ = execution eligibility; higher-TF = confluence/context.")
+
+    # C. FIX2 exact trigger proof: WHICH zone each bit came from (single source).
+    st.markdown("**C. Trigger proof (exact hit zones at trigger bar)**")
+    _tbi = int(state.get("trigger_bar_index", -1))
+    if _tbi < 0:
+        st.caption("Trigger bar index unknown for this candidate.")
+    else:
+        _trow = selected_snapshot(track, _tbi)
+        st.text(
+            f"Trigger bar {_tbi} @ {pd.Timestamp(track.available_time[_tbi])}  "
+            f"OHLC {_trow['o']:.2f}/{_trow['h']:.2f}/{_trow['l']:.2f}/{_trow['c']:.2f}"
+        )
+        try:
+            _proof = load_candidate_proof_cached(symbol)
+            _rows = _proof[_proof["trigger_bar_index"] == _tbi].to_dict("records")
+        except Exception as _e:
+            _rows = []
+            st.warning(f"touch proof unavailable: {_e}")
+        if not _rows:
+            st.caption("No hit-zone proof recorded for this trigger bar.")
+        else:
+            for _m in _rows:
+                _is_m5 = _m["tf"] == "m5"
+                _tag = "ELIG" if _is_m5 else "conf"
+                _zone = f"[{float(_m['bottom']):.2f}, {float(_m['top']):.2f}]"
+                if _m["family"] == "LIQ":
+                    _lvl = f" level={float(_m['level']):.2f}" if pd.notna(_m.get("level")) else ""
+                    _side = f" {_m.get('side')}" if _m.get("side") else ""
+                    st.text(
+                        f"  {_m['tf']} {_m['family']}{_side} #{int(_m['slot'])} "
+                        f"{_zone}{_lvl} intersect={_m.get('intersects')} ({_tag})"
+                    )
+                else:
+                    _str = (
+                        f" strength={float(_m['strength']):.1f}"
+                        if pd.notna(_m.get("strength")) else ""
+                    )
+                    st.text(
+                        f"  {_m['tf']} {_m['family']} #{int(_m['slot'])} "
+                        f"{_zone}{_str} intersect={_m.get('intersects')} ({_tag})"
+                    )
+            st.text("  Trigger range = [Low, High] of trigger bar; intersect is the")
+            st.text("  stored hit result (Viewer does NOT re-judge bar_hits_zone).")
 
     # B. canonical FORMING multi-timeframe state (canonical owner)
     st.markdown("**B. Current canonical FORMING indicator state**")

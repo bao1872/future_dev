@@ -482,6 +482,81 @@ def bar_hits_zone(low5: float, high5: float, bottom: float, top: float) -> bool:
     return high5 >= bottom and low5 <= top
 
 
+def entry_touch_from_prev_geometry(
+    low5: float,
+    high5: float,
+    prev_geom_by_tf: Dict[str, Tuple],
+    capture_provenance: bool = False,
+) -> Tuple[int, List[Dict[str, Any]]]:
+    """Unified canonical 5m true-touch owner (contract §7 / §8).
+
+    Returns ``(bits, matches)``. ``bits`` is the 8-bit TF x {SR, LIQ} entry mask
+    (current 5m range vs structures ALREADY KNOWN at the previous 5m close).
+    ``matches`` is the list of actually-hit zones (empty unless
+    ``capture_provenance`` is True).
+
+    CRITICAL: the bit and every provenance record are produced by the SAME
+    ``bar_hits_zone`` call inside the SAME loop. There is exactly ONE touch
+    computation — no second, divergent pass. This is what lets the Candidate
+    artifact's "trigger proof" be provably consistent with the 8-bit mask
+    (FIX2: Viewer/DP/Model must consume the same verified touch fact, including
+    WHICH zone each bit came from).
+
+    ``prev_geom_by_tf[tf] = (channels, liq_up, liq_down, atr_tf)`` where
+    ``channels`` is the canonical ``sr.channels`` list of ``(top, bottom,
+    strength)`` and ``liq_up/liq_down`` are canonical liquidity level dicts with
+    ``top`` / ``bottom`` / ``level`` / ``broken``.
+
+    ONLY the geometry known at the PREVIOUS 5m close may qualify (causal): a
+    structure formed by the current bar can never retroactively make the current
+    bar eligible. ``broken`` liquidity is excluded.
+    """
+    bits = 0
+    matches: List[Dict[str, Any]] = []
+    for tf in TF_ORDER:
+        g = prev_geom_by_tf.get(tf)
+        if g is None:
+            continue
+        channels, liq_up, liq_down, *_ = g
+
+        for slot, (top, bottom, strength) in enumerate(channels):
+            if bar_hits_zone(low5, high5, float(bottom), float(top)):
+                bits |= 1 << MASK_BIT[(tf, "SR")]
+                if capture_provenance:
+                    matches.append({
+                        "tf": tf,
+                        "family": "SR",
+                        "side": None,
+                        "slot": int(slot),
+                        "top": float(top),
+                        "bottom": float(bottom),
+                        "level": None,
+                        "strength": float(strength),
+                        "intersects": True,
+                    })
+
+        for side, levels in (("BUY", liq_up), ("SELL", liq_down)):
+            for slot, z in enumerate(levels):
+                if bool(z["broken"]):
+                    continue
+                if bar_hits_zone(low5, high5, float(z["bottom"]), float(z["top"])):
+                    bits |= 1 << MASK_BIT[(tf, "LIQ")]
+                    if capture_provenance:
+                        matches.append({
+                            "tf": tf,
+                            "family": "LIQ",
+                            "side": side,
+                            "slot": int(slot),
+                            "top": float(z["top"]),
+                            "bottom": float(z["bottom"]),
+                            "level": float(z["level"]),
+                            "strength": None,
+                            "intersects": True,
+                        })
+
+    return int(bits), matches
+
+
 def entry_bits_from_prev_geometry(
     low5: float,
     high5: float,
@@ -489,37 +564,11 @@ def entry_bits_from_prev_geometry(
 ) -> int:
     """8-bit entry mask: current 5m range touches a PRE-EXISTING SR / Liquidity.
 
-    ``prev_geom_by_tf[tf] = (channels, liq_up, liq_down)`` where ``channels`` is
-    the canonical ``sr.channels`` list of ``(top, bottom, strength)`` and
-    ``liq_up/liq_down`` are canonical liquidity level dicts with ``top`` /
-    ``bottom`` / ``broken``.
-
-    ONLY the geometry known at the PREVIOUS 5m close may qualify (causal): a
-    structure formed by the current bar can never retroactively make the
-    current bar eligible. ``broken`` liquidity is excluded.
+    Thin bit-only wrapper over :func:`entry_touch_from_prev_geometry` (kept for
+    backward compatibility — byte-identical output). The provenance-bearing entry
+    point is ``entry_touch_from_prev_geometry``.
     """
-    bits = 0
-    for tf in TF_ORDER:
-        g = prev_geom_by_tf.get(tf)
-        if g is None:
-            continue
-        channels, liq_up, liq_down, *_ = g
-
-        hit_sr = any(
-            bar_hits_zone(low5, high5, float(bottom), float(top))
-            for top, bottom, _strength in channels
-        )
-        if hit_sr:
-            bits |= 1 << MASK_BIT[(tf, "SR")]
-
-        hit_liq = any(
-            (not bool(z["broken"]))
-            and bar_hits_zone(low5, high5, float(z["bottom"]), float(z["top"]))
-            for z in (*liq_up, *liq_down)
-        )
-        if hit_liq:
-            bits |= 1 << MASK_BIT[(tf, "LIQ")]
-
+    bits, _ = entry_touch_from_prev_geometry(low5, high5, prev_geom_by_tf)
     return int(bits)
 
 
@@ -1091,6 +1140,7 @@ def run_symbol_streaming(
     emit_events: bool = True,
     mask_only: bool = False,
     capture_proximity: bool = False,
+    capture_provenance: bool = False,
 ) -> Dict[str, Any]:
     """Single-pass causal event engine for one symbol (real data path).
 
@@ -1100,18 +1150,20 @@ def run_symbol_streaming(
     ``capture_geom`` records the per-decision production geometry for the T1
     differential harness. ``capture_entry_mask`` records the frozen 8-bit
     entry mask (contract §7 / §8): current 5m range touching a PRE-EXISTING
-    SR / Liquidity zone. ``capture_proximity`` records the Oracle V2 distance-
+    SR / Liquidity zone.     ``capture_proximity`` records the Oracle V2 distance-
     based proximity mask (within ENTRY_PROX_ATR of a pre-existing SR / Liquidity
     zone) used as the V2 DP entry gate. ``emit_events=False`` skips event-row
     construction (no ``compute_outcome``). ``mask_only=True`` is the true DP
     fast path: the (tf, role) episode/event lifecycle is NOT executed at all and
-    no DTP context arrays are stored. None of these call the slow reference.
+    no DTP context arrays are stored. ``capture_provenance=True`` (with
+    ``capture_entry_mask``) additionally records, per bar, the exact SR / Liquidity
+    zones actually hit (FIX2 trigger-proof). None of these call the slow reference.
     """
     info = build_base_frame(symbol, counters)
     return _stream_from_base(
         info["base"], info["form"], info["seg_completed"], counters,
         max_bars, symbol, capture_geom, capture_entry_mask, emit_events,
-        mask_only, capture_proximity,
+        mask_only, capture_proximity, capture_provenance=capture_provenance,
     )
 
 
@@ -1125,6 +1177,7 @@ def stream_from_base(
     emit_events: bool = True,
     mask_only: bool = False,
     capture_proximity: bool = False,
+    capture_provenance: bool = False,
 ) -> Dict[str, Any]:
     """Streaming entry point for a prebuilt base frame (synthetic T0 tests).
 
@@ -1142,6 +1195,7 @@ def stream_from_base(
     return _stream_from_base(
         base, form, seg_completed, counters, max_bars, symbol, capture_geom,
         capture_entry_mask, emit_events, mask_only, capture_proximity,
+        capture_provenance=capture_provenance,
     )
 
 
@@ -1158,6 +1212,7 @@ def _stream_from_base(
     mask_only: bool = False,
     capture_proximity: bool = False,
     capture_atr5m: bool = False,
+    capture_provenance: bool = False,
 ) -> Dict[str, Any]:
     """Core single-pass streaming loop (shared by all entry points)."""
     n = len(base)
@@ -1205,6 +1260,9 @@ def _stream_from_base(
     events: List[Dict[str, Any]] = []
     decision_geom: List[Dict[str, Any]] = [] if capture_geom else None
     entry_mask = np.zeros(n, dtype=np.uint16) if capture_entry_mask else None
+    entry_matches: Optional[List[List[Dict[str, Any]]]] = (
+        [[] for _ in range(n)] if capture_provenance else None
+    )
     proximity_bits = np.zeros(n, dtype=np.uint16) if capture_proximity else None
     proximity_any = np.zeros(n, dtype=bool) if capture_proximity else None
     # geometry known at the PREVIOUS 5m close (causal entry mask input)
@@ -1278,11 +1336,23 @@ def _stream_from_base(
         if capture_geom_prev:
             # current 5m bar range vs geometry known at the PREVIOUS close
             if capture_entry_mask:
-                entry_mask[i] = np.uint16(
-                    entry_bits_from_prev_geometry(
-                        float(L5[i]), float(H5[i]), prev_geom_by_tf or {}
+                if capture_provenance:
+                    # ONE bar_hits_zone pass produces BOTH the 8-bit mask AND the
+                    # list of actually-hit zones (FIX2: bit + proof are identical
+                    # derived, never a second divergent touch computation).
+                    b, m = entry_touch_from_prev_geometry(
+                        float(L5[i]), float(H5[i]), prev_geom_by_tf or {},
+                        capture_provenance=True,
                     )
-                )
+                    entry_mask[i] = np.uint16(b)
+                    if entry_matches is not None:
+                        entry_matches[i] = m
+                else:
+                    entry_mask[i] = np.uint16(
+                        entry_bits_from_prev_geometry(
+                            float(L5[i]), float(H5[i]), prev_geom_by_tf or {}
+                        )
+                    )
             if capture_proximity:
                 pb = int(
                     proximity_bits_from_prev_geometry(
@@ -1414,6 +1484,8 @@ def _stream_from_base(
     if capture_entry_mask:
         result["entry_mask"] = entry_mask
         result["entry_eligible"] = entry_mask != 0
+    if capture_provenance and entry_matches is not None:
+        result["entry_matches"] = entry_matches
     if capture_proximity:
         result["proximity_bits"] = proximity_bits
         result["proximity_any"] = proximity_any
