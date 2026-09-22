@@ -247,6 +247,141 @@ COMPARISONS = [
 ]
 
 
+def _cross_symbol_holdout(df, subsets, symbols):
+    """Frozen 5-fold leave-symbols-out diagnostic (T2 contract Section 10).
+
+    ``fold = sorted_symbol_index % 5`` -> each fold holds exactly 3 unseen
+    symbols and every symbol is held out exactly once. The unseen baseline is the
+    weighted mean of the 12 *seen* symbols' TRAIN labels -- never the held-out
+    Test labels (that would be Test leakage, the original T2-FIX1 bug).
+    """
+    sorted_syms = sorted(symbols)
+    fold_of = {s: i % 5 for i, s in enumerate(sorted_syms)}
+    folds = {f: [s for s in sorted_syms if fold_of[s] == f] for f in range(5)}
+    # contract invariants (also asserted by the test-suite)
+    assert all(len(folds[f]) == 3 for f in range(5)), "each fold must hold 3 symbols"
+    held_all = [s for f in range(5) for s in folds[f]]
+    assert sorted(held_all) == sorted(symbols), "held-out set must equal the universe"
+    assert len(held_all) == 15 and len(set(held_all)) == 15
+
+    sym_arr = df["symbol"].to_numpy()
+    tr = (df["split"].to_numpy() == "train")
+    va = (df["split"].to_numpy() == "validation")
+    te = (df["split"].to_numpy() == "test")
+    w_norm = df["w_norm"].to_numpy(float)
+    w_raw = df["w_raw"].to_numpy(float)
+
+    fold_rows: List[Dict[str, Any]] = []
+    cs_pred: Dict[tuple, tuple] = {}
+    for f in range(5):
+        held = folds[f]
+        train_syms = [s for s in sorted_syms if s not in held]
+        trm = np.isin(sym_arr, train_syms) & tr
+        vam = np.isin(sym_arr, train_syms) & va
+        tem = np.isin(sym_arr, held) & te
+        fold_rows.append({
+            "fold": f, "held_out_symbols": ",".join(held),
+            "train_symbols": ",".join(train_syms),
+            "n_train_rows": int(trm.sum()), "n_validation_rows": int(vam.sum()),
+            "n_eval_rows": int(tem.sum()),
+        })
+        for direction, ycol in (("long", "Y_L"), ("short", "Y_S")):
+            yv = df[ycol].to_numpy(float)
+            for mname in ("M0", "M1", "M2"):
+                cols = subsets[mname]
+                model, _, _ = T.fit_direction(
+                    B.build_X_subset(df[trm], cols), yv[trm], w_norm[trm],
+                    B.build_X_subset(df[vam], cols), yv[vam], w_norm[vam])
+                p = np.asarray(model.predict(B.build_X_subset(df[tem], cols)), float)
+                cs_pred[(f, direction, mname)] = (yv[tem], p, w_raw[tem], sym_arr[tem])
+
+    # per-fold, per-direction weighted mean of the 12 *seen* symbols' TRAIN labels
+    fold_train_mean: Dict[tuple, float] = {}
+    for f in range(5):
+        for direction, ycol in (("long", "Y_L"), ("short", "Y_S")):
+            held = folds[f]
+            seen = [s for s in sorted_syms if s not in held]
+            trm = np.isin(sym_arr, seen) & tr
+            yv = df[ycol].to_numpy(float)
+            fold_train_mean[(f, direction)] = T._wmean(yv[trm], w_norm[trm])
+
+    cs_rows: List[Dict[str, Any]] = []
+    cs_comparison_delta: Dict[tuple, float] = {}
+    for direction, _ in (("long", None), ("short", None)):
+        base_pred_all = np.concatenate([
+            np.full(int((np.isin(sym_arr, folds[f]) & te).sum()),
+                    fold_train_mean[(f, direction)])
+            for f in range(5)])
+        for mname in ("M0", "M1", "M2"):
+            y_all = np.concatenate([cs_pred[(f, direction, mname)][0] for f in range(5)])
+            p_all = np.concatenate([cs_pred[(f, direction, mname)][1] for f in range(5)])
+            w_all = np.concatenate([cs_pred[(f, direction, mname)][2] for f in range(5)])
+            s_all = np.concatenate([cs_pred[(f, direction, mname)][3] for f in range(5)])
+            bw = _wrmse(y_all, base_pred_all, w_all)
+            mw = _wrmse(y_all, p_all, w_all)
+            for sym in symbols:
+                m = s_all == sym
+                if not m.any():
+                    continue
+                ys_, ps_, ws_ = y_all[m], p_all[m], w_all[m]
+                bws = _wrmse(ys_, np.full(len(ys_), fold_train_mean[(fold_of[sym], direction)]), ws_)
+                cs_rows.append({
+                    "symbol": sym, "model": mname, "direction": direction,
+                    "fold": fold_of[sym], "rows": int(m.sum()),
+                    "w_rmse": _wrmse(ys_, ps_, ws_), "r2": _r2(ys_, ps_, ws_),
+                    "spearman": _spear(ys_, ps_), "baseline_wRMSE": bws,
+                    "rel_wrmse_improvement": _rel_improve(bws, _wrmse(ys_, ps_, ws_)),
+                })
+            cs_rows.append({
+                "symbol": "POOLED", "model": mname, "direction": direction,
+                "fold": -1, "rows": int(len(y_all)), "w_rmse": mw, "r2": _r2(y_all, p_all, w_all),
+                "spearman": _spear(y_all, p_all), "baseline_wRMSE": bw,
+                "rel_wrmse_improvement": _rel_improve(bw, mw),
+            })
+        for comp, base_name, model_name in COMPARISONS:
+            y_all = np.concatenate([cs_pred[(f, direction, model_name)][0] for f in range(5)])
+            w_all = np.concatenate([cs_pred[(f, direction, model_name)][2] for f in range(5)])
+            if base_name is None:
+                base_pred = base_pred_all
+            else:
+                base_pred = np.concatenate([cs_pred[(f, direction, base_name)][1] for f in range(5)])
+            model_pred = np.concatenate([cs_pred[(f, direction, model_name)][1] for f in range(5)])
+            cs_comparison_delta[(direction, comp)] = (
+                _wrmse(y_all, base_pred, w_all) - _wrmse(y_all, model_pred, w_all))
+    return fold_rows, cs_rows, cs_comparison_delta
+
+
+def _dtp_ready_sensitivity(df, subsets, y, ybar, w_norm, wva, wva_raw, wte_raw,
+                           va, tr, te, ready, base_w):
+    """Section 12 sensitivity: retrain M1/M2 on (Train & dtp_4tf_ready), eval on
+    untouched Test. FIX (T2-FIX1): ``yva_`` is recomputed per direction -- the
+    prior version leaked the Short validation target into the Long retrain.
+    """
+    rows: List[Dict[str, Any]] = []
+    for direction, _ in (("long", None), ("short", None)):
+        yv = y[direction]
+        yva_ = yv[va]   # FIX: must be inside the loop, per direction
+        for mname in ("M1", "M2"):
+            cols = subsets[mname]
+            trd = tr & ready
+            Xtr_s = B.build_X_subset(df[trd], cols)
+            Xva_s = B.build_X_subset(df[va], cols)
+            Xte_s = B.build_X_subset(df[te], cols)
+            model, _, _ = T.fit_direction(Xtr_s, yv[trd], w_norm[trd], Xva_s, yva_, wva)
+            p_va = np.asarray(model.predict(Xva_s), float)
+            p_te = np.asarray(model.predict(Xte_s), float)
+            for block, yt, pt, wt, split in (
+                ("model_validation_dtp_ready_retrain", yva_, p_va, wva_raw, "validation"),
+                ("model_test_dtp_ready_retrain", yv[te], p_te, wte_raw, "test"),
+            ):
+                b = T.metrics_block(yt, pt, wt)
+                b["rel_wrmse_improvement"] = _rel_improve(
+                    base_w.get((mname, split), float("nan")), b["w_rmse"])
+                bb = dict(b); bb.update({"model": mname, "direction": direction, "block": block})
+                rows.append(bb)
+    return rows
+
+
 def run_t2(symbols: Optional[List[str]] = None,
            artifact_root: Any = DEFAULT_ARTIFACT_ROOT,
            out_dir: Any = Path("artifacts/intraday_entry_value_tree_core108_v1"),
@@ -541,77 +676,8 @@ def run_t2_pipeline(symbols, cov,
     pd.DataFrame(bootstrap_rows).to_csv(out_dir / "t2_bootstrap.csv", index=False)
 
     # ---- mandatory cross-symbol holdout (5 folds, 3 unseen each) -------------
-    sorted_syms = sorted(symbols)
-    fold_of = {s: i for i, s in enumerate(sorted_syms)}
-    folds = {i: [s for s in sorted_syms if fold_of[s] == i] for i in range(5)}
-    sym_arr = df["symbol"].to_numpy()
-    cs_pred: Dict[tuple, tuple] = {}
-    fold_rows: List[Dict[str, Any]] = []
-    for f in range(5):
-        held = folds[f]
-        train_syms = [s for s in sorted_syms if s not in held]
-        trm = np.isin(sym_arr, train_syms) & (df["split"].to_numpy() == "train")
-        vam = np.isin(sym_arr, train_syms) & (df["split"].to_numpy() == "validation")
-        tem = np.isin(sym_arr, held) & (df["split"].to_numpy() == "test")
-        if tem.sum() == 0:  # safety; never triggers for the 15-symbol universe
-            continue
-        fold_rows.append({
-            "fold": f, "held_out_symbols": ",".join(held),
-            "train_symbols": ",".join(train_syms),
-            "n_train_rows": int(trm.sum()), "n_validation_rows": int(vam.sum()),
-            "n_eval_rows": int(tem.sum()),
-        })
-        for direction, ycol in (("long", "Y_L"), ("short", "Y_S")):
-            yv = df[ycol].to_numpy(float)
-            for mname in ("M0", "M1", "M2"):
-                cols = subsets[mname]
-                model, _, _ = T.fit_direction(
-                    B.build_X_subset(df[trm], cols), yv[trm], w_norm[trm],
-                    B.build_X_subset(df[vam], cols), yv[vam], w_norm[vam])
-                p = np.asarray(model.predict(B.build_X_subset(df[tem], cols)), float)
-                cs_pred[(f, direction, mname)] = (yv[tem], p, w_raw[tem], sym_arr[tem])
+    fold_rows, cs_rows, cs_comparison_delta = _cross_symbol_holdout(df, subsets, symbols)
     pd.DataFrame(fold_rows).to_csv(out_dir / "t2_cross_symbol_folds.csv", index=False)
-
-    cs_rows: List[Dict[str, Any]] = []
-    cs_comparison_delta: Dict[tuple, float] = {}
-    for direction, _ in (("long", None), ("short", None)):
-        for mname in ("M0", "M1", "M2"):
-            y_all = np.concatenate([cs_pred[(f, direction, mname)][0] for f in range(5)])
-            p_all = np.concatenate([cs_pred[(f, direction, mname)][1] for f in range(5)])
-            w_all = np.concatenate([cs_pred[(f, direction, mname)][2] for f in range(5)])
-            s_all = np.concatenate([cs_pred[(f, direction, mname)][3] for f in range(5)])
-            ybar_cs = T._wmean(y_all, w_all)
-            bw = _wrmse(y_all, np.full(len(y_all), ybar_cs), w_all)
-            mw = _wrmse(y_all, p_all, w_all)
-            for sym in symbols:
-                m = s_all == sym
-                if not m.any():
-                    continue
-                ys_, ps_, ws_ = y_all[m], p_all[m], w_all[m]
-                bws = _wrmse(ys_, np.full(len(ys_), ybar_cs), ws_)
-                cs_rows.append({
-                    "symbol": sym, "model": mname, "direction": direction,
-                    "fold": fold_of[sym], "rows": int(m.sum()),
-                    "w_rmse": _wrmse(ys_, ps_, ws_), "r2": _r2(ys_, ps_, ws_),
-                    "spearman": _spear(ys_, ps_), "baseline_wRMSE": bws,
-                    "rel_wrmse_improvement": _rel_improve(bws, _wrmse(ys_, ps_, ws_)),
-                })
-            cs_rows.append({
-                "symbol": "POOLED", "model": mname, "direction": direction,
-                "fold": -1, "rows": int(len(y_all)), "w_rmse": mw, "r2": _r2(y_all, p_all, w_all),
-                "spearman": _spear(y_all, p_all), "baseline_wRMSE": bw,
-                "rel_wrmse_improvement": _rel_improve(bw, mw),
-            })
-        for comp, base_name, model_name in COMPARISONS:
-            y_all = np.concatenate([cs_pred[(f, direction, model_name)][0] for f in range(5)])
-            w_all = np.concatenate([cs_pred[(f, direction, model_name)][2] for f in range(5)])
-            if base_name is None:
-                base_pred = np.full(len(y_all), T._wmean(y_all, w_all))
-            else:
-                base_pred = np.concatenate([cs_pred[(f, direction, base_name)][1] for f in range(5)])
-            model_pred = np.concatenate([cs_pred[(f, direction, model_name)][1] for f in range(5)])
-            cs_comparison_delta[(direction, comp)] = (
-                _wrmse(y_all, base_pred, w_all) - _wrmse(y_all, model_pred, w_all))
     pd.DataFrame(cs_rows).to_csv(out_dir / "t2_cross_symbol_metrics.csv", index=False)
 
     # ---- importance: gain + grouped permutation + distance decomposition ------
@@ -662,25 +728,9 @@ def run_t2_pipeline(symbols, cov,
     pd.DataFrame(dist_rows).to_csv(out_dir / "t2_distance_decomposition.csv", index=False)
 
     # ---- DTP-ready sensitivity (retrain M1/M2 on Train & dtp_4tf_ready) ------
-    for direction, _ in (("long", None), ("short", None)):
-        yv = y[direction]
-        for mname in ("M1", "M2"):
-            cols = subsets[mname]
-            trd = tr & ready
-            Xtr_s = B.build_X_subset(df[trd], cols)
-            Xva_s = B.build_X_subset(df[va], cols)
-            Xte_s = B.build_X_subset(df[te], cols)
-            model, _, _ = T.fit_direction(Xtr_s, yv[trd], w_norm[trd], Xva_s, yva_, wva)
-            p_va = np.asarray(model.predict(Xva_s), float)
-            p_te = np.asarray(model.predict(Xte_s), float)
-            for block, yt, pt, wt, split in (
-                ("model_validation_dtp_ready_retrain", yva_, p_va, wva_raw, "validation"),
-                ("model_test_dtp_ready_retrain", yv[te], p_te, wte_raw, "test"),
-            ):
-                b = T.metrics_block(yt, pt, wt)
-                b["rel_wrmse_improvement"] = _rel_improve(base_w.get((mname, split), float("nan")), b["w_rmse"])
-                bb = dict(b); bb.update({"model": mname, "direction": direction, "block": block})
-                metrics_rows.append(bb)
+    sensitivity_rows = _dtp_ready_sensitivity(
+        df, subsets, y, ybar, w_norm, wva, wva_raw, wte_raw, va, tr, te, ready, base_w)
+    metrics_rows.extend(sensitivity_rows)
     # re-write metrics with the sensitivity rows appended
     pd.DataFrame(metrics_rows).to_csv(out_dir / "t2_metrics.csv", index=False)
 
@@ -752,6 +802,91 @@ def run_t2_pipeline(symbols, cov,
     S["artifacts"]["t2_summary.json"] = {
         "path": str(summary_path), "rows": None,
         "bytes": int(summary_path.stat().st_size), "sha256": T._sha256_file(summary_path)}
+    return S
+
+
+def repair_t2_cross_symbol(out_dir: Any = Path(
+        "artifacts/intraday_entry_value_tree_core108_v1")) -> Dict[str, Any]:
+    """T2-FIX1-CROSS-SYMBOL.
+
+    Reuses the already-built 96 MB combined dataset
+    (``<out_dir>/t2/t2_dataset.parquet``) and ONLY reruns the cross-symbol
+    holdout (fixed folds + fixed unseen baseline) and the DTP-ready sensitivity
+    (fixed Long ``yva_`` leak). Regenerates exactly:
+        t2_cross_symbol_folds.csv, t2_cross_symbol_metrics.csv,
+        t2_metrics.csv, t2_summary.json.
+
+    Does NOT rebuild CORE108, recompute the Oracle, or retrain the temporal
+    main M0/M1/M2 models or the bootstrap.
+    """
+    out_dir = Path(out_dir)
+    df = pd.read_parquet(out_dir / "t2" / "t2_dataset.parquet")
+    subsets = B.feature_subsets()
+
+    tr = (df["split"].to_numpy() == "train")
+    va = (df["split"].to_numpy() == "validation")
+    te = (df["split"].to_numpy() == "test")
+    w_norm = df["w_norm"].to_numpy(float)
+    w_raw = df["w_raw"].to_numpy(float)
+    wva = w_norm[va]; wva_raw = w_raw[va]; wte_raw = w_raw[te]
+    y = {"long": df["Y_L"].to_numpy(float), "short": df["Y_S"].to_numpy(float)}
+    ybar = {d: T._wmean(y[d][tr], w_raw[tr]) for d in ("long", "short")}
+    ready = (df["dtp_4tf_ready"].to_numpy()
+             if "dtp_4tf_ready" in df.columns else B.dtp_ready_mask(df))
+
+    # constant-baseline w_rmse per model/split (no model fit needed)
+    base_w: Dict[tuple, float] = {}
+    for direction in ("long", "short"):
+        yte = y[direction][te]; yva_ = y[direction][va]
+        base_const_te = np.full(len(yte), ybar[direction])
+        base_const_va = np.full(len(yva_), ybar[direction])
+        for mname in ("M0", "M1", "M2"):
+            base_w[(mname, "validation")] = T.weighted_rmse(yva_, base_const_va, wva_raw)
+            base_w[(mname, "test")] = T.weighted_rmse(yte, base_const_te, wte_raw)
+
+    # 1) cross-symbol holdout (fixed folds + fixed unseen baseline)
+    fold_rows, cs_rows, cs_comparison_delta = _cross_symbol_holdout(
+        df, subsets, list(df["symbol"].unique()))
+    pd.DataFrame(fold_rows).to_csv(out_dir / "t2_cross_symbol_folds.csv", index=False)
+    pd.DataFrame(cs_rows).to_csv(out_dir / "t2_cross_symbol_metrics.csv", index=False)
+
+    # 2) DTP-ready sensitivity (fixed Long yva_ leak)
+    sens = _dtp_ready_sensitivity(
+        df, subsets, y, ybar, w_norm, wva, wva_raw, wte_raw, va, tr, te, ready, base_w)
+
+    # 3) rewrite t2_metrics.csv: drop the old (buggy) retrain rows, append corrected
+    mpath = out_dir / "t2_metrics.csv"
+    old = pd.read_csv(mpath)
+    old = old[~old["block"].isin(
+        ["model_validation_dtp_ready_retrain", "model_test_dtp_ready_retrain"])]
+    new_df = pd.concat([old, pd.DataFrame(sens)], ignore_index=True)
+    new_df.to_csv(mpath, index=False)
+
+    # 4) update t2_summary.json (unseen deltas + artifact hashes for the 3 csv files)
+    spath = out_dir / "t2_summary.json"
+    S = json.loads(spath.read_text())
+    for direction in ("long", "short"):
+        for comp, _, _ in COMPARISONS:
+            S["formal_evidence"][direction][comp]["unseen_symbol_holdout_delta"] = \
+                cs_comparison_delta[(direction, comp)]
+    # hashes for the 3 regenerated csv artifacts (post-write)
+    for name in ("t2_cross_symbol_folds.csv", "t2_cross_symbol_metrics.csv", "t2_metrics.csv"):
+        p = out_dir / name
+        S["artifacts"][name] = {
+            "path": str(p),
+            "rows": int(len(pd.read_csv(p))),
+            "bytes": int(p.stat().st_size),
+            "sha256": T._sha256_file(p),
+        }
+    # write the summary WITHOUT its own self-hash entry (mirrors run_t2_pipeline),
+    # then record the post-write hash in the returned S only (file stays stable).
+    summary_to_write = dict(S)
+    summary_to_write["artifacts"] = {
+        k: v for k, v in S["artifacts"].items() if k != "t2_summary.json"}
+    spath.write_text(json.dumps(T._jsonable(summary_to_write), indent=2, sort_keys=False))
+    S["artifacts"]["t2_summary.json"] = {
+        "path": str(spath), "rows": None,
+        "bytes": int(spath.stat().st_size), "sha256": T._sha256_file(spath)}
     return S
 
 

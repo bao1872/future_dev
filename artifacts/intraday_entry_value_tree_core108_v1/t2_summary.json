@@ -1216,7 +1216,7 @@
           "SN": 0.06879569213048997,
           "TA": 0.031210007829022945
         },
-        "unseen_symbol_holdout_delta": 0.0357478552714281
+        "unseen_symbol_holdout_delta": 0.06293651547237777
       },
       "M1-M0": {
         "pooled_test_delta_wrmse": 0.10688890593131273,
@@ -1244,7 +1244,7 @@
           "SN": 0.1428815824833949,
           "TA": 0.07772559751525687
         },
-        "unseen_symbol_holdout_delta": 0.10923957840400123
+        "unseen_symbol_holdout_delta": 0.09499683029982364
       },
       "M2-M1": {
         "pooled_test_delta_wrmse": -0.005963453931959961,
@@ -1272,7 +1272,7 @@
           "SN": 0.007153699260441737,
           "TA": -0.0054014879716661746
         },
-        "unseen_symbol_holdout_delta": -0.002686797662580176
+        "unseen_symbol_holdout_delta": -0.0028748177038027123
       }
     },
     "short": {
@@ -1302,7 +1302,7 @@
           "SN": 0.09507140232198585,
           "TA": 0.0477807377063324
         },
-        "unseen_symbol_holdout_delta": 0.06933504153830583
+        "unseen_symbol_holdout_delta": 0.046732796068178484
       },
       "M1-M0": {
         "pooled_test_delta_wrmse": 0.12943235276248455,
@@ -1330,7 +1330,7 @@
           "SN": 0.06345540410267914,
           "TA": 0.1244308207935414
         },
-        "unseen_symbol_holdout_delta": 0.11537970213772342
+        "unseen_symbol_holdout_delta": 0.11399115804102733
       },
       "M2-M1": {
         "pooled_test_delta_wrmse": -0.007049928149132967,
@@ -1358,7 +1358,7 @@
           "SN": 0.02240441797348014,
           "TA": -0.00810767564600079
         },
-        "unseen_symbol_holdout_delta": -2.2782356922768088e-05
+        "unseen_symbol_holdout_delta": -0.0028208813891428264
       }
     }
   },
@@ -1378,8 +1378,8 @@
     "t2_metrics.csv": {
       "path": "artifacts/intraday_entry_value_tree_core108_v1/t2_metrics.csv",
       "rows": 44,
-      "bytes": 7852,
-      "sha256": "caec3ad08c7f6eb766bbe7f06efea949c670bb5f42e547bab32074b9d3769213"
+      "bytes": 7693,
+      "sha256": "bd7465a6222dfa06dc76a7b87d1d354e707e5b8bd66c21fecc544ad582f2e05e"
     },
     "t2_symbol_metrics.csv": {
       "path": "artifacts/intraday_entry_value_tree_core108_v1/t2_symbol_metrics.csv",
@@ -1402,14 +1402,14 @@
     "t2_cross_symbol_folds.csv": {
       "path": "artifacts/intraday_entry_value_tree_core108_v1/t2_cross_symbol_folds.csv",
       "rows": 5,
-      "bytes": 399,
-      "sha256": "33269e1ed955e357f9ccf59ed8b6762b8135862e48bd2e3b84a864edff21d16f"
+      "bytes": 414,
+      "sha256": "0072e9d072ed766560d1551e6f2a78295c2aaa26e82e801a4620b5780039101a"
     },
     "t2_cross_symbol_metrics.csv": {
       "path": "artifacts/intraday_entry_value_tree_core108_v1/t2_cross_symbol_metrics.csv",
-      "rows": 36,
-      "bytes": 4324,
-      "sha256": "771f023fbe800f0fa0a826c342f7516ddd3a9d0c3e599f18eb5b9339bcbd3e9b"
+      "rows": 96,
+      "bytes": 11349,
+      "sha256": "53df324f93c2ad075f16a9ed212918cbfd48f4707576be178a310d6d328fbcfe"
     },
     "t2_bootstrap.csv": {
       "path": "artifacts/intraday_entry_value_tree_core108_v1/t2_bootstrap.csv",
