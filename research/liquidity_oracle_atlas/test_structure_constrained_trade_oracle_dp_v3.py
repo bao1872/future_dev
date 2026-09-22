@@ -1,16 +1,21 @@
 """test_structure_constrained_trade_oracle_dp_v3
 ==============================================
 
-R3 DP gate tests (FUTURE-R3-CANONICAL-M5-TOUCH-NEXTBAR-GATE-V1, checkpoint A).
+Committed (clean-checkout) R3 DP gate tests
+(FUTURE-R3-CANONICAL-M5-TOUCH-NEXTBAR-GATE-V1, checkpoint A).
 
 The Bellman kernel is reused from V2 unchanged; only the exogenous entry gate
 switches from distance-based ``proximity_any`` to the canonical R3
-``candidate_any``. These tests prove:
+``candidate_any``. These tests MUST run in a clean checkout (``git clone &&
+pytest``), so they use only SYNTHETIC gates (no committed parquet artifact):
 
 1. DP = exhaustive DFS over all 6 states with the candidate gate (no math drift).
 2. A new-entry action can NEVER occur at a non-candidate bar (gate breach = 0).
 3. With the gate fully off, the oracle cannot open at all (stays flat).
-4. AG / RB / AU R3 smoke: illegal new-entry count = 0, units terminate flat.
+
+The AG / RB / AU full-history smoke (illegal new-entry = 0 on real artifacts)
+lives in ``verify_candidate_gate_r3_artifacts.py`` because the parquet artifacts
+are intentionally NOT committed to Git.
 
 No model / Y / Q / action artifact is produced here.
 """
@@ -23,12 +28,10 @@ from research.liquidity_oracle_atlas.build_structure_constrained_trade_oracle_dp
     _solve_unit_v2,
     _walk_unit_path,
     exhaustive_reference_v2,
-    is_new_entry,
     solve_day_dp_v2,
 )
 from research.liquidity_oracle_atlas.build_structure_constrained_trade_oracle_dp_v3 import (
     MATH_VERSION,
-    run_symbol_dp_v3,
     solve_day_dp_v3,
 )
 
@@ -110,10 +113,5 @@ def test_new_entry_only_at_candidate_bars():
             assert bool(c2[d["t"]]), f"new entry at non-candidate bar {d['t']}"
 
 
-@pytest.mark.parametrize("symbol", ["AG", "RB", "AU"])
-def test_r3_smoke_no_illegal(symbol):
-    res = run_symbol_dp_v3(symbol)
-    assert res["math_version"] == MATH_VERSION
-    assert res["units_run"] > 0
-    assert res["illegal_new_entries"] == 0, res
-    assert res["new_entries"] > 0
+def test_math_version_frozen():
+    assert MATH_VERSION == "intraday_dp_oracle_r3_m5_touch_nextbar_candidate"

@@ -43,7 +43,7 @@ from research.liquidity_oracle_atlas.indicator_viewer_v1 import (
     selected_snapshot,
 )
 from research.liquidity_oracle_atlas.build_candidate_gate_r3_v1 import (
-    load_candidate_gate,
+    load_candidate_gate_verified,
     touch_bit,
 )
 
@@ -87,9 +87,11 @@ def load_candidate_rows(symbol: str) -> pd.DataFrame:
 
     This is the single frozen candidate truth consumed by Streamlit, the DP and
     the future Model. Candidate membership and trigger context come from here,
-    never from chart geometry.
+    never from chart geometry. The verified loader fails closed on any SHA /
+    manifest / row-count / math-version drift, so a stale artifact can never
+    silently load into the Viewer.
     """
-    df = load_candidate_gate(symbol)
+    df = load_candidate_gate_verified(symbol)
     df["decision_time"] = pd.to_datetime(df["decision_time"])
     return df.reset_index(drop=True)
 
@@ -177,6 +179,7 @@ def build_candidate_segments(
         "matched_5m_bars": 0,
         "unmatched_candidate_rows": 0,
         "duplicate_decision_keys": 0,
+        "bar_index_mismatch": 0,
         "n_episodes": 0,
         "n_segments": 0,
         "first_candidate_time": None,
@@ -204,6 +207,18 @@ def build_candidate_segments(
     tbi = cand["trigger_bar_index"].to_numpy().astype(int)
     tdt = pd.to_datetime(cand["trigger_decision_time"]).to_numpy()
 
+    # FAIL-CLOSED alignment (P1-5): a stale artifact whose decision_time / bar_index
+    # no longer maps onto the current 5m ViewerTrack must NEVER silently render a
+    # wrong candidate zone. Trust nothing; verify the mapping.
+    duplicate_decision_keys = int(cand["decision_time"].duplicated().sum())
+    bar_index_mismatch = int((ok & (bi != pos)).sum())
+    if unmatched > 0 or duplicate_decision_keys > 0 or bar_index_mismatch > 0:
+        raise RuntimeError(
+            "STOP_R3_VIEWER_GATE_ALIGNMENT:"
+            f"{track.symbol}:unmatched={unmatched}:dup={duplicate_decision_keys}"
+            f":bar_index_mismatch={bar_index_mismatch}"
+        )
+
     cand_by_time: Dict[pd.Timestamp, Dict[str, Any]] = {}
     for i in range(n_cand):
         cand_by_time[pd.Timestamp(dt_arr[i])] = {
@@ -215,45 +230,54 @@ def build_candidate_segments(
             "proximity_episode_id": int(ep[i]),
         }
 
+    # Vectorized run-boundary segmentation (replaces the pandas groupby). A new
+    # sub-segment begins when the episode id changes, OR the bar_index is not the
+    # immediate successor of the previous candidate bar (gap), OR the Viewer
+    # track's exchange-session segment changes (never bridge an overnight gap).
+    ci = bi.astype(np.int64)
+    ce = ep.astype(np.int64)
     seg_arr = np.asarray(track.segment)
+    cseg = seg_arr[ci]
+    new_seg = np.r_[
+        True,
+        (ce[1:] != ce[:-1]) | (ci[1:] != ci[:-1] + 1) | (cseg[1:] != cseg[:-1]),
+    ]
+    starts = np.flatnonzero(new_seg)
+    if starts.size == 0:
+        return [], empty_audit, cand_by_time
+    ends = np.r_[starts[1:] - 1, len(ci) - 1]
+
     segments: List[CandidateSegment] = []
-    for ep_id, g in cand.groupby("candidate_episode_id", sort=False):
-        gi = g["bar_index"].to_numpy().astype(int)
-        if len(gi) == 1:
-            cuts = np.array([0, 1])
-        else:
-            # split on exchange-session / segment change (Section 16): never
-            # bridge an overnight gap. Within a session, consecutive candidate
-            # bars of the same episode merge into one contiguous band.
-            br = np.where(seg_arr[gi[1:]] != seg_arr[gi[:-1]])[0] + 1
-            cuts = np.concatenate([[0], br, [len(gi)]])
-        for a, b in zip(cuts[:-1], cuts[1:]):
-            sub = gi[a:b]
-            s = int(sub[0])
-            e = int(sub[-1])
-            segments.append(CandidateSegment(
-                symbol=track.symbol,
-                episode_id=ep_id,
-                start_idx=s,
-                end_idx=e,
-                start_time=pd.Timestamp(avail[s]),
-                end_time=pd.Timestamp(avail[e]),
-                n_bars=int(len(sub)),
-            ))
+    ep_of_seg: List[int] = []
+    for a, b in zip(starts, ends):
+        sub = ci[a : b + 1]
+        s = int(sub[0])
+        e = int(sub[-1])
+        segments.append(CandidateSegment(
+            symbol=track.symbol,
+            episode_id=int(ce[a]),
+            start_idx=s,
+            end_idx=e,
+            start_time=pd.Timestamp(avail[s]),
+            end_time=pd.Timestamp(avail[e]),
+            n_bars=int(len(sub)),
+        ))
+        ep_of_seg.append(int(ce[a]))
 
     # annotate per-episode sub-segment count (session splits within an episode)
-    _cnt: Dict[object, int] = {}
-    for s in segments:
-        _cnt[s.episode_id] = _cnt.get(s.episode_id, 0) + 1
-    for s in segments:
-        s.n_segments_for_episode = _cnt[s.episode_id]
+    _cnt: Dict[int, int] = {}
+    for e in ep_of_seg:
+        _cnt[e] = _cnt.get(e, 0) + 1
+    for s, e in zip(segments, ep_of_seg):
+        s.n_segments_for_episode = _cnt[e]
 
     audit = {
         "symbol": track.symbol,
         "t2_candidate_rows": int(rows["candidate_any"].astype(bool).sum()),
         "matched_5m_bars": int(n_cand),
         "unmatched_candidate_rows": int(unmatched),
-        "duplicate_decision_keys": 0,
+        "duplicate_decision_keys": int(duplicate_decision_keys),
+        "bar_index_mismatch": int(bar_index_mismatch),
         "n_episodes": int(cand["candidate_episode_id"].nunique()),
         "n_segments": int(len(segments)),
         "first_candidate_time": pd.Timestamp(cand["decision_time"].min()),

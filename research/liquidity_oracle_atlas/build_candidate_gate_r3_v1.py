@@ -49,6 +49,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
+from research.export_ob_trigger_execution_v21 import load_raw_5m
 from research.liquidity_oracle_atlas.experiment_structure_interaction_entry_v1 import (
     KernelCounters,
     MASK_BIT,
@@ -155,13 +156,17 @@ def compute_candidate_episode_id(
     return out
 
 
-def touch_bit(bits: np.ndarray, tf: str, family: str) -> np.ndarray:
+def touch_bit(bits, tf: str, family: str) -> np.ndarray:
     """Unified bit decoder — the ONLY place TF x {SR, LIQ} bits are parsed.
 
     Callers (Streamlit, DP, Model) MUST use this; no per-consumer decoding.
+
+    Accepts a scalar or array ``bits`` and ALWAYS returns an ndarray (at least
+    1-d), so ``touch_bit(np.uint16(x), tf, fam)[0]`` is valid for a scalar.
     """
     shift = MASK_BIT[(tf, family)]
-    return ((np.asarray(bits, dtype=np.uint16) >> shift) & 1).astype(bool)
+    arr = np.atleast_1d(np.asarray(bits, dtype=np.uint16))
+    return ((arr >> shift) & 1).astype(bool)
 
 
 # --------------------------------------------------------------------------- #
@@ -218,6 +223,7 @@ def build_candidate_gate_for_symbol(symbol: str) -> Tuple[pd.DataFrame, str]:
             "decision_time": decision_time,
             "segment": base["segment"].to_numpy().astype(np.int64),
             "trading_day": pd.to_datetime(base["trading_day"]),
+            "candidate_math_version": CANDIDATE_MATH_VERSION,
             "touch_bits": touch_bits.astype(np.int64),
             "prev_touch_bits": gate["prev_touch_bits"].astype(np.int64),
             "candidate_any": cand.astype(bool),
@@ -234,12 +240,12 @@ def build_candidate_gate_for_symbol(symbol: str) -> Tuple[pd.DataFrame, str]:
     return df, sha
 
 
-def build_all_candidate_gates(
-    symbols: List[str], prefix_bars: Optional[int] = None
-) -> Dict[str, Any]:
+def build_all_candidate_gates(symbols: List[str]) -> Dict[str, Any]:
     """Generate artifacts for all symbols + write summary.json with SHA256.
 
-    ``prefix_bars`` (debug only) limits each symbol to its first N bars.
+    The summary/spec SHA is computed from the SAME parquet that is persisted, so
+    summary.json and the on-disk artifact can never drift (prefix debug mode
+    removed: the canonical generator has no fuzzy truncation path).
     """
     summary: Dict[str, Any] = {
         "candidate_math_version": CANDIDATE_MATH_VERSION,
@@ -249,8 +255,6 @@ def build_all_candidate_gates(
     }
     for sym in symbols:
         df, sha = build_candidate_gate_for_symbol(sym)
-        if prefix_bars is not None:
-            df = df.head(prefix_bars)
         cand_rows = int(df["candidate_any"].sum())
         touch_rows = int((df["touch_bits"] != 0).sum())
         summary["symbol_artifacts"][sym] = {
@@ -275,6 +279,10 @@ def load_candidate_gate(symbol: str) -> pd.DataFrame:
 
     This is the single source of truth consumed by Streamlit, the DP and the
     future Model. Raises FileNotFoundError if the artifact was not generated.
+
+    NOTE: this is the low-level read. Every CONSUMER (Viewer / DP / Model) MUST
+    call :func:`load_candidate_gate_verified` instead, which fails closed on any
+    SHA / manifest / row-count / math-version drift.
     """
     p = gate_path(symbol)
     if not p.exists():
@@ -289,6 +297,116 @@ def load_candidate_gate_summary() -> Dict[str, Any]:
     if not SUMMARY_FILE.exists():
         raise FileNotFoundError(f"candidate gate summary missing: {SUMMARY_FILE}")
     return json.loads(SUMMARY_FILE.read_text())
+
+
+def load_candidate_gate_verified(symbol: str) -> pd.DataFrame:
+    """The ONLY sanctioned consumer entry point for the candidate artifact.
+
+    Fails closed (raises RuntimeError) on any of:
+      * artifact file missing            -> STOP_R3_GATE_MISSING
+      * symbol absent from manifest      -> STOP_R3_GATE_MANIFEST_MISSING
+      * on-disk SHA != manifest SHA      -> STOP_R3_GATE_SHA_MISMATCH
+      * row count != manifest rows       -> STOP_R3_GATE_ROWCOUNT_MISMATCH
+      * artifact missing math-version     -> STOP_R3_GATE_VERSION_MISSING
+      * artifact math-version drifted     -> STOP_R3_GATE_VERSION_MISMATCH
+      * summary math-version drifted      -> STOP_R3_GATE_SUMMARY_VERSION_MISMATCH
+
+    This is what guarantees Viewer / DP / Model consume the SAME verified fact:
+    a stale or hand-edited parquet can never silently load.
+    """
+    p = gate_path(symbol)
+    if not p.exists():
+        raise RuntimeError(f"STOP_R3_GATE_MISSING:{symbol}")
+
+    summary = load_candidate_gate_summary()
+    spec = summary.get("symbol_artifacts", {}).get(symbol)
+    if spec is None:
+        raise RuntimeError(f"STOP_R3_GATE_MANIFEST_MISSING:{symbol}")
+
+    actual_sha = hashlib.sha256(p.read_bytes()).hexdigest()
+    expected_sha = spec["sha256"]
+    if actual_sha != expected_sha:
+        raise RuntimeError(
+            f"STOP_R3_GATE_SHA_MISMATCH:{symbol}:{expected_sha}:{actual_sha}"
+        )
+
+    df = pd.read_parquet(p)
+
+    if len(df) != int(spec["rows"]):
+        raise RuntimeError(
+            f"STOP_R3_GATE_ROWCOUNT_MISMATCH:{symbol}:"
+            f"{int(spec['rows'])}:{len(df)}"
+        )
+
+    if "candidate_math_version" not in df.columns:
+        raise RuntimeError(f"STOP_R3_GATE_VERSION_MISSING:{symbol}")
+    mv = df["candidate_math_version"].iloc[0]
+    if mv != CANDIDATE_MATH_VERSION:
+        raise RuntimeError(
+            f"STOP_R3_GATE_VERSION_MISMATCH:{symbol}:{mv}:{CANDIDATE_MATH_VERSION}"
+        )
+    if summary.get("candidate_math_version") != CANDIDATE_MATH_VERSION:
+        raise RuntimeError(f"STOP_R3_GATE_SUMMARY_VERSION_MISMATCH:{symbol}")
+
+    return df
+
+
+def gate_alignment_mismatch_count(gate: pd.DataFrame, raw: pd.DataFrame) -> int:
+    """Count bars where the artifact disagrees with the raw 5m frame.
+
+    Returns the number of mismatched bars (0 == perfectly aligned). Used by the
+    formal verifier to populate ``alignment_mismatch`` evidence without raising.
+    Compares row count, ``bar_index == arange(N)``, exact ``bar_start_time`` and
+    exact ``trading_day`` (the artifact is the single source of ``segment``).
+    """
+    n = len(raw)
+    if len(gate) != n:
+        return int(abs(len(gate) - n)) + n  # length mismatch is fatal; over-count
+    if not np.array_equal(
+        gate["bar_index"].to_numpy(np.int64), np.arange(n, dtype=np.int64)
+    ):
+        return n
+    gt = pd.to_datetime(gate["bar_start_time"]).to_numpy()
+    rt = pd.to_datetime(raw["bar_start_time"]).to_numpy()
+    if len(gt) != len(rt) or not np.array_equal(gt, rt):
+        return n
+    gd = pd.to_datetime(gate["trading_day"]).to_numpy()
+    rd = pd.to_datetime(raw["trading_day"]).to_numpy()
+    if len(gd) != len(rd) or not np.array_equal(gd, rd):
+        return n
+    return 0
+
+
+def validate_gate_against_raw(gate: pd.DataFrame, raw: pd.DataFrame) -> None:
+    """Hard gate: the candidate artifact MUST align exactly with raw 5m.
+
+    Fail-closed (raises RuntimeError) on any misalignment so the DP / Model can
+    never silently run against a stale or shifted candidate universe:
+
+      * length mismatch              -> STOP_R3_GATE_LENGTH_MISMATCH
+      * bar_index != arange(N)       -> STOP_R3_GATE_BAR_INDEX_MISMATCH
+      * bar_start_time misaligned     -> STOP_R3_GATE_TIME_ALIGNMENT
+      * trading_day misaligned        -> STOP_R3_GATE_DAY_ALIGNMENT
+
+    Shared by the DP runner and the future Model dataset builder.
+    """
+    n = len(raw)
+    if len(gate) != n:
+        raise RuntimeError(
+            f"STOP_R3_GATE_LENGTH_MISMATCH:{len(gate)}:{n}"
+        )
+    if not np.array_equal(
+        gate["bar_index"].to_numpy(np.int64), np.arange(n, dtype=np.int64)
+    ):
+        raise RuntimeError("STOP_R3_GATE_BAR_INDEX_MISMATCH")
+    gt = pd.to_datetime(gate["bar_start_time"]).to_numpy()
+    rt = pd.to_datetime(raw["bar_start_time"]).to_numpy()
+    if len(gt) != len(rt) or not np.array_equal(gt, rt):
+        raise RuntimeError("STOP_R3_GATE_TIME_ALIGNMENT")
+    gd = pd.to_datetime(gate["trading_day"]).to_numpy()
+    rd = pd.to_datetime(raw["trading_day"]).to_numpy()
+    if len(gd) != len(rd) or not np.array_equal(gd, rd):
+        raise RuntimeError("STOP_R3_GATE_DAY_ALIGNMENT")
 
 
 ALL_SYMBOLS = [

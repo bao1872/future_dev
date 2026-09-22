@@ -4,91 +4,91 @@
   "candidate_rule": "candidate[t] = same_unit[t] and has_m5_touch(touch_bits[t-1])",
   "symbol_artifacts": {
     "AG": {
-      "sha256": "2bdaf371614759e2b18229335ae5835f867b98d0a80c7faa48588dd6931a0622",
+      "sha256": "5395b98e105120432d98e2b99b316e8d581dd1f0de059cf4d1445d3d78438064",
       "rows": 44451,
       "touch_rows": 28088,
       "candidate_rows": 17463
     },
     "AL": {
-      "sha256": "09d867fa5eee453b7f907453abcb34bfcea1876e0898bb4692f0c0680a27335d",
+      "sha256": "7e6eca0ba38f9b04b34154e32879273e7fa7aa875f1b4306bcc6f4247520fbf7",
       "rows": 37323,
       "touch_rows": 27163,
       "candidate_rows": 18644
     },
     "AU": {
-      "sha256": "b37105b9651f413c61b747385347ba45e7f00371daf410d63e0e345c017501c9",
+      "sha256": "77099835771dd88bb12267a8ba56164bfb33f6f8f6b94d074df8006a3048d204",
       "rows": 44451,
       "touch_rows": 26846,
       "candidate_rows": 16972
     },
     "CF": {
-      "sha256": "e0eca52f16a3edee80bd26b17a54d38dc9cc50db448d90482454077181552744",
+      "sha256": "a63fd136e111dd0b50e0f8544548ac41be232fc4d9b11297e40c978427f7106c",
       "rows": 27819,
       "touch_rows": 21124,
       "candidate_rows": 15449
     },
     "CU": {
-      "sha256": "3a7cc7f97c916cab142c403148e078937c19368585ef92149d00ee9895c9034b",
+      "sha256": "e82ca8be2536c7b97a05e65b84bb071b9a612205f3d893202f31562de7e628d7",
       "rows": 37323,
       "touch_rows": 26135,
       "candidate_rows": 17074
     },
     "I": {
-      "sha256": "7747934ceba2fb58ea53bd1ec8c771bef31991aa2e714f79a5b16b2e8876f28b",
+      "sha256": "0968b9bf3ecf1ed9d7831a0a46e9fe4181bc265eeebe7d32db42d2eb53b7504b",
       "rows": 27819,
       "touch_rows": 22631,
       "candidate_rows": 15863
     },
     "M": {
-      "sha256": "aec4e6620e20caf368c4d914dc611f09d438e4f52a90de911712fce82b0b9f74",
+      "sha256": "5d6a962d463b970dd16e4e887fb250b1b96257d59e22b80422f3ef41cce9c04a",
       "rows": 27819,
       "touch_rows": 20693,
       "candidate_rows": 14015
     },
     "MA": {
-      "sha256": "6b66f72bc311765c1f493ac09b89593e8e1bb08f08c7b09244a46b72de52a252",
+      "sha256": "3a7bd072c8bd8b583dcc2d2a8e1c6f01d48d5803b52e5dc8966e29c786d7c682",
       "rows": 27819,
       "touch_rows": 19825,
       "candidate_rows": 13337
     },
     "NI": {
-      "sha256": "86e27221777bf6c757664e08fd14e36254d86f6b1425dcffdf50c801e8819247",
+      "sha256": "2f8a107bc5bfb7adb8dc378f3b961ef61c54e2eae81710d73196da1c752d3f39",
       "rows": 37323,
       "touch_rows": 26482,
       "candidate_rows": 17280
     },
     "P": {
-      "sha256": "9bc993c07a67048d2512c27f81a0313dec4b55d8a1e963b8b802122e5fd1b9a1",
+      "sha256": "fa2ff65600ba339ead5ad44839427adc1cab4ddc04513e79b3f6a2476d14392c",
       "rows": 27819,
       "touch_rows": 19427,
       "candidate_rows": 12510
     },
     "RB": {
-      "sha256": "670c15b6e9f3751d8f63cc7c4676e468631882f0527d4d135442f1d83c90d449",
+      "sha256": "6da9aded82e75fa72420809873b28784465869321847b42cfc4c263233c45681",
       "rows": 27819,
       "touch_rows": 21520,
       "candidate_rows": 14873
     },
     "RU": {
-      "sha256": "ccac891e68c3f3adf9babf4ac09a095f985d3e32e2222983a5e949161c4520e7",
+      "sha256": "ed1f08914777049cd8b1f34733137071f4544a5a007ab2736ec9187df31e6083",
       "rows": 27819,
       "touch_rows": 19989,
       "candidate_rows": 13811
     },
     "SC": {
-      "sha256": "8469a1f908d9945bb33426f0f1eba3f6aef22b9af0e7baa4b4faa274217c6c36",
+      "sha256": "13e055ba5f843e2f96ebc185f3a7a92140c9269eda8a797fcf6c2194273bcefe",
       "rows": 44449,
       "touch_rows": 28634,
       "candidate_rows": 18097
     },
     "SN": {
-      "sha256": "b5ee5206cc1cf8d351ec6a7cc74ee496aa728e64d599fe471968186b1835bda1",
+      "sha256": "55b835d6e2d1fcfb71cb33dcb42c33e0401499ce8401da4496bd0e1a33f2fbec",
       "rows": 37323,
       "touch_rows": 25028,
       "candidate_rows": 15681
     },
     "TA": {
-      "sha256": "e0fd4f385ee5297730321e849c272e8d3ff6f053aa48d14a7f9ae31d6cbf9828",
+      "sha256": "112d3212a34f7c2e55c21111c6411c533fe9391aef5e4d60abff724a83ec5a0a",
       "rows": 27819,
       "touch_rows": 20554,
       "candidate_rows": 13957

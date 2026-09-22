@@ -43,16 +43,15 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import pandas as pd
 
+from research.export_ob_trigger_execution_v21 import load_raw_5m
 from research.liquidity_oracle_atlas.build_candidate_gate_r3_v1 import (
-    load_candidate_gate,
+    load_candidate_gate_verified,
+    validate_gate_against_raw,
 )
 from research.liquidity_oracle_atlas.build_structure_constrained_trade_oracle_dp_v2 import (
-    KernelCounters,
     _solve_unit_v2,
     _walk_unit_path,
-    build_base_frame,
     build_intraday_units,
-    is_new_entry,
 )
 
 
@@ -92,6 +91,28 @@ def solve_day_dp_v3(
 
 
 # --------------------------------------------------------------------------- #
+# Lightweight R3 DP inputs: raw 5m open + verified candidate artifact only       #
+# --------------------------------------------------------------------------- #
+def load_r3_dp_inputs(symbol: str) -> Dict[str, Any]:
+    """Lightweight R3 DP inputs: raw 5m ``open`` + verified candidate artifact.
+
+    Explicitly performs ZERO 4TF resample and ZERO candidate recomputation:
+    the candidate universe is read verbatim from the single canonical artifact
+    (fail-closed verified) and then hard-aligned against the current raw 5m
+    frame so a stale artifact can never silently shift the DP's candidate gate.
+    """
+    raw = load_raw_5m(symbol).sort_values("bar_start_time").reset_index(drop=True)
+    gate = load_candidate_gate_verified(symbol)
+    validate_gate_against_raw(gate, raw)
+    return {
+        "opens": raw["open"].to_numpy(float),
+        "candidate_any": gate["candidate_any"].to_numpy(bool),
+        "segment": gate["segment"].to_numpy(np.int64),
+        "trading_day": pd.to_datetime(gate["trading_day"]).to_numpy(),
+    }
+
+
+# --------------------------------------------------------------------------- #
 # Production runner: load candidate artifact, run the shared kernel per unit     #
 # --------------------------------------------------------------------------- #
 def run_symbol_dp_v3(
@@ -105,21 +126,17 @@ def run_symbol_dp_v3(
     Returns aggregate audit counters; full action tables are NOT persisted in
     checkpoint A (that is R3 action-artifact work, checkpoint B).
     """
-    counters = KernelCounters()
-    info = build_base_frame(symbol, counters)
-    base = info["base"]
-    n = len(base)
-    opens = base["open"].to_numpy(float)[:n]
-
-    gate = load_candidate_gate(symbol)
-    cand = np.asarray(gate["candidate_any"], dtype=bool)[:n]
+    inputs = load_r3_dp_inputs(symbol)
+    opens = inputs["opens"]
+    n = len(opens)
+    cand = inputs["candidate_any"][:n]
     if cost_points is None:
         cost = np.zeros(n, dtype=float)
     else:
         cost = np.asarray(cost_points, dtype=float)[:n]
 
-    seg_arr = base["segment"].to_numpy(np.int64)[:n]
-    td_arr = pd.to_datetime(base["trading_day"]).to_numpy()[:n]
+    seg_arr = inputs["segment"][:n]
+    td_arr = inputs["trading_day"][:n]
     starts, ends = build_intraday_units(td_arr, seg_arr)
 
     illegal = 0

@@ -1,0 +1,97 @@
+{
+  "candidate_math_version": "r3_m5_touch_nextbar_gate_v1",
+  "verifier": "verify_candidate_gate_r3_artifacts.py",
+  "symbols": {
+    "AG": {
+      "artifact_sha_verified": true,
+      "alignment_mismatch": 0,
+      "touch_mismatch": 0,
+      "error": null
+    },
+    "AL": {
+      "artifact_sha_verified": true,
+      "alignment_mismatch": 0,
+      "touch_mismatch": 0,
+      "error": null
+    },
+    "AU": {
+      "artifact_sha_verified": true,
+      "alignment_mismatch": 0,
+      "touch_mismatch": 0,
+      "error": null
+    },
+    "CF": {
+      "artifact_sha_verified": true,
+      "alignment_mismatch": 0,
+      "touch_mismatch": 0,
+      "error": null
+    },
+    "CU": {
+      "artifact_sha_verified": true,
+      "alignment_mismatch": 0,
+      "touch_mismatch": 0,
+      "error": null
+    },
+    "I": {
+      "artifact_sha_verified": true,
+      "alignment_mismatch": 0,
+      "touch_mismatch": 0,
+      "error": null
+    },
+    "M": {
+      "artifact_sha_verified": true,
+      "alignment_mismatch": 0,
+      "touch_mismatch": 0,
+      "error": null
+    },
+    "MA": {
+      "artifact_sha_verified": true,
+      "alignment_mismatch": 0,
+      "touch_mismatch": 0,
+      "error": null
+    },
+    "NI": {
+      "artifact_sha_verified": true,
+      "alignment_mismatch": 0,
+      "touch_mismatch": 0,
+      "error": null
+    },
+    "P": {
+      "artifact_sha_verified": true,
+      "alignment_mismatch": 0,
+      "touch_mismatch": 0,
+      "error": null
+    },
+    "RB": {
+      "artifact_sha_verified": true,
+      "alignment_mismatch": 0,
+      "touch_mismatch": 0,
+      "error": null
+    },
+    "RU": {
+      "artifact_sha_verified": true,
+      "alignment_mismatch": 0,
+      "touch_mismatch": 0,
+      "error": null
+    },
+    "SC": {
+      "artifact_sha_verified": true,
+      "alignment_mismatch": 0,
+      "touch_mismatch": 0,
+      "error": null
+    },
+    "SN": {
+      "artifact_sha_verified": true,
+      "alignment_mismatch": 0,
+      "touch_mismatch": 0,
+      "error": null
+    },
+    "TA": {
+      "artifact_sha_verified": true,
+      "alignment_mismatch": 0,
+      "touch_mismatch": 0,
+      "error": null
+    }
+  },
+  "all_passed": true
+}

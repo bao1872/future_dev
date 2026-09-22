@@ -1,45 +1,37 @@
 """test_candidate_gate_r3_v1
 ===========================
 
-Tests for the canonical R3 Candidate Gate (FUTURE-R3-CANONICAL-M5-TOUCH-NEXTBAR-GATE-V1).
+Committed (clean-checkout) tests for the canonical R3 Candidate Gate
+(FUTURE-R3-CANONICAL-M5-TOUCH-NEXTBAR-GATE-V1).
 
-Two independent layers of evidence:
+These tests MUST run in a clean checkout (``git clone && pytest``). They are
+therefore restricted to:
 
-A. Gate LOGIC (unit): ``derive_nextbar_candidate_gate`` +
-   ``compute_candidate_episode_id`` over hand-built 4TF touch-bit sequences.
-   These encode the user's frozen decision table directly:
+  * Gate LOGIC (unit): ``derive_nextbar_candidate_gate`` +
+    ``compute_candidate_episode_id`` over hand-built 4TF touch-bit sequences.
+    These encode the user's frozen decision table directly:
 
-       Candidate[t] = same_unit[t] AND (touch_bits[t-1] has 5m SR or 5m LIQ)
+        Candidate[t] = same_unit[t] AND (touch_bits[t-1] has 5m SR or 5m LIQ)
 
-   and the full 4TF trigger context is preserved as candidate_trigger_bits.
+    and the full 4TF trigger context is preserved as candidate_trigger_bits.
+  * Scalar / array bit-decoder contract (``touch_bit``).
 
-B. Streaming INTEGRATION / differential: the generated artifact's
-   ``touch_bits`` must equal the canonical true-touch ``entry_mask``
-   recomputed INDEPENDENTLY from the per-bar structure geometry on real data
-   (AG / RB / AU full-history; the remaining 12 symbols on a fixed prefix).
-   This is the guard against silently rewriting the touch math.
+Full-history artifact verification (differential vs canonical entry_mask,
+row-count / SHA / version checks) lives in ``verify_candidate_gate_r3_artifacts.py``
+because the parquet artifacts are intentionally NOT committed to Git.
 
 No model / Y / Q / Oracle-action content is produced here.
 """
 
 import numpy as np
-import pandas as pd
 import pytest
 
 from research.liquidity_oracle_atlas.build_candidate_gate_r3_v1 import (
-    ALL_SYMBOLS,
     CANDIDATE_MATH_VERSION,
+    MASK_BIT,
     compute_candidate_episode_id,
     derive_nextbar_candidate_gate,
-    load_candidate_gate,
     touch_bit,
-)
-from research.liquidity_oracle_atlas.experiment_structure_interaction_entry_v1 import (
-    MASK_BIT,
-    KernelCounters,
-    build_base_frame,
-    entry_bits_from_prev_geometry,
-    _stream_from_base,
 )
 
 
@@ -81,7 +73,7 @@ def _run(prev_bits, cur_bits, same_unit):
 
 
 # --------------------------------------------------------------------------- #
-# A. Gate logic: frozen decision table                                          #
+# Gate logic: frozen decision table                                            #
 # --------------------------------------------------------------------------- #
 def test_5m_sr_prev_makes_candidate():
     g = _run([_mask_of(("m5", "SR"))], [_mask_of(("m5", "SR"))], [False, True])
@@ -194,85 +186,29 @@ def test_episode_id_consecutive_then_gap():
 
 
 # --------------------------------------------------------------------------- #
-# B. Streaming integration: artifact touch_bits == canonical entry_mask         #
+# Bit decoder contract (scalar + array)                                         #
 # --------------------------------------------------------------------------- #
-def _independent_entry_mask(symbol, max_bars):
-    counters = KernelCounters()
-    info = build_base_frame(symbol, counters)
-    res = _stream_from_base(
-        info["base"], info["form"], info["seg_completed"], counters,
-        max_bars, symbol, True, True, False, True, False,
+def test_touch_bit_scalar():
+    bits = np.uint16(1 << MASK_BIT[("m5", "SR")])
+    x = touch_bit(bits, "m5", "SR")
+    # scalar input must return a 1-d array, so [0] indexing is valid
+    assert x.shape == (1,)
+    assert bool(x[0])
+    # and direct bool() of the array works too
+    assert bool(x)
+
+
+def test_touch_bit_array():
+    bits = np.array(
+        [1 << MASK_BIT[("m5", "SR")], 1 << MASK_BIT[("h1", "LIQ")], 0],
+        dtype=np.uint16,
     )
-    entry_mask = np.asarray(res["entry_mask"], dtype=np.uint16)
-    geom = res["decision_geom"]  # geom at bar i (== prev_geom for bar i+1)
-    n = len(entry_mask)
-    rec = np.zeros(n, dtype=np.uint16)
-    for i in range(1, n):
-        prev_geom = geom[i - 1]
-        g = {tf: prev_geom[tf] for tf in prev_geom}
-        rec[i] = np.uint16(
-            entry_bits_from_prev_geometry(
-                float(info["base"]["low"].to_numpy()[i]),
-                float(info["base"]["high"].to_numpy()[i]),
-                g,
-            )
-        )
-    return entry_mask, rec
+    xsr = touch_bit(bits, "m5", "SR")
+    xliq = touch_bit(bits, "h1", "LIQ")
+    assert xsr.shape == (3,)
+    assert list(xsr) == [True, False, False]
+    assert list(xliq) == [False, True, False]
 
 
-@pytest.mark.parametrize("symbol,full", [("AG", True), ("RB", True), ("AU", True)])
-def test_differential_full_history(symbol, full):
-    df = load_candidate_gate(symbol)
-    em, rec = _independent_entry_mask(symbol, None)
-    df_bits = df["touch_bits"].to_numpy().astype(np.uint16)
-    assert len(em) == len(df_bits), "stream length must match artifact"
-    mismatch = int(np.sum(em != df_bits))
-    assert mismatch == 0, f"{symbol} entry_mask vs artifact mismatch = {mismatch}"
-    rec_mismatch = int(np.sum(rec != df_bits))
-    assert rec_mismatch == 0, f"{symbol} independent recompute mismatch = {rec_mismatch}"
-
-
-@pytest.mark.parametrize(
-    "symbol", [s for s in ALL_SYMBOLS if s not in ("AG", "RB", "AU")]
-)
-def test_differential_prefix(symbol):
-    PREFIX = 2000
-    df = load_candidate_gate(symbol).head(PREFIX)
-    em, rec = _independent_entry_mask(symbol, PREFIX)
-    df_bits = df["touch_bits"].to_numpy().astype(np.uint16)
-    m1 = int(np.sum(em != df_bits))
-    m2 = int(np.sum(rec != df_bits))
-    assert m1 == 0, f"{symbol} prefix entry_mask mismatch = {m1}"
-    assert m2 == 0, f"{symbol} prefix recompute mismatch = {m2}"
-
-
-# --------------------------------------------------------------------------- #
-# C. Artifact invariant checks (real data)                                       #
-# --------------------------------------------------------------------------- #
-def test_artifact_invariants_ag():
-    df = load_candidate_gate("AG")
-    cand = df[df["candidate_any"]].reset_index(drop=True)
-    # trigger alignment: trigger_bar_index + 1 == bar_index (100%)
-    assert (cand["bar_index"].to_numpy() - cand["trigger_bar_index"].to_numpy() == 1).all()
-    # candidate_trigger_bits[t] == touch_bits[t-1] (100%)
-    tb = df["touch_bits"].to_numpy().astype(np.uint16)
-    prev = np.r_[np.uint16(0), tb[:-1]]
-    trig = cand["candidate_trigger_bits"].to_numpy().astype(np.uint16)
-    assert (trig == prev[cand["bar_index"].to_numpy()]).all()
-    # no session leakage: trigger bar in same segment + trading_day
-    seg = df["segment"].to_numpy()
-    td = pd.to_datetime(df["trading_day"]).to_numpy()
-    tbi = cand["trigger_bar_index"].to_numpy()
-    assert (seg[cand["bar_index"].to_numpy()] == seg[tbi]).all()
-    assert (td[cand["bar_index"].to_numpy()] == td[tbi]).all()
-    # candidate math version recorded
+def test_candidate_math_version_constant():
     assert CANDIDATE_MATH_VERSION == "r3_m5_touch_nextbar_gate_v1"
-
-
-def test_touch_bit_decoder_consistency():
-    df = load_candidate_gate("AG")
-    trig = df["candidate_trigger_bits"].to_numpy().astype(np.uint16)
-    for tf, fam in [("m5", "SR"), ("m5", "LIQ"), ("m15", "SR"), ("h1", "LIQ"), ("h4", "SR")]:
-        decoded = touch_bit(trig, tf, fam)
-        manual = ((trig >> MASK_BIT[(tf, fam)]) & 1).astype(bool)
-        assert np.array_equal(decoded, manual)
