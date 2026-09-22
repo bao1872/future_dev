@@ -1,0 +1,6 @@
+kappa,validation_selected_coverage,validation_threshold,validation_episodes,validation_mean_y,validation_ci_lower,validation_ci_upper,test_episodes,test_actual_coverage,test_mean_y,test_median_y,test_positive_y_rate,test_ci_lower,test_ci_upper,test_long_fraction,test_short_fraction,test_symbols_represented,test_symbols_positive_among_ge10
+0.0,,,0,,,,,,,,,,,,,0,
+0.005,,,0,,,,,,,,,,,,,0,
+0.01,,,0,,,,,,,,,,,,,0,
+0.02,,,0,,,,,,,,,,,,,0,
+0.05,,,0,,,,,,,,,,,,,0,

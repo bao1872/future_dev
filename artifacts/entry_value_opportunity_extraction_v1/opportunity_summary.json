@@ -1,0 +1,107 @@
+{
+  "task_id": "FUTURE-ENTRY-VALUE-M1-OPPORTUNITY-EXTRACTION-V1",
+  "base_sha": "2d056ec871d599c1ba4a55133715c9cdaec77d91",
+  "parent_sha": "2d056ec871d599c1ba4a55133715c9cdaec77d91",
+  "kappas": [
+    0.0,
+    0.005,
+    0.01,
+    0.02,
+    0.05
+  ],
+  "coverages": [
+    0.2,
+    0.1,
+    0.05,
+    0.03,
+    0.02,
+    0.01,
+    0.005
+  ],
+  "min_episodes": 100,
+  "bootstrap_n": 1000,
+  "seed": 20260921,
+  "score_definition": "score=max(pL,pS); direction=argmax; actual_y=chosen Y",
+  "primary_diagnostic": "first crossing per (symbol,global_episode)",
+  "selection_rule": "scan coverages 20%->0.5%, pick FIRST with val episodes>=100 AND val mean_y>0 AND val ci_lower>0",
+  "lightgbm_version": "4.7.0",
+  "hard_checks": {
+    "all_prediction_caches_present": true,
+    "thresholds_from_validation_only": true,
+    "test_not_used_for_threshold_selection": true,
+    "first_crossing_one_row_per_episode": true,
+    "all_selected_actual_y_finite": true,
+    "all_five_kappas_processed": true,
+    "no_model_training": true,
+    "no_oracle_call": true,
+    "n_kappas": 5,
+    "lightgbm_version": "4.7.0"
+  },
+  "verdict_inputs": {
+    "0.0": {
+      "validation_selected_coverage": null,
+      "validation_threshold": null,
+      "validation_episodes": 0,
+      "validation_mean_y": null,
+      "validation_ci_lower": null,
+      "test_episodes": NaN,
+      "test_mean_y": null,
+      "test_ci_lower": null,
+      "test_ci_upper": null,
+      "test_positive_y_rate": NaN,
+      "test_symbols_represented": 0
+    },
+    "0.005": {
+      "validation_selected_coverage": null,
+      "validation_threshold": null,
+      "validation_episodes": 0,
+      "validation_mean_y": null,
+      "validation_ci_lower": null,
+      "test_episodes": NaN,
+      "test_mean_y": null,
+      "test_ci_lower": null,
+      "test_ci_upper": null,
+      "test_positive_y_rate": NaN,
+      "test_symbols_represented": 0
+    },
+    "0.01": {
+      "validation_selected_coverage": null,
+      "validation_threshold": null,
+      "validation_episodes": 0,
+      "validation_mean_y": null,
+      "validation_ci_lower": null,
+      "test_episodes": NaN,
+      "test_mean_y": null,
+      "test_ci_lower": null,
+      "test_ci_upper": null,
+      "test_positive_y_rate": NaN,
+      "test_symbols_represented": 0
+    },
+    "0.02": {
+      "validation_selected_coverage": null,
+      "validation_threshold": null,
+      "validation_episodes": 0,
+      "validation_mean_y": null,
+      "validation_ci_lower": null,
+      "test_episodes": NaN,
+      "test_mean_y": null,
+      "test_ci_lower": null,
+      "test_ci_upper": null,
+      "test_positive_y_rate": NaN,
+      "test_symbols_represented": 0
+    },
+    "0.05": {
+      "validation_selected_coverage": null,
+      "validation_threshold": null,
+      "validation_episodes": 0,
+      "validation_mean_y": null,
+      "validation_ci_lower": null,
+      "test_episodes": NaN,
+      "test_mean_y": null,
+      "test_ci_lower": null,
+      "test_ci_upper": null,
+      "test_positive_y_rate": NaN,
+      "test_symbols_represented": 0
+    }
+  }
+}
