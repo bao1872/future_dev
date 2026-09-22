@@ -1,0 +1,126 @@
+{
+  "task_id": "FUTURE-ENTRY-ACTION3-STRUCT44-V1",
+  "base_sha": "0d003d0660171772f715d6610602ecc0d361ffc2",
+  "branch": "entry-value-cost-robustness-v1",
+  "lightgbm_version": "4.7.0",
+  "kappas": [
+    0.0,
+    0.005,
+    0.01,
+    0.02,
+    0.05
+  ],
+  "models": [
+    "REG-M0",
+    "REG-M1",
+    "ACTION3-M0",
+    "ACTION3-M1",
+    "ACTION3-M1-MARGIN"
+  ],
+  "action_prior": "SHORT/FLAT/LONG from DP best_F1 (encoded -1/0/+1)",
+  "features": {
+    "M0": "DTP12",
+    "M1": "STRUCT44"
+  },
+  "hard_checks": {
+    "all_cost_caches_present": true,
+    "all_pred_caches_present": true,
+    "no_oracle_call": true,
+    "no_model_training_on_test": true,
+    "best_F1_utility_audit_passed": true,
+    "first_nonwait_one_row_per_episode": true,
+    "all_action_labels_in_0_1_2": true,
+    "feature_lists_m0_m1_only": true,
+    "candidate_universe_kappa_independent": true
+  },
+  "join_audit": {
+    "hard_gate_universe_identical": true,
+    "matched_rows_per_kappa": {
+      "0.0": 426038,
+      "0.005": 426038,
+      "0.01": 426038,
+      "0.02": 426038,
+      "0.05": 426038
+    },
+    "n_t2_rows": 426038
+  },
+  "gate_C_standalone_viability": {
+    "0.0": {
+      "selected_episodes": 958,
+      "selected_mean_entry_value": -0.9219427641534661,
+      "caev": -0.33723603209584596,
+      "caev_ci_lower": -0.4111669826109689,
+      "caev_ci_upper": -0.26120528133719506
+    },
+    "0.005": {
+      "selected_episodes": 1073,
+      "selected_mean_entry_value": -1.1661121385565083,
+      "caev": -0.4777542285876798,
+      "caev_ci_lower": -0.5587789933257673,
+      "caev_ci_upper": -0.3907584706173388
+    },
+    "0.01": {
+      "selected_episodes": 1045,
+      "selected_mean_entry_value": -1.0906515277757478,
+      "caev": -0.43517787190746715,
+      "caev_ci_lower": -0.5152552917394938,
+      "caev_ci_upper": -0.3486092271099401
+    },
+    "0.02": {
+      "selected_episodes": 1061,
+      "selected_mean_entry_value": -1.1467523268123367,
+      "caev": -0.46456823930809066,
+      "caev_ci_lower": -0.5456339085014875,
+      "caev_ci_upper": -0.3794165605493717
+    },
+    "0.05": {
+      "selected_episodes": 988,
+      "selected_mean_entry_value": -0.984848536769402,
+      "caev": -0.37152743578776987,
+      "caev_ci_lower": -0.4500776232549092,
+      "caev_ci_upper": -0.28875937043762884
+    }
+  },
+  "primary_comparison_symbol_deltas": {
+    "0.0": {
+      "symbols_action3_better_than_reg": 2,
+      "symbols_action3_better_than_m0": 1,
+      "n_symbols": 15,
+      "median_symbol_delta_vs_reg": -0.11498126487304833,
+      "median_symbol_delta_vs_m0": -0.19497057768588277
+    },
+    "0.005": {
+      "symbols_action3_better_than_reg": 0,
+      "symbols_action3_better_than_m0": 0,
+      "n_symbols": 15,
+      "median_symbol_delta_vs_reg": -0.26875739343570426,
+      "median_symbol_delta_vs_m0": -0.3473073041453417
+    },
+    "0.01": {
+      "symbols_action3_better_than_reg": 1,
+      "symbols_action3_better_than_m0": 0,
+      "n_symbols": 15,
+      "median_symbol_delta_vs_reg": -0.23738286363365468,
+      "median_symbol_delta_vs_m0": -0.31911406590485214
+    },
+    "0.02": {
+      "symbols_action3_better_than_reg": 1,
+      "symbols_action3_better_than_m0": 0,
+      "n_symbols": 15,
+      "median_symbol_delta_vs_reg": -0.31179473939970703,
+      "median_symbol_delta_vs_m0": -0.32708222888887906
+    },
+    "0.05": {
+      "symbols_action3_better_than_reg": 1,
+      "symbols_action3_better_than_m0": 1,
+      "n_symbols": 15,
+      "median_symbol_delta_vs_reg": -0.13791553869832518,
+      "median_symbol_delta_vs_m0": -0.2081098338563128
+    }
+  },
+  "verdict_inputs": {
+    "A_formulation_improvement": "ACTION3-M1 vs REG-M1: lower regret, higher CAEV, paired bootstrap Delta CAEV > 0 (CI lower > 0 preferred)",
+    "B_struct44_incremental": "ACTION3-M1 vs ACTION3-M0: lower regret, higher CAEV, >=10/15 symbols improve",
+    "C_standalone_viability": "ACTION3-M1 Test first-entry: episodes>=100, mean entry value>0, bootstrap CI lower>0"
+  }
+}
