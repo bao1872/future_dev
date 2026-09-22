@@ -62,6 +62,15 @@ from research.liquidity_oracle_atlas.indicator_viewer_v1 import (
     select_visible_oracle_trades,
     selected_snapshot,
 )
+from research.liquidity_oracle_atlas.indicator_viewer_candidate_overlay_v1 import (
+    add_candidate_zone_overlay,
+    build_candidate_segments,
+    candidate_for_symbol,
+    candidate_state_at,
+    load_candidate_rows,
+    match_available_index,
+    snapshot_as_of,
+)
 
 TF_LABELS = ["5m", "15m", "1H", "4H"]
 
@@ -422,6 +431,12 @@ def build_track_cached(symbol: str, tf: str, source_sha: str):
     return build_viewer_track(base, tf, symbol=symbol, source_sha=source_sha)
 
 
+@st.cache_data(show_spinner="加载候选区域真值…")
+def load_candidate_rows_cached():
+    """Frozen T2 candidate truth (cached; never recomputed per interaction)."""
+    return load_candidate_rows()
+
+
 @st.cache_data(show_spinner="加载 DP Oracle artifact…")
 def load_oracle_artifact_cached(
     root: str, symbol: str, math_version: str, cache_token: str
@@ -467,6 +482,8 @@ def main() -> None:
     st.session_state.setdefault("iv_show_sr", True)
     st.session_state.setdefault("iv_show_liq", True)
     st.session_state.setdefault("iv_show_oracle", False)
+    st.session_state.setdefault("iv_show_candidate", False)
+    st.session_state.setdefault("iv_cand_view", "All bars")
 
     # ---- toolbar columns ------------------------------------------------ #
     col_sym, col_tf, col_date, col_bt, col_prev, col_next, c1, c2, c3 = st.columns(
@@ -489,6 +506,22 @@ def main() -> None:
     with c3:
         st.session_state.iv_show_liq = st.checkbox("Liquidity", value=st.session_state.iv_show_liq)
 
+    # Candidate-zone audit overlay (visual audit only; frozen T2 truth).
+    with st.sidebar:
+        st.session_state.iv_show_candidate = st.checkbox(
+            "Show Candidate Trading Zones",
+            value=st.session_state.iv_show_candidate,
+            help="Frozen Oracle candidate regions from the formal T2 parquet. "
+                 "Decision axis = 5m; no t+1 shift; shows candidate truth only "
+                 "(no model / Y / Q / Oracle action).",
+        )
+        if st.session_state.iv_show_candidate:
+            st.session_state.iv_cand_view = st.radio(
+                "Candidate display",
+                ["All bars", "Candidate episodes only"],
+                index=0 if st.session_state.iv_cand_view == "All bars" else 1,
+            )
+
     # DP Oracle audit overlay — OFF by default, read-only, 5m-clock only.
     st.session_state.iv_show_oracle = st.checkbox(
         "DP Oracle — FUTURE / HINDSIGHT AUDIT",
@@ -500,6 +533,13 @@ def main() -> None:
     # (2) NOW build the track from the CURRENT widget values, so the chart
     #     always corresponds to the dropdown in the SAME rerun.
     track = build_track_cached(symbol, tf, git_head())
+
+    # (2b) Candidate-zone overlay data (frozen T2 truth, 5m decision axis).
+    # Cached load + per-symbol split; build_candidate_segments returns [] for
+    # any non-5m timeframe (candidate zones live on the 5m axis only).
+    cand_df = load_candidate_rows_cached()
+    cand_sym = candidate_for_symbol(cand_df, symbol)
+    segments, cand_audit, cand_by_time = build_candidate_segments(cand_sym, track)
 
     # (3) Selection: reset to latest bar when symbol/TF changed.
     prev_ctx = st.session_state.get("_iv_ctx")
@@ -601,6 +641,32 @@ def main() -> None:
     with chart_col:
         fig = build_figure(track, selected, st.session_state.iv_show_dtp,
                            st.session_state.iv_show_sr, st.session_state.iv_show_liq)
+        if st.session_state.iv_show_candidate:
+            if track.tf_label == "5m":
+                fig = add_candidate_zone_overlay(fig, segments)
+                st.caption(
+                    "Blue shaded bands = frozen Oracle candidate trading zones "
+                    "(formal T2). Decision axis = 5m; no t+1 shift. Candidate "
+                    "truth only — no model / Y / Q / Oracle action shown.")
+                if st.session_state.iv_cand_view == "Candidate episodes only" and segments:
+                    starts = sorted({int(s.start_idx) for s in segments})
+                    cp, cn = st.columns(2)
+                    with cp:
+                        if st.button("◀ Prev candidate episode"):
+                            prev = [x for x in starts if x < selected]
+                            if prev:
+                                st.session_state.iv_selected = int(max(prev))
+                                st.rerun()
+                    with cn:
+                        if st.button("Next candidate episode ▶"):
+                            nxt = [x for x in starts if x > selected]
+                            if nxt:
+                                st.session_state.iv_selected = int(min(nxt))
+                                st.rerun()
+            else:
+                st.info(
+                    "Candidate zones are defined on the 5m decision axis. "
+                    "Switch the primary chart to 5m for candidate-region audit.")
         if show_oracle and oracle_trades is not None and tf == ORACLE_TF_ONLY:
             fig = add_dp_oracle_overlay(fig, track, selected, oracle_trades)
         event = st.plotly_chart(
@@ -638,6 +704,10 @@ def main() -> None:
         for k, lv in enumerate(snap["liq_down"]):
             st.text(f"  S#{k+1} {lv['level']:.2f} br={lv['broken']} z={lv['zone_active']}")
 
+        # ---- candidate audit (A: frozen truth, B: canonical state) ------ #
+        if st.session_state.iv_show_candidate and track.tf_label == "5m":
+            _render_candidate_audit(track, symbol, selected, cand_by_time, cand_audit, segments)
+
     # ---- bottom debug --------------------------------------------------- #
     with st.expander("Technical snapshot", expanded=False):
         st.text(f"global TF index : {snap['index']}")
@@ -652,6 +722,77 @@ def main() -> None:
             "liq_up": snap["liq_up"],
             "liq_down": snap["liq_down"],
         })
+
+
+def _render_candidate_audit(track, symbol, selected, cand_by_time, cand_audit, segments):
+    """Render the candidate audit panel (Section 7/8/10/11/19).
+
+    A. frozen candidate truth from T2 (proximity flag + episode id);
+    B. canonical indicator state at the SAME 5m decision bar for 5m/15m/1h/4h,
+       each leakage-free (last fully-closed tf bar as-of the decision time).
+    The two halves are never recomputed from one another.
+    """
+    dt = pd.Timestamp(track.available_time[selected])
+    st.markdown("**Candidate Audit**")
+    state = candidate_state_at(cand_by_time, dt)
+    if not state["is_candidate"]:
+        st.caption(
+            "Candidate: NO at this bar (frozen T2 truth). "
+            "Shaded bands mark Oracle candidates; this bar is not one."
+        )
+        return
+
+    # A. frozen candidate truth
+    st.markdown("**A. Frozen candidate truth (T2)**")
+    st.text(f"Decision time : {dt}")
+    st.text(f"Candidate     : YES")
+    st.text(f"Episode       : {state['episode']}")
+    st.text(f"Proximity any : {state['proximity_any']}")
+    st.text(f"Prox. episode : {state['proximity_episode_id']}")
+
+    # B. canonical indicator state (leakage-free) at the same decision bar
+    st.markdown("**B. Current canonical indicator state**")
+    st.text("→ manually judge: does Oracle's candidate agree with SR/Liq/DTP?")
+    tf_tracks = {"5m": track}
+    for tf in ("15m", "1H", "4H"):
+        tf_tracks[tf] = build_track_cached(symbol, tf, git_head())
+    for tf in TF_LABELS:
+        s = snapshot_as_of(tf_tracks[tf], dt)
+        if s is None:
+            st.text(f"{tf}: (no matching bar)")
+            continue
+        d = s["dtp"]
+        st.text(
+            f"{tf}: trend={'UP' if d['trend'] == 1 else 'DOWN'} "
+            f"score={d['trend_score']:.3f} age={d['trend_age']} | "
+            f"SR ch={s['sr_n_channels']} in_zone={s['sr_in_zone']} | "
+            f"liq↑{s['liq_up_count']} liq↓{s['liq_down_count']}"
+        )
+
+    # Hard validation table (Section 19)
+    with st.expander("Candidate Overlay Audit", expanded=False):
+        a = cand_audit
+        lo, hi = compute_viewport(track, selected)
+        vis_seg = [s for s in segments if s.start_idx <= hi and s.end_idx >= lo]
+        vis_rows = sum(s.n_bars for s in vis_seg)
+        st.text(f"Symbol                    : {a['symbol']}")
+        st.text(f"T2 candidate rows         : {a['t2_candidate_rows']}")
+        st.text(f"Matched 5m bars           : {a['matched_5m_bars']}")
+        st.text(f"Unmatched candidate rows  : {a['unmatched_candidate_rows']}  (must be 0)")
+        st.text(f"Duplicate decision keys   : {a['duplicate_decision_keys']}  (must be 0)")
+        st.text(f"Episodes                  : {a['n_episodes']}")
+        st.text(f"Visual segments           : {a['n_segments']}")
+        if a["first_candidate_time"] is not None:
+            st.text(f"First candidate time      : {a['first_candidate_time']}")
+            st.text(f"Last candidate time       : {a['last_candidate_time']}")
+        st.text(f"Full-symbol candidate rows: {a['t2_candidate_rows']}")
+        st.text(f"Visible candidate rows     : {vis_rows}")
+        invariants_ok = (
+            a["unmatched_candidate_rows"] == 0
+            and a["duplicate_decision_keys"] == 0
+            and a["matched_5m_bars"] == a["t2_candidate_rows"]
+        )
+        st.text(f"INVARIANTS MET            : {invariants_ok}")
 
 
 if __name__ == "__main__":
