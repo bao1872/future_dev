@@ -164,7 +164,7 @@ def snapshot_as_of(track: ViewerTrack, decision_dt: Any) -> Optional[dict]:
 def build_candidate_segments(
     rows: pd.DataFrame,
     track: ViewerTrack,
-) -> Tuple[List[CandidateSegment], Dict[str, Any], Dict[pd.Timestamp, pd.Series]]:
+) -> Tuple[List[CandidateSegment], Dict[str, Any], Dict[pd.Timestamp, Dict[str, Any]]]:
     """Map candidate rows of one symbol onto the 5m ViewerTrack.
 
     Returns ``(segments, audit, cand_by_time)``.
@@ -173,10 +173,12 @@ def build_candidate_segments(
       (Section 4). Unmatched candidate rows are counted, never silently
       dropped.
     * Builds ``cand_by_time`` keyed by ``decision_time``; a duplicate key is a
-      hard error (Section 18).
+      hard error (Section 18). Values are compact dicts (episode + proximity
+      flags only) so the result stays cheap to cache/serialize.
     * Per episode, consecutive candidate bars are merged into one contiguous
-      band; a discontinuity in the integer bar index (which always accompanies
-      an exchange-session / segment gap) starts a new sub-segment (Section 16).
+      band; a discontinuity in the session/segment id (which always
+      accompanies an exchange-session / overnight gap) starts a new
+      sub-segment (Section 16).
     """
     empty_audit = {
         "symbol": track.symbol,
@@ -208,10 +210,21 @@ def build_candidate_segments(
     matched["bar_idx"] = pos[ok].astype(int)
     matched = matched.sort_values(["global_episode", "bar_idx"]).reset_index(drop=True)
 
-    cand_by_time: Dict[pd.Timestamp, pd.Series] = {}
+    cand_by_time: Dict[pd.Timestamp, Dict[str, Any]] = {}
     dts = matched["decision_time"].to_numpy()
+    eps = matched["global_episode"].to_numpy()
+    pa = matched["proximity_any"].to_numpy() if "proximity_any" in matched.columns else None
+    pe = (
+        matched["proximity_episode_id"].to_numpy()
+        if "proximity_episode_id" in matched.columns
+        else None
+    )
     for i in range(len(matched)):
-        cand_by_time[pd.Timestamp(dts[i])] = matched.iloc[i]
+        cand_by_time[pd.Timestamp(dts[i])] = {
+            "episode": eps[i],
+            "proximity_any": bool(pa[i]) if pa is not None else None,
+            "proximity_episode_id": (pe[i] if pe is not None else None),
+        }
 
     segments: List[CandidateSegment] = []
     seg_arr = np.asarray(track.segment)
@@ -291,7 +304,7 @@ def add_candidate_zone_overlay(
 # Selected-bar lookup (Section 18)                                            #
 # --------------------------------------------------------------------------- #
 def candidate_state_at(
-    cand_by_time: Dict[pd.Timestamp, pd.Series],
+    cand_by_time: Dict[pd.Timestamp, Dict[str, Any]],
     selected_decision_time: Any,
 ) -> Dict[str, Any]:
     """Frozen candidate truth at a selected decision time.
@@ -311,7 +324,7 @@ def candidate_state_at(
     r = cand_by_time[dt]
     return {
         "is_candidate": True,
-        "episode": r["global_episode"],
-        "proximity_any": bool(r["proximity_any"]),
-        "proximity_episode_id": int(r["proximity_episode_id"]),
+        "episode": r["episode"],
+        "proximity_any": r["proximity_any"],
+        "proximity_episode_id": r["proximity_episode_id"],
     }

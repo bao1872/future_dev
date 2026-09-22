@@ -35,6 +35,10 @@ from research.liquidity_oracle_atlas.test_indicator_viewer_v1 import (
     build_viewer_track,
     gen_trend_base,
 )
+from research.liquidity_oracle_atlas.build_forming_environment_v1 import (
+    FormingEnvironmentBuilder,
+)
+from research.liquidity_oracle_atlas.indicator_viewer_v1 import selected_snapshot
 
 
 def _make_rows(symbol, indices, track, episode_of, prox_any=True, prox_ep=100,
@@ -203,3 +207,58 @@ def test_integration_ag_alignment():
     for s in segs:
         for j in range(s.start_idx, s.end_idx + 1):
             assert int(seg_arr[j]) == int(seg_arr[s.start_idx])
+
+
+def test_forming_env_decision_time_alignment():
+    """Audit aligns forming env by decision_time == 5m availability_time."""
+    base = FormingEnvironmentBuilder(symbol="AG").load_raw().base
+    b = FormingEnvironmentBuilder(symbol="AG")
+    b.load_raw().prepare()
+    fdf, _ = b.run()
+    track = build_viewer_track(base, "5m", symbol="AG", source_sha="x")
+    ftimes = set(pd.to_datetime(fdf["decision_time"]))
+    vtimes = set(pd.to_datetime(track.available_time))
+    missing = vtimes - ftimes
+    assert len(missing) == 0, f"{len(missing)} Viewer 5m times missing from forming env"
+
+
+def test_forming_state_is_formed_not_closed():
+    """At an interior 5m bar the 15m state is the FORMING (partial) bar.
+
+    The audit must show this, not the last fully-closed 15m bar. A closed 15m
+    bar has exactly 3 sub-bars (n_base_known == 3); a forming bar has < 3.
+    """
+    b = FormingEnvironmentBuilder(symbol="AG")
+    b.load_raw().prepare()
+    fdf, _ = b.run()
+    nb = fdf["m15_n_base_known"].to_numpy()
+    closed = np.where(nb == 3)[0]
+    forming = np.where(nb < 3)[0]
+    assert len(closed) > 0, "expected some closed 15m bars (n_base_known==3)"
+    assert len(forming) > 0, "expected some forming 15m bars (n_base_known<3)"
+    i = int(forming[len(forming) // 2])
+    assert int(fdf.iloc[i]["m15_n_base_known"]) < 3
+
+
+def test_forming_m5_parity_with_viewer():
+    """Forming env m5 features equal the 5m ViewerTrack selected_snapshot.
+
+    Confirms the canonical forming-MTF owner reproduces the same indicator
+    math (no change to DTP/SR/Liquidity), for the 5m decision axis.
+    """
+    base = FormingEnvironmentBuilder(symbol="AG").load_raw().base
+    track = build_viewer_track(base, "5m", symbol="AG", source_sha="x")
+    b = FormingEnvironmentBuilder(symbol="AG")
+    b.load_raw().prepare()
+    fdf, _ = b.run()
+    for i in [10, 100, 1000]:
+        snap = selected_snapshot(track, i)
+        row = fdf.iloc[i]
+        a = float(row["m5_trend_score"])
+        b = float(snap["dtp"]["trend_score"])
+        if not (np.isnan(a) and np.isnan(b)):
+            assert abs(a - b) < 1e-9
+        # SR channel count and liquidity counts are both exposed directly and
+        # must agree (same canonical IndicatorState math).
+        assert int(row["m5_sr_n_channels"]) == int(snap["sr_n_channels"])
+        assert int(row["m5_liq_up_count"]) == int(snap["liq_up_count"])

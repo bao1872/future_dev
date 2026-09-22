@@ -30,6 +30,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import time
+
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -69,10 +71,23 @@ from research.liquidity_oracle_atlas.indicator_viewer_candidate_overlay_v1 impor
     candidate_state_at,
     load_candidate_rows,
     match_available_index,
-    snapshot_as_of,
 )
 
 TF_LABELS = ["5m", "15m", "1H", "4H"]
+TF_PREFIX = {"5m": "m5", "15m": "m15", "1H": "h1", "4H": "h4"}
+
+# forming-MTF owner prefixes used by build_forming_environment_v1.run()
+EMPTY_CAND_AUDIT = {
+    "symbol": "",
+    "t2_candidate_rows": 0,
+    "matched_5m_bars": 0,
+    "unmatched_candidate_rows": 0,
+    "duplicate_decision_keys": 0,
+    "n_episodes": 0,
+    "n_segments": 0,
+    "first_candidate_time": None,
+    "last_candidate_time": None,
+}
 
 # DP Oracle audit artifacts live outside the indicator pipeline (read-only).
 ORACLE_ARTIFACT_ROOT = (
@@ -425,8 +440,11 @@ def load_base_cached(symbol: str):
     return b.base
 
 
-@st.cache_data(show_spinner="构建指标时间轴…")
+@st.cache_resource(show_spinner="构建指标时间轴…")
 def build_track_cached(symbol: str, tf: str, source_sha: str):
+    # cache_resource (not cache_data): the ViewerTrack is a large immutable
+    # bundle of numpy arrays. Returning the same in-memory object on every hit
+    # avoids the per-rerun pickle/copy cost of cache_data (FIX1 point 5).
     base = load_base_cached(symbol)
     return build_viewer_track(base, tf, symbol=symbol, source_sha=source_sha)
 
@@ -435,6 +453,35 @@ def build_track_cached(symbol: str, tf: str, source_sha: str):
 def load_candidate_rows_cached():
     """Frozen T2 candidate truth (cached; never recomputed per interaction)."""
     return load_candidate_rows()
+
+
+@st.cache_data(show_spinner="构建候选区域段…")
+def candidate_segments_cached(symbol: str, source_sha: str):
+    """Per-symbol candidate segments + frozen-truth lookup.
+
+    Args are strings only, so cache hits are cheap (no array hashing). The 5m
+    track is fetched from the cache_resource owner, so switching bars never
+    re-runs the candidate groupby (FIX1 point 2).
+    """
+    cand_df = load_candidate_rows_cached()
+    cand_sym = candidate_for_symbol(cand_df, symbol)
+    track5 = build_track_cached(symbol, "5m", source_sha)
+    return build_candidate_segments(cand_sym, track5)
+
+
+@st.cache_resource(show_spinner="构建 forming-MTF 环境…")
+def load_forming_env_cached(symbol: str):
+    # Canonical forming-MTF owner (build_forming_environment_v1). Returns the
+    # per-5m-decision-bar FORMING DTP/SR/Liquidity state for 15m/1h/4h.
+    # NOTE: the 5m forming state is identically the ViewerTrack's selected
+    # snapshot (parity-tested), so we omit m5 here — running m5 through the
+    # forming owner is ~35s of trivial 1-bar previews for no extra information.
+    # cache_resource: large immutable DataFrame, returned by reference.
+    b = FormingEnvironmentBuilder(symbol=symbol)
+    b.load_raw().prepare()
+    b.tf_minutes = [15, 60, 240]
+    df, _ = b.run()
+    return df
 
 
 @st.cache_data(show_spinner="加载 DP Oracle artifact…")
@@ -532,14 +579,24 @@ def main() -> None:
 
     # (2) NOW build the track from the CURRENT widget values, so the chart
     #     always corresponds to the dropdown in the SAME rerun.
+    timing: Dict[str, float] = {}
+    _t0 = time.perf_counter()
     track = build_track_cached(symbol, tf, git_head())
+    timing["track_build_ms"] = (time.perf_counter() - _t0) * 1000.0
 
     # (2b) Candidate-zone overlay data (frozen T2 truth, 5m decision axis).
-    # Cached load + per-symbol split; build_candidate_segments returns [] for
-    # any non-5m timeframe (candidate zones live on the 5m axis only).
-    cand_df = load_candidate_rows_cached()
-    cand_sym = candidate_for_symbol(cand_df, symbol)
-    segments, cand_audit, cand_by_time = build_candidate_segments(cand_sym, track)
+    # FIX1 point 1: only touch the T2 candidate data when the overlay is ON and
+    # the primary chart is 5m. Otherwise leave it entirely untouched.
+    # FIX1 point 2: the per-symbol segments are served from a cached owner, so
+    # switching bars never re-runs the candidate groupby.
+    segments, cand_audit, cand_by_time = [], EMPTY_CAND_AUDIT, {}
+    if st.session_state.iv_show_candidate and track.tf_label == "5m":
+        _t0 = time.perf_counter()
+        _ = load_candidate_rows_cached()  # parquet read / cache hit
+        timing["candidate_load_ms"] = (time.perf_counter() - _t0) * 1000.0
+        _t0 = time.perf_counter()
+        segments, cand_audit, cand_by_time = candidate_segments_cached(symbol, git_head())
+        timing["candidate_segment_ms"] = (time.perf_counter() - _t0) * 1000.0
 
     # (3) Selection: reset to latest bar when symbol/TF changed.
     prev_ctx = st.session_state.get("_iv_ctx")
@@ -639,15 +696,28 @@ def main() -> None:
     # ---- main + snapshot ------------------------------------------------ #
     chart_col, snap_col = st.columns([4, 1])
     with chart_col:
+        _t0 = time.perf_counter()
         fig = build_figure(track, selected, st.session_state.iv_show_dtp,
                            st.session_state.iv_show_sr, st.session_state.iv_show_liq)
         if st.session_state.iv_show_candidate:
             if track.tf_label == "5m":
-                fig = add_candidate_zone_overlay(fig, segments)
+                # FIX1 point 3: only draw segments that intersect the CURRENT
+                # viewport AND start at/before the selected bar. This keeps the
+                # figure to a handful of vrects instead of every historical
+                # episode (AG has ~1392 episodes; never all go into the figure).
+                lo, hi = compute_viewport(track, selected)
+                visible = [
+                    s for s in segments
+                    if s.end_idx >= lo and s.start_idx <= hi and s.start_idx <= selected
+                ]
+                fig = add_candidate_zone_overlay(fig, visible)
+                timing["plot_segment_count"] = len(visible)
+                timing["full_symbol_segments"] = len(segments)
                 st.caption(
-                    "Blue shaded bands = frozen Oracle candidate trading zones "
-                    "(formal T2). Decision axis = 5m; no t+1 shift. Candidate "
-                    "truth only — no model / Y / Q / Oracle action shown.")
+                    f"Blue shaded bands = frozen Oracle candidate trading zones "
+                    f"(formal T2). Rendered {len(visible)} / {len(segments)} segments "
+                    f"in current viewport. Decision axis = 5m; no t+1 shift. "
+                    f"Candidate truth only — no model / Y / Q / Oracle action shown.")
                 if st.session_state.iv_cand_view == "Candidate episodes only" and segments:
                     starts = sorted({int(s.start_idx) for s in segments})
                     cp, cn = st.columns(2)
@@ -669,6 +739,7 @@ def main() -> None:
                     "Switch the primary chart to 5m for candidate-region audit.")
         if show_oracle and oracle_trades is not None and tf == ORACLE_TF_ONLY:
             fig = add_dp_oracle_overlay(fig, track, selected, oracle_trades)
+        timing["figure_build_ms"] = (time.perf_counter() - _t0) * 1000.0
         event = st.plotly_chart(
             fig, key="iv_chart", on_select="rerun", selection_mode="points",
             use_container_width=True)
@@ -706,7 +777,7 @@ def main() -> None:
 
         # ---- candidate audit (A: frozen truth, B: canonical state) ------ #
         if st.session_state.iv_show_candidate and track.tf_label == "5m":
-            _render_candidate_audit(track, symbol, selected, cand_by_time, cand_audit, segments)
+            _render_candidate_audit(track, symbol, selected, cand_by_time, cand_audit, segments, timing)
 
     # ---- bottom debug --------------------------------------------------- #
     with st.expander("Technical snapshot", expanded=False):
@@ -716,6 +787,15 @@ def main() -> None:
         st.text(f"counters        : raw_load={track.raw_load_count} resample={track.resample_count} "
                 f"steps={track.indicator_step_count} full_recompute={track.full_history_recompute_count} "
                 f"reference={track.reference_call_count} writes={track.visual_snapshot_write_count}")
+        st.text("")  # FIX1 point 7: timing instrumentation
+        st.text("RENDER TIMING (ms)")
+        st.text(f"  track_build_ms        : {timing.get('track_build_ms', 0.0):.1f}")
+        st.text(f"  candidate_load_ms     : {timing.get('candidate_load_ms', 0.0):.1f}")
+        st.text(f"  candidate_segment_ms  : {timing.get('candidate_segment_ms', 0.0):.1f}")
+        st.text(f"  figure_build_ms       : {timing.get('figure_build_ms', 0.0):.1f}")
+        st.text(f"  forming_env_ms        : {timing.get('forming_env_ms', 0.0):.1f}")
+        st.text(f"  plot_segment_count    : {timing.get('plot_segment_count', 0)} "
+                f"/ {timing.get('full_symbol_segments', 0)}  (rendered / full)")
         st.json({
             "dtp": d,
             "sr": snap["sr_channels"],
@@ -724,13 +804,26 @@ def main() -> None:
         })
 
 
-def _render_candidate_audit(track, symbol, selected, cand_by_time, cand_audit, segments):
+def _ff(x, p: int = 2) -> str:
+    """Format a forming-feature scalar; show '—' for NaN / missing."""
+    try:
+        v = float(x)
+        if not np.isfinite(v):
+            return "—"
+        return f"{v:.{p}f}"
+    except (TypeError, ValueError):
+        return "—"
+
+
+def _render_candidate_audit(track, symbol, selected, cand_by_time, cand_audit, segments, timing):
     """Render the candidate audit panel (Section 7/8/10/11/19).
 
-    A. frozen candidate truth from T2 (proximity flag + episode id);
-    B. canonical indicator state at the SAME 5m decision bar for 5m/15m/1h/4h,
-       each leakage-free (last fully-closed tf bar as-of the decision time).
-    The two halves are never recomputed from one another.
+    A. Frozen candidate truth from T2 (proximity flag + episode id);
+    B. Canonical FORMING multi-timeframe state at the SAME 5m decision bar.
+       FIX1 point 6: B is sourced from ``build_forming_environment_v1`` — the
+       canonical forming-MTF owner — so the 15m/1h/4h states shown are the
+       bars AS-FORMING at the 5m close, NOT the last fully-closed HTF bar.
+       A and B are computed from independent sources and never cross-derived.
     """
     dt = pd.Timestamp(track.available_time[selected])
     st.markdown("**Candidate Audit**")
@@ -750,24 +843,65 @@ def _render_candidate_audit(track, symbol, selected, cand_by_time, cand_audit, s
     st.text(f"Proximity any : {state['proximity_any']}")
     st.text(f"Prox. episode : {state['proximity_episode_id']}")
 
-    # B. canonical indicator state (leakage-free) at the same decision bar
-    st.markdown("**B. Current canonical indicator state**")
-    st.text("→ manually judge: does Oracle's candidate agree with SR/Liq/DTP?")
-    tf_tracks = {"5m": track}
-    for tf in ("15m", "1H", "4H"):
-        tf_tracks[tf] = build_track_cached(symbol, tf, git_head())
-    for tf in TF_LABELS:
-        s = snapshot_as_of(tf_tracks[tf], dt)
-        if s is None:
-            st.text(f"{tf}: (no matching bar)")
-            continue
-        d = s["dtp"]
-        st.text(
-            f"{tf}: trend={'UP' if d['trend'] == 1 else 'DOWN'} "
-            f"score={d['trend_score']:.3f} age={d['trend_age']} | "
-            f"SR ch={s['sr_n_channels']} in_zone={s['sr_in_zone']} | "
-            f"liq↑{s['liq_up_count']} liq↓{s['liq_down_count']}"
-        )
+    # B. canonical FORMING multi-timeframe state (canonical owner)
+    st.markdown("**B. Current canonical FORMING indicator state**")
+    st.text("→ manually judge: does Oracle's candidate make sense vs SR/Liq/DTP?")
+    st.text("   5m = ViewerTrack snapshot (forming 5m bar); 15m/1h/4h = forming")
+    st.text("   bar at this 5m close via canonical forming-MTF owner (NOT the")
+    st.text("   last fully-closed HTF bar).")
+    _t0 = time.perf_counter()
+    fdf = load_forming_env_cached(symbol)
+    timing["forming_env_ms"] = (time.perf_counter() - _t0) * 1000.0
+
+    # 5m: the forming 5m state IS the ViewerTrack selected snapshot (parity
+    # tested). Sourcing it here avoids the ~35s of trivial m5 previews that the
+    # forming owner would otherwise do.
+    snap5 = selected_snapshot(track, selected)
+    d5 = snap5["dtp"]
+    t5 = d5["trend"]
+    st.text(
+        f"5m: DTP {'UP' if t5 == 1 else ('DOWN' if t5 == -1 else 'FLAT/NA')} "
+        f"score={_ff(d5['trend_score'], 3)} dev={_ff(snap5['dev'], 3)} "
+        f"slope={_ff(snap5['slope'], 3)} sma={_ff(snap5['ma'])} atr={_ff(snap5['atr'])}"
+    )
+    ch5 = snap5["sr_channels"]
+    sup5 = min((c["bottom"] for c in ch5), default=float("nan"))
+    res5 = max((c["top"] for c in ch5), default=float("nan"))
+    st.text(
+        f"     SR in_zone={int(snap5['sr_in_zone'])} ch={int(snap5['sr_n_channels'])} "
+        f"sup={_ff(sup5)} res={_ff(res5)}"
+    )
+    st.text(
+        f"     LIQ up={int(snap5['liq_up_count'])} dn={int(snap5['liq_down_count'])}"
+    )
+
+    # 15m/1h/4h: forming bar at this 5m close (canonical owner).
+    sub = fdf[fdf["decision_time"] == dt]
+    row = sub.iloc[0] if len(sub) else (fdf.iloc[selected] if 0 <= selected < len(fdf) else None)
+    if row is None:
+        st.text("   (no forming-state row for this decision time)")
+    else:
+        for tf in ("15m", "1H", "4H"):
+            p = TF_PREFIX[tf]
+            ts = int(row[f"{p}_trend_state"])
+            tlabel = "UP" if ts == 1 else ("DOWN" if ts == -1 else "FLAT/NA")
+            st.text(
+                f"{tf}: DTP {tlabel} score={_ff(row[f'{p}_trend_score'], 3)} "
+                f"dev={_ff(row[f'{p}_dev'], 3)} slope={_ff(row[f'{p}_slope_atr'], 3)} "
+                f"sma={_ff(row[f'{p}_sma'])} atr={_ff(row[f'{p}_atr'])}"
+            )
+            st.text(
+                f"     SR in_zone={int(row[f'{p}_sr_in_zone'])} ch={int(row[f'{p}_sr_n_channels'])} "
+                f"sup={_ff(row[f'{p}_sr_support_price'])} "
+                f"({_ff(row[f'{p}_sr_support_dist_atr'])}σ,{_ff(row[f'{p}_sr_support_strength'], 0)}) "
+                f"res={_ff(row[f'{p}_sr_resistance_price'])} "
+                f"({_ff(row[f'{p}_sr_resistance_dist_atr'])}σ,{_ff(row[f'{p}_sr_resistance_strength'], 0)})"
+            )
+            st.text(
+                f"     LIQ up={int(row[f'{p}_liq_up_count'])} dn={int(row[f'{p}_liq_down_count'])} "
+                f"upLvl={_ff(row[f'{p}_liq_up_level_price'])} dnLvl={_ff(row[f'{p}_liq_down_level_price'])} "
+                f"upDist={_ff(row[f'{p}_liq_up_dist_atr'])} dnDist={_ff(row[f'{p}_liq_down_dist_atr'])}"
+            )
 
     # Hard validation table (Section 19)
     with st.expander("Candidate Overlay Audit", expanded=False):
