@@ -24,9 +24,11 @@ def test_expected_symbols_constant():
     assert T2.EXPECTED_COST_MODE == "zero_cost"
 
 
-def test_build_coverage_no_gate_current_env():
-    """build_coverage reports AG/RB without raising (it only reports)."""
-    cov = T2.build_coverage(T2.discover_symbols())
+def test_build_coverage_no_gate_current_env(monkeypatch):
+    """build_coverage reports the universe without raising (it only reports)."""
+    symbols = [f"SYM{i:02d}" for i in range(2)]
+    _stub_loads(monkeypatch, symbols)
+    cov = T2.build_coverage(symbols)
     assert cov["n_discovered"] == 2
     assert cov["n_oracle_ok"] == 2
     assert len(cov["coverage_rows"]) == 2
@@ -35,17 +37,24 @@ def test_build_coverage_no_gate_current_env():
     assert "common_start" in cov["common_window"]
 
 
-def test_preflight_blocks_when_not_15():
-    """In the real env only 2 symbols exist -> T2_PREFLIGHT_BLOCKED."""
+def test_preflight_blocks_when_not_15(monkeypatch):
+    """A 14-symbol universe (not 15) must block with T2_PREFLIGHT_BLOCKED."""
+    symbols = [f"SYM{i:02d}" for i in range(14)]
+    _stub_loads(monkeypatch, symbols)
     with pytest.raises(SystemExit) as exc:
-        T2.preflight()
+        T2.preflight(symbols=symbols)
     assert "T2_PREFLIGHT_BLOCKED" in str(exc.value)
 
 
 def _stub_loads(monkeypatch, symbols):
     """Make load_raw_5m / load_oracle_artifact_v2 / window helpers succeed for
     the given 15 symbols so the gate logic can be exercised positively."""
-    df = pd.DataFrame({"a": [1.0, 2.0, 3.0]})
+    df = pd.DataFrame({
+        "a": [1.0, 2.0, 3.0],
+        "Q_F1_S": [0.0, 0.0, 0.0],
+        "Q_F1_F": [0.0, 0.0, 0.0],
+        "Q_F1_L": [0.0, 0.0, 0.0],
+    })
 
     def fake_raw(sym):
         if sym in symbols:
@@ -58,10 +67,13 @@ def _stub_loads(monkeypatch, symbols):
                 "ok": True,
                 "reason": None,
                 "actions": df,
+                "trades": df,
                 "metadata": {
                     "math_version": T2.EXPECTED_MATH_VERSION,
                     "cost_mode": T2.EXPECTED_COST_MODE,
-                    "oracle_source_sha": "deadbeef",
+                    "oracle_source_sha": "cc7891723beb7298aa5225275b0697969d8e19bb",
+                    "row_count_actions": int(len(df)),
+                    "row_count_trades": int(len(df)),
                 },
             }
         return {"ok": False, "reason": "missing", "actions": df, "metadata": {}}
