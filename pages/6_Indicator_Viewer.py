@@ -65,12 +65,17 @@ from research.liquidity_oracle_atlas.indicator_viewer_v1 import (
     selected_snapshot,
 )
 from research.liquidity_oracle_atlas.indicator_viewer_candidate_overlay_v1 import (
+    TRIGGER_BITS,
     add_candidate_zone_overlay,
     build_candidate_segments,
     candidate_for_symbol,
     candidate_state_at,
     load_candidate_rows,
     match_available_index,
+)
+from research.liquidity_oracle_atlas.build_candidate_gate_r3_v1 import (
+    load_candidate_gate_summary,
+    touch_bit,
 )
 
 TF_LABELS = ["5m", "15m", "1H", "4H"]
@@ -449,22 +454,16 @@ def build_track_cached(symbol: str, tf: str, source_sha: str):
     return build_viewer_track(base, tf, symbol=symbol, source_sha=source_sha)
 
 
-@st.cache_data(show_spinner="加载候选区域真值…")
-def load_candidate_rows_cached():
-    """Frozen T2 candidate truth (cached; never recomputed per interaction)."""
-    return load_candidate_rows()
-
-
 @st.cache_data(show_spinner="构建候选区域段…")
 def candidate_segments_cached(symbol: str, source_sha: str):
     """Per-symbol candidate segments + frozen-truth lookup.
 
-    Args are strings only, so cache hits are cheap (no array hashing). The 5m
-    track is fetched from the cache_resource owner, so switching bars never
-    re-runs the candidate groupby (FIX1 point 2).
+    Reads the canonical R3 candidate gate artifact (ONE canonical owner,
+    shared with DP and the future Model). Args are strings only, so cache hits
+    are cheap (no array hashing); switching bars never re-runs the candidate
+    computation (FIX1 point 2 / R3 checkpoint A).
     """
-    cand_df = load_candidate_rows_cached()
-    cand_sym = candidate_for_symbol(cand_df, symbol)
+    cand_sym = load_candidate_rows(symbol)
     track5 = build_track_cached(symbol, "5m", source_sha)
     return build_candidate_segments(cand_sym, track5)
 
@@ -592,11 +591,18 @@ def main() -> None:
     segments, cand_audit, cand_by_time = [], EMPTY_CAND_AUDIT, {}
     if st.session_state.iv_show_candidate and track.tf_label == "5m":
         _t0 = time.perf_counter()
-        _ = load_candidate_rows_cached()  # parquet read / cache hit
-        timing["candidate_load_ms"] = (time.perf_counter() - _t0) * 1000.0
-        _t0 = time.perf_counter()
         segments, cand_audit, cand_by_time = candidate_segments_cached(symbol, git_head())
         timing["candidate_segment_ms"] = (time.perf_counter() - _t0) * 1000.0
+        timing["candidate_load_ms"] = 0.0  # artifact read is inside the cached owner
+        # candidate math version + artifact SHA (proves Viewer/DP/Model share it)
+        try:
+            _summ = load_candidate_gate_summary()
+            timing["candidate_math_version"] = _summ.get("candidate_math_version", "")
+            _sa = _summ.get("symbol_artifacts", {}).get(symbol, {})
+            timing["candidate_artifact_sha"] = _sa.get("sha256", "")[:12]
+        except FileNotFoundError:
+            timing["candidate_math_version"] = "MISSING"
+            timing["candidate_artifact_sha"] = "MISSING"
 
     # (3) Selection: reset to latest bar when symbol/TF changed.
     prev_ctx = st.session_state.get("_iv_ctx")
@@ -711,13 +717,27 @@ def main() -> None:
                     if s.end_idx >= lo and s.start_idx <= hi and s.start_idx <= selected
                 ]
                 fig = add_candidate_zone_overlay(fig, visible)
+                # Yellow vertical line marks the TRIGGER bar: the previous 5m bar
+                # whose true-touch (5m SR/LIQ) actually opened the candidate. This
+                # makes the "previous-bar touch -> next-bar candidate" rule visible.
+                _dt = pd.Timestamp(track.available_time[selected])
+                _cstate = candidate_state_at(cand_by_time, _dt)
+                if _cstate["is_candidate"] and _cstate["trigger_bar_index"] >= 0:
+                    _tbi = int(_cstate["trigger_bar_index"])
+                    if 0 <= _tbi < len(track.available_time):
+                        fig.add_vline(
+                            x=_tbi, line_color="gold", line_width=1.5,
+                            opacity=0.9,
+                        )
                 timing["plot_segment_count"] = len(visible)
                 timing["full_symbol_segments"] = len(segments)
                 st.caption(
-                    f"Blue shaded bands = frozen Oracle candidate trading zones "
-                    f"(formal T2). Rendered {len(visible)} / {len(segments)} segments "
-                    f"in current viewport. Decision axis = 5m; no t+1 shift. "
-                    f"Candidate truth only — no model / Y / Q / Oracle action shown.")
+                    f"Blue shaded bands = frozen R3 candidate trading zones "
+                    f"(candidate gate artifact). Rendered {len(visible)} / {len(segments)} "
+                    f"segments in current viewport. Gold line = trigger bar (prev 5m "
+                    f"bar whose 5m SR/LIQ opened the candidate). Decision axis = 5m; "
+                    f"no t+1 shift. Candidate truth only — no model / Y / Q / Oracle "
+                    f"action shown.")
                 if st.session_state.iv_cand_view == "Candidate episodes only" and segments:
                     starts = sorted({int(s.start_idx) for s in segments})
                     cp, cn = st.columns(2)
@@ -796,6 +816,10 @@ def main() -> None:
         st.text(f"  forming_env_ms        : {timing.get('forming_env_ms', 0.0):.1f}")
         st.text(f"  plot_segment_count    : {timing.get('plot_segment_count', 0)} "
                 f"/ {timing.get('full_symbol_segments', 0)}  (rendered / full)")
+        st.text("")
+        st.text("CANDIDATE ARTIFACT (shared by Viewer / DP / Model)")
+        st.text(f"  math_version          : {timing.get('candidate_math_version', '—')}")
+        st.text(f"  artifact SHA          : {timing.get('candidate_artifact_sha', '—')}")
         st.json({
             "dtp": d,
             "sr": snap["sr_channels"],
@@ -835,13 +859,21 @@ def _render_candidate_audit(track, symbol, selected, cand_by_time, cand_audit, s
         )
         return
 
-    # A. frozen candidate truth
-    st.markdown("**A. Frozen candidate truth (T2)**")
+    # A. frozen candidate truth  (R3 gate artifact = single source of truth)
+    st.markdown("**A. Frozen candidate truth (R3 gate artifact)**")
     st.text(f"Decision time : {dt}")
     st.text(f"Candidate     : YES")
     st.text(f"Episode       : {state['episode']}")
-    st.text(f"Proximity any : {state['proximity_any']}")
-    st.text(f"Prox. episode : {state['proximity_episode_id']}")
+    trig_dt = state.get("trigger_decision_time")
+    st.text(f"Trigger bar   : {trig_dt}")
+    # Decode the retained full 4TF true-touch mask of the trigger bar.
+    tb = int(state["trigger_bits"])
+    st.markdown("**Trigger context (true-touch at trigger bar, 5m close-known)**")
+    for tf, fam in TRIGGER_BITS:
+        hit = bool(touch_bit(np.uint16(tb), tf, fam)[0]) if tb else False
+        kind = "ELIG" if tf == "m5" else "conf"
+        st.text(f"  {tf} {fam:3s} : {'YES' if hit else 'no '}  ({kind})")
+    st.text("  5m SR/LIQ = execution eligibility; higher-TF = confluence/context.")
 
     # B. canonical FORMING multi-timeframe state (canonical owner)
     st.markdown("**B. Current canonical FORMING indicator state**")

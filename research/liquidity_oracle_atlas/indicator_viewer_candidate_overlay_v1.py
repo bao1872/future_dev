@@ -6,24 +6,25 @@ Candidate-zone audit overlay for the Indicator Viewer (visual audit ONLY).
 This module is a VISUALIZATION helper. It performs NO indicator math, NO
 causal resampling, NO model work and NO label recomputation. It only:
 
-  * reads the frozen formal T2 candidate truth
-    (artifacts/intraday_entry_value_tree_core108_v1/t2/t2_dataset.parquet),
-  * maps each candidate ``decision_time`` to the 5m bar whose ``available_time``
-    equals it (Section 4 hard rule: decision_time <-> 5m availability_time,
-    one-to-one),
+  * reads the canonical R3 candidate gate artifact
+    (artifacts/candidate_gate_r3_m5_touch_nextbar_v1/<symbol>.parquet),
+    which is the SINGLE source of candidate truth shared by Streamlit, DP and
+    the future Model (FUTURE-R3-CANONICAL-M5-TOUCH-NEXTBAR-GATE-V1),
+  * maps each candidate bar to the 5m ViewerTrack by integer ``bar_index``
+    (both the artifact and the ViewerTrack derive from the same base 5m frame,
+    so indices are identical; ``decision_time`` == 5m ``availability_time``),
   * merges same-episode consecutive 5m bars into contiguous shaded regions,
-  * exposes the frozen candidate truth next to the canonical indicator state.
+  * exposes the frozen candidate trigger context next to the canonical
+    indicator state.
 
-Source of truth for candidate membership is the formal T2 parquet, which
-persists exactly: ``is_candidate`` / ``proximity_any`` /
-``proximity_episode_id`` / ``global_episode`` / ``decision_time``.  The
-per-timeframe SR/LIQ ``proximity_bits`` bitmask is NOT persisted in that
-parquet, so finer provenance is intentionally NOT reconstructed here (Section 9:
-"do not manufacture finer provenance").
+Candidate eligibility (5m SR/LIQ true-touch only) is decided ONCE by the gate
+artifact; this module never recomputes it. The higher-TF trigger context
+(``candidate_trigger_bits``) is preserved verbatim from the artifact.
 
 Frozen owners reused verbatim (no math copied):
   * research.liquidity_oracle_atlas.indicator_viewer_v1.ViewerTrack
   * research.liquidity_oracle_atlas.indicator_viewer_v1.selected_snapshot
+  * research.liquidity_oracle_atlas.build_candidate_gate_r3_v1.load_candidate_gate
 
 No model / Y / Q / Oracle-action content is ever produced by this module.
 """
@@ -41,25 +42,19 @@ from research.liquidity_oracle_atlas.indicator_viewer_v1 import (
     ViewerTrack,
     selected_snapshot,
 )
-
-# --------------------------------------------------------------------------- #
-# Frozen source of truth                                                      #
-# --------------------------------------------------------------------------- #
-T2_PATH = Path(
-    "artifacts/intraday_entry_value_tree_core108_v1/"
-    "t2/t2_dataset.parquet"
+from research.liquidity_oracle_atlas.build_candidate_gate_r3_v1 import (
+    load_candidate_gate,
+    touch_bit,
 )
 
-CANDIDATE_COLS = [
-    "symbol",
-    "decision_time",
-    "global_episode",
-    "proximity_any",
-    "proximity_episode_id",
-    "is_candidate",
-]
-
 TF_LABELS = ["5m", "15m", "1H", "4H"]
+# 4TF x {SR, LIQ} trigger-context display order
+TRIGGER_BITS = [
+    ("m5", "SR"), ("m5", "LIQ"),
+    ("m15", "SR"), ("m15", "LIQ"),
+    ("h1", "SR"), ("h1", "LIQ"),
+    ("h4", "SR"), ("h4", "LIQ"),
+]
 
 # Overlay visual identity (distinct from SR red/green and Oracle markers).
 _CANDIDATE_RGB = "rgba(56, 128, 255, 1.0)"
@@ -87,27 +82,24 @@ class CandidateSegment:
 # --------------------------------------------------------------------------- #
 # Loading (pure; the page wraps this in @st.cache_data)                       #
 # --------------------------------------------------------------------------- #
-def load_candidate_rows() -> pd.DataFrame:
-    """Read only candidate-truth columns from the formal T2 parquet.
+def load_candidate_rows(symbol: str) -> pd.DataFrame:
+    """Read the canonical R3 candidate gate artifact for one symbol.
 
-    The formal T2 parquet is candidate-only (``is_candidate`` is True for every
-    row), so the filter is a no-op guard that also documents the hard rule from
-    Section 3: candidate membership comes from frozen data, never from chart
-    geometry.
+    This is the single frozen candidate truth consumed by Streamlit, the DP and
+    the future Model. Candidate membership and trigger context come from here,
+    never from chart geometry.
     """
-    df = pd.read_parquet(T2_PATH, columns=list(CANDIDATE_COLS))
+    df = load_candidate_gate(symbol)
     df["decision_time"] = pd.to_datetime(df["decision_time"])
-    if "is_candidate" in df.columns:
-        df = df[df["is_candidate"]].copy()
     return df.reset_index(drop=True)
 
 
 def candidate_for_symbol(
     candidate_df: pd.DataFrame, symbol: str
 ) -> pd.DataFrame:
-    """Filter + sort candidate rows for one symbol (Section 15)."""
+    """Identity pass: the artifact is already per-symbol (Section 15)."""
     d = candidate_df[candidate_df["symbol"] == symbol].copy()
-    return d.sort_values("decision_time").reset_index(drop=True)
+    return d.reset_index(drop=True)
 
 
 # --------------------------------------------------------------------------- #
@@ -169,16 +161,15 @@ def build_candidate_segments(
 
     Returns ``(segments, audit, cand_by_time)``.
 
-    * Aligns every ``decision_time`` to the 5m bar via ``available_time``
-      (Section 4). Unmatched candidate rows are counted, never silently
-      dropped.
-    * Builds ``cand_by_time`` keyed by ``decision_time``; a duplicate key is a
-      hard error (Section 18). Values are compact dicts (episode + proximity
-      flags only) so the result stays cheap to cache/serialize.
-    * Per episode, consecutive candidate bars are merged into one contiguous
-      band; a discontinuity in the session/segment id (which always
-      accompanies an exchange-session / overnight gap) starts a new
-      sub-segment (Section 16).
+    * Consumes the canonical R3 gate artifact; candidate bars are those with
+      ``candidate_any == True``. ``bar_index`` in the artifact is the SAME
+      integer ViewerTrack x position (both derive from the same base 5m frame),
+      so mapping is O(1) per row. ``decision_time`` == 5m ``availability_time``
+      is still cross-checked (Section 4 invariant).
+    * Builds ``cand_by_time`` keyed by ``decision_time`` carrying the trigger
+      context (trigger bar index/time + full 4TF trigger_bits).
+    * Same-episode consecutive candidate bars merge into one contiguous band;
+      a discontinuity in the segment id starts a new sub-segment (Section 16).
     """
     empty_audit = {
         "symbol": track.symbol,
@@ -195,41 +186,39 @@ def build_candidate_segments(
         # Candidate zones are defined on the 5m decision axis only (Section 5).
         return [], empty_audit, {}
 
-    dt_arr = rows["decision_time"].to_numpy()
-    # duplicate decision_time is a hard error (Section 18)
-    if len(np.unique(dt_arr)) != len(dt_arr):
-        raise RuntimeError("CANDIDATE_DUPLICATE_KEY")
+    cand = rows[rows["candidate_any"].astype(bool)].copy().reset_index(drop=True)
+    n_cand = len(cand)
+    if n_cand == 0:
+        return [], empty_audit, {}
 
+    # cross-check: decision_time == 5m availability_time (Section 4)
     avail = pd.to_datetime(track.available_time)
-    # Vectorized alignment: avail is monotonic, so searchsorted maps each
-    # decision_time to its 5m bar index on the decision (availability) axis.
+    dt_arr = cand["decision_time"].to_numpy()
     pos = np.searchsorted(avail, dt_arr)
     ok = (pos < len(avail)) & (avail[pos] == dt_arr)
     unmatched = int((~ok).sum())
-    matched = rows.iloc[np.where(ok)[0]].copy()
-    matched["bar_idx"] = pos[ok].astype(int)
-    matched = matched.sort_values(["global_episode", "bar_idx"]).reset_index(drop=True)
+
+    bi = cand["bar_index"].to_numpy().astype(int)
+    ep = cand["candidate_episode_id"].to_numpy().astype(int)
+    trig = cand["candidate_trigger_bits"].to_numpy().astype(np.int64)
+    tbi = cand["trigger_bar_index"].to_numpy().astype(int)
+    tdt = pd.to_datetime(cand["trigger_decision_time"]).to_numpy()
 
     cand_by_time: Dict[pd.Timestamp, Dict[str, Any]] = {}
-    dts = matched["decision_time"].to_numpy()
-    eps = matched["global_episode"].to_numpy()
-    pa = matched["proximity_any"].to_numpy() if "proximity_any" in matched.columns else None
-    pe = (
-        matched["proximity_episode_id"].to_numpy()
-        if "proximity_episode_id" in matched.columns
-        else None
-    )
-    for i in range(len(matched)):
-        cand_by_time[pd.Timestamp(dts[i])] = {
-            "episode": eps[i],
-            "proximity_any": bool(pa[i]) if pa is not None else None,
-            "proximity_episode_id": (pe[i] if pe is not None else None),
+    for i in range(n_cand):
+        cand_by_time[pd.Timestamp(dt_arr[i])] = {
+            "episode": int(ep[i]),
+            "trigger_bits": int(trig[i]),
+            "trigger_bar_index": int(tbi[i]),
+            "trigger_decision_time": tdt[i],
+            "proximity_any": True,
+            "proximity_episode_id": int(ep[i]),
         }
 
-    segments: List[CandidateSegment] = []
     seg_arr = np.asarray(track.segment)
-    for ep_id, g in matched.groupby("global_episode", sort=False):
-        gi = g["bar_idx"].to_numpy().astype(int)
+    segments: List[CandidateSegment] = []
+    for ep_id, g in cand.groupby("candidate_episode_id", sort=False):
+        gi = g["bar_index"].to_numpy().astype(int)
         if len(gi) == 1:
             cuts = np.array([0, 1])
         else:
@@ -261,18 +250,14 @@ def build_candidate_segments(
 
     audit = {
         "symbol": track.symbol,
-        "t2_candidate_rows": int(len(rows)),
-        "matched_5m_bars": int(len(matched)),
+        "t2_candidate_rows": int(rows["candidate_any"].astype(bool).sum()),
+        "matched_5m_bars": int(n_cand),
         "unmatched_candidate_rows": int(unmatched),
         "duplicate_decision_keys": 0,
-        "n_episodes": int(matched["global_episode"].nunique()),
+        "n_episodes": int(cand["candidate_episode_id"].nunique()),
         "n_segments": int(len(segments)),
-        "first_candidate_time": (
-            pd.Timestamp(matched["decision_time"].min()) if len(matched) else None
-        ),
-        "last_candidate_time": (
-            pd.Timestamp(matched["decision_time"].max()) if len(matched) else None
-        ),
+        "first_candidate_time": pd.Timestamp(cand["decision_time"].min()),
+        "last_candidate_time": pd.Timestamp(cand["decision_time"].max()),
     }
     return segments, audit, cand_by_time
 
@@ -311,13 +296,17 @@ def candidate_state_at(
 
     Returns ``is_candidate=False`` when the bar is not a candidate. Does NOT
     recompute anything from the indicator state (Section 10: A and B stay
-    strictly separate).
+    strictly separate). The trigger context (trigger bar index/time + full 4TF
+    trigger bits) is carried verbatim from the gate artifact.
     """
     dt = pd.Timestamp(selected_decision_time)
     if dt not in cand_by_time:
         return {
             "is_candidate": False,
             "episode": None,
+            "trigger_bits": 0,
+            "trigger_bar_index": -1,
+            "trigger_decision_time": None,
             "proximity_any": None,
             "proximity_episode_id": None,
         }
@@ -325,6 +314,9 @@ def candidate_state_at(
     return {
         "is_candidate": True,
         "episode": r["episode"],
+        "trigger_bits": r["trigger_bits"],
+        "trigger_bar_index": r["trigger_bar_index"],
+        "trigger_decision_time": r["trigger_decision_time"],
         "proximity_any": r["proximity_any"],
         "proximity_episode_id": r["proximity_episode_id"],
     }
