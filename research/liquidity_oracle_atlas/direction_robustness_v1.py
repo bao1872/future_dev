@@ -205,26 +205,85 @@ def month_block_bootstrap(block_trade_returns: dict, B: int = BOOTSTRAP_REPLICAT
 # Audits                                                                        #
 # --------------------------------------------------------------------------- #
 def time_block_audit(ds, test_idx, pred_dir, p_long, seed: int = BOOTSTRAP_SEED) -> dict:
-    months = pd.to_datetime(ds.loc[test_idx, "candidate_decision_time"]).dt.strftime("%Y-%m").to_numpy(object)
-    blocks, block_trade_returns = {}, {}
-    for m in sorted(set(months.tolist())):
-        m_mask = months == m
-        idx = test_idx[m_mask]
-        pm = pred_dir[m_mask]
-        pl = None if p_long is None else p_long[m_mask]
+    """TEST time-block audit with ONE month per Oracle opportunity (FIX1).
+
+    Block ownership is the opportunity's own entry month:
+        block_month = month(oracle_entry_fill_time)
+    Every retained Candidate row of a trade is evaluated inside that trade's block,
+    so a trade is NEVER split across blocks. The previous row-based assignment
+    (candidate_decision_time) could place one oracle_trade_id in two months and
+    double-counted trades (678 > 638). A strict disjoint partition is asserted.
+    """
+    tids = ds.loc[test_idx, "oracle_trade_id"].to_numpy(object)
+    entry_ns = pd.to_datetime(ds.loc[test_idx, "oracle_entry_fill_time"]).to_numpy(dtype="datetime64[ns]")
+
+    # opportunity -> entry month (entry time must be unique within a trade)
+    trade_entry = {}
+    for tid, t in zip(tids.tolist(), entry_ns.tolist()):
+        if tid in trade_entry and trade_entry[tid] != t:
+            raise RuntimeError(f"STOP_15SYM_ROBUSTNESS_TRADE_ENTRY_TIME_NOT_UNIQUE:{tid}")
+        trade_entry[tid] = t
+    trade_month = {tid: pd.Timestamp(t).strftime("%Y-%m") for tid, t in trade_entry.items()}
+
+    block_ids, blocks, block_trade_returns = {}, {}, {}
+    for m in sorted(set(trade_month.values())):
+        ids = {tid for tid, mm in trade_month.items() if mm == m}
+        block_ids[m] = sorted(ids)
+        mask = np.array([tid in ids for tid in tids.tolist()], dtype=bool)
+        idx = test_idx[mask]
+        pm = pred_dir[mask]
+        pl = None if p_long is None else p_long[mask]
         blocks[m] = _subset_eval(ds, idx, pm, pl)
         tr, _ = _trade_returns(ds, idx, pm)
         block_trade_returns[m] = tr
 
+    # ---- formal partition assertions (opportunity must live in exactly one block) ----
+    pooled_ids = set(tids.tolist())
+    union_ids = set()
+    for v in block_ids.values():
+        union_ids |= set(v)
+    if union_ids != pooled_ids:
+        raise RuntimeError("STOP_15SYM_ROBUSTNESS_BLOCK_UNION_MISMATCH")
+    keys = list(block_ids)
+    for i in range(len(keys)):
+        for j in range(i + 1, len(keys)):
+            inter = set(block_ids[keys[i]]) & set(block_ids[keys[j]])
+            if inter:
+                raise RuntimeError(
+                    f"STOP_15SYM_ROBUSTNESS_BLOCK_OVERLAP:{keys[i]}:{keys[j]}:{len(inter)}"
+                )
+    sum_block_trades = int(sum(len(v) for v in block_ids.values()))
+    if sum_block_trades != len(pooled_ids):
+        raise RuntimeError("STOP_15SYM_ROBUSTNESS_BLOCK_SUM_MISMATCH")
+
+    # pre-FIX1 (row-based) block counts, kept only to document the defect delta
+    row_month = pd.to_datetime(ds.loc[test_idx, "candidate_decision_time"]).dt.strftime("%Y-%m").to_numpy(object)
+    pre_fix_counts = {m: int(len(set(tids[row_month == m].tolist())))
+                      for m in sorted(set(row_month.tolist()))}
+    pre_fix_sum = int(sum(pre_fix_counts.values()))
+
     all_tr, _ = _trade_returns(ds, test_idx, pred_dir)
     bmean, blo, bhi = month_block_bootstrap(block_trade_returns, seed=seed)
     return {
+        "ownership": "oracle opportunity entry month (oracle_entry_fill_time)",
         "blocks": blocks,
         "overall_return_atr": float(all_tr.mean()),
-        "block_bootstrap": {
+        "partition_check": {
+            "pooled_unique_test_trades": int(len(pooled_ids)),
+            "sum_block_unique_trade_counts": sum_block_trades,
+            "union_equals_pooled": True,
+            "pairwise_disjoint": True,
+            "pre_fix_row_based_sum_block_trade_counts": pre_fix_sum,
+            "pre_fix_row_based_block_counts": pre_fix_counts,
+            "post_fix_opportunity_owned_sum_block_trade_counts": sum_block_trades,
+        },
+        "temporal_block_robustness_diagnostic": {
             "n_blocks": len(block_trade_returns),
-            "cluster": "calendar month (candidate_decision_time)",
+            "cluster": "oracle opportunity entry month (disjoint)",
             "resampled_mean": bmean, "ci_low": blo, "ci_high": bhi,
+            "label": "temporal_block_robustness_diagnostic",
+            "caveat": ("only ~5 disjoint calendar-month blocks; a percentile cluster "
+                       "bootstrap with very few clusters is a diagnostic, not definitive proof"),
         },
     }
 
@@ -290,7 +349,16 @@ def leave_one_symbol_out(split_data: dict, symbols=SYMBOLS, seed: int = BOOTSTRA
 # --------------------------------------------------------------------------- #
 # Orchestration                                                                 #
 # --------------------------------------------------------------------------- #
-def run_direction_robustness(symbols=SYMBOLS, save: bool = True, verbose: bool = True) -> dict:
+def run_direction_robustness(symbols=SYMBOLS, save: bool = True, verbose: bool = True,
+                             reuse_loso_from: str | None = None) -> dict:
+    """Run the robustness audit.
+
+    ``reuse_loso_from``: path to a previous summary JSON whose ``loso`` block is
+    reused verbatim (no 15-fold refit). Used by FIX1, which only reorganizes the
+    time-block statistics (the LOSO logic/data are untouched, so its evidence must
+    stay identical). Symbol robustness (no fit) and the pooled M0 (one deterministic
+    fit) are always recomputed and must reproduce.
+    """
     split_data = build_frozen_split(symbols)
     ds = split_data["ds"]
     test_idx = split_data["test_idx"]
@@ -320,12 +388,20 @@ def run_direction_robustness(symbols=SYMBOLS, save: bool = True, verbose: bool =
         print(f"[ROBUST] pooled M0 TEST return={pooled_eval['return_atr']} "
               f"trades={pooled_eval['n_trades']} (FIX1 reproduced)")
 
-    # ---- B. time blocks ----
+    # ---- B. time blocks (opportunity-owned months) ----
     time_blocks = time_block_audit(ds, test_idx, pooled_dir, pooled_long)
-    # ---- C. symbol robustness ----
+    # ---- C. symbol robustness (no fit; deterministic) ----
     sym_rob = symbol_robustness(ds, test_idx, pooled_dir, pooled_long, symbols)
     # ---- D. leave-one-symbol-out ----
-    loso = leave_one_symbol_out(split_data, symbols, verbose=verbose)
+    if reuse_loso_from is not None:
+        with open(reuse_loso_from) as fh:
+            loso = json.load(fh)["loso"]
+        loso_reused = True
+        if verbose:
+            print(f"[ROBUST] LOSO reused verbatim from {reuse_loso_from} (no refit)")
+    else:
+        loso = leave_one_symbol_out(split_data, symbols, verbose=verbose)
+        loso_reused = False
 
     summary = {
         "task_id": TASK_ID,
@@ -363,6 +439,7 @@ def run_direction_robustness(symbols=SYMBOLS, save: bool = True, verbose: bool =
         "time_blocks": time_blocks,
         "symbol_robustness": sym_rob,
         "loso": loso,
+        "loso_provenance": {"reused_from": reuse_loso_from, "refit_this_run": not loso_reused},
         "params": {"base_params": BASE_PARAMS, "decision_threshold": DECISION_THRESHOLD,
                    "bootstrap_replicates": BOOTSTRAP_REPLICATES, "bootstrap_seed": BOOTSTRAP_SEED},
     }
@@ -385,18 +462,21 @@ def run_direction_robustness(symbols=SYMBOLS, save: bool = True, verbose: bool =
             })
         pd.DataFrame(blk_rows).to_csv(EVIDENCE_BLOCKS, index=False)
 
-        loso_rows = []
-        for s in symbols:
-            f = loso["folds"][s]
-            loso_rows.append({
-                "metric": METRIC_NAME, "held_out_symbol": s,
-                "n_test_rows": f["n_rows"], "n_test_trades": f["n_trades"],
-                "return_atr": f["return_atr"], "ci_low": f["ci_low"], "ci_high": f["ci_high"],
-                "accuracy": f["accuracy"], "auc": f["roc_auc"],
-                "teacher_long_return_atr": f["teacher_long_return_atr"],
-                "teacher_short_return_atr": f["teacher_short_return_atr"],
-            })
-        pd.DataFrame(loso_rows).to_csv(EVIDENCE_LOSO, index=False)
+        # LOSO evidence is written only on a real refit; when reused, the committed
+        # direction_robustness_loso.csv must remain byte-unchanged.
+        if not loso_reused:
+            loso_rows = []
+            for s in symbols:
+                f = loso["folds"][s]
+                loso_rows.append({
+                    "metric": METRIC_NAME, "held_out_symbol": s,
+                    "n_test_rows": f["n_rows"], "n_test_trades": f["n_trades"],
+                    "return_atr": f["return_atr"], "ci_low": f["ci_low"], "ci_high": f["ci_high"],
+                    "accuracy": f["accuracy"], "auc": f["roc_auc"],
+                    "teacher_long_return_atr": f["teacher_long_return_atr"],
+                    "teacher_short_return_atr": f["teacher_short_return_atr"],
+                })
+            pd.DataFrame(loso_rows).to_csv(EVIDENCE_LOSO, index=False)
 
     return {
         "summary": summary,
@@ -408,7 +488,10 @@ def run_direction_robustness(symbols=SYMBOLS, save: bool = True, verbose: bool =
 
 
 if __name__ == "__main__":
-    r = run_direction_robustness()
+    # FIX1: reorganize time-block statistics only; reuse the frozen LOSO block
+    # (no 15-fold refit) when a previous summary already exists.
+    reuse = EVIDENCE_SUMMARY if os.path.exists(EVIDENCE_SUMMARY) else None
+    r = run_direction_robustness(reuse_loso_from=reuse)
     s = r["summary"]
     print(json.dumps({
         "task_id": s["task_id"],
@@ -422,7 +505,9 @@ if __name__ == "__main__":
                             "teacher_long_return_atr": b["teacher_long_return_atr"],
                             "teacher_short_return_atr": b["teacher_short_return_atr"]}
                         for m, b in s["time_blocks"]["blocks"].items()},
-        "time_block_bootstrap": s["time_blocks"]["block_bootstrap"],
+        "time_blocks_partition_check": s["time_blocks"]["partition_check"],
+        "time_block_bootstrap": s["time_blocks"]["temporal_block_robustness_diagnostic"],
+        "loso_provenance": s["loso_provenance"],
         "symbol_robustness": {
             "positive_symbol_count": s["symbol_robustness"]["positive_symbol_count"],
             "negative_symbol_count": s["symbol_robustness"]["negative_symbol_count"],

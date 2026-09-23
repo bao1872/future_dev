@@ -61,16 +61,52 @@ def test_frozen_split_reproduced(run):
 def test_time_blocks_partition_and_bootstrap(run):
     s = run["summary"]
     tb = s["time_blocks"]
+    pc = tb["partition_check"]
+    # opportunity-owned partition is disjoint + complete
+    assert pc["pooled_unique_test_trades"] == 638
+    assert pc["sum_block_unique_trade_counts"] == pc["pooled_unique_test_trades"]
+    assert pc["union_equals_pooled"] is True
+    assert pc["pairwise_disjoint"] is True
+    # the fixed partition removes the previous double counting (678 -> 638)
+    assert pc["pre_fix_row_based_sum_block_trade_counts"] == 678
+    assert pc["post_fix_opportunity_owned_sum_block_trade_counts"] == 638
+
     pooled_rows = s["pooled_m0_test"]["n_rows"]
     assert sum(b["n_rows"] for b in tb["blocks"].values()) == pooled_rows
-    assert tb["block_bootstrap"]["n_blocks"] == len(tb["blocks"])
+    assert sum(b["n_trades"] for b in tb["blocks"].values()) == 638
+
+    diag = tb["temporal_block_robustness_diagnostic"]
+    assert diag["label"] == "temporal_block_robustness_diagnostic"
+    assert diag["n_blocks"] == len(tb["blocks"])
+    assert diag["ci_low"] <= diag["ci_high"]
     for b in tb["blocks"].values():
         for k in ("n_rows", "n_trades", "return_atr", "ci_low", "ci_high",
                   "accuracy", "roc_auc", "teacher_long_return_atr",
                   "teacher_short_return_atr"):
             assert k in b
-    # block-level CI must exist and be a real interval
-    assert tb["block_bootstrap"]["ci_low"] <= tb["block_bootstrap"]["ci_high"]
+
+
+def test_time_block_ownership_is_one_entry_month_per_trade(run):
+    # Independent recomputation: each TEST oracle_trade_id has exactly one entry
+    # month, blocks are disjoint, and the row-based (pre-fix) grouping double counts.
+    sd = run["split_data"]
+    ds, test_idx = sd["ds"], sd["test_idx"]
+    tids = ds.loc[test_idx, "oracle_trade_id"].to_numpy(object)
+    entry_month = pd.to_datetime(ds.loc[test_idx, "oracle_entry_fill_time"]).dt.strftime("%Y-%m")
+    df = pd.DataFrame({"tid": tids, "month": entry_month.to_numpy()})
+    assert (df.groupby("tid")["month"].nunique() == 1).all()
+
+    per_month_ids = {m: set(g["tid"]) for m, g in df.groupby("month")}
+    union = set()
+    for v in per_month_ids.values():
+        assert not (union & v)          # pairwise disjoint
+        union |= v
+    assert union == set(tids.tolist())
+    assert sum(len(v) for v in per_month_ids.values()) == 638
+
+    row_month = pd.to_datetime(ds.loc[test_idx, "candidate_decision_time"]).dt.strftime("%Y-%m")
+    pre = sum(pd.Series(tids).groupby(row_month.to_numpy()).nunique())
+    assert pre == 678                   # pre-FIX1 row-based double count
 
 
 def test_symbol_robustness_partitions_trades(run):
@@ -95,19 +131,26 @@ def test_loso_covers_all_symbols_and_partitions_trades(run):
             assert k in f
 
 
-def test_loso_never_trains_on_held_out_symbol(monkeypatch):
+def test_loso_excludes_held_out_symbol_from_train_and_val(monkeypatch):
     sd = M.build_frozen_split()
     seen = {}
     orig = M._fit_m0
 
     def spy(ds, tr, va):
-        seen[len(seen)] = set(ds.loc[tr, "symbol"].unique().tolist())
+        seen[len(seen)] = (set(ds.loc[tr, "symbol"].unique().tolist()),
+                           set(ds.loc[va, "symbol"].unique().tolist()))
         return orig(ds, tr, va)
 
     monkeypatch.setattr(M, "_fit_m0", spy)
     M.leave_one_symbol_out(sd, symbols=["AG", "CU"], verbose=False)
-    assert "AG" not in seen[0]
-    assert "CU" not in seen[1]
+
+    tr0, va0 = seen[0]   # held out AG
+    tr1, va1 = seen[1]   # held out CU
+    assert "AG" not in tr0 and "AG" not in va0
+    assert "CU" not in tr1 and "CU" not in va1
+    # the OTHER symbol is present in both TRAIN and VALIDATION (real 14-symbol fit)
+    assert "CU" in tr0 and "CU" in va0
+    assert "AG" in tr1 and "AG" in va1
 
 
 def test_evidence_files_and_metric_column(run):
