@@ -3,7 +3,7 @@
 Proves the frozen DTP9 direction result cannot be explained by label/opportunity/
 payoff imbalance or a trivial LONG-biased predictor:
 
-  - frozen split + M0 reproduction guard (no retrain / no upstream rerun)
+  - frozen split + M0 deterministic-reproduction guard (frozen params, no tuning)
   - TEST is 50/50 at the Oracle-opportunity level (319 LONG / 319 SHORT)
   - always_long / fair_coin / train_prior_coin economic returns are ~0
   - M0 clearly beats every null (always_long, always_short, fair_coin, prior_coin)
@@ -104,7 +104,11 @@ def test_m0_beats_every_null(run):
 def test_class_balanced_is_noop(run):
     f = run["summary"]["F_class_balanced_counterfactual"]
     assert f["n_long_opps"] == 319 and f["n_short_opps"] == 319
-    assert abs(f["m0_unweighted_return"] - f["m0_class_balanced_return"]) < 1e-12
+    assert abs(f["M0"]["unweighted_return"] - f["M0"]["class_balanced_return"]) < 1e-12
+    assert abs(f["M0"]["unweighted_accuracy"] - f["M0"]["class_balanced_accuracy"]) < 1e-12
+    assert abs(f["ALWAYS_LONG"]["class_balanced_return"] - 0.017734) < 2e-3
+    assert abs(f["ALWAYS_SHORT"]["class_balanced_return"] + 0.017734) < 2e-3
+    assert all(f["no_op_assertion"].values())
 
 
 def test_bootstrap_chunked_equals_reference():
@@ -114,6 +118,25 @@ def test_bootstrap_chunked_equals_reference():
     for chunk in (1, 7, 250, 3000):
         chk = bootstrap_trade_returns_chunked(tr, B=3000, chunk=chunk)
         assert np.allclose(ref, chk), f"chunk={chunk} mismatch vs reference"
+
+
+def test_confusion_matrix_precision_recall_synthetic():
+    # Synthetic Oracle-opportunity confusion matrix (LONG = positive class):
+    #   actual  y = [L, L, L, S, S, S]
+    #   pred    d = [L, L, S, L, L, S]
+    #   => TP=2, FN=1, FP=2, TN=1
+    y = np.array([1, 1, 1, 0, 0, 0])
+    d = np.array([1, 1, 0, 1, 1, 0])
+    c = M._confusion(d, y)
+    assert c["n_long_opps"] == 3 and c["n_short_opps"] == 3
+    assert abs(c["long_recall"] - 2 / 3) < 1e-12
+    assert abs(c["short_recall"] - 1 / 3) < 1e-12
+    assert abs(c["balanced_accuracy"] - 0.5) < 1e-12
+    assert abs(c["precision_long"] - 0.5) < 1e-12
+    # SHORT as positive class: precision_short = TN / (TN + FN) = 1 / (1 + 1) = 0.5
+    assert abs(c["precision_short"] - 0.5) < 1e-12
+    # guard against the old buggy formula TN / (TN + FP) = 1/3
+    assert abs(c["precision_short"] - 1 / 3) > 1e-9
 
 
 def test_evidence_files_and_metric_column(run):
@@ -128,3 +151,5 @@ def test_evidence_files_and_metric_column(run):
                 "always_short_return_atr", "fair_coin_mean_return",
                 "train_prior_coin_mean_return"):
         assert col in df.columns
+    # precision_short column must now be the corrected field (not short_recall)
+    assert "m0_precision_short" in df.columns

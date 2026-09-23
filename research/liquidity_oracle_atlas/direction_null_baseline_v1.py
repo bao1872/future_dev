@@ -5,9 +5,10 @@ FUTURE-R4-M15-DIRECTION-NULL-BASELINE-AUDIT-V1
 
 Goal: decide whether the frozen DTP9 direction result (+0.601 ATR/trade on TEST)
 can be explained by LONG/SHORT label imbalance, opportunity imbalance, economic
-payoff imbalance, or a trivial LONG-biased predictor. NO model is retrained or
-tuned; the frozen DTP9 (DIR-M0) predictions are reproduced deterministically from
-the frozen datasets and the frozen LightGBM params.
+payoff imbalance, or a trivial LONG-biased predictor. The frozen DTP9 (DIR-M0) is
+re-fit DETERMINISTICALLY from the frozen datasets and the frozen LightGBM params
+(no model redesign, no hyperparameter tuning, no threshold tuning); its TEST
+predictions are reproduced byte-for-byte against the frozen evidence.
 
 The frozen split is reproduced by REUSING the confirmation trainer's exact helpers
 (build_frozen_split-equivalent), so this audit runs on the SAME TEST rows/trades
@@ -76,6 +77,9 @@ from research.liquidity_oracle_atlas.train_direction_model_15sym_v1 import (
 TASK_ID = "FUTURE-R4-M15-DIRECTION-NULL-BASELINE-AUDIT-V1"
 # The BASE SHA given by the reviewer (parent commit for this audit task).
 TASK_BASE_SHA = "ab55121ed9171b80d2f1668c3e48aaa6f5d230bc"
+# The commit this FIX1 is based on (the initial audit commit that was remote-reviewed).
+FIX1_BASE_SHA = "f8ace222a63dfc5d5633101e9e4b994491e3e041"
+FIX_VERSION = "FIX1"
 # The frozen DTP9 confirmation model this audit reproduces.
 FROZEN_MODEL_SHA = "686cb06fa5199f2712b1d8f8cfddd77f6c1c0a79"
 
@@ -212,7 +216,9 @@ def _confusion(d, y_opp):
     bal_acc = (None if None in (long_rec, short_rec)
                else 0.5 * (long_rec + short_rec))
     prec_l = tp / (tp + fp) if (tp + fp) else None
-    prec_s = tn / (tn + fp) if (tn + fp) else None
+    # SHORT as the positive class: TP_short = TN, FP_short = FN
+    #   Precision_SHORT = TP_short / (TP_short + FP_short) = TN / (TN + FN)
+    prec_s = tn / (tn + fn) if (tn + fn) else None
     return {
         "n_long_opps": int((y_opp == 1).sum()),
         "n_short_opps": int((y_opp == 0).sum()),
@@ -459,20 +465,73 @@ def run_null_baseline_audit(symbols=SYMBOLS, save: bool = True, verbose: bool = 
         m = sym_test == s
         per_symbol[s] = _audit_subset(ds, test_idx[m], m0_dir[m], m0_plong[m], p_train_prior)
 
+    # ---- core-result preservation guards (FIX1) ----
+    _al_ret = pooled["null_predictors"]["always_long"]["mean_return"]
+    _fc_ret = pooled["null_predictors"]["fair_coin"]["mean_return"]
+    _m0_al = pooled["m0_minus_null"]["always_long"]
+    _m0_fc = pooled["m0_minus_null"]["fair_coin"]
+    assert abs(float(m0_tr.mean()) - 0.6014965284150177) < 1e-6
+    assert abs(_al_ret - 0.017734) < 2e-3, f"Always Long drift: {_al_ret}"
+    assert abs(_fc_ret) < 0.05, f"Fair Coin MC not ~0: {_fc_ret}"
+    assert _m0_al["ci_low"] > 0, f"M0-AlwaysLong CI not >0: {_m0_al}"
+    assert _m0_fc["ci_low"] > 0, f"M0-FairCoin CI not >0: {_m0_fc}"
+
     # ---- F. class-balanced counterfactual (TEST) ----
     st_test = _opp_structures(ds, test_idx)
     n_long = int((st_test["y_opp"] == 1).sum())
     n_short = int((st_test["y_opp"] == 0).sum())
     m0_tr_test = _m0_tr_canonical(ds, test_idx, m0_dir)
-    # reweight so each side totals 0.5
+    d_m0_test = _m0_opp_pred(ds, test_idx, m0_dir)
+    # canonical per-trade returns for the constant predictors (== opportunity-level form,
+    # because the predictor is constant within every opportunity)
+    al_tr = _m0_tr_canonical(ds, test_idx, np.full(test_idx.size, 1, dtype=np.uint8))
+    as_tr = _m0_tr_canonical(ds, test_idx, np.full(test_idx.size, 0, dtype=np.uint8))
+    # opportunity-level reweight so each side totals 0.5 (matches contract)
     rew = np.where(st_test["y_opp"] == 1, 0.5 / max(1, n_long), 0.5 / max(1, n_short))
-    m0_rew = float(np.average(m0_tr_test, weights=rew))
+    assert abs(float(rew.sum()) - 1.0) < 1e-12
+
+    def _cb(per_trade_ret):
+        return float(np.sum(rew * per_trade_ret))   # sum(rew) == 1.0
+
+    m0_cb_ret = _cb(m0_tr_test)
+    al_cb_ret = _cb(al_tr)
+    as_cb_ret = _cb(as_tr)
+    m0_cb_acc = float(np.sum(rew * (d_m0_test == st_test["y_opp"]).astype(float)))
+    al_cb_acc = float(np.sum(rew * (np.ones(st_test["n"], dtype=np.uint8) == st_test["y_opp"]).astype(float)))
+    as_cb_acc = float(np.sum(rew * (np.zeros(st_test["n"], dtype=np.uint8) == st_test["y_opp"]).astype(float)))
+
+    # Because TEST is 319/319, opportunity-level class reweighting must be a no-op:
+    # assert the class-balanced values equal the ordinary opportunity-level values.
+    if (abs(m0_cb_ret - float(m0_tr_test.mean())) > 1e-9
+            or abs(al_cb_ret - float(al_tr.mean())) > 1e-9
+            or abs(as_cb_ret - float(as_tr.mean())) > 1e-9):
+        raise RuntimeError(
+            "STOP_NULL_AUDIT_CLASS_BALANCE_NOT_NOOP:"
+            f"{m0_cb_ret}/{float(al_tr.mean())}/{float(as_tr.mean())}")
+
     class_balanced = {
-        "m0_unweighted_return": float(m0_tr_test.mean()),
-        "m0_class_balanced_return": m0_rew,
         "n_long_opps": n_long, "n_short_opps": n_short,
+        "M0": {
+            "class_balanced_accuracy": m0_cb_acc,
+            "class_balanced_return": m0_cb_ret,
+            "unweighted_return": float(m0_tr_test.mean()),
+            "unweighted_accuracy": float((d_m0_test == st_test["y_opp"]).mean()),
+        },
+        "ALWAYS_LONG": {
+            "class_balanced_accuracy": al_cb_acc,
+            "class_balanced_return": al_cb_ret,
+        },
+        "ALWAYS_SHORT": {
+            "class_balanced_accuracy": as_cb_acc,
+            "class_balanced_return": as_cb_ret,
+        },
+        "no_op_assertion": {
+            "m0_return_match": abs(m0_cb_ret - float(m0_tr_test.mean())) < 1e-9,
+            "always_long_match": abs(al_cb_ret - float(al_tr.mean())) < 1e-9,
+            "always_short_match": abs(as_cb_ret - float(as_tr.mean())) < 1e-9,
+        },
         "note": ("TEST already 50/50 at the opportunity level (319 LONG / 319 SHORT), "
-                 "so reweighting is a no-op; reported to confirm, not to change."),
+                 "so opportunity-level class reweighting is a no-op; reported to confirm, not to change."),
     }
 
     # ---- G. hard fact check (recompute from frozen dataset) ----
@@ -502,7 +561,12 @@ def run_null_baseline_audit(symbols=SYMBOLS, save: bool = True, verbose: bool = 
             "frozen_model_sha": FROZEN_MODEL_SHA,
             "task_base_sha": TASK_BASE_SHA,
         },
-        "no_retrain": True,
+        "model_redesign": False,
+        "hyperparameter_tuning": False,
+        "threshold_tuning": False,
+        "deterministic_model_refit_for_reproduction": True,
+        "fix_version": FIX_VERSION,
+        "fix1_base_sha": FIX1_BASE_SHA,
         "frozen_split_reproduction": {
             "fix1_source_sha": FIX1_REFERENCE["source_sha"],
             "test_rows": FIX1_REFERENCE["test_rows"], "test_trades": FIX1_REFERENCE["test_trades"],
@@ -531,6 +595,13 @@ def run_null_baseline_audit(symbols=SYMBOLS, save: bool = True, verbose: bool = 
         "E_model_vs_null": {
             "POOLED": pooled["m0_minus_null"],
             "POOLED_EX_AG": pooled_ex_ag["m0_minus_null"],
+        },
+        "fair_coin_analytical_null": {
+            "expected_return": 0.0,
+            "explanation": (
+                "For each opportunity a fair coin is correct with P=0.5 and wrong with "
+                "P=0.5, so E[+entry_quality_atr | correct] + E[-entry_quality_atr | wrong] = 0 "
+                "regardless of the LONG/SHORT class balance."),
         },
         "F_class_balanced_counterfactual": class_balanced,
         "G_hard_fact_check": hard_fact,

@@ -2,7 +2,7 @@
   "task_id": "FUTURE-R4-M15-DIRECTION-NULL-BASELINE-AUDIT-V1",
   "base_sha": "686cb06fa5199f2712b1d8f8cfddd77f6c1c0a79",
   "task_base_sha": "ab55121ed9171b80d2f1668c3e48aaa6f5d230bc",
-  "generated_at": "2026-09-23T12:25:05.342605+00:00",
+  "generated_at": "2026-09-23T12:40:22.790057+00:00",
   "metric": {
     "name": "TeacherFixedExitDirectionReturnATR",
     "definition": "(+entry_quality_atr if predicted direction == Teacher direction else -entry_quality_atr), aggregated per Oracle opportunity (trade), bootstrapped at the trade level",
@@ -15,12 +15,17 @@
   },
   "provenance": {
     "confirmation_base_sha": "48605666cd9e3cb0c2d49848df47bb7050a0dabc",
-    "fix1_base_sha": "ea49c84161c5a859d893ae3b6dc9dcc75de1c0f9",
+    "fix1_base_sha": "f8ace222a63dfc5d5633101e9e4b994491e3e041",
     "confirmation_source_sha": "4e1629f7f2a493bc1b101cadd5bca018778897b9",
     "frozen_model_sha": "686cb06fa5199f2712b1d8f8cfddd77f6c1c0a79",
     "task_base_sha": "ab55121ed9171b80d2f1668c3e48aaa6f5d230bc"
   },
-  "no_retrain": true,
+  "model_redesign": false,
+  "hyperparameter_tuning": false,
+  "threshold_tuning": false,
+  "deterministic_model_refit_for_reproduction": true,
+  "fix_version": "FIX1",
+  "fix1_base_sha": "f8ace222a63dfc5d5633101e9e4b994491e3e041",
   "frozen_split_reproduction": {
     "fix1_source_sha": "686cb06fa5199f2712b1d8f8cfddd77f6c1c0a79",
     "test_rows": 13773,
@@ -1337,7 +1342,7 @@
       "short_recall": 0.4827586206896552,
       "balanced_accuracy": 0.6191222570532915,
       "precision_long": 0.5935960591133005,
-      "precision_short": 0.4827586206896552
+      "precision_short": 0.6637931034482759
     },
     "POOLED_EX_AG": {
       "n_long_opps": 285,
@@ -1349,7 +1354,7 @@
       "short_recall": 0.4838709677419355,
       "balanced_accuracy": 0.624391624221845,
       "precision_long": 0.6022099447513812,
-      "precision_short": 0.4838709677419355
+      "precision_short": 0.6683168316831684
     },
     "per_symbol": {
       "AG": {
@@ -1362,7 +1367,7 @@
         "short_recall": 0.475,
         "balanced_accuracy": 0.575735294117647,
         "precision_long": 0.5227272727272727,
-        "precision_short": 0.475
+        "precision_short": 0.6333333333333333
       },
       "AU": {
         "n_long_opps": 35,
@@ -1374,7 +1379,7 @@
         "short_recall": 0.34210526315789475,
         "balanced_accuracy": 0.4853383458646616,
         "precision_long": 0.46808510638297873,
-        "precision_short": 0.34210526315789475
+        "precision_short": 0.5
       },
       "CU": {
         "n_long_opps": 21,
@@ -1386,7 +1391,7 @@
         "short_recall": 0.5294117647058824,
         "balanced_accuracy": 0.7170868347338936,
         "precision_long": 0.7037037037037037,
-        "precision_short": 0.5294117647058824
+        "precision_short": 0.8181818181818182
       },
       "AL": {
         "n_long_opps": 17,
@@ -1398,7 +1403,7 @@
         "short_recall": 0.47058823529411764,
         "balanced_accuracy": 0.6470588235294117,
         "precision_long": 0.6086956521739131,
-        "precision_short": 0.47058823529411764
+        "precision_short": 0.7272727272727273
       },
       "SN": {
         "n_long_opps": 20,
@@ -1410,7 +1415,7 @@
         "short_recall": 0.4166666666666667,
         "balanced_accuracy": 0.5583333333333333,
         "precision_long": 0.5,
-        "precision_short": 0.4166666666666667
+        "precision_short": 0.625
       },
       "NI": {
         "n_long_opps": 15,
@@ -1422,7 +1427,7 @@
         "short_recall": 0.65,
         "balanced_accuracy": 0.6583333333333333,
         "precision_long": 0.5882352941176471,
-        "precision_short": 0.65
+        "precision_short": 0.7222222222222222
       },
       "RB": {
         "n_long_opps": 13,
@@ -1434,7 +1439,7 @@
         "short_recall": 0.5,
         "balanced_accuracy": 0.6730769230769231,
         "precision_long": 0.6111111111111112,
-        "precision_short": 0.5
+        "precision_short": 0.7777777777777778
       },
       "I": {
         "n_long_opps": 14,
@@ -1446,7 +1451,7 @@
         "short_recall": 0.5,
         "balanced_accuracy": 0.5714285714285714,
         "precision_long": 0.5294117647058824,
-        "precision_short": 0.5
+        "precision_short": 0.6153846153846154
       },
       "SC": {
         "n_long_opps": 42,
@@ -1458,7 +1463,7 @@
         "short_recall": 0.5882352941176471,
         "balanced_accuracy": 0.6393557422969187,
         "precision_long": 0.6744186046511628,
-        "precision_short": 0.5882352941176471
+        "precision_short": 0.6060606060606061
       },
       "RU": {
         "n_long_opps": 27,
@@ -1470,7 +1475,7 @@
         "short_recall": 0.3,
         "balanced_accuracy": 0.5388888888888889,
         "precision_long": 0.6,
-        "precision_short": 0.3
+        "precision_short": 0.5
       },
       "MA": {
         "n_long_opps": 11,
@@ -1482,7 +1487,7 @@
         "short_recall": 0.6842105263157895,
         "balanced_accuracy": 0.8421052631578947,
         "precision_long": 0.6470588235294118,
-        "precision_short": 0.6842105263157895
+        "precision_short": 1.0
       },
       "TA": {
         "n_long_opps": 16,
@@ -1494,7 +1499,7 @@
         "short_recall": 0.6,
         "balanced_accuracy": 0.7375,
         "precision_long": 0.7,
-        "precision_short": 0.6
+        "precision_short": 0.8181818181818182
       },
       "M": {
         "n_long_opps": 18,
@@ -1518,7 +1523,7 @@
         "short_recall": 0.4166666666666667,
         "balanced_accuracy": 0.6416666666666667,
         "precision_long": 0.65,
-        "precision_short": 0.4166666666666667
+        "precision_short": 0.7142857142857143
       },
       "CF": {
         "n_long_opps": 21,
@@ -1530,7 +1535,7 @@
         "short_recall": 0.3,
         "balanced_accuracy": 0.5785714285714285,
         "precision_long": 0.5625,
-        "precision_short": 0.3
+        "precision_short": 0.6666666666666666
       }
     }
   },
@@ -2253,12 +2258,33 @@
       }
     }
   },
+  "fair_coin_analytical_null": {
+    "expected_return": 0.0,
+    "explanation": "For each opportunity a fair coin is correct with P=0.5 and wrong with P=0.5, so E[+entry_quality_atr | correct] + E[-entry_quality_atr | wrong] = 0 regardless of the LONG/SHORT class balance."
+  },
   "F_class_balanced_counterfactual": {
-    "m0_unweighted_return": 0.6014965284150177,
-    "m0_class_balanced_return": 0.6014965284150178,
     "n_long_opps": 319,
     "n_short_opps": 319,
-    "note": "TEST already 50/50 at the opportunity level (319 LONG / 319 SHORT), so reweighting is a no-op; reported to confirm, not to change."
+    "M0": {
+      "class_balanced_accuracy": 0.6191222570532914,
+      "class_balanced_return": 0.6014965284150178,
+      "unweighted_return": 0.6014965284150177,
+      "unweighted_accuracy": 0.6191222570532915
+    },
+    "ALWAYS_LONG": {
+      "class_balanced_accuracy": 0.49999999999999994,
+      "class_balanced_return": 0.01773415731776308
+    },
+    "ALWAYS_SHORT": {
+      "class_balanced_accuracy": 0.49999999999999994,
+      "class_balanced_return": -0.01773415731776308
+    },
+    "no_op_assertion": {
+      "m0_return_match": true,
+      "always_long_match": true,
+      "always_short_match": true
+    },
+    "note": "TEST already 50/50 at the opportunity level (319 LONG / 319 SHORT), so opportunity-level class reweighting is a no-op; reported to confirm, not to change."
   },
   "G_hard_fact_check": {
     "unique_teacher_opportunities": 638,
