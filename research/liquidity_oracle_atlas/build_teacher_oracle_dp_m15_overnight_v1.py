@@ -621,9 +621,15 @@ def load_oracle_artifact(
 def check_oracle_invariants(result: Dict[str, Any]) -> Dict[str, Any]:
     """Return counts of invariant violations (all should be 0).
 
-    Overnight variant: cross_day is EXPECTED (overnight holding), so it is not a
-    violation here; cross_segment remains a hard invariant (a trade must never
-    span a hard segment boundary).
+    Overnight variant: cross_day is EXPECTED (overnight holding), so it is only
+    reported as an informational count, not a violation. cross_segment remains a
+    hard invariant (a trade must never span a hard segment boundary).
+
+    ``nonflat_terminal`` and ``pnl_mismatch_flag`` are REAL mechanical checks:
+      * nonflat_terminal: every unit's forced-flat decision (at e-1) must have
+        position_after == Flat; otherwise the Teacher leaked a non-flat terminal.
+      * pnl_mismatch_flag: the DP total value (sum of per-unit optimal values)
+        must equal the sum of realized trade gross points, within 1e-6.
     """
     dec = result["decision"]
     prox = result["proximity_any"]
@@ -671,13 +677,23 @@ def check_oracle_invariants(result: Dict[str, Any]) -> Dict[str, Any]:
             if seg[ei] != seg[xi]:
                 out["cross_segment"] += 1
 
+    # non-flat unit terminals: the forced-flat decision is at e-1 of each unit.
     for u in result["units"]:
         e = int(u["seg_end"])
         if e - int(u["seg_start"]) < 2:
             continue
-        # terminal flat guard: the forced-flat decision is at e-1; the path is
-        # asserted flat by _dp_from_proximity above, so a non-flat terminal here
-        # would be a reconstruction bug.
+        if int(dec["position_after"][e - 1]) != 0:
+            out["nonflat_terminal"] += 1
+
+    # PnL reconstruction: DP total value (sum of per-unit optimal values) must
+    # equal the sum of realized trade gross points.
+    uv = result.get("unit_values")
+    total_val = float(np.sum(np.asarray(uv, dtype=float))) if uv else 0.0
+    total_gross = float(sum(float(t["gross_points"]) for t in trades))
+    out["pnl_abs_diff"] = abs(total_val - total_gross)
+    if out["pnl_abs_diff"] > 1e-6:
+        out["pnl_mismatch_flag"] = 1
+
     return out
 
 
