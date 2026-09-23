@@ -1,0 +1,10 @@
+{
+  "sha": "c4261fcefaf5efa9568f2d74709b20b2b0e93b38",
+  "pytest_collected": 18,
+  "pytest_passed": 18,
+  "lint_errors": 0,
+  "lint_tool": "none-configured in repo; IDE LSP reported 0 diagnostics on changed files",
+  "import_smoke": true,
+  "verifier": "clean-checkout detached worktree (c4261fc) + local market data symlinked",
+  "note": "GitHub CI run not present on this branch; this JSON is the local machine-generated proof of the clean-checkout gate. Re-run via git worktree at the recorded sha to reproduce."
+}
