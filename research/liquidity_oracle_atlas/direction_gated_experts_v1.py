@@ -252,55 +252,90 @@ def fit_fixed_router(X, y, w, n_estimators):
     return model
 
 
-def build_prequential_router_oof(X, y, w, decision_time_ns, train_idx, n_estimators,
-                                 return_audit=False):
+def _straddling_train_gids(gid_train, qord_train):
+    """Oracle opportunities whose Candidate rows cross an internal OOF quarter boundary."""
+    dfq = pd.DataFrame({"gid": gid_train, "q": qord_train})
+    nq = dfq.groupby("gid", sort=False)["q"].nunique()
+    return nq[nq > 1].index.to_numpy()
+
+
+def build_prequential_router_oof(ds, data, train_idx, n_estimators, return_audit=False):
     """Calendar-quarter expanding/prequential OOF router predictions inside TRAIN.
 
-    The first TRAIN quarter is warm-up only and receives NO fake prediction, so expert
-    training gates are never in-sample. Every block satisfies
-    max(router-fit decision time) < min(prediction-block decision time).
+    Every prediction block satisfies, in addition to the first-quarter warm-up rule:
+      * canonical router representation -- features come from the frozen prepare_xy path
+        (identical columns/order/dtypes to router A). They are NEVER recast to float32,
+        because that representation was empirically shown to shift LightGBM probabilities.
+      * time purity     -- max(router-fit decision time) < min(prediction-block time).
+      * opportunity purity -- router-fit gids and predicted gids are disjoint. An Oracle
+        opportunity whose Candidate rows cross an internal OOF quarter boundary is dropped
+        ENTIRELY from the Expert OOF population (no partial reassignment).
     """
-    X = np.asarray(X)
-    y = np.asarray(y)
-    w = np.asarray(w, dtype=np.float64)
-    t = pd.to_datetime(decision_time_ns).astype("datetime64[ns]")
+    gid = data.gid
+    dec = data.decision_time_ns
+    t = pd.to_datetime(dec).astype("datetime64[ns]")
     pidx = pd.PeriodIndex(t, freq="Q")
     # monotonic integer quarter ordinal avoids any string-compare ordering risk
     qord = (pidx.year * 4 + (pidx.quarter - 1)).to_numpy()
     qname = pidx.astype(str).to_numpy()
 
     train_idx = np.asarray(train_idx)
-    tq = np.unique(qord[train_idx])
+    trq = qord[train_idx]
+    tq = np.unique(trq)
 
-    p_long = np.full(len(X), np.nan, dtype=np.float64)
-    pred = np.full(len(X), -1, dtype=np.int8)
+    p_long = np.full(len(gid), np.nan, dtype=np.float64)
+    pred = np.full(len(gid), -1, dtype=np.int8)
     audit = []
+    rows_before = 0
+    rows_after = 0
+
+    straddling = _straddling_train_gids(gid[train_idx], trq)
+    straddle_mask = (np.isin(gid, straddling) if straddling.size
+                     else np.zeros(len(gid), dtype=bool))
 
     # first quarter = warm-up
     for q in tq[1:]:
-        pred_idx = train_idx[qord[train_idx] == q]
-        fit_idx = train_idx[qord[train_idx] < q]
+        block_all = train_idx[trq == q]
+        fit_idx = train_idx[trq < q]
+        pred_idx = block_all[~straddle_mask[block_all]]
+        rows_before += int(block_all.size)
+        rows_after += int(pred_idx.size)
+        if pred_idx.size == 0:
+            continue
         assert fit_idx.size > 0, "empty router fit block"
-        assert len(np.unique(y[fit_idx])) == 2, "router fit block must be two-class"
-        # hard temporal invariant
-        assert np.max(decision_time_ns[fit_idx]) < np.min(decision_time_ns[pred_idx]), (
-            "OOF_TEMPORAL_VIOLATION")
-        m = fit_fixed_router(X[fit_idx], y[fit_idx], w[fit_idx], n_estimators)
-        p = m.predict_proba(X[pred_idx])[:, 1]
+        assert np.max(dec[fit_idx]) < np.min(dec[pred_idx]), "OOF_TEMPORAL_VIOLATION"
+        overlap = np.intersect1d(gid[fit_idx], gid[pred_idx])
+        assert overlap.size == 0, f"OOF_OPPORTUNITY_LEAK:{overlap[:3]}"
+
+        Xtr, ytr, wtr = prepare_xy(ds, fit_idx, DTP9)
+        assert len(np.unique(ytr)) == 2, "router fit block must be two-class"
+        Xpr, _, _ = prepare_xy(ds, pred_idx, DTP9)
+        m = fit_fixed_router(Xtr, ytr, wtr, n_estimators)
+        p = m.predict_proba(Xpr)[:, 1]
         p_long[pred_idx] = p
         pred[pred_idx] = (p >= 0.5).astype(np.int8)
         audit.append({
             "quarter": str(qname[pred_idx][0]),
             "n_fit_rows": int(fit_idx.size),
             "n_pred_rows": int(pred_idx.size),
-            "fit_max_time": str(pd.to_datetime(np.max(decision_time_ns[fit_idx]))),
-            "pred_min_time": str(pd.to_datetime(np.min(decision_time_ns[pred_idx]))),
+            "n_pred_rows_dropped_straddling": int(block_all.size - pred_idx.size),
+            "fit_max_time": str(pd.to_datetime(np.max(dec[fit_idx]))),
+            "pred_min_time": str(pd.to_datetime(np.min(dec[pred_idx]))),
             "fit_has_both_classes": True,
+            "gid_overlap_size": int(overlap.size),
             "router_long_share": float(np.mean((p >= 0.5))),
         })
 
     available = pred >= 0
-    out = {"p_long": p_long, "pred": pred, "available": available}
+    out = {
+        "p_long": p_long, "pred": pred, "available": available,
+        "purity": {
+            "n_oof_boundary_straddling_trades": int(straddling.size),
+            "n_oof_boundary_straddling_rows": int(straddle_mask[train_idx].sum()),
+            "oof_rows_before_boundary_drop": rows_before,
+            "oof_rows_after_boundary_drop": rows_after,
+        },
+    }
     if return_audit:
         out["audit"] = pd.DataFrame(audit)
     return out
@@ -493,17 +528,29 @@ def evaluate_system(data: DirectionExpertData, idx, final_pred, router_pred,
     return out
 
 
-def _paired(pairs, n_trades):
-    return dict(zip(("mean", "ci_low", "ci_high"), bootstrap_trade_returns_chunked(pairs)))
+def contrast_delta(name, mapping):
+    """Canonical contrast arithmetic: '<LHS>_minus_<RHS>' == LHS - RHS.
+
+    Single source of truth for EVERY contrast path (pooled, Teacher LONG, Teacher SHORT,
+    per-symbol, LOSO, cluster bootstrap, evidence CSVs). No path may hand-code a
+    subtraction direction.
+    """
+    lhs, rhs = name.split("_minus_")
+    return (np.asarray(mapping[lhs], dtype=np.float64)
+            - np.asarray(mapping[rhs], dtype=np.float64))
 
 
-def _paired_side(tr_map, key_a, key_b, teacher_mask=None):
-    """Paired contrast restricted to a Teacher-side trade subset."""
-    ta = np.asarray(tr_map[key_a], dtype=np.float64)
-    tb = np.asarray(tr_map[key_b], dtype=np.float64)
+def _paired(vec):
+    return dict(zip(("mean", "ci_low", "ci_high"),
+                    bootstrap_trade_returns_chunked(vec)))
+
+
+def _paired_side(name, tr_map, teacher_mask=None):
+    """Paired contrast '<LHS>_minus_<RHS>' restricted to a Teacher-side trade subset."""
+    d = contrast_delta(name, tr_map)
     if teacher_mask is not None:
-        ta, tb = ta[teacher_mask], tb[teacher_mask]
-    return dict(zip(("mean", "ci_low", "ci_high"), bootstrap_trade_returns_chunked(tb - ta)))
+        d = d[teacher_mask]
+    return _paired(d)
 
 
 def _clean(o):
@@ -565,8 +612,8 @@ def run_chain(data: DirectionExpertData, ds: pd.DataFrame,
         raise RuntimeError(f"STOP_FIXED_ROUTER_A_MISMATCH: max_dev={max_dev}")
 
     # ---- prequential OOF gates inside TRAIN (expert gates are never in-sample) ----
-    oof = build_prequential_router_oof(
-        data.X9, data.y, data.w, data.decision_time_ns, train_idx, n_estimators)
+    oof = build_prequential_router_oof(ds, data, train_idx, n_estimators,
+                                       return_audit=True)
     # oof arrays are FULL-length; restrict to this fold's TRAIN rows first
     avail_tr = oof["available"][train_idx]
     tr_gate = train_idx[avail_tr]
@@ -616,7 +663,7 @@ def run_chain(data: DirectionExpertData, ds: pd.DataFrame,
         "models": {"router": router, "m9": m9, "m33": m33,
                    "e9": e9, "e33": e33},
         "oof": {"available": oof["available"], "pred": oof["pred"], "p_long": oof["p_long"],
-                "tr_gate": tr_gate},
+                "tr_gate": tr_gate, "audit": oof["audit"], "purity": oof["purity"]},
     }
 
 
@@ -679,10 +726,9 @@ def run_gated_experts(save: bool = True, verbose: bool = True):
     log(f"  router best_iteration = {n_est}")
 
     # ---- frozen A reproduction gate ----
+    oof_df = chain["oof"]["audit"]
     oof_audit = _oof_audit(data, train_idx, chain["oof"])
-    oof_df = build_prequential_router_oof(
-        data.X9, data.y, data.w, data.decision_time_ns, train_idx, n_est,
-        return_audit=True)["audit"]
+    oof_audit.update(chain["oof"]["purity"])
 
     preds = {"A": chain["A"], "M9": chain["M9"], "E9": chain["E9"],
              "M33": chain["M33"], "E33": chain["E33"]}
@@ -723,23 +769,16 @@ def run_gated_experts(save: bool = True, verbose: bool = True):
         np.searchsorted(uniq, data.gid[test_idx]),
         weights=(data.y[test_idx] == 1).astype(np.float64), minlength=len(uniq)) > 0)
 
-    contrasts = {
-        "E9_minus_A": _paired(tr_map["E9"] - tr_map["A"], n_trades),
-        "E9_minus_M9": _paired(tr_map["E9"] - tr_map["M9"], n_trades),
-        "E33_minus_E9": _paired(tr_map["E33"] - tr_map["E9"], n_trades),
-        "E33_minus_M33": _paired(tr_map["E33"] - tr_map["M33"], n_trades),
-        "M9_minus_A": _paired(tr_map["M9"] - tr_map["A"], n_trades),
-        "M33_minus_M9": _paired(tr_map["M33"] - tr_map["M9"], n_trades),
-        "E33_minus_A": _paired(tr_map["E33"] - tr_map["A"], n_trades),
-    }
     primary = ("E9_minus_A", "E9_minus_M9", "E33_minus_E9", "E33_minus_M33")
-    side_contrasts = {}
-    for c in contrasts:
-        ka, kb = c.split("_minus_")
-        side_contrasts[c] = {
-            "LONG": _paired_side(tr_map, ka, kb, teacher_long_trade),
-            "SHORT": _paired_side(tr_map, ka, kb, ~teacher_long_trade),
+    secondary = ("M9_minus_A", "M33_minus_M9", "E33_minus_A")
+    contrasts = {c: _paired(contrast_delta(c, tr_map)) for c in primary + secondary}
+    side_contrasts = {
+        c: {
+            "LONG": _paired_side(c, tr_map, teacher_long_trade),
+            "SHORT": _paired_side(c, tr_map, ~teacher_long_trade),
         }
+        for c in contrasts
+    }
 
     # ---- per-symbol robustness ----
     log("per-symbol ...")
@@ -769,8 +808,7 @@ def run_gated_experts(save: bool = True, verbose: bool = True):
                 np.asarray(preds[k], dtype=np.uint8)[m], data.y[sub],
                 data.entry_quality_atr[sub]))[0]) for k in SYSTEMS}
         for c in contrasts:
-            ka, kb = c.split("_minus_")
-            d = float(np.mean(sub_tr_map[kb] - sub_tr_map[ka]))
+            d = float(np.mean(contrast_delta(c, sub_tr_map)))
             row[f"{c}_mean"] = d
             sym_lists[c].append(d)
         per_symbol.append(row)
@@ -817,14 +855,19 @@ def run_gated_experts(save: bool = True, verbose: bool = True):
             trs[sysname] = _trade_returns(data, te_s, preds_s[sysname])[0]
         row = {"held_out_symbol": s,
                "router_best_iteration": ch["n_estimators"],
-               "n_trades": ev["A"]["n_trades"]}
+               "n_trades": ev["A"]["n_trades"],
+               "n_oof_boundary_straddling_trades":
+                   ch["oof"]["purity"]["n_oof_boundary_straddling_trades"],
+               "oof_rows_before_boundary_drop":
+                   ch["oof"]["purity"]["oof_rows_before_boundary_drop"],
+               "oof_rows_after_boundary_drop":
+                   ch["oof"]["purity"]["oof_rows_after_boundary_drop"]}
         for sysname in SYSTEMS:
             row[f"{sysname}_return"] = ev[sysname]["return_atr"]
             row[f"{sysname}_long_return"] = ev[sysname]["long_return"]
             row[f"{sysname}_short_return"] = ev[sysname]["short_return"]
         for c in primary:
-            ka, kb = c.split("_minus_")
-            d = float(np.mean(trs[kb] - trs[ka]))
+            d = float(np.mean(contrast_delta(c, trs)))
             row[f"{c}_mean"] = d
             loso_lists[c].append(d)
         loso.append(row)
@@ -1000,14 +1043,16 @@ def _write_trade_returns_csv(uniq, teacher_long, tr_map, path):
                        "teacher_direction": np.where(teacher_long, "LONG", "SHORT")})
     for s in SYSTEMS:
         df[f"tr_{s}"] = tr_map[s]
-    for ka, kb in (("A", "E9"), ("M9", "E9"), ("E9", "E33"), ("M33", "E33"),
-                   ("A", "M9"), ("M9", "M33"), ("A", "E33")):
-        df[f"delta_{kb}_minus_{ka}"] = tr_map[kb] - tr_map[ka]
+    for name in ("E9_minus_A", "E9_minus_M9", "E33_minus_E9", "E33_minus_M33",
+                 "M9_minus_A", "M33_minus_M9", "E33_minus_A"):
+        df[f"delta_{name}"] = contrast_delta(name, tr_map)
     df.to_csv(path, index=False)
 
 
 def _write_loso_csv(loso, path):
-    base = ["held_out_symbol", "router_best_iteration", "n_trades"]
+    base = ["held_out_symbol", "router_best_iteration", "n_trades",
+            "n_oof_boundary_straddling_trades", "oof_rows_before_boundary_drop",
+            "oof_rows_after_boundary_drop"]
     for s in SYSTEMS:
         base += [f"{s}_return", f"{s}_long_return", f"{s}_short_return"]
     contrasts_cols = ["E9_minus_A_mean", "E9_minus_M9_mean",

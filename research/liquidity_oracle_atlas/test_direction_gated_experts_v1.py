@@ -39,8 +39,7 @@ def oof(ctx):
     data = ctx["data"]
     split = ctx["split"]
     return M.build_prequential_router_oof(
-        data.X9, data.y, data.w, data.decision_time_ns, split["train_idx"],
-        50, return_audit=True)
+        ctx["ds"], data, split["train_idx"], 50, return_audit=True)
 
 
 # --------------------------------------------------------------------------- #
@@ -132,15 +131,36 @@ def test_oof_first_quarter_is_warmup(oof, ctx):
 
 
 def test_oof_expert_rows_are_oof_gated(oof, ctx):
-    """Expert TRAIN uses only rows with a valid OOF router prediction (test 8)."""
+    """Expert TRAIN uses only valid OOF-gated rows: never warm-up, never straddling.
+
+    Unavailable TRAIN rows must be EXACTLY (warm-up quarter) UNION (opportunities that
+    cross an internal OOF quarter boundary) -- nothing else may be dropped or kept.
+    """
     split = ctx["split"]
+    data = ctx["data"]
     tr = split["train_idx"]
     avail = oof["available"][tr]
-    usable = tr[avail]
-    # all usable rows lie strictly after the warm-up quarter
-    t = ctx["data"].decision_time_ns
-    assert np.max(t[tr[~avail]]) < np.min(t[usable]), (
-        "warm-up block must precede every OOF-gated row")
+    gid_tr = data.gid[tr]
+
+    t = pd.to_datetime(data.decision_time_ns).astype("datetime64[ns]")
+    pidx = pd.PeriodIndex(t, freq="Q")
+    qord = (pidx.year * 4 + (pidx.quarter - 1)).to_numpy()
+    qord_tr = qord[tr]
+    first_q = np.unique(qord_tr)[0]
+    warm = qord_tr == first_q
+
+    strad = M._straddling_train_gids(gid_tr, qord_tr)
+    strad_row = (np.isin(gid_tr, strad) if strad.size
+                 else np.zeros(len(tr), dtype=bool))
+
+    # warm-up quarter never receives an OOF gate
+    assert not bool(avail[warm].any())
+    # usable rows are never warm-up and never straddling
+    assert not bool((qord_tr[avail] == first_q).any())
+    if strad.size:
+        assert not bool(np.isin(gid_tr[avail], strad).any())
+    # unavailable set is exactly warm-up union straddling
+    assert bool((~avail == (warm | strad_row)).all())
 
 
 # --------------------------------------------------------------------------- #
@@ -502,6 +522,125 @@ def test_evidence_schema_complete(run):
             "no_identifiable_increment")
     for p in run["paths"].values():
         assert os.path.exists(p), p
+
+
+# --------------------------------------------------------------------------- #
+# FIX1.1 contrast-name semantics: X_minus_Y always means X - Y                  #
+# --------------------------------------------------------------------------- #
+def test_contrast_name_semantics_synthetic():
+    m = {"A": np.array([1.0, 2.0, 3.0]), "E9": np.array([2.0, 4.0, 6.0])}
+    assert np.allclose(M.contrast_delta("E9_minus_A", m), np.array([1.0, 2.0, 3.0]))
+    assert np.allclose(M.contrast_delta("A_minus_E9", m), np.array([-1.0, -2.0, -3.0]))
+
+
+# --------------------------------------------------------------------------- #
+# FIX1.2 / FIX1.3 Teacher LONG / SHORT side contrast exact arithmetic           #
+# --------------------------------------------------------------------------- #
+PRIMARY = ("E9_minus_A", "E9_minus_M9", "E33_minus_E9", "E33_minus_M33")
+
+
+def _check_side(run, side):
+    df = pd.read_csv(run["paths"]["trade_returns_csv"])
+    s = run["summary"]
+    sub = df[df["teacher_direction"] == side]
+    for c in PRIMARY:
+        lhs, rhs = c.split("_minus_")
+        expect = float((sub[f"tr_{lhs}"] - sub[f"tr_{rhs}"]).mean())
+        got = s["side_contrasts"][c][side]["mean"]
+        assert abs(got - expect) < 1e-9, f"{side}/{c}: {got} != {expect}"
+
+
+def test_teacher_long_side_contrast_arithmetic(run):
+    _check_side(run, "LONG")
+
+
+def test_teacher_short_side_contrast_arithmetic(run):
+    _check_side(run, "SHORT")
+
+
+# --------------------------------------------------------------------------- #
+# FIX1.4 / FIX1.5 per-symbol and LOSO contrast exact arithmetic                 #
+# --------------------------------------------------------------------------- #
+def test_per_symbol_contrast_arithmetic(run):
+    ps = pd.read_csv(run["paths"]["per_symbol_csv"])
+    for c in PRIMARY:
+        lhs, rhs = c.split("_minus_")
+        expect = ps[f"{lhs}_return"] - ps[f"{rhs}_return"]
+        assert np.allclose(ps[f"{c}_mean"], expect, atol=1e-9), f"per-symbol {c} sign"
+
+
+def test_loso_contrast_arithmetic(run):
+    lo = pd.read_csv(run["paths"]["loso_csv"])
+    for c in PRIMARY:
+        lhs, rhs = c.split("_minus_")
+        expect = lo[f"{lhs}_return"] - lo[f"{rhs}_return"]
+        assert np.allclose(lo[f"{c}_mean"], expect, atol=1e-9), f"LOSO {c} sign"
+
+
+# --------------------------------------------------------------------------- #
+# FIX1.6 / FIX1.7 cluster + LOSO aggregate mean of correctly signed values      #
+# --------------------------------------------------------------------------- #
+def test_cluster_mean_equals_signed_per_symbol_mean(run):
+    ps = pd.read_csv(run["paths"]["per_symbol_csv"])
+    cl = run["summary"]["per_symbol_cluster_bootstrap"]
+    for c in PRIMARY:
+        assert abs(cl[c]["mean"] - ps[f"{c}_mean"].mean()) < 1e-9
+
+
+def test_loso_aggregate_mean_equals_signed_fold_mean(run):
+    lo = pd.read_csv(run["paths"]["loso_csv"])
+    agg = run["summary"]["loso"]["aggregate"]
+    for c in PRIMARY:
+        assert abs(agg[c]["mean"] - lo[f"{c}_mean"].mean()) < 1e-9
+
+
+# --------------------------------------------------------------------------- #
+# FIX1.8 / FIX1.9 OOF router canonical representation (never float32)           #
+# --------------------------------------------------------------------------- #
+def test_oof_router_canonical_representation(ctx):
+    ds = ctx["ds"]
+    split = ctx["split"]
+    cols = tuple(M.DTP_COLS)
+    Xsub, ysub, _ = M.prepare_xy(ds, split["train_idx"], cols)
+    Xfull = ds.loc[:, list(cols)]
+    assert list(Xsub.columns) == list(cols)
+    assert list(Xfull.columns) == list(cols)
+    assert Xsub.dtypes.equals(Xfull.dtypes), "router extraction must preserve dtypes"
+    assert ysub.dtype == np.uint8
+
+
+def test_oof_router_never_uses_float32_x9():
+    src = inspect.getsource(M.build_prequential_router_oof)
+    # scan executable body only; the docstring prose legitimately mentions float32
+    code_only = src.split('"""', 2)[-1] if '"""' in src else src
+    assert "data.X9" not in code_only, "OOF router must not fit on float32 data.X9"
+    assert "float32" not in code_only, "OOF router must not recast to float32"
+    assert "prepare_xy" in code_only, "OOF router must use the canonical frozen extraction"
+
+
+# --------------------------------------------------------------------------- #
+# FIX1.10 / FIX1.11 / FIX1.12 whole-opportunity OOF purity                      #
+# --------------------------------------------------------------------------- #
+def test_oof_gid_disjoint_per_quarter(oof):
+    audit = oof["audit"]
+    assert len(audit) > 0
+    assert (audit["gid_overlap_size"] == 0).all(), "OOF block leaked an opportunity"
+
+
+def test_straddling_opportunity_excluded():
+    gid = np.array(["t1", "t1", "t2", "t3", "t3"])
+    q = np.array([1, 2, 1, 2, 2])
+    s = M._straddling_train_gids(gid, q)
+    assert set(s.tolist()) == {"t1"}, "only the cross-quarter opportunity is straddling"
+
+
+def test_loso_folds_have_whole_opportunity_guard(run):
+    lo = pd.read_csv(run["paths"]["loso_csv"])
+    for c in ("n_oof_boundary_straddling_trades", "oof_rows_before_boundary_drop",
+              "oof_rows_after_boundary_drop"):
+        assert c in lo.columns, f"missing LOSO purity column {c}"
+    assert lo["oof_rows_after_boundary_drop"].notna().all()
+    assert (lo["oof_rows_after_boundary_drop"] > 0).all()
 
 
 def test_all_systems_reported_and_phase_present(run):
