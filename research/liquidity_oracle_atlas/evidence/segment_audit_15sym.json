@@ -1,0 +1,27 @@
+{
+  "overall": {
+    "gap_time": 0,
+    "gap_px": 0,
+    "both": 0,
+    "unknown": 2,
+    "seg_change": 2
+  },
+  "threshold": 10.0,
+  "symbols": [
+    "AG",
+    "AU",
+    "CU",
+    "AL",
+    "SN",
+    "NI",
+    "RB",
+    "I",
+    "SC",
+    "RU",
+    "MA",
+    "TA",
+    "M",
+    "P",
+    "CF"
+  ]
+}
