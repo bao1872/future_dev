@@ -1,0 +1,178 @@
+{
+  "task_id": "FUTURE-R4-M15-15SYM-UPSTREAM-MATERIALIZATION-V1",
+  "generated_at": "2026-09-23T09:16:36.664599+00:00",
+  "base_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
+  "frozen_symbols": [
+    "AG",
+    "AU",
+    "CU",
+    "AL",
+    "SN",
+    "NI",
+    "RB",
+    "I",
+    "SC",
+    "RU",
+    "MA",
+    "TA",
+    "M",
+    "P",
+    "CF"
+  ],
+  "symbols_materialized_this_session": [
+    "CU",
+    "AL",
+    "SN",
+    "NI",
+    "RB",
+    "I",
+    "SC",
+    "RU",
+    "MA",
+    "TA",
+    "M",
+    "P",
+    "CF"
+  ],
+  "ag_status": "pre_existing_complete_not_recomputed",
+  "raw_network_fetches_total": 0,
+  "execution_frame_builds_total": 13,
+  "environment_runs_total": 13,
+  "teacher_runs_total": 13,
+  "dataset_builds_total": 13,
+  "total_teacher_seconds": 92.07,
+  "total_dataset_seconds": 13.15,
+  "per_symbol": [
+    {
+      "symbol": "CU",
+      "raw_network_fetches": 0,
+      "execution_frame_builds": 1,
+      "environment_runs": 1,
+      "teacher_runs": 1,
+      "dataset_builds": 1,
+      "teacher_seconds": 8.76,
+      "dataset_seconds": 1.27
+    },
+    {
+      "symbol": "AL",
+      "raw_network_fetches": 0,
+      "execution_frame_builds": 1,
+      "environment_runs": 1,
+      "teacher_runs": 1,
+      "dataset_builds": 1,
+      "teacher_seconds": 9.04,
+      "dataset_seconds": 1.11
+    },
+    {
+      "symbol": "SN",
+      "raw_network_fetches": 0,
+      "execution_frame_builds": 1,
+      "environment_runs": 1,
+      "teacher_runs": 1,
+      "dataset_builds": 1,
+      "teacher_seconds": 8.08,
+      "dataset_seconds": 1.2
+    },
+    {
+      "symbol": "NI",
+      "raw_network_fetches": 0,
+      "execution_frame_builds": 1,
+      "environment_runs": 1,
+      "teacher_runs": 1,
+      "dataset_builds": 1,
+      "teacher_seconds": 8.22,
+      "dataset_seconds": 1.3
+    },
+    {
+      "symbol": "RB",
+      "raw_network_fetches": 0,
+      "execution_frame_builds": 1,
+      "environment_runs": 1,
+      "teacher_runs": 1,
+      "dataset_builds": 1,
+      "teacher_seconds": 6.18,
+      "dataset_seconds": 0.8
+    },
+    {
+      "symbol": "I",
+      "raw_network_fetches": 0,
+      "execution_frame_builds": 1,
+      "environment_runs": 1,
+      "teacher_runs": 1,
+      "dataset_builds": 1,
+      "teacher_seconds": 6.23,
+      "dataset_seconds": 0.95
+    },
+    {
+      "symbol": "SC",
+      "raw_network_fetches": 0,
+      "execution_frame_builds": 1,
+      "environment_runs": 1,
+      "teacher_runs": 1,
+      "dataset_builds": 1,
+      "teacher_seconds": 8.87,
+      "dataset_seconds": 1.3
+    },
+    {
+      "symbol": "RU",
+      "raw_network_fetches": 0,
+      "execution_frame_builds": 1,
+      "environment_runs": 1,
+      "teacher_runs": 1,
+      "dataset_builds": 1,
+      "teacher_seconds": 6.19,
+      "dataset_seconds": 0.83
+    },
+    {
+      "symbol": "MA",
+      "raw_network_fetches": 0,
+      "execution_frame_builds": 1,
+      "environment_runs": 1,
+      "teacher_runs": 1,
+      "dataset_builds": 1,
+      "teacher_seconds": 6.17,
+      "dataset_seconds": 0.85
+    },
+    {
+      "symbol": "TA",
+      "raw_network_fetches": 0,
+      "execution_frame_builds": 1,
+      "environment_runs": 1,
+      "teacher_runs": 1,
+      "dataset_builds": 1,
+      "teacher_seconds": 5.98,
+      "dataset_seconds": 0.8
+    },
+    {
+      "symbol": "M",
+      "raw_network_fetches": 0,
+      "execution_frame_builds": 1,
+      "environment_runs": 1,
+      "teacher_runs": 1,
+      "dataset_builds": 1,
+      "teacher_seconds": 6.13,
+      "dataset_seconds": 0.81
+    },
+    {
+      "symbol": "P",
+      "raw_network_fetches": 0,
+      "execution_frame_builds": 1,
+      "environment_runs": 1,
+      "teacher_runs": 1,
+      "dataset_builds": 1,
+      "teacher_seconds": 6.07,
+      "dataset_seconds": 0.75
+    },
+    {
+      "symbol": "CF",
+      "raw_network_fetches": 0,
+      "execution_frame_builds": 1,
+      "environment_runs": 1,
+      "teacher_runs": 1,
+      "dataset_builds": 1,
+      "teacher_seconds": 6.15,
+      "dataset_seconds": 1.18
+    }
+  ],
+  "note": "environment_runs counts ONE expensive m15/h1/h4 indicator pass per symbol (cached, reused by Teacher + Dataset via run_environment_m15 cache)."
+}

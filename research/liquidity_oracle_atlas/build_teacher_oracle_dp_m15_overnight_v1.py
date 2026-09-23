@@ -508,11 +508,15 @@ def artifact_metadata(
     generated_at: Optional[str] = None,
     row_count_actions: int = 0,
     row_count_trades: int = 0,
+    teacher_contract_id: str = TASK_ID,
+    teacher_source_git_sha: Optional[str] = None,
 ) -> Dict[str, Any]:
     return {
         "task_id": TASK_ID,
         "math_version": MATH_VERSION,
         "oracle_source_sha": oracle_source_sha,
+        "teacher_contract_id": teacher_contract_id,
+        "teacher_source_git_sha": teacher_source_git_sha or oracle_source_sha,
         "symbol": symbol,
         "data_start": str(data_start),
         "data_end": str(data_end),
@@ -558,6 +562,8 @@ def write_oracle_artifact(
         data_start=pd.Timestamp(times[0]), data_end=pd.Timestamp(times[-1]),
         generated_at=generated_at,
         row_count_actions=len(actions), row_count_trades=len(trades),
+        teacher_contract_id=TASK_ID,
+        teacher_source_git_sha=oracle_source_sha,
     )
     (outdir / ORACLE_METADATA_FILE).write_text(json.dumps(meta, indent=2, default=str))
     return outdir

@@ -31,8 +31,15 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
+import hashlib
+import json
+from datetime import datetime, timezone
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
+
+from research.export_ob_trigger_execution_v21 import RAW_5M_ROOT
 
 from research.liquidity_oracle_atlas.experiment_structural_reversion_pgm_v1 import (
     PINE_DEFAULT,
@@ -53,6 +60,145 @@ from research.liquidity_oracle_atlas.experiment_structure_interaction_entry_v1 i
 from research.liquidity_oracle_atlas.build_execution_frame_m15_v1 import (
     build_execution_frame_m15,
 )
+
+
+# --------------------------------------------------------------------------- #
+# R4 environment cache (U3 efficiency contract)
+# --------------------------------------------------------------------------- #
+# The expensive m15/h1/h4 indicator streaming pass is computed ONCE per symbol
+# and persisted to a SHA-identified artifact. Both the frozen overnight Teacher
+# builder (via build_dp_proximity_m15) and the Phase-1 STRUCT33 dataset builder
+# call run_environment_m15, so this single cache makes them share one computed
+# environment instead of each re-running the indicators. The cheap 15m execution
+# frame aggregation is rebuilt on load (deterministic, fast). entry_matches is
+# not persisted: neither canonical caller consumes it.
+R4_ENV_CACHE_VERSION = "r4_env_cache_v1"
+_R4_ENV_DIR = Path("artifacts/candidate_gate_r4_m15_touch_nextbar_v1")
+_R4_ENV_MANIFEST = _R4_ENV_DIR / "r4_env_manifest.json"
+
+
+def _r4_env_identity(symbol: str, max_bars) -> str:
+    raw_path = RAW_5M_ROOT / f"{symbol}_5m.csv"
+    raw_sha = hashlib.sha256(Path(raw_path).read_bytes()).hexdigest()
+    key = f"{raw_sha}|{symbol}|{max_bars}|{R4_ENV_CACHE_VERSION}"
+    return hashlib.sha256(key.encode()).hexdigest()
+
+
+def _r4_env_cache_path(symbol: str) -> Path:
+    return _R4_ENV_DIR / f"{symbol}_r4_env.parquet"
+
+
+def _json_default(o):
+    if isinstance(o, np.integer):
+        return int(o)
+    if isinstance(o, np.floating):
+        return float(o)
+    if isinstance(o, np.ndarray):
+        return o.tolist()
+    return str(o)
+
+
+def _geom_to_records(geom):
+    recs = []
+    for g in geom:
+        if g is None:
+            recs.append(None)
+            continue
+        d = {}
+        for tf, (channels, liq_up, liq_down, atr) in g.items():
+            d[tf] = {
+                "channels": channels,
+                "liq_up": liq_up,
+                "liq_down": liq_down,
+                "atr": float(atr),
+            }
+        recs.append(d)
+    return recs
+
+
+def _records_to_geom(recs):
+    if recs is None:
+        return None
+    geom = []
+    for d in recs:
+        if d is None:
+            geom.append(None)
+            continue
+        g = {}
+        for tf, v in d.items():
+            g[tf] = (v["channels"], v["liq_up"], v["liq_down"], float(v["atr"]))
+        geom.append(g)
+    return geom
+
+
+def _load_r4_env_cache(symbol: str, ident: str, max_bars):
+    p = _r4_env_cache_path(symbol)
+    if not p.exists():
+        return None
+    try:
+        manifest = (
+            json.loads(_R4_ENV_MANIFEST.read_text())
+            if _R4_ENV_MANIFEST.exists()
+            else {}
+        )
+        spec = manifest.get(symbol)
+        if spec is None or spec.get("identity") != ident:
+            return None
+        if hashlib.sha256(p.read_bytes()).hexdigest() != spec.get("sha256"):
+            return None
+        cache = pd.read_parquet(p)
+        exec_frame = build_execution_frame_m15(symbol, max_bars)
+        feature_cols = [c for c in cache.columns if c not in ("touch_bits", "geom_json")]
+        features = cache[feature_cols].copy()
+        for tf in TF_ORDER_R4:
+            for c in DISCRETE_COLS:
+                col = f"{tf}_{c}"
+                if col in features.columns:
+                    features[col] = features[col].astype("int64")
+        touch_bits = cache["touch_bits"].to_numpy().astype(np.uint8)
+        geom = _records_to_geom(
+            [
+                json.loads(x) if isinstance(x, str) else x
+                for x in cache["geom_json"].tolist()
+            ]
+        )
+        return {
+            "exec_frame": exec_frame,
+            "features": features,
+            "geom_by_decision": geom,
+            "touch_bits": touch_bits,
+            "entry_matches": None,
+        }
+    except Exception:
+        return None
+
+
+def _save_r4_env_cache(symbol: str, ident: str, env: dict) -> None:
+    p = _r4_env_cache_path(symbol)
+    try:
+        cache = env["features"].copy()
+        cache["touch_bits"] = env["touch_bits"].astype("int64")
+        cache["geom_json"] = [
+            json.dumps(g, default=_json_default) if g is not None else None
+            for g in _geom_to_records(env["geom_by_decision"])
+        ]
+        cache.to_parquet(p)
+        sha = hashlib.sha256(p.read_bytes()).hexdigest()
+        manifest = (
+            json.loads(_R4_ENV_MANIFEST.read_text())
+            if _R4_ENV_MANIFEST.exists()
+            else {}
+        )
+        manifest[symbol] = {
+            "identity": ident,
+            "sha256": sha,
+            "rows": int(len(cache)),
+            "created": datetime.now(timezone.utc).isoformat(),
+        }
+        _R4_ENV_MANIFEST.write_text(json.dumps(manifest, indent=2))
+    except Exception as exc:  # cache failure must never break the compute path
+        print(f"[r4_env_cache] persist failed for {symbol}: {exc!r}")
+
 
 # --------------------------------------------------------------------------- #
 # R4 research-axis contract (no m5 anywhere)                                    #
@@ -214,6 +360,8 @@ def run_environment_m15(
     symbol: str,
     max_bars: Optional[int] = None,
     capture_provenance: bool = True,
+    *,
+    _use_cache: bool = True,
 ) -> Dict[str, Any]:
     """Run the canonical R4 15m environment for one symbol.
 
@@ -223,7 +371,18 @@ def run_environment_m15(
       geom_by_decision: list[tf->(channels, liq_up, liq_down, atr)] per bar
       touch_bits      : uint8 6-bit true-touch mask per 15m bar
       entry_matches   : list[list[dict]] of hit zones per bar (proof)
+
+    Efficiency (U3): the expensive m15/h1/h4 indicator streaming pass is cached
+    to a SHA-identified artifact so the Teacher builder and the STRUCT33 dataset
+    builder -- both of which call this function -- share ONE computed environment
+    per symbol. The cheap 15m execution-frame aggregation is rebuilt on load.
     """
+    ident = _r4_env_identity(symbol, max_bars)
+    if _use_cache:
+        cached = _load_r4_env_cache(symbol, ident, max_bars)
+        if cached is not None:
+            return cached
+
     exec_frame = build_execution_frame_m15(symbol, max_bars)
     n = len(exec_frame)
 
@@ -360,10 +519,12 @@ def run_environment_m15(
             col = f"{tf}_{c}"
             features[col] = features[col].astype("int64")
 
-    return {
+    env = {
         "exec_frame": exec_frame,
         "features": features,
         "geom_by_decision": geom_by_decision,
         "touch_bits": touch_bits,
         "entry_matches": entry_matches,
     }
+    _save_r4_env_cache(symbol, ident, env)
+    return env

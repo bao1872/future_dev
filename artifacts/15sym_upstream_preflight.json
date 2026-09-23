@@ -1,0 +1,534 @@
+{
+  "task_id": "FUTURE-R4-M15-15SYM-UPSTREAM-MATERIALIZATION-V1",
+  "generated_at": "2026-09-23T09:16:37.638035+00:00",
+  "conclusion": "Raw 5m canonical data present for ALL 15 frozen symbols in research/exports/v3r_5m. No PyTDX network acquisition required.",
+  "symbols": {
+    "AG": {
+      "raw_5m_v3r": {
+        "exists": true,
+        "rows": 44451,
+        "first": "2025-01-02 09:00:00",
+        "last": "2026-09-04 14:55:00",
+        "dup_ts": 0
+      },
+      "silver_main_data": {
+        "5m": true,
+        "15m": true,
+        "1h": true,
+        "4h": true
+      },
+      "exec_frame_r4": {
+        "exists": true,
+        "rows": 14817,
+        "sha256": "70cc98f85b0988ec38cf3d6039f3b293e8422bf26ccebbc09fa82aa897f3f22c"
+      },
+      "teacher_artifact": {
+        "exists": true,
+        "has_metadata": true,
+        "has_trades": true,
+        "math_version": "intraday_dp_oracle_r2_one_entry_proximity_15m_port",
+        "oracle_source_sha": "phase0p5-fix2",
+        "row_count_trades": 566,
+        "data_start": "2025-01-02 09:00:00",
+        "data_end": "2026-09-04 14:45:00"
+      },
+      "struct33_dataset": {
+        "exists": true,
+        "has_parquet": true,
+        "has_metadata": true,
+        "n_label_eligible": 5555,
+        "n_candidates": 5573
+      }
+    },
+    "AU": {
+      "raw_5m_v3r": {
+        "exists": true,
+        "rows": 44451,
+        "first": "2025-01-02 09:00:00",
+        "last": "2026-09-04 14:55:00",
+        "dup_ts": 0
+      },
+      "silver_main_data": {
+        "5m": false,
+        "15m": false,
+        "1h": false,
+        "4h": false
+      },
+      "exec_frame_r4": {
+        "exists": false
+      },
+      "teacher_artifact": {
+        "exists": true,
+        "has_metadata": true,
+        "has_trades": true,
+        "math_version": "intraday_dp_oracle_r2_one_entry_proximity_15m_port",
+        "oracle_source_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
+        "row_count_trades": 520,
+        "data_start": "2025-01-02 09:00:00",
+        "data_end": "2026-09-04 14:45:00"
+      },
+      "struct33_dataset": {
+        "exists": true,
+        "has_parquet": true,
+        "has_metadata": true,
+        "n_label_eligible": 5010,
+        "n_candidates": 5034
+      }
+    },
+    "CU": {
+      "raw_5m_v3r": {
+        "exists": true,
+        "rows": 37323,
+        "first": "2025-01-02 09:00:00",
+        "last": "2026-09-04 14:55:00",
+        "dup_ts": 0
+      },
+      "silver_main_data": {
+        "5m": false,
+        "15m": false,
+        "1h": false,
+        "4h": false
+      },
+      "exec_frame_r4": {
+        "exists": false
+      },
+      "teacher_artifact": {
+        "exists": true,
+        "has_metadata": true,
+        "has_trades": true,
+        "math_version": "intraday_dp_oracle_r2_one_entry_proximity_15m_port",
+        "oracle_source_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
+        "row_count_trades": 326,
+        "data_start": "2025-01-02 09:00:00",
+        "data_end": "2026-09-04 14:45:00"
+      },
+      "struct33_dataset": {
+        "exists": true,
+        "has_parquet": true,
+        "has_metadata": true,
+        "n_label_eligible": 5327,
+        "n_candidates": 5328
+      }
+    },
+    "AL": {
+      "raw_5m_v3r": {
+        "exists": true,
+        "rows": 37323,
+        "first": "2025-01-02 09:00:00",
+        "last": "2026-09-04 14:55:00",
+        "dup_ts": 0
+      },
+      "silver_main_data": {
+        "5m": false,
+        "15m": false,
+        "1h": false,
+        "4h": false
+      },
+      "exec_frame_r4": {
+        "exists": false
+      },
+      "teacher_artifact": {
+        "exists": true,
+        "has_metadata": true,
+        "has_trades": true,
+        "math_version": "intraday_dp_oracle_r2_one_entry_proximity_15m_port",
+        "oracle_source_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
+        "row_count_trades": 351,
+        "data_start": "2025-01-02 09:00:00",
+        "data_end": "2026-09-04 14:45:00"
+      },
+      "struct33_dataset": {
+        "exists": true,
+        "has_parquet": true,
+        "has_metadata": true,
+        "n_label_eligible": 5722,
+        "n_candidates": 5734
+      }
+    },
+    "SN": {
+      "raw_5m_v3r": {
+        "exists": true,
+        "rows": 37323,
+        "first": "2025-01-02 09:00:00",
+        "last": "2026-09-04 14:55:00",
+        "dup_ts": 0
+      },
+      "silver_main_data": {
+        "5m": false,
+        "15m": false,
+        "1h": false,
+        "4h": false
+      },
+      "exec_frame_r4": {
+        "exists": false
+      },
+      "teacher_artifact": {
+        "exists": true,
+        "has_metadata": true,
+        "has_trades": true,
+        "math_version": "intraday_dp_oracle_r2_one_entry_proximity_15m_port",
+        "oracle_source_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
+        "row_count_trades": 358,
+        "data_start": "2025-01-02 09:00:00",
+        "data_end": "2026-09-04 14:45:00"
+      },
+      "struct33_dataset": {
+        "exists": true,
+        "has_parquet": true,
+        "has_metadata": true,
+        "n_label_eligible": 5292,
+        "n_candidates": 5322
+      }
+    },
+    "NI": {
+      "raw_5m_v3r": {
+        "exists": true,
+        "rows": 37323,
+        "first": "2025-01-02 09:00:00",
+        "last": "2026-09-04 14:55:00",
+        "dup_ts": 0
+      },
+      "silver_main_data": {
+        "5m": false,
+        "15m": false,
+        "1h": false,
+        "4h": false
+      },
+      "exec_frame_r4": {
+        "exists": false
+      },
+      "teacher_artifact": {
+        "exists": true,
+        "has_metadata": true,
+        "has_trades": true,
+        "math_version": "intraday_dp_oracle_r2_one_entry_proximity_15m_port",
+        "oracle_source_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
+        "row_count_trades": 325,
+        "data_start": "2025-01-02 09:00:00",
+        "data_end": "2026-09-04 14:45:00"
+      },
+      "struct33_dataset": {
+        "exists": true,
+        "has_parquet": true,
+        "has_metadata": true,
+        "n_label_eligible": 5414,
+        "n_candidates": 5462
+      }
+    },
+    "RB": {
+      "raw_5m_v3r": {
+        "exists": true,
+        "rows": 27819,
+        "first": "2025-01-02 09:00:00",
+        "last": "2026-09-04 14:55:00",
+        "dup_ts": 0
+      },
+      "silver_main_data": {
+        "5m": false,
+        "15m": false,
+        "1h": false,
+        "4h": false
+      },
+      "exec_frame_r4": {
+        "exists": false
+      },
+      "teacher_artifact": {
+        "exists": true,
+        "has_metadata": true,
+        "has_trades": true,
+        "math_version": "intraday_dp_oracle_r2_one_entry_proximity_15m_port",
+        "oracle_source_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
+        "row_count_trades": 220,
+        "data_start": "2025-01-02 09:00:00",
+        "data_end": "2026-09-04 14:45:00"
+      },
+      "struct33_dataset": {
+        "exists": true,
+        "has_parquet": true,
+        "has_metadata": true,
+        "n_label_eligible": 4334,
+        "n_candidates": 4336
+      }
+    },
+    "I": {
+      "raw_5m_v3r": {
+        "exists": true,
+        "rows": 27819,
+        "first": "2025-01-02 09:00:00",
+        "last": "2026-09-04 14:55:00",
+        "dup_ts": 0
+      },
+      "silver_main_data": {
+        "5m": false,
+        "15m": false,
+        "1h": false,
+        "4h": false
+      },
+      "exec_frame_r4": {
+        "exists": false
+      },
+      "teacher_artifact": {
+        "exists": true,
+        "has_metadata": true,
+        "has_trades": true,
+        "math_version": "intraday_dp_oracle_r2_one_entry_proximity_15m_port",
+        "oracle_source_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
+        "row_count_trades": 157,
+        "data_start": "2025-01-02 09:00:00",
+        "data_end": "2026-09-04 14:45:00"
+      },
+      "struct33_dataset": {
+        "exists": true,
+        "has_parquet": true,
+        "has_metadata": true,
+        "n_label_eligible": 4551,
+        "n_candidates": 4569
+      }
+    },
+    "SC": {
+      "raw_5m_v3r": {
+        "exists": true,
+        "rows": 44449,
+        "first": "2025-01-02 09:00:00",
+        "last": "2026-09-04 14:55:00",
+        "dup_ts": 0
+      },
+      "silver_main_data": {
+        "5m": false,
+        "15m": false,
+        "1h": false,
+        "4h": false
+      },
+      "exec_frame_r4": {
+        "exists": false
+      },
+      "teacher_artifact": {
+        "exists": true,
+        "has_metadata": true,
+        "has_trades": true,
+        "math_version": "intraday_dp_oracle_r2_one_entry_proximity_15m_port",
+        "oracle_source_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
+        "row_count_trades": 481,
+        "data_start": "2025-01-02 09:00:00",
+        "data_end": "2026-09-04 14:45:00"
+      },
+      "struct33_dataset": {
+        "exists": true,
+        "has_parquet": true,
+        "has_metadata": true,
+        "n_label_eligible": 5462,
+        "n_candidates": 5504
+      }
+    },
+    "RU": {
+      "raw_5m_v3r": {
+        "exists": true,
+        "rows": 27819,
+        "first": "2025-01-02 09:00:00",
+        "last": "2026-09-04 14:55:00",
+        "dup_ts": 0
+      },
+      "silver_main_data": {
+        "5m": false,
+        "15m": false,
+        "1h": false,
+        "4h": false
+      },
+      "exec_frame_r4": {
+        "exists": false
+      },
+      "teacher_artifact": {
+        "exists": true,
+        "has_metadata": true,
+        "has_trades": true,
+        "math_version": "intraday_dp_oracle_r2_one_entry_proximity_15m_port",
+        "oracle_source_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
+        "row_count_trades": 266,
+        "data_start": "2025-01-02 09:00:00",
+        "data_end": "2026-09-04 14:45:00"
+      },
+      "struct33_dataset": {
+        "exists": true,
+        "has_parquet": true,
+        "has_metadata": true,
+        "n_label_eligible": 4292,
+        "n_candidates": 4304
+      }
+    },
+    "MA": {
+      "raw_5m_v3r": {
+        "exists": true,
+        "rows": 27819,
+        "first": "2025-01-02 09:00:00",
+        "last": "2026-09-04 14:55:00",
+        "dup_ts": 0
+      },
+      "silver_main_data": {
+        "5m": false,
+        "15m": false,
+        "1h": false,
+        "4h": false
+      },
+      "exec_frame_r4": {
+        "exists": false
+      },
+      "teacher_artifact": {
+        "exists": true,
+        "has_metadata": true,
+        "has_trades": true,
+        "math_version": "intraday_dp_oracle_r2_one_entry_proximity_15m_port",
+        "oracle_source_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
+        "row_count_trades": 284,
+        "data_start": "2025-01-02 09:00:00",
+        "data_end": "2026-09-04 14:45:00"
+      },
+      "struct33_dataset": {
+        "exists": true,
+        "has_parquet": true,
+        "has_metadata": true,
+        "n_label_eligible": 4115,
+        "n_candidates": 4115
+      }
+    },
+    "TA": {
+      "raw_5m_v3r": {
+        "exists": true,
+        "rows": 27819,
+        "first": "2025-01-02 09:00:00",
+        "last": "2026-09-04 14:55:00",
+        "dup_ts": 0
+      },
+      "silver_main_data": {
+        "5m": false,
+        "15m": false,
+        "1h": false,
+        "4h": false
+      },
+      "exec_frame_r4": {
+        "exists": false
+      },
+      "teacher_artifact": {
+        "exists": true,
+        "has_metadata": true,
+        "has_trades": true,
+        "math_version": "intraday_dp_oracle_r2_one_entry_proximity_15m_port",
+        "oracle_source_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
+        "row_count_trades": 285,
+        "data_start": "2025-01-02 09:00:00",
+        "data_end": "2026-09-04 14:45:00"
+      },
+      "struct33_dataset": {
+        "exists": true,
+        "has_parquet": true,
+        "has_metadata": true,
+        "n_label_eligible": 4114,
+        "n_candidates": 4121
+      }
+    },
+    "M": {
+      "raw_5m_v3r": {
+        "exists": true,
+        "rows": 27819,
+        "first": "2025-01-02 09:00:00",
+        "last": "2026-09-04 14:55:00",
+        "dup_ts": 0
+      },
+      "silver_main_data": {
+        "5m": false,
+        "15m": false,
+        "1h": false,
+        "4h": false
+      },
+      "exec_frame_r4": {
+        "exists": false
+      },
+      "teacher_artifact": {
+        "exists": true,
+        "has_metadata": true,
+        "has_trades": true,
+        "math_version": "intraday_dp_oracle_r2_one_entry_proximity_15m_port",
+        "oracle_source_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
+        "row_count_trades": 258,
+        "data_start": "2025-01-02 09:00:00",
+        "data_end": "2026-09-04 14:45:00"
+      },
+      "struct33_dataset": {
+        "exists": true,
+        "has_parquet": true,
+        "has_metadata": true,
+        "n_label_eligible": 3880,
+        "n_candidates": 3886
+      }
+    },
+    "P": {
+      "raw_5m_v3r": {
+        "exists": true,
+        "rows": 27819,
+        "first": "2025-01-02 09:00:00",
+        "last": "2026-09-04 14:55:00",
+        "dup_ts": 0
+      },
+      "silver_main_data": {
+        "5m": false,
+        "15m": false,
+        "1h": false,
+        "4h": false
+      },
+      "exec_frame_r4": {
+        "exists": false
+      },
+      "teacher_artifact": {
+        "exists": true,
+        "has_metadata": true,
+        "has_trades": true,
+        "math_version": "intraday_dp_oracle_r2_one_entry_proximity_15m_port",
+        "oracle_source_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
+        "row_count_trades": 287,
+        "data_start": "2025-01-02 09:00:00",
+        "data_end": "2026-09-04 14:45:00"
+      },
+      "struct33_dataset": {
+        "exists": true,
+        "has_parquet": true,
+        "has_metadata": true,
+        "n_label_eligible": 3874,
+        "n_candidates": 3874
+      }
+    },
+    "CF": {
+      "raw_5m_v3r": {
+        "exists": true,
+        "rows": 27819,
+        "first": "2025-01-02 09:00:00",
+        "last": "2026-09-04 14:55:00",
+        "dup_ts": 0
+      },
+      "silver_main_data": {
+        "5m": false,
+        "15m": false,
+        "1h": false,
+        "4h": false
+      },
+      "exec_frame_r4": {
+        "exists": false
+      },
+      "teacher_artifact": {
+        "exists": true,
+        "has_metadata": true,
+        "has_trades": true,
+        "math_version": "intraday_dp_oracle_r2_one_entry_proximity_15m_port",
+        "oracle_source_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
+        "row_count_trades": 259,
+        "data_start": "2025-01-02 09:00:00",
+        "data_end": "2026-09-04 14:45:00"
+      },
+      "struct33_dataset": {
+        "exists": true,
+        "has_parquet": true,
+        "has_metadata": true,
+        "n_label_eligible": 4218,
+        "n_candidates": 4242
+      }
+    }
+  }
+}

@@ -52,7 +52,11 @@ BASE_SHA = "29e52876fb894b40046fcd2e4035cb66eb931c1d"
 # == "phase0p5-fix2". We pin the dataset to that exact artifact so a stale,
 # same-math-version Teacher can never be consumed silently (governance: explicit
 # source identity, fail-closed).
-FROZEN_TEACHER_SOURCE_SHA = "phase0p5-fix2"
+# Frozen Teacher identity. AG's Phase-0.5 Teacher was produced with the free-text
+# source tag "phase0p5-fix2". Newly materialized Teachers record the actual frozen
+# git SHA 67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de. Both are accepted; any other
+# identity fails closed (governance: explicit source identity, no silent swap).
+ACCEPTED_TEACHER_SOURCE_SHAS = ("phase0p5-fix2", "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de")
 
 TF_ORDER = ("m15", "h1", "h4")
 
@@ -219,10 +223,15 @@ def build_struct33_dataset(
         teacher_root,
         symbol,
         expected_math_version=MATH_VERSION,
-        expected_source_sha=FROZEN_TEACHER_SOURCE_SHA,
+        expected_source_sha=None,
     )
     if not art["ok"]:
         raise RuntimeError(f"STOP_PHASE1_TEACHER_ARTIFACT: {art['reason']}")
+    if art["metadata"].get("oracle_source_sha") not in ACCEPTED_TEACHER_SOURCE_SHAS:
+        raise RuntimeError(
+            "STOP_PHASE1_TEACHER_IDENTITY:"
+            f" {art['metadata'].get('oracle_source_sha')}"
+        )
     trades = art["trades"].reset_index(drop=True)
 
     # --- 4. vectorized mapping --------------------------------------------
