@@ -12,36 +12,45 @@ states stably separate
     E9 Direction ultimately CORRECT      vs      E9 Direction ultimately WRONG ?
 
 This is NOT a stop-loss optimization, NOT a take-profit optimization and NOT a
-Direction redesign. No thresholds, stop rules, TP rules, architecture, Direction
-threshold/features, outer split, Teacher, Candidate gate or dataset definition may
-be tuned here.
+Direction redesign.
+
+ZONE SEMANTICS (RC1/RC2)
+------------------------
+Canonical SR owner stores (top, bottom, strength) and canonical Liquidity owner stores
+(left, level, top, bottom, broken, breach_i). A zone is a BAND, not a point:
+
+    LONG  backstop = support zone : touch/enter = low  <= support_top
+                                    pierce-through     = low  <  support_bottom
+                                    reclaim boundary   = close >= support_bottom
+    SHORT backstop = resistance   : touch/enter = high >= resistance_bottom
+                                    pierce-through     = high >  resistance_top
+                                    reclaim boundary   = close <= resistance_top
+
+A price merely ENTERING a zone is NEVER a pierce-through. Both structural backstops
+(SR and Liquidity-behind) carry independent state machines (RC3).
 
 Causality contract
 ------------------
-Everything derived from the future (oracle_direction, oracle_exit_fill_time,
-entry_quality_atr, final MFE/MAE, event completion) is AUDIT_ONLY /
-FORBIDDEN_REALTIME_FEATURE. It may be a label, audit field, scoring outcome or
-stratification variable, but it must never enter a real-time feature or state
-transition before it becomes observable. The observation horizon therefore stops at
-the EARLIEST of (end of 5th trading day, hard-segment boundary, data end) and never
-at oracle_exit_fill_time.
+Everything derived from the future is AUDIT_ONLY / FORBIDDEN_REALTIME_FEATURE. The
+observation horizon stops at the EARLIEST of (end of 5th trading day, hard-segment
+boundary, data end) and never at oracle_exit_fill_time.
 
-Kernels
--------
-Reference  -- deliberately slow and obvious (per-candidate loop). T0/T1 only.
-Production -- loop over TIME STEP, vectorized over all Candidates. Never a Python
-              loop over Candidate rows. O(N*H*Z) time, O(N*Z) memory, streaming
-              accumulators plus checkpoint snapshots only.
+Checkpoint contract (RC4)
+-------------------------
+Checkpoint arrays are pre-filled with NaN. A Candidate truncated before a checkpoint
+has NO observation there (NaN), and never inherits a shorter-horizon accumulator.
+Trading-day checkpoints fill per-Candidate at each Candidate's own day end.
 """
 
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import os
 import sys
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
@@ -60,21 +69,20 @@ from research.liquidity_oracle_atlas.direction_gated_experts_v1 import (
 
 TASK_ID = "FUTURE-R5-M15-ENTRY-PATH-ATLAS-V1"
 BASE_SHA = "cb9261d4498d328e6dd8edca5d655eaf609b0611"
+REVIEWED_SHA = "6376c63f973d8c5f6705ccaf421abc8740c7b0ef"
 STAGE = "kernel_checkpoint"
 
 TF_ORDER = ("m15", "h1", "h4")
 
-# Fixed bar-count checkpoints. Step index is 0-based: step s means (s+1) bars have
-# been observed since the fill bar, so 1 bar = step 0, 4 bars = step 3, 16 bars = step 15.
+# Step index is 0-based: step s means (s+1) bars observed since the fill bar.
 BAR_CHECKPOINTS = ((0, "m15"), (3, "h1"), (15, "h4"))
 BARS_IN_CHECKPOINT = {"m15": 1, "h1": 4, "h4": 16}
-# Trading-day checkpoints: end of the Nth trading day (fill day counts as day 1).
 TD_CHECKPOINTS = ((1, "td1"), (3, "td3"), (5, "td5"))
-CHECKPOINT_NAMES = tuple(n for _, n in BAR_CHECKPOINTS) + tuple(n for _, n in TD_CHECKPOINTS)
-PRIMARY_CHECKPOINT = "h4"          # 4h = 16 valid 15m bars
+CHECKPOINT_NAMES = (tuple(n for _, n in BAR_CHECKPOINTS)
+                    + tuple(n for _, n in TD_CHECKPOINTS))
+PRIMARY_CHECKPOINT = "h4"
 HORIZON_TRADING_DAYS = 5
 
-# Frozen TEST population from the frozen upstream Direction experiment.
 FROZEN_TEST = {"test_rows": 13773, "test_trades": 638,
                "long_trades": 319, "short_trades": 319}
 
@@ -84,35 +92,23 @@ ANCHORS_PARQUET = os.path.join(ARTIFACT_DIR, "entry_path_anchors_v1.parquet")
 ROW_METRICS_PARQUET = os.path.join(ARTIFACT_DIR, "entry_path_row_metrics_v1.parquet")
 EVIDENCE_DIR = os.path.join("research", "liquidity_oracle_atlas", "evidence")
 MANIFEST_JSON = os.path.join(EVIDENCE_DIR, "entry_path_atlas_v1_manifest.json")
+R4_ENV_DIR = os.path.join("artifacts", "candidate_gate_r4_m15_touch_nextbar_v1")
+R4_ENV_MANIFEST = os.path.join(R4_ENV_DIR, "r4_env_manifest.json")
 
-# Fields whose value is only knowable AFTER the fact. Never a real-time input.
 AUDIT_ONLY_FIELDS = (
-    "direction_correct",
-    "oracle_direction",
-    "oracle_entry_quality_atr",
-    "e9_teacher_exit_return_atr",
-    "oracle_exit_fill_time",
-    "final_mfe",
-    "final_mae",
+    "direction_correct", "oracle_direction", "oracle_entry_quality_atr",
+    "e9_teacher_exit_return_atr", "oracle_exit_fill_time",
+    "final_mfe", "final_mae",
 )
 FORBIDDEN_REALTIME_FEATURE = "FORBIDDEN_REALTIME_FEATURE"
-
 SEMANTIC_KEY_FIELDS = ("symbol", "oracle_trade_id",
                        "candidate_decision_time", "candidate_fill_time")
 
-# --------------------------------------------------------------------------- #
-# Performance / structural counters (TP performance gate)                      #
-# --------------------------------------------------------------------------- #
 COUNTER_NAMES = (
-    "raw_exec_load_count",
-    "direction_chain_run_count",
-    "atr_precompute_count",
-    "sr_liq_precompute_count",
-    "full_history_recompute_count",
-    "reference_call_count_production",
-    "candidate_python_loop_count",
-    "hotloop_dataframe_concat_count",
-    "path_step_count",
+    "raw_exec_load_count", "direction_chain_run_count", "atr_precompute_count",
+    "sr_liq_precompute_count", "full_history_recompute_count",
+    "reference_call_count_production", "candidate_python_loop_count",
+    "hotloop_dataframe_concat_count", "path_step_count",
 )
 COUNTERS = {k: 0 for k in COUNTER_NAMES}
 
@@ -152,6 +148,20 @@ def _sha256_file(path: str) -> str:
     return h.hexdigest()
 
 
+def _git_head_sha() -> str:
+    """Current git HEAD SHA (identity of the code that produced this manifest)."""
+    try:
+        import subprocess
+        out = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True, text=True, cwd=os.path.dirname(__file__))
+        if out.returncode == 0:
+            return out.stdout.strip()
+    except Exception:
+        pass
+    return "UNKNOWN"
+
+
 def build_semantic_key(df: pd.DataFrame) -> np.ndarray:
     parts = [df[c].astype(str) for c in SEMANTIC_KEY_FIELDS]
     out = parts[0]
@@ -161,27 +171,20 @@ def build_semantic_key(df: pd.DataFrame) -> np.ndarray:
 
 
 # --------------------------------------------------------------------------- #
-# 1. Materialize the frozen row-level E9 Direction state (ONCE, no LOSO)       #
+# 1. Frozen row-level E9 Direction state (materialized ONCE, no LOSO)          #
 # --------------------------------------------------------------------------- #
 def materialize_e9_direction_state(save: bool = True, verbose: bool = True):
-    """Run the frozen upstream pooled chain ONCE to obtain row-level E9 TEST state.
-
-    Direction is frozen: this reuses run_chain verbatim and never retrains or alters
-    it. LOSO is deliberately NOT run.
-    """
     def log(*a):
         if verbose:
             print(*a, file=sys.stderr, flush=True)
 
     log("verify manifest (fail-closed) ...")
     verify_manifest(SYMBOLS)
-
     log("build frozen split ...")
     split = build_frozen_split()
     ds = split["ds"]
     train_idx, val_idx, test_idx = (split["train_idx"], split["val_idx"],
                                     split["test_idx"])
-
     data = build_direction_expert_data(ds)
     gid_all = data.gid[test_idx]
     n_rows = int(test_idx.size)
@@ -195,10 +198,9 @@ def materialize_e9_direction_state(save: bool = True, verbose: bool = True):
             f"STOP_PATH_ATLAS_POPULATION_DRIFT rows={n_rows} trades={n_trades} "
             f"long={n_long} short={n_short}")
 
-    log("run frozen pooled chain ONCE (E9 row-level materialization) ...")
+    log("run frozen pooled chain ONCE ...")
     chain = run_chain(data, ds, train_idx, val_idx, test_idx)
     bump("direction_chain_run_count")
-
     e9 = np.asarray(chain["E9"], dtype=np.uint8)
     router = np.asarray(chain["router_te"], dtype=np.int8)
     if e9.size != n_rows:
@@ -216,30 +218,23 @@ def materialize_e9_direction_state(save: bool = True, verbose: bool = True):
         "candidate_fill_time": sub["candidate_fill_time"].to_numpy(object),
         "candidate_fill_price": sub["candidate_fill_price"].to_numpy(np.float64),
         "sample_weight_raw": data.w[test_idx],
-        # ---- frozen Direction state (decision-time, real-time legal) ----
         "e9_direction": np.where(e9 == 1, "LONG", "SHORT"),
         "e9_side": np.where(e9 == 1, 1.0, -1.0),
         "router_direction": np.where(router == 1, "LONG", "SHORT"),
         "router_p_long": np.asarray(chain["p_te"], dtype=np.float64),
         "e9_p_correct": np.asarray(chain["p_score"]["E9"], dtype=np.float64),
-        # ---- AUDIT ONLY ----
         "oracle_direction": sub["oracle_direction"].to_numpy(object),
         "oracle_entry_quality_atr": sub["entry_quality_atr"].to_numpy(np.float64),
         "oracle_exit_fill_time": sub["oracle_exit_fill_time"].to_numpy(object),
     })
     df["direction_correct"] = (
         df["e9_direction"].to_numpy(object)
-        == df["oracle_direction"].to_numpy(object)
-    ).astype(np.uint8)
+        == df["oracle_direction"].to_numpy(object)).astype(np.uint8)
     df["e9_teacher_exit_return_atr"] = np.where(
         df["direction_correct"].to_numpy() == 1,
-        df["oracle_entry_quality_atr"],
-        -df["oracle_entry_quality_atr"],
-    )
-
+        df["oracle_entry_quality_atr"], -df["oracle_entry_quality_atr"])
     if not df["semantic_key"].is_unique:
         raise RuntimeError("STOP_PATH_ATLAS_SEMANTIC_KEY_NOT_UNIQUE")
-
     if save:
         os.makedirs(ARTIFACT_DIR, exist_ok=True)
         df.to_parquet(E9_STATE_PARQUET, index=False)
@@ -248,7 +243,7 @@ def materialize_e9_direction_state(save: bool = True, verbose: bool = True):
 
 
 # --------------------------------------------------------------------------- #
-# 2. Canonical decision-time environment state (ATR0 + SR/Liquidity zones)     #
+# 2. Canonical zone geometry (RC1 / RC2)                                       #
 # --------------------------------------------------------------------------- #
 @dataclass
 class SymbolState:
@@ -261,65 +256,167 @@ class SymbolState:
     trading_day: np.ndarray
     bar_start_time: np.ndarray
     execution_bar_index: np.ndarray
-    atr0_col: np.ndarray                 # canonical m15_atr per bar
-    sr_support_price: np.ndarray
-    sr_resistance_price: np.ndarray
-    liq_up_edge: np.ndarray              # near edge (zone bottom) of liq_up
-    liq_down_edge: np.ndarray            # near edge (zone top) of liq_down
+    atr0_col: np.ndarray
+    # canonical SR zone geometry (selected per canonical scalar identity)
+    sup_top: np.ndarray
+    sup_bottom: np.ndarray
+    sup_strength: np.ndarray
+    res_top: np.ndarray
+    res_bottom: np.ndarray
+    res_strength: np.ndarray
+    # canonical Liquidity zone geometry (canonical active-level selection)
+    liq_up_top: np.ndarray
+    liq_up_bottom: np.ndarray
+    liq_up_level: np.ndarray
+    liq_dn_top: np.ndarray
+    liq_dn_bottom: np.ndarray
+    liq_dn_level: np.ndarray
+    # canonical reference features for differential assertions
+    ref_sr_support: np.ndarray
+    ref_sr_resistance: np.ndarray
+    ref_liq_up_dist: np.ndarray
+    ref_liq_dn_dist: np.ndarray
     n_bars: int
     env_complete: bool
     env_note: str = ""
 
 
-def _nearest_edge_levels(geom_by_decision, n_bars, price_arr):
-    """Extract liquidity near-edge prices from the canonical zone owner.
+def _max_dev(a, b):
+    """Max absolute deviation over rows where BOTH arrays are finite.
 
-    Canonical distance semantics (forming_indicator_state_v1):
-        liq_up_dist_atr   = (zone.bottom - close) / atr
-        liq_down_dist_atr = (close - zone.top)    / atr
-    so the TRADEABLE boundary is the zone's near edge (bottom for up, top for down),
-    NOT the zone centre (which is what *_level_price reports). We select the nearest
-    zone by |edge - price| and preserve the zone's exact top/bottom later.
+    A row where one is finite and the other NaN is a genuine disagreement and
+    returns inf (so the audit fails loudly instead of silently producing NaN).
     """
-    up_edge = np.full(n_bars, np.nan, dtype=np.float64)
-    dn_edge = np.full(n_bars, np.nan, dtype=np.float64)
+    a = np.asarray(a, dtype=float)
+    b = np.asarray(b, dtype=float)
+    fin = np.isfinite(a) & np.isfinite(b)
+    if not fin.any():
+        if (np.isfinite(a) != np.isfinite(b)).any():
+            return float("inf")
+        return 0.0
+    if (np.isfinite(a) != np.isfinite(b)).any():
+        return float("inf")
+    return float(np.nanmax(np.abs(a[fin] - b[fin])))
+
+
+def extract_zone_geometry(geom, n_bars, close, sr_sup_ref, sr_res_ref,
+                          liq_up_level_ref, liq_dn_level_ref):
+    """Resolve decision-time SR and Liquidity ZONES by REPLICATING the canonical
+    SRState.step / LiquidityState.step selection over the canonical geom.
+
+    This is mechanically identical to the canonical owner (same channels, same
+    close, same rules) so the selected band is exactly the canonical channel:
+
+      SR support    = max-top channel entirely below close (z[0] < c); else, when
+                      price is inside a channel, the max-strength containing channel
+                      and sr_support_price := close.
+      SR resistance = min-bottom channel entirely above close (z[1] > c); else the
+                      max-strength containing channel and sr_resistance_price := close.
+      Liquidity up  = min-bottom UNBROKEN level with bottom > close.
+      Liquidity down= max-top   UNBROKEN level with top   < close.
+
+    The band (top, bottom, strength / level) of the selected zone is preserved
+    verbatim -- never collapsed to a single price point.
+    """
+    sup_top = np.full(n_bars, np.nan)
+    sup_bot = np.full(n_bars, np.nan)
+    sup_str = np.full(n_bars, np.nan)
+    res_top = np.full(n_bars, np.nan)
+    res_bot = np.full(n_bars, np.nan)
+    res_str = np.full(n_bars, np.nan)
+    up_top = np.full(n_bars, np.nan)
+    up_bot = np.full(n_bars, np.nan)
+    up_lvl = np.full(n_bars, np.nan)
+    dn_top = np.full(n_bars, np.nan)
+    dn_bot = np.full(n_bars, np.nan)
+    dn_lvl = np.full(n_bars, np.nan)
+    # re-derived canonical scalar/level, used only for the audit
+    recon_sup = np.full(n_bars, np.nan)
+    recon_res = np.full(n_bars, np.nan)
+    recon_up = np.full(n_bars, np.nan)
+    recon_dn = np.full(n_bars, np.nan)
+
     for i in range(n_bars):
-        g = geom_by_decision[i]
+        g = geom[i]
         if not g or "m15" not in g:
             continue
-        channels, liq_up, liq_down = g["m15"][0], g["m15"][1], g["m15"][2]
-        px = price_arr[i]
-        best = None
-        for z in liq_up:
-            e = float(z["bottom"])
-            if not np.isfinite(e):
-                continue
-            d = abs(e - px)
-            if best is None or d < best[0]:
-                best = (d, e)
-        if best is not None:
-            up_edge[i] = best[1]
-        best = None
-        for z in liq_down:
-            e = float(z["top"])
-            if not np.isfinite(e):
-                continue
-            d = abs(e - px)
-            if best is None or d < best[0]:
-                best = (d, e)
-        if best is not None:
-            dn_edge[i] = best[1]
-        del channels
-    return up_edge, dn_edge
+        channels, liq_up, liq_down, _atr = g["m15"]
+        c = float(close[i])
+
+        # ---- SR: replicate canonical SRState.step selection ----
+        containing = [z for z in channels if z[1] <= c <= z[0]]
+        supports = [z for z in channels if z[0] < c]
+        resistances = [z for z in channels if z[1] > c]
+
+        sup_sel = None
+        if supports:
+            sup_sel = max(supports, key=lambda q: q[0])
+            recon_sup[i] = float(sup_sel[0])
+        elif containing:
+            sup_sel = max(containing, key=lambda q: q[2])
+            recon_sup[i] = c
+        if sup_sel is not None:
+            sup_top[i], sup_bot[i], sup_str[i] = (
+                float(sup_sel[0]), float(sup_sel[1]), float(sup_sel[2]))
+
+        res_sel = None
+        if resistances:
+            res_sel = min(resistances, key=lambda q: q[1])
+            recon_res[i] = float(res_sel[1])
+        elif containing:
+            res_sel = max(containing, key=lambda q: q[2])
+            recon_res[i] = c
+        if res_sel is not None:
+            res_top[i], res_bot[i], res_str[i] = (
+                float(res_sel[0]), float(res_sel[1]), float(res_sel[2]))
+
+        # ---- Liquidity: replicate canonical LiquidityState.step selection ----
+        active_up = [z for z in liq_up
+                     if (not z.get("broken")) and float(z["bottom"]) > c]
+        if active_up:
+            u = min(active_up, key=lambda q: float(q["bottom"]))
+            up_top[i], up_bot[i], up_lvl[i] = (
+                float(u["top"]), float(u["bottom"]), float(u["level"]))
+            recon_up[i] = float(u["level"])
+        active_down = [z for z in liq_down
+                       if (not z.get("broken")) and float(z["top"]) < c]
+        if active_down:
+            d = max(active_down, key=lambda q: float(q["top"]))
+            dn_top[i], dn_bot[i], dn_lvl[i] = (
+                float(d["top"]), float(d["bottom"]), float(d["level"]))
+            recon_dn[i] = float(d["level"])
+
+    audit = {
+        "sr_support_price_max_dev": _max_dev(recon_sup, sr_sup_ref),
+        "sr_resistance_price_max_dev": _max_dev(recon_res, sr_res_ref),
+        "liq_up_level_max_dev": _max_dev(recon_up, liq_up_level_ref),
+        "liq_dn_level_max_dev": _max_dev(recon_dn, liq_dn_level_ref),
+    }
+    return dict(sup_top=sup_top, sup_bottom=sup_bot, sup_strength=sup_str,
+                res_top=res_top, res_bottom=res_bot, res_strength=res_str,
+                liq_up_top=up_top, liq_up_bottom=up_bot, liq_up_level=up_lvl,
+                liq_dn_top=dn_top, liq_dn_bottom=dn_bot, liq_dn_level=dn_lvl,
+                audit=audit)
+
+
+def load_env_provenance(symbol):
+    """Record the R4 environment cache provenance (RC9)."""
+    out = {"symbol": symbol, "max_bars": None}
+    try:
+        with open(R4_ENV_MANIFEST) as f:
+            man = json.load(f)
+        ent = man.get(symbol) or (man.get("symbols") or {}).get(symbol)
+        if isinstance(ent, dict):
+            out.update({k: ent.get(k) for k in
+                        ("identity", "sha256", "rows", "max_bars", "contract_id",
+                         "code_identity", "execution_frame_sha256", "raw_sha256")})
+        out["cache_version"] = man.get("cache_version") or man.get("R4_ENV_CACHE_VERSION")
+    except Exception as exc:
+        out["manifest_error"] = str(exc)
+    return out
 
 
 def load_symbol_state(symbol: str) -> SymbolState:
-    """Load the m15 execution frame and canonical decision-time environment ONCE.
-
-    run_environment_m15 is the canonical owner for exec frame, features (m15_atr,
-    SR/Liquidity prices) and geom_by_decision (SR channels + liquidity zones).
-    capture_provenance=False so the persisted cache is used rather than recomputed.
-    """
     from research.liquidity_oracle_atlas.build_execution_environment_m15_v1 import (
         run_environment_m15,
     )
@@ -332,67 +429,64 @@ def load_symbol_state(symbol: str) -> SymbolState:
     feats = env["features"]
     geom = env["geom_by_decision"]
     n_frame = len(frame)
-    n_feat = len(feats)
-
-    # fail-closed: a partial/smoke env cache would silently truncate candidate paths
-    env_complete = (n_feat == n_frame) and (len(geom) == n_frame)
+    env_complete = (len(feats) == n_frame) and (len(geom) == n_frame)
     note = ""
     if not env_complete:
-        note = (f"env incomplete: features={n_feat} geom={len(geom)} frame={n_frame}; "
-                "symbol excluded from real-data validation")
-
-    high = frame["high"].to_numpy(np.float64)
-    low = frame["low"].to_numpy(np.float64)
-    close = frame["close"].to_numpy(np.float64)
-    open_ = frame["open"].to_numpy(np.float64)
-    segment = frame["segment"].to_numpy(np.int64)
-    trading_day = frame["trading_day"].to_numpy(object)
-    bar_start = frame["bar_start_time"].to_numpy(object)
-    ebi = frame["execution_bar_index"].to_numpy(np.int64)
+        note = (f"env incomplete: features={len(feats)} geom={len(geom)} "
+                f"frame={n_frame}; symbol excluded from real-data validation")
 
     def col(name):
         return (feats[name].to_numpy(np.float64) if name in feats.columns
                 else np.full(n_frame, np.nan))
 
-    atr0 = col("m15_atr")
-    sr_sup = col("m15_sr_support_price")
-    sr_res = col("m15_sr_resistance_price")
-    up_edge, dn_edge = _nearest_edge_levels(geom, n_frame, close)
-    # fall back to the canonical centre level only if no zone was resolvable
-    up_edge = np.where(np.isnan(up_edge), col("m15_liq_up_level_price"), up_edge)
-    dn_edge = np.where(np.isnan(dn_edge), col("m15_liq_down_level_price"), dn_edge)
+    close = frame["close"].to_numpy(np.float64)
+    atr = col("m15_atr")
+    sr_sup_ref = col("m15_sr_support_price")
+    sr_res_ref = col("m15_sr_resistance_price")
+    up_level_ref = col("m15_liq_up_level_price")
+    dn_level_ref = col("m15_liq_down_level_price")
+    zg = extract_zone_geometry(geom, n_frame, close, sr_sup_ref, sr_res_ref,
+                               up_level_ref, dn_level_ref)
 
-    return SymbolState(symbol, high, low, close, open_, segment, trading_day,
-                       bar_start, ebi, atr0, sr_sup, sr_res, up_edge, dn_edge,
-                       n_frame, env_complete, note)
+    st = SymbolState(
+        symbol, frame["high"].to_numpy(np.float64), frame["low"].to_numpy(np.float64),
+        close, frame["open"].to_numpy(np.float64), frame["segment"].to_numpy(np.int64),
+        frame["trading_day"].to_numpy(object),
+        frame["bar_start_time"].to_numpy(object),
+        frame["execution_bar_index"].to_numpy(np.int64),
+        atr,
+        zg["sup_top"], zg["sup_bottom"], zg["sup_strength"],
+        zg["res_top"], zg["res_bottom"], zg["res_strength"],
+        zg["liq_up_top"], zg["liq_up_bottom"], zg["liq_up_level"],
+        zg["liq_dn_top"], zg["liq_dn_bottom"], zg["liq_dn_level"],
+        sr_sup_ref, sr_res_ref, up_level_ref, dn_level_ref,
+        n_frame, env_complete, note)
+    st.env_provenance = load_env_provenance(symbol)
+    st.zone_audit = zg["audit"]
+    return st
 
 
 # --------------------------------------------------------------------------- #
-# 3. Horizon construction (segment / trading day / data end)                   #
+# 3. Horizon                                                                   #
 # --------------------------------------------------------------------------- #
 def build_horizon_indices(state: SymbolState, fill_idx: np.ndarray):
-    """Return (end_idx, td_end_idx dict) -- earliest of 5th-TD end, segment, data end.
-
-    Never uses oracle_exit_fill_time.
-    """
     n = state.n_bars
     seg = state.segment
     day = state.trading_day
 
-    # last bar index of the segment containing each bar
     seg_last = np.empty(n, dtype=np.int64)
     for s in np.unique(seg):
         pos = np.flatnonzero(seg == s)
         seg_last[pos] = pos[-1]
 
-    # trading-day ordinal -> last bar index with that ordinal
+    day_arr = np.asarray(day)
     uniq_days = pd.Index(day).unique()
     day_ord = np.empty(n, dtype=np.int64)
     ord_last = {}
     for o, d in enumerate(uniq_days):
-        pos = np.flatnonzero(np.asarray(day) == d)
+        pos = np.flatnonzero(day_arr == d)
         day_ord[pos] = o
-        ord_last[o] = pos[-1]
+        ord_last[o] = int(pos[-1])
     max_ord = len(uniq_days) - 1
 
     def last_of(ord_arr):
@@ -403,48 +497,45 @@ def build_horizon_indices(state: SymbolState, fill_idx: np.ndarray):
         return out
 
     f_ord = day_ord[fill_idx]
-    td_ends = {}
-    for k, name in TD_CHECKPOINTS:
-        td_ends[name] = last_of(f_ord + (k - 1))
-
+    td_ends = {name: last_of(f_ord + (k - 1)) for k, name in TD_CHECKPOINTS}
     seg_end = seg_last[fill_idx]
     data_end = np.full(len(fill_idx), n - 1, dtype=np.int64)
     end = np.minimum(np.minimum(td_ends["td5"], seg_end), data_end)
-    # trading-day checkpoints must also respect the segment/data truncation
     for name in td_ends:
         td_ends[name] = np.minimum(np.minimum(td_ends[name], seg_end), data_end)
     return end, td_ends
 
 
 # --------------------------------------------------------------------------- #
-# 4. Side-relative VIEW (raw identities preserved separately)                  #
+# 4. Side-relative boundaries (RC1 / RC3)                                      #
 # --------------------------------------------------------------------------- #
-def side_view(e9_long: np.ndarray, sr_support, sr_resistance,
-              liq_up, liq_down):
-    """Raw identities (support/resistance/liq_up/liq_down) are NEVER collapsed.
+def side_boundaries(e9_long, sup_top, sup_bottom, res_top, res_bottom,
+                    liq_up_top, liq_up_bottom, liq_dn_top, liq_dn_bottom):
+    """Return the boundary triple for each structural backstop plus ahead channels.
 
-    This only builds the side-relative projection used by the event state machine.
-    E9 LONG : backstop=support, ahead=resistance, liq ahead=up,    behind=down
-    E9 SHORT: backstop=resistance, ahead=support, liq ahead=down,  behind=up
+    LONG : SR backstop = support      ; liquidity-behind = LOWER liquidity
+    SHORT: SR backstop = resistance   ; liquidity-behind = UPPER liquidity
     """
     is_long = np.asarray(e9_long, dtype=bool)
-    backstop = np.where(is_long, sr_support, sr_resistance)
-    ahead_sr = np.where(is_long, sr_resistance, sr_support)
-    ahead_liq = np.where(is_long, liq_up, liq_down)
-    behind_liq = np.where(is_long, liq_down, liq_up)
-    return backstop, ahead_sr, ahead_liq, behind_liq
+    w = lambda a, b: np.where(is_long, a, b)
+    return {
+        "sr_enter": w(sup_top, res_bottom),
+        "sr_pierce": w(sup_bottom, res_top),
+        "sr_reclaim": w(sup_bottom, res_top),
+        "lb_enter": w(liq_dn_top, liq_up_bottom),
+        "lb_pierce": w(liq_dn_bottom, liq_up_top),
+        "lb_reclaim": w(liq_dn_bottom, liq_up_top),
+        "ahead_sr_touch": w(res_bottom, sup_top),
+        "ahead_sr_cross": w(res_top, sup_bottom),
+        "ahead_liq_touch": w(liq_up_bottom, liq_dn_top),
+        "ahead_liq_cross": w(liq_up_top, liq_dn_bottom),
+    }
 
 
+# --------------------------------------------------------------------------- #
+# 5. Alignment gates (RC6)                                                     #
+# --------------------------------------------------------------------------- #
 def build_anchors_for_symbol(e9_df: pd.DataFrame, state: SymbolState) -> dict:
-    """L1 anchors: join frozen Candidates to canonical decision-time state.
-
-    Runs the HARD fail-closed alignment gate (ruling 3): candidate_fill_index must be
-    a valid positional index into the symbol frame with matching execution_bar_index,
-    open price and bar_start_time. Any mismatch is STOP.
-
-    All frozen-at-decision state (ATR0, SR, Liquidity) is taken at the DECISION index,
-    matching the canonical struct33 convention `candidate_atr = m15_atr[decision_idx]`.
-    """
     sel = e9_df[e9_df["symbol"] == state.symbol].reset_index(drop=True)
     if len(sel) == 0:
         return None
@@ -452,98 +543,135 @@ def build_anchors_for_symbol(e9_df: pd.DataFrame, state: SymbolState) -> dict:
     dec = sel["candidate_decision_index"].to_numpy(np.int64)
     if int(fill.max()) >= state.n_bars or int(dec.max()) >= state.n_bars:
         raise RuntimeError("STOP_PATH_ATLAS_FILL_INDEX_OUT_OF_RANGE")
+
+    # (a) positional identity
     if not np.array_equal(state.execution_bar_index[fill], fill):
-        raise RuntimeError("STOP_PATH_ATLAS_FILL_ALIGNMENT_MISMATCH:index")
+        raise RuntimeError("STOP_ENTRY_PATH_FILL_ALIGNMENT_MISMATCH")
+    # (b) open price at the fill bar
     if not np.allclose(state.open[fill],
                        sel["candidate_fill_price"].to_numpy(np.float64), atol=1e-9):
-        raise RuntimeError("STOP_PATH_ATLAS_FILL_ALIGNMENT_MISMATCH:price")
-    ft = pd.to_datetime(sel["candidate_fill_time"]).to_numpy("datetime64[ns]")
-    bt = pd.to_datetime(state.bar_start_time[fill]).to_numpy("datetime64[ns]")
-    if not np.array_equal(ft, bt):
-        raise RuntimeError("STOP_PATH_ATLAS_FILL_ALIGNMENT_MISMATCH:time")
+        raise RuntimeError("STOP_ENTRY_PATH_FILL_ALIGNMENT_MISMATCH")
+    # (c) INDEPENDENT timestamp -> row lookup (does not reuse fill_index)
+    bar_ns = pd.to_datetime(state.bar_start_time).to_numpy("datetime64[ns]")
+    lookup = {}
+    for i, ts in enumerate(bar_ns):
+        lookup[int(ts.astype("int64"))] = i
+    fill_ns = pd.to_datetime(sel["candidate_fill_time"]).to_numpy("datetime64[ns]")
+    resolved = np.array([lookup.get(int(t.astype("int64")), -1) for t in fill_ns],
+                        dtype=np.int64)
+    if not np.array_equal(resolved, fill):
+        raise RuntimeError("STOP_ENTRY_PATH_FILL_ALIGNMENT_MISMATCH")
+    # (d) decision-time environment alignment
+    if not np.array_equal(fill, dec + 1):
+        raise RuntimeError("STOP_ENTRY_PATH_FILL_ALIGNMENT_MISMATCH")
+    dec_ns = pd.to_datetime(sel["candidate_decision_time"]).to_numpy("datetime64[ns]")
+    expect_dec = bar_ns[dec] + np.timedelta64(15, "m")
+    if not np.array_equal(dec_ns.astype("int64"), expect_dec.astype("int64")):
+        raise RuntimeError("STOP_ENTRY_PATH_DECISION_ALIGNMENT_MISMATCH")
 
     e9_long = (sel["e9_direction"].to_numpy(object) == "LONG")
-    sr_sup = state.sr_support_price[dec]
-    sr_res = state.sr_resistance_price[dec]
-    liq_up = state.liq_up_edge[dec]
-    liq_dn = state.liq_down_edge[dec]
-    backstop, ahead_sr, ahead_liq, behind_liq = side_view(
-        e9_long, sr_sup, sr_res, liq_up, liq_dn)
+    b = side_boundaries(
+        e9_long,
+        state.sup_top[dec], state.sup_bottom[dec],
+        state.res_top[dec], state.res_bottom[dec],
+        state.liq_up_top[dec], state.liq_up_bottom[dec],
+        state.liq_dn_top[dec], state.liq_dn_bottom[dec])
     end_idx, td_ends = build_horizon_indices(state, fill)
     return {
         "df": sel,
         "entry_idx": fill,
+        "dec_idx": dec,
         "end_idx": end_idx,
         "entry_price": sel["candidate_fill_price"].to_numpy(np.float64),
         "atr0": state.atr0_col[dec],
         "side": np.where(e9_long, 1.0, -1.0),
         "entry_segment": state.segment[fill],
-        "backstop_level": backstop,
-        "ahead_sr_level": ahead_sr,
-        "ahead_liq_level": ahead_liq,
-        "behind_liq_level": behind_liq,
         "td_ends": td_ends,
-        "raw_sr_support": sr_sup,
-        "raw_sr_resistance": sr_res,
-        "raw_liq_up": liq_up,
-        "raw_liq_down": liq_dn,
+        **b,
+        # raw canonical identities preserved (never collapsed)
+        "raw_sup_top": state.sup_top[dec], "raw_sup_bottom": state.sup_bottom[dec],
+        "raw_res_top": state.res_top[dec], "raw_res_bottom": state.res_bottom[dec],
+        "raw_liq_up_top": state.liq_up_top[dec],
+        "raw_liq_up_bottom": state.liq_up_bottom[dec],
+        "raw_liq_dn_top": state.liq_dn_top[dec],
+        "raw_liq_dn_bottom": state.liq_dn_bottom[dec],
     }
 
 
-def run_symbol_paths(state: SymbolState, anchors: dict) -> dict:
-    """Production path scan for one symbol (arrays already loaded once)."""
-    return scan_paths_streaming(
-        entry_idx=anchors["entry_idx"],
-        end_idx=anchors["end_idx"],
-        entry_price=anchors["entry_price"],
-        atr0=anchors["atr0"],
-        side=anchors["side"],
-        high=state.high,
-        low=state.low,
-        close=state.close,
-        segment=state.segment,
-        entry_segment=anchors["entry_segment"],
-        backstop_level=anchors["backstop_level"],
-        ahead_sr_level=anchors["ahead_sr_level"],
-        ahead_liq_level=anchors["ahead_liq_level"],
-        td_ends=anchors["td_ends"],
-    )
+# --------------------------------------------------------------------------- #
+# 6. Production kernel                                                         #
+# --------------------------------------------------------------------------- #
+def _new_backstop_state(n):
+    return dict(first_touch=np.full(n, -1, np.int32),
+                first_pierce=np.full(n, -1, np.int32),
+                first_reclaim=np.full(n, -1, np.int32),
+                first_failed=np.full(n, -1, np.int32),
+                same_bar=np.zeros(n, bool),
+                pierced=np.zeros(n, bool),
+                reclaimed=np.zeros(n, bool))
 
 
-# --------------------------------------------------------------------------- #
-# 5. Production kernel: loop over TIME, vectorize over Candidates              #
-# --------------------------------------------------------------------------- #
+def _update_backstop(st, valid, step, side, lo, hi, cl,
+                     enter_b, pierce_b, reclaim_b):
+    # touch/ENTER the zone
+    t = valid & (st["first_touch"] < 0) & np.where(side > 0, lo <= enter_b, hi >= enter_b)
+    st["first_touch"][t] = step
+    # PIERCE THROUGH the zone (never the same thing as entering it)
+    p = valid & ~st["pierced"] & np.where(side > 0, lo < pierce_b, hi > pierce_b)
+    st["first_pierce"][p] = step
+    st["pierced"][p] = True
+    valid_close = np.where(side > 0, cl >= reclaim_b, cl <= reclaim_b)
+    sbr = p & valid_close
+    st["same_bar"][sbr] = True
+    st["first_reclaim"][sbr] = step
+    st["reclaimed"][sbr] = True
+    late = valid & st["pierced"] & ~st["reclaimed"] & valid_close
+    st["first_reclaim"][late] = step
+    st["reclaimed"][late] = True
+    f = valid & st["reclaimed"] & (st["first_failed"] < 0) & (~valid_close)
+    st["first_failed"][f] = step
+
+
+def _finalize_backstop(st):
+    return {
+        "first_touch": st["first_touch"],
+        "first_pierce": st["first_pierce"],
+        "same_bar_reclaim": st["same_bar"],
+        "first_reclaim": st["first_reclaim"],
+        "bars_to_reclaim": np.where(
+            (st["first_pierce"] >= 0) & (st["first_reclaim"] >= 0),
+            st["first_reclaim"] - st["first_pierce"], -1).astype(np.int32),
+        "first_failed_reclaim": st["first_failed"],
+        "break_continue": (st["first_pierce"] >= 0) & (st["first_reclaim"] < 0),
+    }
+
+
 def scan_paths_streaming(*, entry_idx, end_idx, entry_price, atr0, side,
                          high, low, close, segment, entry_segment,
-                         backstop_level, ahead_sr_level, ahead_liq_level,
-                         td_ends=None, counters=None):
-    """Streaming path/event scan. No Python loop over Candidate rows.
-
-    Returns MFE/MAE accumulators, event first-passage indices, checkpoint snapshots.
-    Convention: not triggered = -1. A NaN zone means the event is UNAVAILABLE and is
-    never fabricated (level comparisons against NaN are always False).
-    """
+                         sr_enter, sr_pierce, sr_reclaim,
+                         lb_enter, lb_pierce, lb_reclaim,
+                         ahead_sr_touch, ahead_sr_cross,
+                         ahead_liq_touch, ahead_liq_cross,
+                         td_ends=None):
+    """Production: loop over TIME, vectorized over Candidates. No Candidate loop."""
     n = len(entry_idx)
     mfe = np.zeros(n, dtype=np.float64)
     mae = np.zeros(n, dtype=np.float64)
+    sr = _new_backstop_state(n)
+    lb = _new_backstop_state(n)
 
-    first_touch = np.full(n, -1, dtype=np.int32)
-    first_pierce = np.full(n, -1, dtype=np.int32)
-    first_reclaim = np.full(n, -1, dtype=np.int32)
-    first_failed_reclaim = np.full(n, -1, dtype=np.int32)
-    first_ahead_sr = np.full(n, -1, dtype=np.int32)
-    first_ahead_sr_cross = np.full(n, -1, dtype=np.int32)
-    first_ahead_liq = np.full(n, -1, dtype=np.int32)
-    first_ahead_liq_cross = np.full(n, -1, dtype=np.int32)
+    a_sr_touch = np.full(n, -1, np.int32)
+    a_sr_cross = np.full(n, -1, np.int32)
+    a_liq_touch = np.full(n, -1, np.int32)
+    a_liq_cross = np.full(n, -1, np.int32)
+    mfe_at_sr = np.full(n, np.nan)
+    mae_before_sr = np.full(n, np.nan)
+    mfe_at_liq = np.full(n, np.nan)
+    mae_before_liq = np.full(n, np.nan)
 
-    same_bar_reclaim = np.zeros(n, dtype=bool)
-    pierced = np.zeros(n, dtype=bool)
-    reclaimed = np.zeros(n, dtype=bool)
-
-    mfe_at_sr = np.full(n, np.nan, dtype=np.float64)
-    mae_before_sr = np.full(n, np.nan, dtype=np.float64)
-
-    snaps = {name: {"mfe": None, "mae": None, "r": None} for name in CHECKPOINT_NAMES}
+    # RC4: NaN-filled; a truncated Candidate stays NaN (never inherits a shorter path)
+    snaps = {name: {"mfe": np.full(n, np.nan), "mae": np.full(n, np.nan),
+                    "r": np.full(n, np.nan)} for name in CHECKPOINT_NAMES}
     bar_steps = dict(BAR_CHECKPOINTS)
 
     n_bars = len(close)
@@ -557,7 +685,6 @@ def scan_paths_streaming(*, entry_idx, end_idx, entry_price, atr0, side,
         valid &= segment[safe_j] == entry_segment
         if not valid.any():
             continue
-
         hi = high[safe_j]
         lo = low[safe_j]
         cl = close[safe_j]
@@ -567,202 +694,196 @@ def scan_paths_streaming(*, entry_idx, end_idx, entry_price, atr0, side,
         mfe[valid] = np.maximum(mfe[valid], fav[valid])
         mae[valid] = np.maximum(mae[valid], adv[valid])
 
-        B = backstop_level
-        # touch: price reaches the backstop without piercing
-        touch_now = valid & (first_touch < 0) & np.where(
-            side > 0, lo <= B, hi >= B)
-        first_touch[touch_now] = step
+        _update_backstop(sr, valid, step, side, lo, hi, cl,
+                         sr_enter, sr_pierce, sr_reclaim)
+        _update_backstop(lb, valid, step, side, lo, hi, cl,
+                         lb_enter, lb_pierce, lb_reclaim)
 
-        pierce_now = valid & ~pierced & np.where(side > 0, lo < B, hi > B)
-        first_pierce[pierce_now] = step
-        pierced[pierce_now] = True
+        t1 = valid & (a_sr_touch < 0) & np.where(
+            side > 0, hi >= ahead_sr_touch, lo <= ahead_sr_touch)
+        a_sr_touch[t1] = step
+        mfe_at_sr[t1] = mfe[t1]
+        mae_before_sr[t1] = mae[t1]
+        c1 = valid & (a_sr_cross < 0) & np.where(
+            side > 0, cl > ahead_sr_cross, cl < ahead_sr_cross)
+        a_sr_cross[c1] = step
 
-        valid_close = np.where(side > 0, cl >= B, cl <= B)
-
-        sbr = pierce_now & valid_close
-        same_bar_reclaim[sbr] = True
-        first_reclaim[sbr] = step
-        reclaimed[sbr] = True
-
-        late = valid & pierced & ~reclaimed & valid_close
-        first_reclaim[late] = step
-        reclaimed[late] = True
-
-        fail = valid & reclaimed & (first_failed_reclaim < 0) & (~valid_close)
-        first_failed_reclaim[fail] = step
-
-        # ahead SR / liquidity: touch = reach, cross = strictly through
-        sr_touch = valid & (first_ahead_sr < 0) & np.where(
-            side > 0, hi >= ahead_sr_level, lo <= ahead_sr_level)
-        first_ahead_sr[sr_touch] = step
-        mfe_at_sr[sr_touch] = mfe[sr_touch]
-        mae_before_sr[sr_touch] = mae[sr_touch]
-
-        sr_cross = valid & (first_ahead_sr_cross < 0) & np.where(
-            side > 0, cl > ahead_sr_level, cl < ahead_sr_level)
-        first_ahead_sr_cross[sr_cross] = step
-
-        liq_touch = valid & (first_ahead_liq < 0) & np.where(
-            side > 0, hi >= ahead_liq_level, lo <= ahead_liq_level)
-        first_ahead_liq[liq_touch] = step
-
-        liq_cross = valid & (first_ahead_liq_cross < 0) & np.where(
-            side > 0, cl > ahead_liq_level, cl < ahead_liq_level)
-        first_ahead_liq_cross[liq_cross] = step
+        t2 = valid & (a_liq_touch < 0) & np.where(
+            side > 0, hi >= ahead_liq_touch, lo <= ahead_liq_touch)
+        a_liq_touch[t2] = step
+        mfe_at_liq[t2] = mfe[t2]
+        mae_before_liq[t2] = mae[t2]
+        c2 = valid & (a_liq_cross < 0) & np.where(
+            side > 0, cl > ahead_liq_cross, cl < ahead_liq_cross)
+        a_liq_cross[c2] = step
 
         if step in bar_steps:
             name = bar_steps[step]
-            if snaps[name]["mfe"] is None:
-                snaps[name] = {"mfe": mfe.copy(), "mae": mae.copy(),
-                               "r": (side * (cl - entry_price) / atr0).copy()}
+            snaps[name]["mfe"][valid] = mfe[valid]
+            snaps[name]["mae"][valid] = mae[valid]
+            snaps[name]["r"][valid] = (side * (cl - entry_price) / atr0)[valid]
         if td_ends is not None:
             for name, arr in td_ends.items():
                 hit = valid & (j == arr)
-                if hit.any() and snaps[name]["mfe"] is None:
-                    snaps[name] = {"mfe": np.where(hit, mfe, np.nan),
-                                   "mae": np.where(hit, mae, np.nan),
-                                   "r": np.where(hit, side * (cl - entry_price) / atr0,
-                                                 np.nan)}
+                if hit.any():
+                    snaps[name]["mfe"][hit] = mfe[hit]
+                    snaps[name]["mae"][hit] = mae[hit]
+                    snaps[name]["r"][hit] = (side * (cl - entry_price) / atr0)[hit]
 
-    bars_to_reclaim = np.where(
-        (first_pierce >= 0) & (first_reclaim >= 0),
-        first_reclaim - first_pierce, -1).astype(np.int32)
-    break_continue = (first_pierce >= 0) & (first_reclaim < 0)
-
-    return {
-        "mfe_final": mfe,
-        "mae_final": mae,
-        "first_touch": first_touch,
-        "first_pierce": first_pierce,
-        "first_reclaim": first_reclaim,
-        "same_bar_reclaim": same_bar_reclaim,
-        "bars_to_reclaim": bars_to_reclaim,
-        "first_failed_reclaim": first_failed_reclaim,
-        "break_continue": break_continue,
-        "first_ahead_sr_touch": first_ahead_sr,
-        "first_ahead_sr_cross": first_ahead_sr_cross,
-        "first_ahead_liq_touch": first_ahead_liq,
-        "first_ahead_liq_cross": first_ahead_liq_cross,
-        "mfe_at_first_ahead_sr": mfe_at_sr,
-        "mae_before_first_ahead_sr": mae_before_sr,
+    out = {"mfe_final": mfe, "mae_final": mae}
+    for pfx, st in (("sr", sr), ("lb", lb)):
+        for k, v in _finalize_backstop(st).items():
+            out[f"{pfx}_{k}"] = v
+    out.update({
+        "first_ahead_sr_touch": a_sr_touch, "first_ahead_sr_cross": a_sr_cross,
+        "first_ahead_liq_touch": a_liq_touch, "first_ahead_liq_cross": a_liq_cross,
+        "mfe_at_first_ahead_sr": mfe_at_sr, "mae_before_first_ahead_sr": mae_before_sr,
+        "mfe_at_first_ahead_liq": mfe_at_liq, "mae_before_first_ahead_liq": mae_before_liq,
         "checkpoints": snaps,
-    }
+    })
+    return out
+
+
+def run_symbol_paths(state: SymbolState, anchors: dict) -> dict:
+    return scan_paths_streaming(
+        entry_idx=anchors["entry_idx"], end_idx=anchors["end_idx"],
+        entry_price=anchors["entry_price"], atr0=anchors["atr0"],
+        side=anchors["side"], high=state.high, low=state.low, close=state.close,
+        segment=state.segment, entry_segment=anchors["entry_segment"],
+        sr_enter=anchors["sr_enter"], sr_pierce=anchors["sr_pierce"],
+        sr_reclaim=anchors["sr_reclaim"],
+        lb_enter=anchors["lb_enter"], lb_pierce=anchors["lb_pierce"],
+        lb_reclaim=anchors["lb_reclaim"],
+        ahead_sr_touch=anchors["ahead_sr_touch"],
+        ahead_sr_cross=anchors["ahead_sr_cross"],
+        ahead_liq_touch=anchors["ahead_liq_touch"],
+        ahead_liq_cross=anchors["ahead_liq_cross"],
+        td_ends=anchors["td_ends"])
 
 
 # --------------------------------------------------------------------------- #
-# 6. Reference kernel (T0/T1 only -- never in the production call chain)       #
+# 7. Reference kernel (T0/T1 only)                                             #
 # --------------------------------------------------------------------------- #
 def scan_paths_reference(*, entry_idx, end_idx, entry_price, atr0, side,
                          high, low, close, segment, entry_segment,
-                         backstop_level, ahead_sr_level, ahead_liq_level,
+                         sr_enter, sr_pierce, sr_reclaim,
+                         lb_enter, lb_pierce, lb_reclaim,
+                         ahead_sr_touch, ahead_sr_cross,
+                         ahead_liq_touch, ahead_liq_cross,
                          td_ends=None):
-    """Deliberately slow per-candidate reference. Allowed in T0/T1 only.
-
-    Must never bump production counters: `candidate_python_loop_count` and
-    `reference_call_count_production` are PRODUCTION invariants and stay 0.
-    """
+    """Deliberately slow per-candidate reference. T0/T1 only."""
     n = len(entry_idx)
-    out = {k: (np.zeros(n) if k in ("mfe_final", "mae_final")
-               else (np.zeros(n, bool) if k == "same_bar_reclaim" or k == "break_continue"
-                     else np.full(n, -1, dtype=np.int32)))
-           for k in ("mfe_final", "mae_final", "first_touch", "first_pierce",
-                     "first_reclaim", "same_bar_reclaim", "bars_to_reclaim",
-                     "first_failed_reclaim", "break_continue",
-                     "first_ahead_sr_touch", "first_ahead_sr_cross",
-                     "first_ahead_liq_touch", "first_ahead_liq_cross")}
-    mfe_at = np.full(n, np.nan)
-    mae_before = np.full(n, np.nan)
+    res = {"mfe_final": np.zeros(n), "mae_final": np.zeros(n)}
+    for pfx in ("sr", "lb"):
+        res[f"{pfx}_first_touch"] = np.full(n, -1, np.int32)
+        res[f"{pfx}_first_pierce"] = np.full(n, -1, np.int32)
+        res[f"{pfx}_first_reclaim"] = np.full(n, -1, np.int32)
+        res[f"{pfx}_first_failed_reclaim"] = np.full(n, -1, np.int32)
+        res[f"{pfx}_same_bar_reclaim"] = np.zeros(n, bool)
+        res[f"{pfx}_bars_to_reclaim"] = np.full(n, -1, np.int32)
+        res[f"{pfx}_break_continue"] = np.zeros(n, bool)
+    for k in ("first_ahead_sr_touch", "first_ahead_sr_cross",
+              "first_ahead_liq_touch", "first_ahead_liq_cross"):
+        res[k] = np.full(n, -1, np.int32)
+    for k in ("mfe_at_first_ahead_sr", "mae_before_first_ahead_sr",
+              "mfe_at_first_ahead_liq", "mae_before_first_ahead_liq"):
+        res[k] = np.full(n, np.nan)
     snaps = {name: {"mfe": np.full(n, np.nan), "mae": np.full(n, np.nan),
                     "r": np.full(n, np.nan)} for name in CHECKPOINT_NAMES}
     bar_steps = dict(BAR_CHECKPOINTS)
 
-    for i in range(n):                      # per-candidate loop (reference only)
-        a = int(entry_idx[i]); e = int(end_idx[i]); seg = entry_segment[i]
+    for i in range(n):
+        a = int(entry_idx[i]); e = int(end_idx[i]); seg = int(entry_segment[i])
         p0 = float(entry_price[i]); atr = float(atr0[i]); s = float(side[i])
-        B = float(backstop_level[i]); AS = float(ahead_sr_level[i])
-        AL = float(ahead_liq_level[i])
-        mfe = 0.0; mae = 0.0
-        pierced = False; reclaimed = False
+        st = {"sr": {"pierced": False, "reclaimed": False},
+              "lb": {"pierced": False, "reclaimed": False}}
+        mfe = 0.0
+        mae = 0.0
         for step in range(int(e - a) + 1):
             j = a + step
             if j > e or j >= len(close) or segment[j] != seg:
                 continue
             hi = float(high[j]); lo = float(low[j]); cl = float(close[j])
-            fav = ((hi - p0) if s > 0 else (p0 - lo)) / atr
-            adv = ((p0 - lo) if s > 0 else (hi - p0)) / atr
-            mfe = max(mfe, fav); mae = max(mae, adv)
+            mfe = max(mfe, ((hi - p0) if s > 0 else (p0 - lo)) / atr)
+            mae = max(mae, ((p0 - lo) if s > 0 else (hi - p0)) / atr)
 
-            if out["first_touch"][i] < 0:
-                if (s > 0 and lo <= B) or (s < 0 and hi >= B):
-                    out["first_touch"][i] = step
-            pierce_now = (not pierced) and ((s > 0 and lo < B) or (s < 0 and hi > B))
-            if pierce_now:
-                out["first_pierce"][i] = step
-                pierced = True
-            valid_close = (cl >= B) if s > 0 else (cl <= B)
-            if pierce_now and valid_close:
-                out["same_bar_reclaim"][i] = True
-                out["first_reclaim"][i] = step
-                reclaimed = True
-            elif pierced and (not reclaimed) and valid_close:
-                out["first_reclaim"][i] = step
-                reclaimed = True
-            if reclaimed and out["first_failed_reclaim"][i] < 0 and (not valid_close):
-                out["first_failed_reclaim"][i] = step
+            for pfx, (eb, pb, rb) in (
+                    ("sr", (float(sr_enter[i]), float(sr_pierce[i]), float(sr_reclaim[i]))),
+                    ("lb", (float(lb_enter[i]), float(lb_pierce[i]), float(lb_reclaim[i])))):
+                if res[f"{pfx}_first_touch"][i] < 0 and (
+                        (s > 0 and lo <= eb) or (s < 0 and hi >= eb)):
+                    res[f"{pfx}_first_touch"][i] = step
+                pierce_now = (not st[pfx]["pierced"]) and (
+                    (s > 0 and lo < pb) or (s < 0 and hi > pb))
+                if pierce_now:
+                    res[f"{pfx}_first_pierce"][i] = step
+                    st[pfx]["pierced"] = True
+                vc = (cl >= rb) if s > 0 else (cl <= rb)
+                if pierce_now and vc:
+                    res[f"{pfx}_same_bar_reclaim"][i] = True
+                    res[f"{pfx}_first_reclaim"][i] = step
+                    st[pfx]["reclaimed"] = True
+                elif st[pfx]["pierced"] and not st[pfx]["reclaimed"] and vc:
+                    res[f"{pfx}_first_reclaim"][i] = step
+                    st[pfx]["reclaimed"] = True
+                if (st[pfx]["reclaimed"]
+                        and res[f"{pfx}_first_failed_reclaim"][i] < 0 and not vc):
+                    res[f"{pfx}_first_failed_reclaim"][i] = step
 
-            if out["first_ahead_sr_touch"][i] < 0 and (
-                    (s > 0 and hi >= AS) or (s < 0 and lo <= AS)):
-                out["first_ahead_sr_touch"][i] = step
-                mfe_at[i] = mfe; mae_before[i] = mae
-            if out["first_ahead_sr_cross"][i] < 0 and (
-                    (s > 0 and cl > AS) or (s < 0 and cl < AS)):
-                out["first_ahead_sr_cross"][i] = step
-            if out["first_ahead_liq_touch"][i] < 0 and (
-                    (s > 0 and hi >= AL) or (s < 0 and lo <= AL)):
-                out["first_ahead_liq_touch"][i] = step
-            if out["first_ahead_liq_cross"][i] < 0 and (
-                    (s > 0 and cl > AL) or (s < 0 and cl < AL)):
-                out["first_ahead_liq_cross"][i] = step
+            if res["first_ahead_sr_touch"][i] < 0 and (
+                    (s > 0 and hi >= float(ahead_sr_touch[i]))
+                    or (s < 0 and lo <= float(ahead_sr_touch[i]))):
+                res["first_ahead_sr_touch"][i] = step
+                res["mfe_at_first_ahead_sr"][i] = mfe
+                res["mae_before_first_ahead_sr"][i] = mae
+            if res["first_ahead_sr_cross"][i] < 0 and (
+                    (s > 0 and cl > float(ahead_sr_cross[i]))
+                    or (s < 0 and cl < float(ahead_sr_cross[i]))):
+                res["first_ahead_sr_cross"][i] = step
+            if res["first_ahead_liq_touch"][i] < 0 and (
+                    (s > 0 and hi >= float(ahead_liq_touch[i]))
+                    or (s < 0 and lo <= float(ahead_liq_touch[i]))):
+                res["first_ahead_liq_touch"][i] = step
+                res["mfe_at_first_ahead_liq"][i] = mfe
+                res["mae_before_first_ahead_liq"][i] = mae
+            if res["first_ahead_liq_cross"][i] < 0 and (
+                    (s > 0 and cl > float(ahead_liq_cross[i]))
+                    or (s < 0 and cl < float(ahead_liq_cross[i]))):
+                res["first_ahead_liq_cross"][i] = step
 
             if step in bar_steps:
-                snaps[bar_steps[step]]["mfe"][i] = mfe
-                snaps[bar_steps[step]]["mae"][i] = mae
-                snaps[bar_steps[step]]["r"][i] = s * (cl - p0) / atr
+                nm = bar_steps[step]
+                snaps[nm]["mfe"][i] = mfe
+                snaps[nm]["mae"][i] = mae
+                snaps[nm]["r"][i] = s * (cl - p0) / atr
             if td_ends is not None:
-                for name, arr in td_ends.items():
+                for nm, arr in td_ends.items():
                     if j == int(arr[i]):
-                        snaps[name]["mfe"][i] = mfe
-                        snaps[name]["mae"][i] = mae
-                        snaps[name]["r"][i] = s * (cl - p0) / atr
+                        snaps[nm]["mfe"][i] = mfe
+                        snaps[nm]["mae"][i] = mae
+                        snaps[nm]["r"][i] = s * (cl - p0) / atr
 
-        out["mfe_final"][i] = mfe
-        out["mae_final"][i] = mae
-        out["bars_to_reclaim"][i] = (
-            (out["first_reclaim"][i] - out["first_pierce"][i])
-            if (out["first_pierce"][i] >= 0 and out["first_reclaim"][i] >= 0) else -1)
-        out["break_continue"][i] = (
-            out["first_pierce"][i] >= 0 and out["first_reclaim"][i] < 0)
-
-    out["mfe_at_first_ahead_sr"] = mfe_at
-    out["mae_before_first_ahead_sr"] = mae_before
-    out["checkpoints"] = snaps
-    return out
+        res["mfe_final"][i] = mfe
+        res["mae_final"][i] = mae
+        for pfx in ("sr", "lb"):
+            res[f"{pfx}_bars_to_reclaim"][i] = (
+                res[f"{pfx}_first_reclaim"][i] - res[f"{pfx}_first_pierce"][i]
+                if (res[f"{pfx}_first_pierce"][i] >= 0
+                    and res[f"{pfx}_first_reclaim"][i] >= 0) else -1)
+            res[f"{pfx}_break_continue"][i] = (
+                res[f"{pfx}_first_pierce"][i] >= 0
+                and res[f"{pfx}_first_reclaim"][i] < 0)
+    res["checkpoints"] = snaps
+    return res
 
 
 # --------------------------------------------------------------------------- #
-# 7. Statistics: whole-gid cluster bootstrap                                   #
+# 8. Statistics                                                                #
 # --------------------------------------------------------------------------- #
 def cluster_bootstrap_gid(values, gid, w=None, B=2000, seed=20260924):
-    """Resample WHOLE Oracle opportunities (gid), never rows.
-
-    Within a trade the value is aggregated with the canonical sample_weight_raw; each
-    opportunity then counts EXACTLY ONCE in the resample (canonical sample_weight_raw
-    sums to 1 per opportunity, so opportunities are equally weighted). Candidate rows
-    are never independent units.
-    """
     values = np.asarray(values, dtype=np.float64)
     gid = np.asarray(gid, dtype=object)
-    w = np.ones(len(values), dtype=np.float64) if w is None else np.asarray(w, np.float64)
+    w = np.ones(len(values)) if w is None else np.asarray(w, np.float64)
     ug, inv = np.unique(gid, return_inverse=True)
     num = np.bincount(inv, weights=values * w, minlength=len(ug))
     den = np.bincount(inv, weights=w, minlength=len(ug))
@@ -774,13 +895,59 @@ def cluster_bootstrap_gid(values, gid, w=None, B=2000, seed=20260924):
     means = np.empty(B, dtype=np.float64)
     for b in range(B):
         means[b] = trade_mean[rng.integers(0, k, size=k)].mean()
-    return (float(trade_mean.mean()),
-            float(np.quantile(means, 0.025)),
+    return (float(trade_mean.mean()), float(np.quantile(means, 0.025)),
             float(np.quantile(means, 0.975)))
 
 
+def delta_ps_cluster_bootstrap(ps, correct, gid, w, B=2000, seed=20260924):
+    """Primary contrast delta_PS = weighted_mean(PS|correct) - weighted_mean(PS|wrong).
+
+    Bootstrap unit is the WHOLE gid: every replicate resamples gids with replacement,
+    carries all Candidate rows of a sampled gid together, and recomputes BOTH the
+    correct and the wrong weighted mean inside the SAME replicate before differencing.
+    This preserves the cluster dependence of a gid that contributes both correct and
+    wrong Candidates. The two groups are never bootstrapped independently.
+    """
+    ps = np.asarray(ps, dtype=np.float64)
+    correct = np.asarray(correct).astype(bool)
+    gid = np.asarray(gid, dtype=object)
+    w = np.asarray(w, dtype=np.float64)
+    ok = np.isfinite(ps) & np.isfinite(w) & (w > 0)
+    ps, correct, gid, w = ps[ok], correct[ok], gid[ok], w[ok]
+    if ps.size == 0:
+        return {"point": None, "ci_low": None, "ci_high": None,
+                "n_gids": 0, "correct_mass": 0.0, "wrong_mass": 0.0}
+
+    ug, inv = np.unique(gid, return_inverse=True)
+    wc = np.where(correct, w, 0.0)
+    ww = np.where(~correct, w, 0.0)
+    num_c = np.bincount(inv, weights=ps * wc, minlength=len(ug))
+    den_c = np.bincount(inv, weights=wc, minlength=len(ug))
+    num_w = np.bincount(inv, weights=ps * ww, minlength=len(ug))
+    den_w = np.bincount(inv, weights=ww, minlength=len(ug))
+
+    k = len(ug)
+    rng = np.random.default_rng(seed)
+    deltas = np.empty(B, dtype=np.float64)
+    for b in range(B):
+        idx = rng.integers(0, k, size=k)
+        dc = den_c[idx].sum()
+        dw = den_w[idx].sum()
+        mc = num_c[idx].sum() / dc if dc > 0 else np.nan
+        mw = num_w[idx].sum() / dw if dw > 0 else np.nan
+        deltas[b] = mc - mw
+    Dc = float(den_c.sum())
+    Dw = float(den_w.sum())
+    point = ((num_c.sum() / Dc) if Dc > 0 else np.nan) - (
+        (num_w.sum() / Dw) if Dw > 0 else np.nan)
+    return {"point": float(point),
+            "ci_low": float(np.nanquantile(deltas, 0.025)),
+            "ci_high": float(np.nanquantile(deltas, 0.975)),
+            "n_gids": int(k), "correct_mass": Dc, "wrong_mass": Dw,
+            "n_rows": int(ps.size)}
+
+
 def group_stats(values, gid, w):
-    """Weighted mean / median / quantiles with canonical sample_weight_raw."""
     v = np.asarray(values, dtype=np.float64)
     w = np.asarray(w, dtype=np.float64)
     ok = np.isfinite(v) & np.isfinite(w) & (w > 0)
@@ -792,8 +959,7 @@ def group_stats(values, gid, w):
     order = np.argsort(vv)
     vs, ws = vv[order], ww[order]
     cw = np.cumsum(ws)
-    cut = 0.5 * cw[-1]
-    med = float(vs[int(np.searchsorted(cw, cut))])
+    med = float(vs[int(np.searchsorted(cw, 0.5 * cw[-1]))])
     qs = {}
     for q in (10, 25, 50, 75, 90):
         c = (q / 100.0) * cw[-1]
@@ -803,40 +969,76 @@ def group_stats(values, gid, w):
 
 
 # --------------------------------------------------------------------------- #
-# 8. Differential harness (shared by T1 tests and the manifest generator)      #
+# 9. Differential harness (RC5)                                                #
 # --------------------------------------------------------------------------- #
-DIFF_FIELDS = ("mfe_final", "mae_final", "first_touch", "first_pierce",
-               "first_reclaim", "same_bar_reclaim", "bars_to_reclaim",
-               "first_failed_reclaim", "break_continue",
-               "first_ahead_sr_touch", "first_ahead_sr_cross",
-               "first_ahead_liq_touch", "first_ahead_liq_cross")
+DIFF_FIELDS = (
+    "mfe_final", "mae_final",
+    "sr_first_touch", "sr_first_pierce", "sr_same_bar_reclaim", "sr_first_reclaim",
+    "sr_bars_to_reclaim", "sr_first_failed_reclaim", "sr_break_continue",
+    "lb_first_touch", "lb_first_pierce", "lb_same_bar_reclaim", "lb_first_reclaim",
+    "lb_bars_to_reclaim", "lb_first_failed_reclaim", "lb_break_continue",
+    "first_ahead_sr_touch", "first_ahead_sr_cross",
+    "first_ahead_liq_touch", "first_ahead_liq_cross",
+    "mfe_at_first_ahead_sr", "mae_before_first_ahead_sr",
+    "mfe_at_first_ahead_liq", "mae_before_first_ahead_liq",
+)
+
+
+def _cmp(a, b, out):
+    """Compare two arrays; NaN/value mask mismatch counts as a mismatch."""
+    a = np.asarray(a)
+    b = np.asarray(b)
+    cells = int(a.size)
+    out["cells"] += cells
+    if np.issubdtype(a.dtype, np.bool_) or np.issubdtype(a.dtype, np.integer):
+        d = a != b
+    else:
+        na, nb = np.isnan(a), np.isnan(b)
+        if np.array_equal(na, nb):
+            d = np.zeros(a.shape, bool)
+            if (~na).any():
+                d = np.zeros(a.shape, bool)
+                d[~na] = np.abs(a[~na] - b[~na]) > 1e-12
+        else:
+            d = na != nb
+    if d.any():
+        out["mismatch"] += int(d.sum())
+        if out["first_mismatch"] is None:
+            out["first_mismatch"] = int(np.flatnonzero(d)[0])
+    return out
 
 
 def diff_reference_vs_production(case: dict) -> dict:
-    """Compare Reference vs Production field by field."""
-    p = scan_paths_streaming(**case)
-    r = scan_paths_reference(**case)
-    rows = 0
-    cells = 0
-    mismatch = 0
-    maxerr = 0.0
-    first = None
+    _sig = inspect.signature(scan_paths_streaming)
+    clean = {k: v for k, v in case.items() if k in _sig.parameters}
+    p = scan_paths_streaming(**clean)
+    r = scan_paths_reference(**clean)
+    out = {"rows": len(p["mfe_final"]), "cells": 0, "mismatch": 0,
+           "max_abs_error": 0.0, "first_mismatch": None}
     for f in DIFF_FIELDS:
-        a = np.asarray(p[f])
-        b = np.asarray(r[f])
-        rows = len(a)
-        cells += int(a.size)
-        if a.dtype == bool or np.issubdtype(a.dtype, np.integer):
-            d = a != b
-            if d.any():
-                mismatch += int(d.sum())
-                if first is None:
-                    first = (f, int(np.flatnonzero(d)[0]))
-        else:
-            e = float(np.nanmax(np.abs(a - b))) if a.size else 0.0
-            maxerr = max(maxerr, e)
-    return {"rows": rows, "cells": cells, "mismatch": mismatch,
-            "max_abs_error": maxerr, "first_mismatch": first}
+        _cmp(p[f], r[f], out)
+    for name in CHECKPOINT_NAMES:
+        for m in ("mfe", "mae", "r"):
+            _cmp(p["checkpoints"][name][m], r["checkpoints"][name][m], out)
+    # finite float error
+    for f in ("mfe_final", "mae_final", "mfe_at_first_ahead_sr",
+              "mae_before_first_ahead_sr", "mfe_at_first_ahead_liq",
+              "mae_before_first_ahead_liq"):
+        a = np.asarray(p[f], dtype=float)
+        b = np.asarray(r[f], dtype=float)
+        m = np.isfinite(a) & np.isfinite(b)
+        if m.any():
+            out["max_abs_error"] = max(out["max_abs_error"],
+                                       float(np.max(np.abs(a[m] - b[m]))))
+    for name in CHECKPOINT_NAMES:
+        for k in ("mfe", "mae", "r"):
+            a = np.asarray(p["checkpoints"][name][k], dtype=float)
+            b = np.asarray(r["checkpoints"][name][k], dtype=float)
+            m = np.isfinite(a) & np.isfinite(b)
+            if m.any():
+                out["max_abs_error"] = max(out["max_abs_error"],
+                                           float(np.max(np.abs(a[m] - b[m]))))
+    return out
 
 
 def make_synthetic_case(N: int, H: int, seed: int = 0) -> dict:
@@ -846,18 +1048,21 @@ def make_synthetic_case(N: int, H: int, seed: int = 0) -> dict:
     high = close + np.abs(rng.normal(0, 0.3, n_bars))
     low = close - np.abs(rng.normal(0, 0.3, n_bars))
     entry_idx = rng.integers(0, n_bars - H - 1, size=N)
+    p0 = close[entry_idx]
     return dict(
         entry_idx=entry_idx.astype(np.int64),
         end_idx=(entry_idx + H).astype(np.int64),
-        entry_price=close[entry_idx],
-        atr0=np.full(N, 1.0),
+        entry_price=p0, atr0=np.full(N, 1.0),
         side=np.where(rng.random(N) < 0.5, 1.0, -1.0),
         high=high, low=low, close=close,
         segment=np.zeros(n_bars, dtype=np.int64),
         entry_segment=np.zeros(N, dtype=np.int64),
-        backstop_level=close[entry_idx] - 1.0,
-        ahead_sr_level=close[entry_idx] + 1.0,
-        ahead_liq_level=close[entry_idx] + 2.0,
+        sr_enter=np.where(rng.random(N) < 0.5, p0 - 1.0, p0 + 1.0),
+        sr_pierce=np.where(rng.random(N) < 0.5, p0 - 2.0, p0 + 2.0),
+        sr_reclaim=np.where(rng.random(N) < 0.5, p0 - 2.0, p0 + 2.0),
+        lb_enter=p0 - 3.0, lb_pierce=p0 - 4.0, lb_reclaim=p0 - 4.0,
+        ahead_sr_touch=p0 + 1.5, ahead_sr_cross=p0 + 2.5,
+        ahead_liq_touch=p0 + 3.0, ahead_liq_cross=p0 + 4.0,
         td_ends=None,
     )
 
@@ -874,26 +1079,20 @@ def tp_scaling_benchmark(base_n=200, horizon=32, seed=0) -> dict:
     t4 = timed(base_n * 4, horizon)
     h1 = timed(base_n, horizon)
     h2 = timed(base_n, horizon * 2)
-    safe = lambda x, y: (y / x) if x > 0 else None
+    r = lambda x, y: (y / x) if x > 0 else None
     return {
         "candidate_scaling": {"N": base_n, "2N": base_n * 2, "4N": base_n * 4,
-                              "H": horizon,
-                              "t_N": t1, "t_2N": t2, "t_4N": t4,
-                              "ratio_2N": safe(t1, t2), "ratio_4N": safe(t1, t4)},
+                              "H": horizon, "t_N": t1, "t_2N": t2, "t_4N": t4,
+                              "ratio_2N": r(t1, t2), "ratio_4N": r(t1, t4)},
         "horizon_scaling": {"H": horizon, "2H": horizon * 2, "N": base_n,
-                            "t_H": h1, "t_2H": h2, "ratio_2H": safe(h1, h2)},
+                            "t_H": h1, "t_2H": h2, "ratio_2H": r(h1, h2)},
     }
 
 
 # --------------------------------------------------------------------------- #
-# 9. Kernel Checkpoint driver                                                  #
+# 10. Kernel Checkpoint driver                                                 #
 # --------------------------------------------------------------------------- #
 def run_kernel_checkpoint(symbols=("AG",), n_subset=150, verbose=True) -> dict:
-    """Run the authorized kernel gates and write the Kernel Checkpoint manifest.
-
-    Deliberately NOT the full experiment: no T1.5, no T2, no statistics over the whole
-    population, no primary-endpoint estimate.
-    """
     def log(*a):
         if verbose:
             print(*a, file=sys.stderr, flush=True)
@@ -922,26 +1121,21 @@ def run_kernel_checkpoint(symbols=("AG",), n_subset=150, verbose=True) -> dict:
             continue
         anc = build_anchors_for_symbol(e9, st)
         n = len(anc["entry_idx"])
-        full = dict(entry_idx=anc["entry_idx"], end_idx=anc["end_idx"],
-                    entry_price=anc["entry_price"], atr0=anc["atr0"],
-                    side=anc["side"], high=st.high, low=st.low, close=st.close,
-                    segment=st.segment, entry_segment=anc["entry_segment"],
-                    backstop_level=anc["backstop_level"],
-                    ahead_sr_level=anc["ahead_sr_level"],
-                    ahead_liq_level=anc["ahead_liq_level"],
-                    td_ends=anc["td_ends"])
         t = time.perf_counter()
-        scan_paths_streaming(**full)
+        run_symbol_paths(st, anc)
         rt_full = time.perf_counter() - t
-        sub = {k: (v[:n_subset] if isinstance(v, np.ndarray) else
-                   {kk: vv[:n_subset] for kk, vv in v.items()})
-               for k, v in full.items()}
+        sub = {k: (v[:n_subset] if isinstance(v, np.ndarray)
+                   else {kk: vv[:n_subset] for kk, vv in v.items()})
+               for k, v in anc.items() if k != "df"}
+        sub = dict(sub)
+        sub.update(high=st.high, low=st.low, close=st.close, segment=st.segment)
         rep = diff_reference_vs_production(sub)
         blocks[sym] = {
-            "env_complete": True,
-            "n_candidates": n,
-            "production_runtime_sec_full": rt_full,
-            "t1": rep,
+            "env_complete": True, "n_candidates": n,
+            "production_runtime_sec_full": rt_full, "t1": rep,
+            "env_provenance": st.env_provenance,
+            "zone_geometry_audit": st.zone_audit,
+            "frame_rows": int(st.n_bars),
         }
 
     log("TP scaling benchmark ...")
@@ -959,18 +1153,28 @@ def run_kernel_checkpoint(symbols=("AG",), n_subset=150, verbose=True) -> dict:
 
     extra = {
         "branch": "entry-path-atlas-v1",
+        "code_sha": _git_head_sha(),
+        "reviewed_parent_sha": REVIEWED_SHA,
         "population": pop,
         "symbols_evaluated": list(symbols),
         "symbol_blocks": blocks,
-        "tp": {"counters": dict(COUNTERS),
-               "scaling": scaling,
-               "peak_rss_bytes": rss},
+        "zone_semantics": {
+            "long_backstop": "support: touch=low<=support_top, "
+                             "pierce=low<support_bottom, reclaim=close>=support_bottom",
+            "short_backstop": "resistance: touch=high>=resistance_bottom, "
+                              "pierce=high>resistance_top, reclaim=close<=resistance_top",
+            "rule": "entering a zone is NEVER a pierce-through",
+        },
+        "checkpoint_semantics": {
+            "nan_filled": True,
+            "truncated_candidate_checkpoints": "unavailable (NaN), never inherited",
+        },
+        "tp": {"counters": dict(COUNTERS), "scaling": scaling, "peak_rss_bytes": rss},
         "artifacts": artifacts,
         "runtime_sec": time.time() - t_start,
         "unverified_items": [
-            "Full 15-symbol canonical environment materialization DEFERRED to T1.5 "
-            "(only symbols with a complete persisted R4 m15 env cache are evaluated).",
-            "Primary endpoint delta_PS_4h is NOT estimated here (full experiment not authorized).",
+            "Full 15-symbol canonical environment materialization DEFERRED to T1.5.",
+            "Primary endpoint delta_PS_4h is NOT estimated (full experiment not authorized).",
             "L2 row metrics parquet is not produced at kernel stage.",
         ],
     }
@@ -978,12 +1182,13 @@ def run_kernel_checkpoint(symbols=("AG",), n_subset=150, verbose=True) -> dict:
 
 
 # --------------------------------------------------------------------------- #
-# 10. Manifest                                                                 #
+# 11. Manifest                                                                 #
 # --------------------------------------------------------------------------- #
 def write_manifest(*, stage=STAGE, extra=None, path=MANIFEST_JSON):
     payload = {
         "task_id": TASK_ID,
         "base_sha": BASE_SHA,
+        "reviewed_parent_sha": REVIEWED_SHA,
         "stage": stage,
         "primary_endpoint": {
             "name": "delta_PS_4h",
@@ -991,12 +1196,14 @@ def write_manifest(*, stage=STAGE, extra=None, path=MANIFEST_JSON):
             "ps": "MFE - MAE (side-normalized, ATR0 units)",
             "checkpoint": PRIMARY_CHECKPOINT,
             "bars": 16,
-            "inference": "whole-gid cluster bootstrap",
+            "inference": "whole-gid cluster bootstrap (correct and wrong means "
+                         "recomputed inside the SAME replicate)",
         },
         "audit_only_fields": list(AUDIT_ONLY_FIELDS),
         "realtime_policy": FORBIDDEN_REALTIME_FEATURE,
         "counters": dict(COUNTERS),
         "checkpoints": list(CHECKPOINT_NAMES),
+        "diff_fields": list(DIFF_FIELDS),
         "horizon": {
             "trading_days": HORIZON_TRADING_DAYS,
             "stops_at": "earliest of 5th trading day end / hard segment / data end",
