@@ -86,7 +86,13 @@ from research.liquidity_oracle_atlas.train_direction_model_ag_v1 import (
 )
 
 TASK_ID = "FUTURE-R4-M15-DIRECTION-MODEL-V1-15SYM-CONFIRMATION"
+# Provenance (metadata only; no retrain required):
+#   BASE_SHA               -> the original confirmation task base (48605666)
+#   FIX1_BASE_SHA          -> the commit FIX1 actually modified (parent of the FIX1 commits)
+#   CONFIRMATION_SOURCE_SHA-> the FIX1 trainer source commit that produced the frozen evidence
 BASE_SHA = "48605666cd9e3cb0c2d49848df47bb7050a0dabc"
+FIX1_BASE_SHA = "ea49c84161c5a859d893ae3b6dc9dcc75de1c0f9"
+CONFIRMATION_SOURCE_SHA = "4e1629f7f2a493bc1b101cadd5bca018778897b9"
 
 # Frozen 15-symbol universe (same order as the upstream materialization).
 SYMBOLS = (
