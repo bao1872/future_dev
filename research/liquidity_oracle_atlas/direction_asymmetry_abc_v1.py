@@ -14,15 +14,22 @@ If the experiment favors C, the next step is to freeze C and wait / build a fres
 baseline -- NOT to keep tuning on this TEST.
 
 Models (DTP9 only, no new features, params frozen):
-  A - Direct M0:        original DTP9 -> LONG/SHORT (mechanical reproduction of baseline)
-  B - Shared Side Model: every Candidate yields two side proposals
-                        (+X -> target=y, -X -> target=1-y); ONE shared classifier decides
-                        whether the proposed side is correct. Inference: pL=f(X), pS=f(-X),
-                        pred=LONG iff pL>=pS.
-  C - Two Specialists:  LongExpert(+X, target=y) and ShortExpert(-X, target=1-y);
-                        BOTH experts are trained on the FULL TRAIN population (not only the
-                        true-LONG / true-SHORT rows). This is the only place the two
-                        functions are allowed to differ. Inference: pL=fL(X), pS=fS(-X),
+  A - Direct M0:        original DTP9 -> LONG/SHORT (mechanical reproduction of baseline).
+  B - Shared Side Model / side-normalized symmetry-augmentation shared model:
+                        every Candidate contributes TWO proposals
+                        (+X -> target=y AND -X -> target=1-y); ONE shared classifier is
+                        trained on this mirrored-augmented population. The augmentation
+                        imposes/encourages LONG/SHORT mirror symmetry THROUGH DATA
+                        AUGMENTATION -- it is NOT merely a coordinate transform.
+                        Inference: pL=f(X), pS=f(-X), pred=LONG iff pL>=pS.
+  C - Two Specialists (complementary_isomorphic_control):
+                        LongExpert(+X, target=y) and ShortExpert(-X, target=1-y).
+                        BOTH experts are trained on the FULL TRAIN population with the SAME
+                        weights and the SAME model family/params; they differ ONLY by a
+                        deterministic input/label mirroring (X->-X, y->1-y). Therefore C is
+                        a complementary/isomorphic binary-direction control and is NOT
+                        evidence about whether genuinely non-complementary LONG/SHORT market
+                        mechanisms require different models. Inference: pL=fL(X), pS=fS(-X),
                         pred=LONG iff pL>=pS.
 
 Primary contrast:  C - B  (specialist / asymmetry increment)
@@ -74,8 +81,8 @@ from research.liquidity_oracle_atlas.direction_null_baseline_v1 import (
 )
 
 TASK_ID = "FUTURE-R4-M15-DIRECTION-ASYMMETRY-ABC-V1"
-# The exact frozen baseline commit this experiment is built on (reviewer-given).
-BASE_SHA = "a5c17964cbadc55a3368b09de630175c2683f3e1"
+# The exact frozen baseline commit this experiment (and its FIX1) is built on.
+BASE_SHA = "e261a229b0c0e7acd528952bff47a5b36e5c206a"
 
 METRIC_NAME = "TeacherFixedExitDirectionReturnATR"
 METRIC_DEFINITION = (
@@ -97,6 +104,50 @@ A_REFERENCE = {
     "test_trades": 638,
     "m0_return_atr": 0.6014965284150177,
 }
+
+# Frozen economic results (FIX1 must NOT let these drift). Means are full precision;
+# C-B CI bounds were reported rounded in the review, so that one pair uses 1e-3.
+FROZEN_ECONOMIC = {
+    "A": 0.6014965284150177,
+    "B": 0.7615098965957399,
+    "C": 0.5745176363087933,
+    "B_minus_A": 0.16001336818072207,
+    "C_minus_B": -0.1869922602869465,
+    "C_minus_A": -0.026978892106224433,
+    "B_minus_A_LONG": -0.7968239136495939,
+    "B_minus_A_SHORT": 1.116850650011038,
+    "C_minus_B_LONG": 0.7709010851806137,
+    "C_minus_B_SHORT": -1.144885605754507,
+}
+# (lo, hi) from frozen evidence. C-B bounds rounded in source -> 1e-3 tolerance.
+FROZEN_CI = {
+    "B_minus_A": (-0.03344755998393732, 0.3446609198295325),
+    "C_minus_B": (-0.37602, 0.00584),
+    "C_minus_B_LONG": (0.557612159181603, 1.020074616749101),
+    "C_minus_B_SHORT": (-1.4092359849940175, -0.8950390599414177),
+    "B_minus_A_SHORT": (0.8714150656302238, 1.3707214065423252),
+}
+
+
+def _assert_economic_frozen(pooled, contrasts):
+    """Fail-closed: the FIX1 metric change must not alter any economic result."""
+    for k in ("A", "B", "C"):
+        got = pooled[k]["return_atr"]
+        assert abs(got - FROZEN_ECONOMIC[k]) < 1e-9, (
+            f"ECONOMIC_DRIFT:{k} {got} != {FROZEN_ECONOMIC[k]}")
+    for k in ("B_minus_A", "C_minus_B", "C_minus_A",
+              "B_minus_A_LONG", "B_minus_A_SHORT",
+              "C_minus_B_LONG", "C_minus_B_SHORT"):
+        got = contrasts[k]["mean"]
+        assert abs(got - FROZEN_ECONOMIC[k]) < 1e-9, (
+            f"ECONOMIC_DRIFT:{k} {got} != {FROZEN_ECONOMIC[k]}")
+    for k, (lo, hi) in FROZEN_CI.items():
+        tol = 1e-3 if k == "C_minus_B" else 1e-6
+        assert abs(contrasts[k]["ci_low"] - lo) < tol, (
+            f"ECONOMIC_CI_DRIFT:{k}_low {contrasts[k]['ci_low']} != {lo}")
+        assert abs(contrasts[k]["ci_high"] - hi) < tol, (
+            f"ECONOMIC_CI_DRIFT:{k}_high {contrasts[k]['ci_high']} != {hi}")
+
 
 DTP_COLS = list(DTP9)
 
@@ -227,23 +278,35 @@ def predict_c(long_model, short_model, arr: ABCData, idx):
 # --------------------------------------------------------------------------- #
 # Evaluation (reuses frozen economic metric + bootstrap)                       #
 # --------------------------------------------------------------------------- #
-def _recall_metrics(pred, y):
+def _recall_metrics(pred, y, w):
+    """All classification diagnostics are weighted by sample_weight_raw (frozen
+    15-symbol methodology). Candidate-row counts are reported as *_rows; they are
+    NOT called 'opportunities'."""
     y = np.asarray(y)
     pred = np.asarray(pred)
-    n_long = int((y == 1).sum())
-    n_short = int((y == 0).sum())
-    long_recall = float(((pred == 1) & (y == 1)).sum()) / n_long if n_long else None
-    short_recall = float(((pred == 0) & (y == 0)).sum()) / n_short if n_short else None
+    w = np.asarray(w, dtype=np.float64)
+    long_mask = (y == 1)
+    short_mask = (y == 0)
+    n_long = int(long_mask.sum())
+    n_short = int(short_mask.sum())
+    long_recall = (
+        float(np.average(pred[long_mask] == 1, weights=w[long_mask]))
+        if n_long else None
+    )
+    short_recall = (
+        float(np.average(pred[short_mask] == 0, weights=w[short_mask]))
+        if n_short else None
+    )
     bal_acc = None
     if n_long and n_short:
         bal_acc = 0.5 * (long_recall + short_recall)
     return {
-        "n_long_opps": n_long,
-        "n_short_opps": n_short,
+        "n_long_rows": n_long,
+        "n_short_rows": n_short,
         "long_recall": long_recall,
         "short_recall": short_recall,
         "balanced_accuracy": bal_acc,
-        "predicted_long_share": float((pred == 1).mean()),
+        "predicted_long_share": float(np.average(pred == 1, weights=w)),
     }
 
 
@@ -256,10 +319,13 @@ def eval_on_idx(arr: ABCData, idx, pred, p_long, ds=None, with_phase=False):
     pdr = pred_direction_return_atr(pred, sub_y, sub_eq)
     tr, uniq = aggregate_per_trade(sub_gid, sub_w, pdr)
     mean_ret, lo, hi = bootstrap_trade_returns_chunked(tr)
-    rec = _recall_metrics(pred, sub_y)
-    acc = float((pred == sub_y).mean())
+    rec = _recall_metrics(pred, sub_y, sub_w)
+    acc = float(np.average(pred == sub_y, weights=sub_w))
     try:
-        auc = float(roc_auc_score(sub_y, p_long)) if len(np.unique(sub_y)) > 1 else None
+        auc = (
+            float(roc_auc_score(sub_y, p_long, sample_weight=sub_w))
+            if len(np.unique(sub_y)) > 1 else None
+        )
     except Exception:
         auc = None
 
@@ -272,9 +338,15 @@ def eval_on_idx(arr: ABCData, idx, pred, p_long, ds=None, with_phase=False):
 
     long_mask = sub_y == 1
     short_mask = sub_y == 0
+    n_long_trades = int(np.unique(sub_gid[long_mask]).size)
+    n_short_trades = int(np.unique(sub_gid[short_mask]).size)
     out = {
         "n_rows": int(idx.size),
         "n_trades": int(len(uniq)),
+        "n_long_rows": rec["n_long_rows"],
+        "n_short_rows": rec["n_short_rows"],
+        "n_long_trades": n_long_trades,
+        "n_short_trades": n_short_trades,
         "return_atr": mean_ret,
         "ci_low": lo,
         "ci_high": hi,
@@ -572,21 +644,56 @@ def run_asymmetry_audit(save: bool = True, verbose: bool = True):
         "ShortExpert": {"best_iteration": short_it, "feature_importance_gain": short_imp},
     }
 
-    # ----- verdict -----
+    # ----- verdict (LONG/SHORT nuance preserved) -----
     asymmetry_supported_by_short = cb_S["ci_low"] > 0
     verdict = {
         "primary_contrast": "C-B",
         "text": _verdict(ba, cb),
+        "overall_statement": "no statistically identifiable C-B specialist increment overall",
         "B_minus_A_ci": [ba["ci_low"], ba["ci_high"]],
         "C_minus_B_ci": [cb["ci_low"], cb["ci_high"]],
         "C_minus_A_ci": [ca["ci_low"], ca["ci_high"]],
         "C_minus_B_LONG_ci": [cb_L["ci_low"], cb_L["ci_high"]],
         "C_minus_B_SHORT_ci": [cb_S["ci_low"], cb_S["ci_high"]],
+        "C_minus_B_LONG_significant_positive": cb_L["ci_low"] > 0,
+        "C_minus_B_SHORT_significant_negative": cb_S["ci_high"] < 0,
+        "long_short_nuance": (
+            "C-B is strongly heterogeneous by Teacher side: C materially improves LONG "
+            "relative to B (C-B_LONG significantly positive) but materially harms SHORT "
+            "(C-B_SHORT significantly negative). Because C is a complementary/isomorphic "
+            "binary-direction control, this heterogeneity must NOT be interpreted as proof "
+            "for or against genuinely different LONG/SHORT market mechanisms."),
         "asymmetry_supported_by_short": asymmetry_supported_by_short,
         "short_cb_note": (
             "C improves TEACHER_SHORT" if asymmetry_supported_by_short
             else "C does NOT improve TEACHER_SHORT; overall C-B may be LONG-driven"),
     }
+
+    interpretation_text = (
+        "A: frozen M0 economic result reproduced. "
+        "B (side-normalized symmetry-augmentation shared model) materially improves "
+        "SHORT-side economic direction diagnostic while reducing LONG-side diagnostic; "
+        "overall B-A point estimate is positive but its paired CI crosses zero, so there "
+        "is no statistically established overall increment. The strongest identifiable "
+        "effect is on TEACHER_SHORT (B-A_SHORT strongly positive; B-A_LONG strongly "
+        "negative). "
+        "C (complementary/isomorphic two-model control) overall C-B CI crosses zero; "
+        "C-B_LONG is significantly positive while C-B_SHORT is significantly negative, so "
+        "C does not simply fail everywhere -- it shifts performance strongly toward LONG "
+        "and away from SHORT. Because C is a complementary/isomorphic binary-direction "
+        "control, this heterogeneity must NOT be interpreted as proof for or against "
+        "genuinely different LONG/SHORT market mechanisms. "
+        "That genuinely side-specific question is deferred to Entry Quality, where "
+        "LONG-quality and SHORT-quality targets are not strict complements.")
+
+    paired_contrasts = {
+        "primary": "C-B",
+        "B_minus_A": ba, "C_minus_B": cb, "C_minus_A": ca,
+        "B_minus_A_LONG": ba_L, "C_minus_B_LONG": cb_L, "C_minus_A_LONG": ca_L,
+        "B_minus_A_SHORT": ba_S, "C_minus_B_SHORT": cb_S, "C_minus_A_SHORT": ca_S,
+    }
+    # Fail-closed: the FIX1 metric change must not alter economic results.
+    _assert_economic_frozen(pooled, paired_contrasts)
 
     summary = _clean({
         "task_id": TASK_ID,
@@ -596,6 +703,11 @@ def run_asymmetry_audit(save: bool = True, verbose: bool = True):
             "name": METRIC_NAME,
             "definition": METRIC_DEFINITION,
             "not_labels": METRIC_NOT_LABELS,
+        },
+        "model_roles": {
+            "A": "frozen_m0_reproduction",
+            "B": "side_normalized_symmetry_augmentation_shared_model",
+            "C": "complementary_isomorphic_control",
         },
         "frozen_split": {
             "test_rows": n_test_rows,
@@ -617,28 +729,38 @@ def run_asymmetry_audit(save: bool = True, verbose: bool = True):
             "no_struct33": True,
             "no_symbol_feature": True,
             "entry_quality_atr_not_in_X": True,
-            "model_redesign": False,
         },
         "pooled": pooled,
         "pooled_ex_ag": pooled_ex_ag,
-        "paired_contrasts": {
-            "primary": "C-B",
-            "B_minus_A": ba, "C_minus_B": cb, "C_minus_A": ca,
-            "B_minus_A_LONG": ba_L, "C_minus_B_LONG": cb_L, "C_minus_A_LONG": ca_L,
-            "B_minus_A_SHORT": ba_S, "C_minus_B_SHORT": cb_S, "C_minus_A_SHORT": ca_S,
-        },
+        "paired_contrasts": paired_contrasts,
         "per_symbol": per_symbol,
         "per_symbol_cluster_bootstrap": per_symbol_cluster,
         "loso": {"folds": loso, "aggregate": loso_agg},
         "mechanism": mechanism,
         "verdict": verdict,
+        "interpretation": interpretation_text,
         "provenance": {
             "base_sha": BASE_SHA,
+            "model_architecture_experiment": True,
+            "feature_schema_changed": False,
+            "hyperparameter_tuning": False,
+            "threshold_tuning": False,
+            "upstream_changed": False,
+            "models_retrained_in_fix1": False,
+            "predictions_changed_in_fix1": False,
+            "economic_metrics_changed_in_fix1": False,
             "reused_split_module": "direction_null_baseline_v1.build_frozen_split",
             "reused_m0_path": "direction_null_baseline_v1._fit_m0 / _predict_m0",
             "base_params_source": "train_direction_model_ag_v1.BASE_PARAMS",
             "bootstrap_seed": BOOTSTRAP_SEED,
             "bootstrap_replicates": BOOTSTRAP_REPLICATES,
+            "fix1_note": (
+                "FIX1 corrected the classification-metric weighting (accuracy / LONG recall "
+                "/ SHORT recall / balanced accuracy / predicted LONG share / ROC-AUC) to use "
+                "sample_weight_raw, renamed Candidate-row counts to *_rows and added "
+                "*_trades counts via unique global_trade_id, and corrected B/C interpretation "
+                "and provenance. No model was retrained for research content; the economic "
+                "results are unchanged (fail-closed asserted)."),
         },
     })
 
@@ -650,6 +772,9 @@ def run_asymmetry_audit(save: bool = True, verbose: bool = True):
         _write_per_symbol_csv(per_symbol, PER_SYMBOL_CSV)
         _write_trade_returns_csv(arr, test_idx, tr_A, tr_B, tr_C, uniq)
         _write_loso_csv(loso, LOSO_CSV)
+        _write_predictions_parquet(
+            arr, test_idx, pred_a, p_a, pred_b, p_b, pred_c, p_c
+        )
         log(f"evidence written -> {SUMMARY_JSON}")
 
     return {
@@ -707,6 +832,77 @@ def _write_loso_csv(loso, path):
             "C_long_return", "C_short_return", "C_long_recall", "C_short_recall"]
     df = pd.DataFrame(loso)[cols]
     df.to_csv(path, index=False)
+
+
+# Persisted per-row predictions so future FIX-style evidence refreshes can recompute
+# classification metrics WITHOUT re-fitting the models (preferred no-retrain path).
+PREDICTIONS_PARQUET = os.path.join(EVIDENCE_DIR, "direction_asymmetry_abc_v1_predictions.parquet")
+
+
+def _write_predictions_parquet(arr, test_idx, pred_a, p_a, pred_b, p_b, pred_c, p_c):
+    gid = arr.gid[test_idx]
+    symbol = arr.symbol[test_idx]
+    y = arr.y[test_idx]
+    w = arr.w[test_idx]
+    df = pd.DataFrame({
+        "gid": gid,
+        "symbol": symbol,
+        "y": y,
+        "w": w,
+        "pred_a": np.asarray(pred_a, dtype=np.uint8),
+        "p_a": np.asarray(p_a, dtype=np.float64),
+        "pred_b": np.asarray(pred_b, dtype=np.uint8),
+        "p_b": np.asarray(p_b, dtype=np.float64),
+        "pred_c": np.asarray(pred_c, dtype=np.uint8),
+        "p_c": np.asarray(p_c, dtype=np.float64),
+    })
+    df.to_parquet(PREDICTIONS_PARQUET, index=False)
+
+
+def refresh_classification_metrics(save: bool = True, verbose: bool = False):
+    """FIX1 preferred evidence-refresh path.
+
+    Recompute the corrected (sample_weight_raw-weighted) classification metrics
+    from the PERSISTED per-row predictions. This invokes NO training/fit function,
+    so it satisfies the 'no retrain' requirement for regenerating the FIX1 metrics.
+    """
+    if not os.path.exists(PREDICTIONS_PARQUET):
+        raise FileNotFoundError(
+            "STOP_FIX1_REFRESH_NO_PREDICTIONS: run run_asymmetry_audit(save=True) once"
+        )
+    df = pd.read_parquet(PREDICTIONS_PARQUET)
+    y = df["y"].to_numpy(np.uint8)
+    w = df["w"].to_numpy(np.float64)
+
+    def _block(suffix):
+        pred = df[f"pred_{suffix}"].to_numpy(np.uint8)
+        p = df[f"p_{suffix}"].to_numpy(np.float64)
+        rec = _recall_metrics(pred, y, w)
+        acc = float(np.average(pred == y, weights=w))
+        auc = (
+            float(roc_auc_score(y, p, sample_weight=w))
+            if len(np.unique(y)) > 1 else None
+        )
+        return {
+            "accuracy": acc,
+            "balanced_accuracy": rec["balanced_accuracy"],
+            "long_recall": rec["long_recall"],
+            "short_recall": rec["short_recall"],
+            "predicted_long_share": rec["predicted_long_share"],
+            "roc_auc": auc,
+            "n_long_rows": rec["n_long_rows"],
+            "n_short_rows": rec["n_short_rows"],
+        }
+
+    result = {m: _block(s) for m, s in (("A", "a"), ("B", "b"), ("C", "c"))}
+    if save:
+        out = os.path.join(
+            EVIDENCE_DIR, "direction_asymmetry_abc_v1_classification_metrics.json")
+        with open(out, "w") as f:
+            json.dump(_clean(result), f, indent=2)
+        if verbose:
+            print(f"classification metrics refreshed -> {out}", file=sys.stderr)
+    return result
 
 
 if __name__ == "__main__":

@@ -297,9 +297,9 @@ def test_evidence_schema_complete(run):
 
 
 # --------------------------------------------------------------------------- #
-# 16. no retrain/tuning provenance is honest                                  #
+# 16. FIX7 provenance is honest (model_redesign removed)                       #
 # --------------------------------------------------------------------------- #
-def test_no_tuning_provenance(run):
+def test_fix7_provenance(run):
     s = run["summary"]["contract"]
     assert s["base_params_unchanged"] is True
     assert s["no_threshold_tuning"] is True
@@ -307,4 +307,173 @@ def test_no_tuning_provenance(run):
     assert s["no_struct33"] is True
     assert s["no_symbol_feature"] is True
     assert s["entry_quality_atr_not_in_X"] is True
-    assert s["model_redesign"] is False
+    prov = run["summary"]["provenance"]
+    assert prov["model_architecture_experiment"] is True
+    assert prov["feature_schema_changed"] is False
+    assert prov["hyperparameter_tuning"] is False
+    assert prov["threshold_tuning"] is False
+    assert prov["upstream_changed"] is False
+    assert prov["models_retrained_in_fix1"] is False
+    assert prov["predictions_changed_in_fix1"] is False
+    assert prov["economic_metrics_changed_in_fix1"] is False
+    assert "model_redesign" not in run["summary"]["contract"]
+
+
+# --------------------------------------------------------------------------- #
+# FIX8.1 weighted accuracy uses sample_weight_raw                              #
+# --------------------------------------------------------------------------- #
+def test_weighted_accuracy_uses_sample_weight(run):
+    import pandas as pd
+    df = pd.read_parquet(M.PREDICTIONS_PARQUET)
+    y = df["y"].to_numpy(np.uint8)
+    w = df["w"].to_numpy(np.float64)
+    pred = df["pred_a"].to_numpy(np.uint8)
+    acc_weighted = float(np.average(pred == y, weights=w))
+    acc_unweighted = float((pred == y).mean())
+    # summary pooled A accuracy must equal the weighted computation
+    summary_acc = run["summary"]["pooled"]["A"]["accuracy"]
+    assert abs(summary_acc - acc_weighted) < 1e-12
+    # and it must actually differ from the unweighted mean (proves weighting applied)
+    assert abs(acc_weighted - acc_unweighted) > 1e-9
+
+
+# --------------------------------------------------------------------------- #
+# FIX8.2/3/4 weighted LONG/SHORT recall + predicted LONG share use weights     #
+# --------------------------------------------------------------------------- #
+def test_weighted_recall_and_long_share(run):
+    import pandas as pd
+    df = pd.read_parquet(M.PREDICTIONS_PARQUET)
+    y = df["y"].to_numpy(np.uint8)
+    w = df["w"].to_numpy(np.float64)
+    for suf in ("a", "b", "c"):
+        pred = df[f"pred_{suf}"].to_numpy(np.uint8)
+        rec = M._recall_metrics(pred, y, w)
+        long_mask = y == 1
+        short_mask = y == 0
+        exp_long = float(np.average(pred[long_mask] == 1, weights=w[long_mask]))
+        exp_short = float(np.average(pred[short_mask] == 0, weights=w[short_mask]))
+        exp_pls = float(np.average(pred == 1, weights=w))
+        assert abs(rec["long_recall"] - exp_long) < 1e-12
+        assert abs(rec["short_recall"] - exp_short) < 1e-12
+        assert abs(rec["predicted_long_share"] - exp_pls) < 1e-12
+
+
+# --------------------------------------------------------------------------- #
+# FIX8.5 weighted AUC passes sample_weight                                     #
+# --------------------------------------------------------------------------- #
+def test_weighted_auc_passes_sample_weight(run):
+    import pandas as pd
+    from sklearn.metrics import roc_auc_score
+    df = pd.read_parquet(M.PREDICTIONS_PARQUET)
+    y = df["y"].to_numpy(np.uint8)
+    w = df["w"].to_numpy(np.float64)
+    p = df["p_a"].to_numpy(np.float64)
+    exp_auc = float(roc_auc_score(y, p, sample_weight=w))
+    summary_auc = run["summary"]["pooled"]["A"]["roc_auc"]
+    assert abs(summary_auc - exp_auc) < 1e-12
+
+
+# --------------------------------------------------------------------------- #
+# FIX8.6 synthetic: opportunity-weighted (not raw-row) result returned        #
+# --------------------------------------------------------------------------- #
+def test_opportunity_weighted_not_raw_row():
+    y = np.array([1, 1, 0, 0, 0], dtype=np.uint8)
+    pred = np.array([1, 0, 0, 1, 1], dtype=np.uint8)
+    # weights: trade1 (rows 0,1) sum=1 ; trade2 (rows 2,3,4) sum=1 ; but unequal per-row
+    w = np.array([0.9, 0.1, 0.1, 0.5, 0.4], dtype=np.float64)
+    rec = M._recall_metrics(pred, y, w)
+    # opportunity-weighted LONG recall: row0 correct(1)->0.9, row1 wrong->0 ; trade sum=1
+    # => long_recall = 0.9 / (0.9+0.1) = 0.9
+    assert abs(rec["long_recall"] - 0.9) < 1e-12
+    # raw-row (unweighted) long recall would be 0.5 -> must differ (proves weighting)
+    raw = float(((pred == 1) & (y == 1)).sum()) / int((y == 1).sum())
+    assert abs(rec["long_recall"] - raw) > 1e-9
+
+
+# --------------------------------------------------------------------------- #
+# FIX8.7 weighted classification metrics reproduce frozen methodology           #
+# --------------------------------------------------------------------------- #
+def test_classification_metrics_reproduce_frozen(run):
+    import pandas as pd
+    from sklearn.metrics import roc_auc_score
+    df = pd.read_parquet(M.PREDICTIONS_PARQUET)
+    y = df["y"].to_numpy(np.uint8)
+    w = df["w"].to_numpy(np.float64)
+    for suf, key in (("a", "A"), ("b", "B"), ("c", "C")):
+        pred = df[f"pred_{suf}"].to_numpy(np.uint8)
+        p = df[f"p_{suf}"].to_numpy(np.float64)
+        rec = M._recall_metrics(pred, y, w)
+        acc = float(np.average(pred == y, weights=w))
+        auc = float(roc_auc_score(y, p, sample_weight=w))
+        pooled = run["summary"]["pooled"][key]
+        assert abs(pooled["accuracy"] - acc) < 1e-12
+        assert abs(pooled["long_recall"] - rec["long_recall"]) < 1e-12
+        assert abs(pooled["short_recall"] - rec["short_recall"]) < 1e-12
+        assert abs(pooled["predicted_long_share"] - rec["predicted_long_share"]) < 1e-12
+        assert abs(pooled["roc_auc"] - auc) < 1e-12
+
+
+# --------------------------------------------------------------------------- #
+# FIX8.8 C evidence carries complementary_isomorphic_control marker             #
+# --------------------------------------------------------------------------- #
+def test_c_model_role_marker(run):
+    assert run["summary"]["model_roles"]["C"] == "complementary_isomorphic_control"
+
+
+# --------------------------------------------------------------------------- #
+# FIX8.9 forbidden sentence must NOT appear in summary/evidence                #
+# --------------------------------------------------------------------------- #
+def test_no_forbidden_sentence(run):
+    import json as _json
+    s = _json.dumps(run["summary"])
+    assert "Long/Short do not need different decision functions" not in s
+    assert "do not need different decision functions" not in s
+    # also scan the per-symbol + loso CSV evidence
+    for p in (run["paths"]["per_symbol_csv"], run["paths"]["loso_csv"]):
+        txt = open(p).read()
+        assert "do not need different decision functions" not in txt
+
+
+# --------------------------------------------------------------------------- #
+# FIX8.10 B described as symmetry augmentation, not merely coordinate transform #
+# --------------------------------------------------------------------------- #
+def test_b_symmetry_augmentation_not_coordinate_only(run):
+    assert "symmetry" in run["summary"]["model_roles"]["B"]
+    assert "symmetry_augmentation" in run["summary"]["model_roles"]["B"]
+    # interpretation must not reduce B to a pure coordinate transform
+    assert "coordinate transform" not in run["summary"]["interpretation"]
+
+
+# --------------------------------------------------------------------------- #
+# FIX8.11 economic results and all paired deltas unchanged                     #
+# --------------------------------------------------------------------------- #
+def test_economic_results_unchanged(run):
+    s = run["summary"]
+    exp = M.FROZEN_ECONOMIC
+    assert abs(s["pooled"]["A"]["return_atr"] - exp["A"]) < 1e-9
+    assert abs(s["pooled"]["B"]["return_atr"] - exp["B"]) < 1e-9
+    assert abs(s["pooled"]["C"]["return_atr"] - exp["C"]) < 1e-9
+    pc = s["paired_contrasts"]
+    for k in ("B_minus_A", "C_minus_B", "C_minus_A",
+              "B_minus_A_LONG", "B_minus_A_SHORT",
+              "C_minus_B_LONG", "C_minus_B_SHORT"):
+        assert abs(pc[k]["mean"] - exp[k]) < 1e-9
+
+
+# --------------------------------------------------------------------------- #
+# FIX8.12 refresh path invokes NO training function                            #
+# --------------------------------------------------------------------------- #
+def test_refresh_path_no_training(run):
+    from unittest import mock
+    with mock.patch.object(M, "fit_direction_model") as m_fit, \
+         mock.patch.object(M, "fit_a") as m_a, \
+         mock.patch.object(M, "fit_b") as m_b, \
+         mock.patch.object(M, "fit_c") as m_c:
+        res = M.refresh_classification_metrics(save=False, verbose=False)
+    assert m_fit.call_count == 0
+    assert m_a.call_count == 0
+    assert m_b.call_count == 0
+    assert m_c.call_count == 0
+    # and it still reproduces the weighted accuracy from the persisted predictions
+    assert "A" in res and "accuracy" in res["A"]
+
