@@ -1,0 +1,295 @@
+{
+  "task_id": "FUTURE-R4-M15-DIRECTION-MODEL-V1-AG",
+  "base_sha": "df868eb8790438ee55db3fc817bcf2650bc994e3",
+  "symbol": "AG",
+  "generated_at": "2026-09-23T08:37:16.244632+00:00",
+  "cuts": {
+    "t1": "2025-12-16T12:09:00",
+    "t2": "2026-04-30T12:51:00",
+    "frac_train": 0.6,
+    "frac_val": 0.2
+  },
+  "boundary_removal": {
+    "eligible_before": 5555,
+    "eligible_after": 5518,
+    "candidate_rows_removed": 37,
+    "trades_total": 417,
+    "trades_dropped_total": 2,
+    "trades_dropped_t1": 1,
+    "trades_dropped_t2": 1
+  },
+  "splits": {
+    "train_rows": 3339,
+    "val_rows": 1106,
+    "test_rows": 1073,
+    "train_trades": 259,
+    "val_trades": 79,
+    "test_trades": 77
+  },
+  "models": {
+    "always_long": {
+      "TEST": {
+        "n_rows": 1073,
+        "n_trades": 77,
+        "accuracy": 0.45454545454545453,
+        "balanced_accuracy": 0.5,
+        "roc_auc": null,
+        "return_atr": -0.1896020534040784,
+        "ci_low": -1.4595649112392532,
+        "ci_high": 1.0291368800954241
+      },
+      "BEFORE_ENTRY": {
+        "n_rows": 102,
+        "n_trades": 19,
+        "accuracy": 0.39276340008979754,
+        "balanced_accuracy": 0.5,
+        "roc_auc": null,
+        "return_atr": 0.39949546226279115,
+        "ci_low": -2.0562134790348687,
+        "ci_high": 2.9341087757239133
+      },
+      "AT_ENTRY": {
+        "n_rows": 23,
+        "n_trades": 23,
+        "accuracy": 0.6151393123162084,
+        "balanced_accuracy": 0.5,
+        "roc_auc": null,
+        "return_atr": 0.6704468697907638,
+        "ci_low": -2.0353181763645734,
+        "ci_high": 3.396573134435319
+      },
+      "IN_POSITION": {
+        "n_rows": 948,
+        "n_trades": 73,
+        "accuracy": 0.45589815094504166,
+        "balanced_accuracy": 0.5,
+        "roc_auc": null,
+        "return_atr": -0.10800749861745583,
+        "ci_low": -1.3921572475346318,
+        "ci_high": 1.1285994648969193
+      }
+    },
+    "always_short": {
+      "TEST": {
+        "n_rows": 1073,
+        "n_trades": 77,
+        "accuracy": 0.5454545454545454,
+        "balanced_accuracy": 0.5,
+        "roc_auc": null,
+        "return_atr": 0.1896020534040784,
+        "ci_low": -1.0291368800954257,
+        "ci_high": 1.459564911239253
+      },
+      "BEFORE_ENTRY": {
+        "n_rows": 102,
+        "n_trades": 19,
+        "accuracy": 0.6072365999102027,
+        "balanced_accuracy": 0.5,
+        "roc_auc": null,
+        "return_atr": -0.39949546226279115,
+        "ci_low": -2.934108775723916,
+        "ci_high": 2.0562134790348674
+      },
+      "AT_ENTRY": {
+        "n_rows": 23,
+        "n_trades": 23,
+        "accuracy": 0.38486068768379145,
+        "balanced_accuracy": 0.5,
+        "roc_auc": null,
+        "return_atr": -0.6704468697907638,
+        "ci_low": -3.39657313443532,
+        "ci_high": 2.035318176364572
+      },
+      "IN_POSITION": {
+        "n_rows": 948,
+        "n_trades": 73,
+        "accuracy": 0.5441018490549584,
+        "balanced_accuracy": 0.5,
+        "roc_auc": null,
+        "return_atr": 0.10800749861745583,
+        "ci_low": -1.1285994648969209,
+        "ci_high": 1.3921572475346318
+      }
+    },
+    "majority": {
+      "TEST": {
+        "n_rows": 1073,
+        "n_trades": 77,
+        "accuracy": 0.45454545454545453,
+        "balanced_accuracy": 0.5,
+        "roc_auc": null,
+        "return_atr": -0.1896020534040784,
+        "ci_low": -1.4595649112392532,
+        "ci_high": 1.0291368800954241
+      },
+      "BEFORE_ENTRY": {
+        "n_rows": 102,
+        "n_trades": 19,
+        "accuracy": 0.39276340008979754,
+        "balanced_accuracy": 0.5,
+        "roc_auc": null,
+        "return_atr": 0.39949546226279115,
+        "ci_low": -2.0562134790348687,
+        "ci_high": 2.9341087757239133
+      },
+      "AT_ENTRY": {
+        "n_rows": 23,
+        "n_trades": 23,
+        "accuracy": 0.6151393123162084,
+        "balanced_accuracy": 0.5,
+        "roc_auc": null,
+        "return_atr": 0.6704468697907638,
+        "ci_low": -2.0353181763645734,
+        "ci_high": 3.396573134435319
+      },
+      "IN_POSITION": {
+        "n_rows": 948,
+        "n_trades": 73,
+        "accuracy": 0.45589815094504166,
+        "balanced_accuracy": 0.5,
+        "roc_auc": null,
+        "return_atr": -0.10800749861745583,
+        "ci_low": -1.3921572475346318,
+        "ci_high": 1.1285994648969193
+      }
+    },
+    "dir_m0": {
+      "TEST": {
+        "n_rows": 1073,
+        "n_trades": 77,
+        "accuracy": 0.46711300967331576,
+        "balanced_accuracy": 0.48537775373665415,
+        "roc_auc": 0.5352556747535913,
+        "return_atr": -0.3837840239578383,
+        "ci_low": -1.244779494037645,
+        "ci_high": 0.4974036189434294
+      },
+      "BEFORE_ENTRY": {
+        "n_rows": 102,
+        "n_trades": 19,
+        "accuracy": 0.41717703327311395,
+        "balanced_accuracy": 0.482188259862444,
+        "roc_auc": 0.5161847461748138,
+        "return_atr": -0.029847896910193395,
+        "ci_low": -2.271760096253361,
+        "ci_high": 2.3697859097536256
+      },
+      "AT_ENTRY": {
+        "n_rows": 23,
+        "n_trades": 23,
+        "accuracy": 0.41378024392996965,
+        "balanced_accuracy": 0.3363305154176755,
+        "roc_auc": 0.2972472837116972,
+        "return_atr": -2.9617670610534788,
+        "ci_low": -5.280833704279082,
+        "ci_high": -0.48154030799448583
+      },
+      "IN_POSITION": {
+        "n_rows": 948,
+        "n_trades": 73,
+        "accuracy": 0.47752881421384724,
+        "balanced_accuracy": 0.4934593836304856,
+        "roc_auc": 0.5464326273310439,
+        "return_atr": -0.7334528353863874,
+        "ci_low": -1.7595547472377757,
+        "ci_high": 0.2408921810704141
+      }
+    },
+    "dir_m1": {
+      "TEST": {
+        "n_rows": 1073,
+        "n_trades": 77,
+        "accuracy": 0.5112785343086368,
+        "balanced_accuracy": 0.5446694528707162,
+        "roc_auc": 0.6079614838877807,
+        "return_atr": -0.14486822997594995,
+        "ci_low": -1.2894381121355862,
+        "ci_high": 0.9883657788081165
+      },
+      "BEFORE_ENTRY": {
+        "n_rows": 102,
+        "n_trades": 19,
+        "accuracy": 0.6023106964039914,
+        "balanced_accuracy": 0.6725417212542701,
+        "roc_auc": 0.8189885990648923,
+        "return_atr": 1.288791407905473,
+        "ci_low": -1.0521394375367115,
+        "ci_high": 3.6191986049969374
+      },
+      "AT_ENTRY": {
+        "n_rows": 23,
+        "n_trades": 23,
+        "accuracy": 0.5997666716748472,
+        "balanced_accuracy": 0.48750474865321325,
+        "roc_auc": 0.34371048953266187,
+        "return_atr": 0.03077991983283568,
+        "ci_low": -2.735707407822206,
+        "ci_high": 2.680580037748277
+      },
+      "IN_POSITION": {
+        "n_rows": 948,
+        "n_trades": 73,
+        "accuracy": 0.49273547880221974,
+        "balanced_accuracy": 0.5254173017275899,
+        "roc_auc": 0.5864563720700058,
+        "return_atr": -0.2701102444585799,
+        "ci_low": -1.4409173571564116,
+        "ci_high": 0.8782776625476959
+      }
+    }
+  },
+  "m1_minus_m0": {
+    "mean_delta": 0.2389157939818884,
+    "ci_low": -0.9501209014434425,
+    "ci_high": 1.4406499479448793,
+    "n_trades": 77
+  },
+  "feature_schemas": {
+    "dtp9": [
+      "m15_trend_state",
+      "m15_slope_atr",
+      "m15_dev",
+      "h1_trend_state",
+      "h1_slope_atr",
+      "h1_dev",
+      "h4_trend_state",
+      "h4_slope_atr",
+      "h4_dev"
+    ],
+    "struct33": [
+      "m15_trend_state",
+      "m15_slope_atr",
+      "m15_dev",
+      "m15_sr_support_dist_atr",
+      "m15_sr_resistance_dist_atr",
+      "m15_sr_support_strength",
+      "m15_sr_resistance_strength",
+      "m15_liq_up_dist_atr",
+      "m15_liq_down_dist_atr",
+      "m15_liq_up_count",
+      "m15_liq_down_count",
+      "h1_trend_state",
+      "h1_slope_atr",
+      "h1_dev",
+      "h1_sr_support_dist_atr",
+      "h1_sr_resistance_dist_atr",
+      "h1_sr_support_strength",
+      "h1_sr_resistance_strength",
+      "h1_liq_up_dist_atr",
+      "h1_liq_down_dist_atr",
+      "h1_liq_up_count",
+      "h1_liq_down_count",
+      "h4_trend_state",
+      "h4_slope_atr",
+      "h4_dev",
+      "h4_sr_support_dist_atr",
+      "h4_sr_resistance_dist_atr",
+      "h4_sr_support_strength",
+      "h4_sr_resistance_strength",
+      "h4_liq_up_dist_atr",
+      "h4_liq_down_dist_atr",
+      "h4_liq_up_count",
+      "h4_liq_down_count"
+    ]
+  }
+}
