@@ -154,6 +154,7 @@ class DirectionExpertData:
     symbol: np.ndarray            # [N] object
     decision_time_ns: np.ndarray  # [N] int64  candidate_decision_time
     oef_time_ns: np.ndarray       # [N] int64  oracle_entry_fill_time (time blocks only)
+    oexit_time_ns: np.ndarray     # [N] int64  oracle_exit_fill_time (LABEL HORIZON end)
     entry_quality_atr: np.ndarray  # [N] float64
 
 
@@ -169,10 +170,11 @@ def build_direction_expert_data(ds: pd.DataFrame) -> DirectionExpertData:
     )
     dt = pd.to_datetime(ds["candidate_decision_time"]).to_numpy(dtype="datetime64[ns]")
     ot = pd.to_datetime(ds["oracle_entry_fill_time"]).to_numpy(dtype="datetime64[ns]")
+    xt = pd.to_datetime(ds["oracle_exit_fill_time"]).to_numpy(dtype="datetime64[ns]")
     eq = ds["entry_quality_atr"].to_numpy(np.float64)
     return DirectionExpertData(
         X9, X33, y, w, gid, symbol,
-        dt.astype("int64"), ot.astype("int64"), eq,
+        dt.astype("int64"), ot.astype("int64"), xt.astype("int64"), eq,
     )
 
 
@@ -259,6 +261,39 @@ def _straddling_train_gids(gid_train, qord_train):
     return nq[nq > 1].index.to_numpy()
 
 
+def _assert_trade_constant(values, gid, label):
+    """Fail closed if a field is not constant within an Oracle opportunity.
+
+    The label horizon (oracle_exit_fill_time) belongs to the Teacher trade, so every
+    Candidate row of the same gid must carry the identical value; otherwise a
+    whole-opportunity filter could silently keep part of an opportunity.
+    """
+    ug, inv = np.unique(gid, return_inverse=True)
+    vmin = np.full(ug.size, np.iinfo(np.int64).max, dtype=np.int64)
+    vmax = np.full(ug.size, np.iinfo(np.int64).min, dtype=np.int64)
+    np.minimum.at(vmin, inv, values)
+    np.maximum.at(vmax, inv, values)
+    assert np.array_equal(vmin, vmax), f"OOF_{label}_NOT_CONSTANT_WITHIN_TRADE"
+
+
+def select_label_horizon_fit(dec, oex, train_idx, T):
+    """Router-fit selection for a prediction block starting at T.
+
+    A training Candidate row may only enter the Router fit if BOTH:
+      * its own candidate_decision_time is strictly before T, and
+      * its Teacher-direction label has FULLY RESOLVED before T, i.e. the opportunity's
+        oracle_exit_fill_time < T.
+
+    oracle_direction is a future label whose information horizon runs through
+    oracle_exit_fill_time, so candidate-decision ordering alone is not sufficient.
+    Returns (pool_rows, keep_mask) so callers can audit what was dropped.
+    """
+    train_idx = np.asarray(train_idx)
+    pool = train_idx[dec[train_idx] < T]
+    keep = oex[pool] < T
+    return pool, keep
+
+
 def build_prequential_router_oof(ds, data, train_idx, n_estimators, return_audit=False):
     """Calendar-quarter expanding/prequential OOF router predictions inside TRAIN.
 
@@ -273,6 +308,7 @@ def build_prequential_router_oof(ds, data, train_idx, n_estimators, return_audit
     """
     gid = data.gid
     dec = data.decision_time_ns
+    oex = data.oexit_time_ns
     t = pd.to_datetime(dec).astype("datetime64[ns]")
     pidx = pd.PeriodIndex(t, freq="Q")
     # monotonic integer quarter ordinal avoids any string-compare ordering risk
@@ -288,24 +324,47 @@ def build_prequential_router_oof(ds, data, train_idx, n_estimators, return_audit
     audit = []
     rows_before = 0
     rows_after = 0
+    lh_rows = 0
+    lh_trades = 0
+    dropped_gid_parts = []
 
     straddling = _straddling_train_gids(gid[train_idx], trq)
     straddle_mask = (np.isin(gid, straddling) if straddling.size
                      else np.zeros(len(gid), dtype=bool))
+    # the label horizon is a property of the Oracle trade, not of the Candidate row.
+    # Scoped to the OOF TRAIN population (rows outside it carry no Oracle trade id).
+    _assert_trade_constant(oex[train_idx], gid[train_idx], "ORACLE_EXIT_FILL_TIME")
 
     # first quarter = warm-up
     for q in tq[1:]:
         block_all = train_idx[trq == q]
-        fit_idx = train_idx[trq < q]
         pred_idx = block_all[~straddle_mask[block_all]]
         rows_before += int(block_all.size)
         rows_after += int(pred_idx.size)
         if pred_idx.size == 0:
             continue
+        T = int(np.min(dec[pred_idx]))
+
+        # Router fit = candidate-time eligible AND label fully resolved before T
+        pool, keep = select_label_horizon_fit(dec, oex, train_idx, T)
+        fit_idx = pool[keep]
+        n_pool_trades = int(np.unique(gid[pool]).size)
+        n_fit_trades = int(np.unique(gid[fit_idx]).size)
+        lh_rows += int(pool.size - fit_idx.size)
+        lh_trades += int(n_pool_trades - n_fit_trades)
+        if (~keep).any():
+            dropped_gid_parts.append(np.unique(gid[pool][~keep]))
+
         assert fit_idx.size > 0, "empty router fit block"
-        assert np.max(dec[fit_idx]) < np.min(dec[pred_idx]), "OOF_TEMPORAL_VIOLATION"
+        assert np.max(dec[fit_idx]) < T, "OOF_TEMPORAL_VIOLATION"
+        assert np.max(oex[fit_idx]) < T, "OOF_LABEL_HORIZON_VIOLATION"
         overlap = np.intersect1d(gid[fit_idx], gid[pred_idx])
         assert overlap.size == 0, f"OOF_OPPORTUNITY_LEAK:{overlap[:3]}"
+        # whole-opportunity fit integrity: the horizon filter never keeps part of a trade
+        pool_g, pool_cnt = np.unique(gid[pool], return_counts=True)
+        keep_g, keep_cnt = np.unique(gid[fit_idx], return_counts=True)
+        assert np.array_equal(keep_cnt, pool_cnt[np.searchsorted(pool_g, keep_g)]), (
+            "OOF_PARTIAL_FIT_OPPORTUNITY")
 
         Xtr, ytr, wtr = prepare_xy(ds, fit_idx, DTP9)
         assert len(np.unique(ytr)) == 2, "router fit block must be two-class"
@@ -316,12 +375,19 @@ def build_prequential_router_oof(ds, data, train_idx, n_estimators, return_audit
         pred[pred_idx] = (p >= 0.5).astype(np.int8)
         audit.append({
             "quarter": str(qname[pred_idx][0]),
-            "n_fit_rows": int(fit_idx.size),
+            "T_block": str(pd.to_datetime(T)),
+            "n_candidate_fit_rows_before_label_horizon_filter": int(pool.size),
+            "n_candidate_fit_trades_before_label_horizon_filter": n_pool_trades,
+            "n_fit_rows_after_label_horizon_filter": int(fit_idx.size),
+            "n_fit_trades_after_label_horizon_filter": n_fit_trades,
+            "n_fit_rows_dropped_unresolved_label": int(pool.size - fit_idx.size),
+            "n_fit_trades_dropped_unresolved_label": int(n_pool_trades - n_fit_trades),
+            "max_fit_candidate_decision_time": str(pd.to_datetime(np.max(dec[fit_idx]))),
+            "max_fit_oracle_exit_fill_time": str(pd.to_datetime(np.max(oex[fit_idx]))),
+            "pred_min_candidate_decision_time": str(pd.to_datetime(np.min(dec[pred_idx]))),
+            "fit_has_both_classes": True,
             "n_pred_rows": int(pred_idx.size),
             "n_pred_rows_dropped_straddling": int(block_all.size - pred_idx.size),
-            "fit_max_time": str(pd.to_datetime(np.max(dec[fit_idx]))),
-            "pred_min_time": str(pd.to_datetime(np.min(dec[pred_idx]))),
-            "fit_has_both_classes": True,
             "gid_overlap_size": int(overlap.size),
             "router_long_share": float(np.mean((p >= 0.5))),
         })
@@ -334,6 +400,11 @@ def build_prequential_router_oof(ds, data, train_idx, n_estimators, return_audit
             "n_oof_boundary_straddling_rows": int(straddle_mask[train_idx].sum()),
             "oof_rows_before_boundary_drop": rows_before,
             "oof_rows_after_boundary_drop": rows_after,
+            "n_label_horizon_dropped_rows": int(lh_rows),
+            "n_label_horizon_dropped_trades": int(lh_trades),
+            "n_label_horizon_dropped_trades_unique": (
+                int(np.unique(np.concatenate(dropped_gid_parts)).size)
+                if dropped_gid_parts else 0),
         },
     }
     if return_audit:
@@ -861,7 +932,12 @@ def run_gated_experts(save: bool = True, verbose: bool = True):
                "oof_rows_before_boundary_drop":
                    ch["oof"]["purity"]["oof_rows_before_boundary_drop"],
                "oof_rows_after_boundary_drop":
-                   ch["oof"]["purity"]["oof_rows_after_boundary_drop"]}
+                   ch["oof"]["purity"]["oof_rows_after_boundary_drop"],
+               "n_label_horizon_dropped_rows":
+                   ch["oof"]["purity"]["n_label_horizon_dropped_rows"],
+               "n_label_horizon_dropped_trades":
+                   ch["oof"]["purity"]["n_label_horizon_dropped_trades"],
+               "oof_blocks": ch["oof"]["audit"].to_dict(orient="records")}
         for sysname in SYSTEMS:
             row[f"{sysname}_return"] = ev[sysname]["return_atr"]
             row[f"{sysname}_long_return"] = ev[sysname]["long_return"]
@@ -1052,7 +1128,8 @@ def _write_trade_returns_csv(uniq, teacher_long, tr_map, path):
 def _write_loso_csv(loso, path):
     base = ["held_out_symbol", "router_best_iteration", "n_trades",
             "n_oof_boundary_straddling_trades", "oof_rows_before_boundary_drop",
-            "oof_rows_after_boundary_drop"]
+            "oof_rows_after_boundary_drop", "n_label_horizon_dropped_rows",
+            "n_label_horizon_dropped_trades"]
     for s in SYSTEMS:
         base += [f"{s}_return", f"{s}_long_return", f"{s}_short_return"]
     contrasts_cols = ["E9_minus_A_mean", "E9_minus_M9_mean",

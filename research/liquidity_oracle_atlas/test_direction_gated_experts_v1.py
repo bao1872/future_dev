@@ -107,9 +107,16 @@ def test_oof_temporal_invariant(oof):
     audit = oof["audit"]
     assert len(audit) > 0
     for _, r in audit.iterrows():
-        assert r["n_fit_rows"] > 0
+        assert int(r["n_candidate_fit_rows_before_label_horizon_filter"]) > 0
+        assert int(r["n_fit_rows_after_label_horizon_filter"]) > 0
         assert r["fit_has_both_classes"] is True
-        assert pd.Timestamp(r["fit_max_time"]) < pd.Timestamp(r["pred_min_time"])
+        assert int(r["gid_overlap_size"]) == 0
+        # candidate-time purity
+        assert pd.Timestamp(r["max_fit_candidate_decision_time"]) < pd.Timestamp(
+            r["pred_min_candidate_decision_time"])
+        # label-horizon purity: every fit label resolved before the block starts
+        assert pd.Timestamp(r["max_fit_oracle_exit_fill_time"]) < pd.Timestamp(
+            r["pred_min_candidate_decision_time"])
 
 
 def test_oof_first_quarter_is_warmup(oof, ctx):
@@ -641,6 +648,93 @@ def test_loso_folds_have_whole_opportunity_guard(run):
         assert c in lo.columns, f"missing LOSO purity column {c}"
     assert lo["oof_rows_after_boundary_drop"].notna().all()
     assert (lo["oof_rows_after_boundary_drop"] > 0).all()
+
+
+# --------------------------------------------------------------------------- #
+# FIX2 label-horizon purity of the OOF Router fit population                    #
+# --------------------------------------------------------------------------- #
+def _ns(s):
+    return int(pd.Timestamp(s).to_datetime64().astype("int64"))
+
+
+def test_label_horizon_leak_excluded_from_fit():
+    """Candidate decided in Q2 whose Teacher label only resolves in Q3 must NOT fit Q3."""
+    dec = np.array([_ns("2025-05-15"), _ns("2025-05-16")], dtype=np.int64)
+    oex = np.array([_ns("2025-08-15"), _ns("2025-08-15")], dtype=np.int64)
+    T = _ns("2025-07-01")                      # Q3 prediction block start
+    pool, keep = M.select_label_horizon_fit(dec, oex, np.array([0, 1]), T)
+    assert pool.size == 2, "candidate-time alone would have admitted these rows"
+    assert keep.sum() == 0, "unresolved-label opportunity must not enter Router fit"
+
+
+def test_resolved_label_may_enter_fit():
+    """Label fully resolved before the block start -> the opportunity MAY fit."""
+    dec = np.array([_ns("2025-05-15")], dtype=np.int64)
+    oex = np.array([_ns("2025-06-20")], dtype=np.int64)
+    T = _ns("2025-07-01")
+    _, keep = M.select_label_horizon_fit(dec, oex, np.array([0]), T)
+    assert bool(keep.all())
+
+
+def test_label_horizon_boundary_is_strict():
+    """Must use strict '<': a label resolving exactly at T is not yet knowable."""
+    dec = np.array([_ns("2025-05-15")], dtype=np.int64)
+    oex = np.array([_ns("2025-07-01")], dtype=np.int64)   # == T
+    T = _ns("2025-07-01")
+    _, keep = M.select_label_horizon_fit(dec, oex, np.array([0]), T)
+    assert not bool(keep.any()), "equality must be excluded (strict <)"
+
+
+def test_label_horizon_never_keeps_part_of_a_trade():
+    """The horizon is a TRADE property, so a gid is kept wholly or not at all."""
+    dec = np.array([_ns("2025-04-10"), _ns("2025-05-15")], dtype=np.int64)
+    T = _ns("2025-07-01")
+    oex_late = np.array([_ns("2025-08-15"), _ns("2025-08-15")], dtype=np.int64)
+    _, k1 = M.select_label_horizon_fit(dec, oex_late, np.array([0, 1]), T)
+    assert k1.sum() == 0, "both rows of an unresolved opportunity must be dropped"
+    oex_ok = np.array([_ns("2025-06-01"), _ns("2025-06-01")], dtype=np.int64)
+    _, k2 = M.select_label_horizon_fit(dec, oex_ok, np.array([0, 1]), T)
+    assert k2.sum() == 2, "both rows of a resolved opportunity must be kept"
+
+
+def test_trade_constant_assertion_fails_closed():
+    gid = np.array(["t1", "t1", "t2"])
+    bad = np.array([10, 11, 12], dtype=np.int64)
+    with pytest.raises(AssertionError):
+        M._assert_trade_constant(bad, gid, "ORACLE_EXIT_FILL_TIME")
+    good = np.array([10, 10, 12], dtype=np.int64)
+    M._assert_trade_constant(good, gid, "ORACLE_EXIT_FILL_TIME")
+
+
+def test_pooled_oof_blocks_label_horizon_pure(run):
+    df = pd.read_csv(run["paths"]["oof_audit_csv"])
+    assert len(df) > 0
+    for _, r in df.iterrows():
+        assert pd.Timestamp(r["max_fit_oracle_exit_fill_time"]) < pd.Timestamp(
+            r["pred_min_candidate_decision_time"]), "label-horizon leak in fit population"
+        assert pd.Timestamp(r["max_fit_candidate_decision_time"]) < pd.Timestamp(
+            r["pred_min_candidate_decision_time"]), "candidate-time violation"
+        assert int(r["gid_overlap_size"]) == 0
+
+
+def test_loso_oof_blocks_label_horizon_pure(run):
+    folds = run["summary"]["loso"]["folds"]
+    assert len(folds) == 15
+    for f in folds:
+        blocks = f["oof_blocks"]
+        assert len(blocks) > 0, f"no OOF blocks recorded for {f['held_out_symbol']}"
+        for b in blocks:
+            assert pd.Timestamp(b["max_fit_oracle_exit_fill_time"]) < pd.Timestamp(
+                b["pred_min_candidate_decision_time"])
+            assert int(b["gid_overlap_size"]) == 0
+
+
+def test_label_horizon_drops_recorded(run):
+    oa = run["summary"]["router"]["oof_audit"]
+    for k in ("n_label_horizon_dropped_rows", "n_label_horizon_dropped_trades",
+              "n_label_horizon_dropped_trades_unique"):
+        assert k in oa, f"missing audit counter {k}"
+        assert oa[k] >= 0
 
 
 def test_all_systems_reported_and_phase_present(run):
