@@ -117,6 +117,8 @@ def main() -> None:
         "both": int(df["cause_both"].sum()),
         "unknown": int(df["cause_unknown"].sum()),
         "segment_changes": int(df["segment_changes"].sum()),
+        "n_symbols": int(len(df)),
+        "n_symbols_one_segment": int((df["n_segments"] == 1).sum()),
     }
     # overall totals must also reconcile
     assert overall["gap_time"] + overall["gap_px"] + overall["both"] + overall[

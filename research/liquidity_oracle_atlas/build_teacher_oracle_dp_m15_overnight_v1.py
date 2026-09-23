@@ -685,12 +685,19 @@ def check_oracle_invariants(result: Dict[str, Any]) -> Dict[str, Any]:
         if int(dec["position_after"][e - 1]) != 0:
             out["nonflat_terminal"] += 1
 
-    # PnL reconstruction: DP total value (sum of per-unit optimal values) must
-    # equal the sum of realized trade gross points.
+    # PnL reconstruction: the Bellman total value (sum of per-unit optimal
+    # values) must equal the sum of realized trade NET points (gross - cost).
+    # Under zero cost gross == net, but the canonical Bellman is PnL - cost, so
+    # this reconciles against net_points so it stays correct once cost is real.
     uv = result.get("unit_values")
     total_val = float(np.sum(np.asarray(uv, dtype=float))) if uv else 0.0
     total_gross = float(sum(float(t["gross_points"]) for t in trades))
-    out["pnl_abs_diff"] = abs(total_val - total_gross)
+    total_cost = float(sum(float(t["cost_points"]) for t in trades))
+    total_net = float(sum(float(t["net_points"]) for t in trades))
+    out["gross_points_total"] = total_gross
+    out["cost_points_total"] = total_cost
+    out["net_points_total"] = total_net
+    out["pnl_abs_diff"] = abs(total_val - total_net)
     if out["pnl_abs_diff"] > 1e-6:
         out["pnl_mismatch_flag"] = 1
 

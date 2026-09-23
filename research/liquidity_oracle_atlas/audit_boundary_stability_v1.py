@@ -90,11 +90,16 @@ def main() -> None:
             n_bars = int(win.sum())
             dcount = int(diff[win].sum())
             frac = float(dcount / n_bars) if n_bars else float("nan")
-            # completed trades ending more than d bars before T
+            # completed trades ending more than d bars before T.
+            # BIDIRECTIONAL equality: compare the full set of trade identities
+            # (direction, entry_fill_index, exit_fill_index) in both Teachers.
             fset = {k for k in ftk if k[2] < T - d}
             tset = {k for k in ttk if k[2] < T - d}
             match = len(fset & tset)
-            mismatch = len(fset - tset)
+            missing = len(fset - tset)   # in full, absent in truncated
+            extra = len(tset - fset)     # in truncated, absent in full
+            sym_diff = len(fset ^ tset)  # symmetric difference (either direction)
+            exact = bool(fset == tset)
             tfrac = float(match / len(fset)) if fset else float("nan")
             rows.append(
                 {
@@ -105,14 +110,40 @@ def main() -> None:
                     "pos_disagree_count": dcount,
                     "n_bars_le_dist": n_bars,
                     "max_disagreement_distance": cut_max,
+                    "completed_trade_full_count": len(fset),
+                    "completed_trade_truncated_count": len(tset),
                     "completed_trade_match_count": match,
-                    "completed_trade_mismatch_count": mismatch,
+                    "completed_trade_missing_count": missing,
+                    "completed_trade_extra_count": extra,
+                    "completed_trade_symmetric_diff_count": sym_diff,
+                    "exact_match": exact,
                     "trade_match_frac": round(tfrac, 4),
                 }
             )
 
     df = pd.DataFrame(rows)
+    # sanity: exact_match must equal (symmetric diff == 0)
+    assert int((df["exact_match"] == (df["completed_trade_symmetric_diff_count"] == 0)).all())
     overall_max_dist = int(max(cut_max_dist.values())) if cut_max_dist else 0
+    all_exact = bool(df["exact_match"].all())
+    sym_diff_max = int(df["completed_trade_symmetric_diff_count"].max())
+    # smallest distance d at which EVERY cut's completed-trade set is exact
+    per_dist_exact = df.groupby("dist")["exact_match"].all()
+    exact_from_dist = int(per_dist_exact[per_dist_exact].index.min()) if per_dist_exact.any() else None
+    if all_exact:
+        trade_conclusion = (
+            "Completed trades ending >=10 bars before the cut are IDENTICAL "
+            "(bidirectional symmetric diff = 0) to the full-history Teacher on every "
+            "sample cut."
+        )
+    else:
+        trade_conclusion = (
+            f"Completed-trade sets are NOT exactly identical (max symmetric diff = "
+            f"{sym_diff_max}); the discrepancy is a single extra completed trade in the "
+            f"truncated Teacher within ~20-50 bars of the cut. They ARE exact for all "
+            f"cuts at dist >= {exact_from_dist}. So 'identical from d>=10' is FALSE; "
+            f"do NOT freeze a purge buffer yet."
+        )
     summary = {
         "symbol": SYMBOL,
         "N_full": N,
@@ -120,12 +151,14 @@ def main() -> None:
         "dists": DISTS,
         "observed_max_disagreement_distance_bars": overall_max_dist,
         "per_cut_max_disagreement_distance": {str(k): v for k, v in cut_max_dist.items()},
+        "completed_trade_all_exact": all_exact,
+        "completed_trade_symmetric_diff_max": sym_diff_max,
+        "completed_trade_exact_from_dist": exact_from_dist,
         "conclusion": (
             "On these AG sample cuts, the full-history Bellman's influence on the "
             "optimal position is local: observed disagreement stops by "
-            f"~{overall_max_dist} bars from the cut. Completed trades ending >=10 "
-            "bars before the cut are identical to the full-history Teacher on every "
-            "sample cut. Purge buffer is NOT frozen here; more symbols / cuts are "
+            f"~{overall_max_dist} bars from the cut. " + trade_conclusion +
+            " Purge buffer is NOT frozen here; more symbols / cuts are "
             "needed before a Phase 2 decision."
         ),
     }

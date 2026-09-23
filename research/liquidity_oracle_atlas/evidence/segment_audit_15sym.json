@@ -4,7 +4,9 @@
     "gap_px": 0,
     "both": 0,
     "unknown": 0,
-    "segment_changes": 2
+    "segment_changes": 2,
+    "n_symbols": 15,
+    "n_symbols_one_segment": 14
   },
   "threshold": 10.0,
   "symbols": [

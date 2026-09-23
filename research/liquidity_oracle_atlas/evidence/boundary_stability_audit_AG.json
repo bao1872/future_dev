@@ -25,7 +25,10 @@
       "0.8": 2,
       "0.9": 11
     },
-    "conclusion": "On these AG sample cuts, the full-history Bellman's influence on the optimal position is local: observed disagreement stops by ~35 bars from the cut. Completed trades ending >=10 bars before the cut are identical to the full-history Teacher on every sample cut. Purge buffer is NOT frozen here; more symbols / cuts are needed before a Phase 2 decision."
+    "completed_trade_all_exact": false,
+    "completed_trade_symmetric_diff_max": 1,
+    "completed_trade_exact_from_dist": 50,
+    "conclusion": "On these AG sample cuts, the full-history Bellman's influence on the optimal position is local: observed disagreement stops by ~35 bars from the cut. Completed-trade sets are NOT exactly identical (max symmetric diff = 1); the discrepancy is a single extra completed trade in the truncated Teacher within ~20-50 bars of the cut. They ARE exact for all cuts at dist >= 50. So 'identical from d>=10' is FALSE; do NOT freeze a purge buffer yet. Purge buffer is NOT frozen here; more symbols / cuts are needed before a Phase 2 decision."
   },
   "rows": [
     {
@@ -36,8 +39,13 @@
       "pos_disagree_count": 9,
       "n_bars_le_dist": 9,
       "max_disagreement_distance": 11,
+      "completed_trade_full_count": 272,
+      "completed_trade_truncated_count": 272,
       "completed_trade_match_count": 272,
-      "completed_trade_mismatch_count": 0,
+      "completed_trade_missing_count": 0,
+      "completed_trade_extra_count": 0,
+      "completed_trade_symmetric_diff_count": 0,
+      "exact_match": true,
       "trade_match_frac": 1.0
     },
     {
@@ -48,8 +56,13 @@
       "pos_disagree_count": 10,
       "n_bars_le_dist": 19,
       "max_disagreement_distance": 11,
+      "completed_trade_full_count": 272,
+      "completed_trade_truncated_count": 272,
       "completed_trade_match_count": 272,
-      "completed_trade_mismatch_count": 0,
+      "completed_trade_missing_count": 0,
+      "completed_trade_extra_count": 0,
+      "completed_trade_symmetric_diff_count": 0,
+      "exact_match": true,
       "trade_match_frac": 1.0
     },
     {
@@ -60,8 +73,13 @@
       "pos_disagree_count": 10,
       "n_bars_le_dist": 49,
       "max_disagreement_distance": 11,
+      "completed_trade_full_count": 272,
+      "completed_trade_truncated_count": 272,
       "completed_trade_match_count": 272,
-      "completed_trade_mismatch_count": 0,
+      "completed_trade_missing_count": 0,
+      "completed_trade_extra_count": 0,
+      "completed_trade_symmetric_diff_count": 0,
+      "exact_match": true,
       "trade_match_frac": 1.0
     },
     {
@@ -72,8 +90,13 @@
       "pos_disagree_count": 10,
       "n_bars_le_dist": 99,
       "max_disagreement_distance": 11,
+      "completed_trade_full_count": 271,
+      "completed_trade_truncated_count": 271,
       "completed_trade_match_count": 271,
-      "completed_trade_mismatch_count": 0,
+      "completed_trade_missing_count": 0,
+      "completed_trade_extra_count": 0,
+      "completed_trade_symmetric_diff_count": 0,
+      "exact_match": true,
       "trade_match_frac": 1.0
     },
     {
@@ -84,8 +107,13 @@
       "pos_disagree_count": 10,
       "n_bars_le_dist": 199,
       "max_disagreement_distance": 11,
+      "completed_trade_full_count": 270,
+      "completed_trade_truncated_count": 270,
       "completed_trade_match_count": 270,
-      "completed_trade_mismatch_count": 0,
+      "completed_trade_missing_count": 0,
+      "completed_trade_extra_count": 0,
+      "completed_trade_symmetric_diff_count": 0,
+      "exact_match": true,
       "trade_match_frac": 1.0
     },
     {
@@ -96,8 +124,13 @@
       "pos_disagree_count": 10,
       "n_bars_le_dist": 399,
       "max_disagreement_distance": 11,
+      "completed_trade_full_count": 261,
+      "completed_trade_truncated_count": 261,
       "completed_trade_match_count": 261,
-      "completed_trade_mismatch_count": 0,
+      "completed_trade_missing_count": 0,
+      "completed_trade_extra_count": 0,
+      "completed_trade_symmetric_diff_count": 0,
+      "exact_match": true,
       "trade_match_frac": 1.0
     },
     {
@@ -108,8 +141,13 @@
       "pos_disagree_count": 5,
       "n_bars_le_dist": 9,
       "max_disagreement_distance": 6,
+      "completed_trade_full_count": 362,
+      "completed_trade_truncated_count": 362,
       "completed_trade_match_count": 362,
-      "completed_trade_mismatch_count": 0,
+      "completed_trade_missing_count": 0,
+      "completed_trade_extra_count": 0,
+      "completed_trade_symmetric_diff_count": 0,
+      "exact_match": true,
       "trade_match_frac": 1.0
     },
     {
@@ -120,8 +158,13 @@
       "pos_disagree_count": 5,
       "n_bars_le_dist": 19,
       "max_disagreement_distance": 6,
+      "completed_trade_full_count": 361,
+      "completed_trade_truncated_count": 361,
       "completed_trade_match_count": 361,
-      "completed_trade_mismatch_count": 0,
+      "completed_trade_missing_count": 0,
+      "completed_trade_extra_count": 0,
+      "completed_trade_symmetric_diff_count": 0,
+      "exact_match": true,
       "trade_match_frac": 1.0
     },
     {
@@ -132,8 +175,13 @@
       "pos_disagree_count": 5,
       "n_bars_le_dist": 49,
       "max_disagreement_distance": 6,
+      "completed_trade_full_count": 356,
+      "completed_trade_truncated_count": 356,
       "completed_trade_match_count": 356,
-      "completed_trade_mismatch_count": 0,
+      "completed_trade_missing_count": 0,
+      "completed_trade_extra_count": 0,
+      "completed_trade_symmetric_diff_count": 0,
+      "exact_match": true,
       "trade_match_frac": 1.0
     },
     {
@@ -144,8 +192,13 @@
       "pos_disagree_count": 5,
       "n_bars_le_dist": 99,
       "max_disagreement_distance": 6,
+      "completed_trade_full_count": 355,
+      "completed_trade_truncated_count": 355,
       "completed_trade_match_count": 355,
-      "completed_trade_mismatch_count": 0,
+      "completed_trade_missing_count": 0,
+      "completed_trade_extra_count": 0,
+      "completed_trade_symmetric_diff_count": 0,
+      "exact_match": true,
       "trade_match_frac": 1.0
     },
     {
@@ -156,8 +209,13 @@
       "pos_disagree_count": 5,
       "n_bars_le_dist": 199,
       "max_disagreement_distance": 6,
+      "completed_trade_full_count": 348,
+      "completed_trade_truncated_count": 348,
       "completed_trade_match_count": 348,
-      "completed_trade_mismatch_count": 0,
+      "completed_trade_missing_count": 0,
+      "completed_trade_extra_count": 0,
+      "completed_trade_symmetric_diff_count": 0,
+      "exact_match": true,
       "trade_match_frac": 1.0
     },
     {
@@ -168,8 +226,13 @@
       "pos_disagree_count": 5,
       "n_bars_le_dist": 399,
       "max_disagreement_distance": 6,
+      "completed_trade_full_count": 338,
+      "completed_trade_truncated_count": 338,
       "completed_trade_match_count": 338,
-      "completed_trade_mismatch_count": 0,
+      "completed_trade_missing_count": 0,
+      "completed_trade_extra_count": 0,
+      "completed_trade_symmetric_diff_count": 0,
+      "exact_match": true,
       "trade_match_frac": 1.0
     },
     {
@@ -180,8 +243,13 @@
       "pos_disagree_count": 2,
       "n_bars_le_dist": 9,
       "max_disagreement_distance": 35,
+      "completed_trade_full_count": 421,
+      "completed_trade_truncated_count": 422,
       "completed_trade_match_count": 421,
-      "completed_trade_mismatch_count": 0,
+      "completed_trade_missing_count": 0,
+      "completed_trade_extra_count": 1,
+      "completed_trade_symmetric_diff_count": 1,
+      "exact_match": false,
       "trade_match_frac": 1.0
     },
     {
@@ -192,8 +260,13 @@
       "pos_disagree_count": 4,
       "n_bars_le_dist": 19,
       "max_disagreement_distance": 35,
+      "completed_trade_full_count": 421,
+      "completed_trade_truncated_count": 422,
       "completed_trade_match_count": 421,
-      "completed_trade_mismatch_count": 0,
+      "completed_trade_missing_count": 0,
+      "completed_trade_extra_count": 1,
+      "completed_trade_symmetric_diff_count": 1,
+      "exact_match": false,
       "trade_match_frac": 1.0
     },
     {
@@ -204,8 +277,13 @@
       "pos_disagree_count": 19,
       "n_bars_le_dist": 49,
       "max_disagreement_distance": 35,
+      "completed_trade_full_count": 417,
+      "completed_trade_truncated_count": 417,
       "completed_trade_match_count": 417,
-      "completed_trade_mismatch_count": 0,
+      "completed_trade_missing_count": 0,
+      "completed_trade_extra_count": 0,
+      "completed_trade_symmetric_diff_count": 0,
+      "exact_match": true,
       "trade_match_frac": 1.0
     },
     {
@@ -216,8 +294,13 @@
       "pos_disagree_count": 19,
       "n_bars_le_dist": 99,
       "max_disagreement_distance": 35,
+      "completed_trade_full_count": 417,
+      "completed_trade_truncated_count": 417,
       "completed_trade_match_count": 417,
-      "completed_trade_mismatch_count": 0,
+      "completed_trade_missing_count": 0,
+      "completed_trade_extra_count": 0,
+      "completed_trade_symmetric_diff_count": 0,
+      "exact_match": true,
       "trade_match_frac": 1.0
     },
     {
@@ -228,8 +311,13 @@
       "pos_disagree_count": 19,
       "n_bars_le_dist": 199,
       "max_disagreement_distance": 35,
+      "completed_trade_full_count": 417,
+      "completed_trade_truncated_count": 417,
       "completed_trade_match_count": 417,
-      "completed_trade_mismatch_count": 0,
+      "completed_trade_missing_count": 0,
+      "completed_trade_extra_count": 0,
+      "completed_trade_symmetric_diff_count": 0,
+      "exact_match": true,
       "trade_match_frac": 1.0
     },
     {
@@ -240,8 +328,13 @@
       "pos_disagree_count": 19,
       "n_bars_le_dist": 399,
       "max_disagreement_distance": 35,
+      "completed_trade_full_count": 415,
+      "completed_trade_truncated_count": 415,
       "completed_trade_match_count": 415,
-      "completed_trade_mismatch_count": 0,
+      "completed_trade_missing_count": 0,
+      "completed_trade_extra_count": 0,
+      "completed_trade_symmetric_diff_count": 0,
+      "exact_match": true,
       "trade_match_frac": 1.0
     },
     {
@@ -252,8 +345,13 @@
       "pos_disagree_count": 1,
       "n_bars_le_dist": 9,
       "max_disagreement_distance": 2,
+      "completed_trade_full_count": 456,
+      "completed_trade_truncated_count": 456,
       "completed_trade_match_count": 456,
-      "completed_trade_mismatch_count": 0,
+      "completed_trade_missing_count": 0,
+      "completed_trade_extra_count": 0,
+      "completed_trade_symmetric_diff_count": 0,
+      "exact_match": true,
       "trade_match_frac": 1.0
     },
     {
@@ -264,8 +362,13 @@
       "pos_disagree_count": 1,
       "n_bars_le_dist": 19,
       "max_disagreement_distance": 2,
+      "completed_trade_full_count": 455,
+      "completed_trade_truncated_count": 455,
       "completed_trade_match_count": 455,
-      "completed_trade_mismatch_count": 0,
+      "completed_trade_missing_count": 0,
+      "completed_trade_extra_count": 0,
+      "completed_trade_symmetric_diff_count": 0,
+      "exact_match": true,
       "trade_match_frac": 1.0
     },
     {
@@ -276,8 +379,13 @@
       "pos_disagree_count": 1,
       "n_bars_le_dist": 49,
       "max_disagreement_distance": 2,
+      "completed_trade_full_count": 453,
+      "completed_trade_truncated_count": 453,
       "completed_trade_match_count": 453,
-      "completed_trade_mismatch_count": 0,
+      "completed_trade_missing_count": 0,
+      "completed_trade_extra_count": 0,
+      "completed_trade_symmetric_diff_count": 0,
+      "exact_match": true,
       "trade_match_frac": 1.0
     },
     {
@@ -288,8 +396,13 @@
       "pos_disagree_count": 1,
       "n_bars_le_dist": 99,
       "max_disagreement_distance": 2,
+      "completed_trade_full_count": 451,
+      "completed_trade_truncated_count": 451,
       "completed_trade_match_count": 451,
-      "completed_trade_mismatch_count": 0,
+      "completed_trade_missing_count": 0,
+      "completed_trade_extra_count": 0,
+      "completed_trade_symmetric_diff_count": 0,
+      "exact_match": true,
       "trade_match_frac": 1.0
     },
     {
@@ -300,8 +413,13 @@
       "pos_disagree_count": 1,
       "n_bars_le_dist": 199,
       "max_disagreement_distance": 2,
+      "completed_trade_full_count": 443,
+      "completed_trade_truncated_count": 443,
       "completed_trade_match_count": 443,
-      "completed_trade_mismatch_count": 0,
+      "completed_trade_missing_count": 0,
+      "completed_trade_extra_count": 0,
+      "completed_trade_symmetric_diff_count": 0,
+      "exact_match": true,
       "trade_match_frac": 1.0
     },
     {
@@ -312,8 +430,13 @@
       "pos_disagree_count": 1,
       "n_bars_le_dist": 399,
       "max_disagreement_distance": 2,
+      "completed_trade_full_count": 442,
+      "completed_trade_truncated_count": 442,
       "completed_trade_match_count": 442,
-      "completed_trade_mismatch_count": 0,
+      "completed_trade_missing_count": 0,
+      "completed_trade_extra_count": 0,
+      "completed_trade_symmetric_diff_count": 0,
+      "exact_match": true,
       "trade_match_frac": 1.0
     },
     {
@@ -324,8 +447,13 @@
       "pos_disagree_count": 9,
       "n_bars_le_dist": 9,
       "max_disagreement_distance": 11,
+      "completed_trade_full_count": 500,
+      "completed_trade_truncated_count": 500,
       "completed_trade_match_count": 500,
-      "completed_trade_mismatch_count": 0,
+      "completed_trade_missing_count": 0,
+      "completed_trade_extra_count": 0,
+      "completed_trade_symmetric_diff_count": 0,
+      "exact_match": true,
       "trade_match_frac": 1.0
     },
     {
@@ -336,8 +464,13 @@
       "pos_disagree_count": 10,
       "n_bars_le_dist": 19,
       "max_disagreement_distance": 11,
+      "completed_trade_full_count": 500,
+      "completed_trade_truncated_count": 500,
       "completed_trade_match_count": 500,
-      "completed_trade_mismatch_count": 0,
+      "completed_trade_missing_count": 0,
+      "completed_trade_extra_count": 0,
+      "completed_trade_symmetric_diff_count": 0,
+      "exact_match": true,
       "trade_match_frac": 1.0
     },
     {
@@ -348,8 +481,13 @@
       "pos_disagree_count": 10,
       "n_bars_le_dist": 49,
       "max_disagreement_distance": 11,
+      "completed_trade_full_count": 499,
+      "completed_trade_truncated_count": 499,
       "completed_trade_match_count": 499,
-      "completed_trade_mismatch_count": 0,
+      "completed_trade_missing_count": 0,
+      "completed_trade_extra_count": 0,
+      "completed_trade_symmetric_diff_count": 0,
+      "exact_match": true,
       "trade_match_frac": 1.0
     },
     {
@@ -360,8 +498,13 @@
       "pos_disagree_count": 10,
       "n_bars_le_dist": 99,
       "max_disagreement_distance": 11,
+      "completed_trade_full_count": 498,
+      "completed_trade_truncated_count": 498,
       "completed_trade_match_count": 498,
-      "completed_trade_mismatch_count": 0,
+      "completed_trade_missing_count": 0,
+      "completed_trade_extra_count": 0,
+      "completed_trade_symmetric_diff_count": 0,
+      "exact_match": true,
       "trade_match_frac": 1.0
     },
     {
@@ -372,8 +515,13 @@
       "pos_disagree_count": 10,
       "n_bars_le_dist": 199,
       "max_disagreement_distance": 11,
+      "completed_trade_full_count": 497,
+      "completed_trade_truncated_count": 497,
       "completed_trade_match_count": 497,
-      "completed_trade_mismatch_count": 0,
+      "completed_trade_missing_count": 0,
+      "completed_trade_extra_count": 0,
+      "completed_trade_symmetric_diff_count": 0,
+      "exact_match": true,
       "trade_match_frac": 1.0
     },
     {
@@ -384,8 +532,13 @@
       "pos_disagree_count": 10,
       "n_bars_le_dist": 399,
       "max_disagreement_distance": 11,
+      "completed_trade_full_count": 484,
+      "completed_trade_truncated_count": 484,
       "completed_trade_match_count": 484,
-      "completed_trade_mismatch_count": 0,
+      "completed_trade_missing_count": 0,
+      "completed_trade_extra_count": 0,
+      "completed_trade_symmetric_diff_count": 0,
+      "exact_match": true,
       "trade_match_frac": 1.0
     }
   ]
