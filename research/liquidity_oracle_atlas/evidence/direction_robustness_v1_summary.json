@@ -1,7 +1,7 @@
 {
   "task_id": "FUTURE-R4-M15-DIRECTION-ROBUSTNESS-V1",
   "base_sha": "686cb06fa5199f2712b1d8f8cfddd77f6c1c0a79",
-  "generated_at": "2026-09-23T10:48:50.664926+00:00",
+  "generated_at": "2026-09-23T11:26:15.151050+00:00",
   "primary_model": "DIR-M0 = DTP9",
   "provenance": {
     "confirmation_base_sha": "48605666cd9e3cb0c2d49848df47bb7050a0dabc",
@@ -46,80 +46,98 @@
     "teacher_short_n_trades": 319
   },
   "time_blocks": {
+    "ownership": "oracle opportunity entry month (oracle_entry_fill_time)",
     "blocks": {
       "2026-05": {
-        "n_rows": 2857,
-        "n_trades": 139,
-        "return_atr": 0.08572980027170933,
-        "ci_low": -0.5013672374353015,
-        "ci_high": 0.6902568801496538,
-        "accuracy": 0.5326921024673212,
-        "roc_auc": 0.5657456630406891,
-        "teacher_long_return_atr": 0.4692141352754175,
+        "n_rows": 3285,
+        "n_trades": 138,
+        "return_atr": 0.2186892437700871,
+        "ci_low": -0.31160448758290793,
+        "ci_high": 0.7672595676627697,
+        "accuracy": 0.5444437505917931,
+        "roc_auc": 0.5853963528147681,
+        "teacher_long_return_atr": 0.7897235134255361,
         "teacher_long_n_trades": 63,
-        "teacher_short_return_atr": -0.2321585300603121,
-        "teacher_short_n_trades": 76
+        "teacher_short_return_atr": -0.26097954274049023,
+        "teacher_short_n_trades": 75
       },
       "2026-06": {
-        "n_rows": 3331,
-        "n_trades": 179,
-        "return_atr": 0.4455016649989738,
-        "ci_low": -0.08346399349379663,
-        "ci_high": 0.9824715168092724,
-        "accuracy": 0.6122859613648332,
-        "roc_auc": 0.6666483324322826,
-        "teacher_long_return_atr": 0.7812088084319397,
-        "teacher_long_n_trades": 77,
-        "teacher_short_return_atr": 0.19207568417212703,
-        "teacher_short_n_trades": 102
+        "n_rows": 3162,
+        "n_trades": 164,
+        "return_atr": 0.4086467462530892,
+        "ci_low": -0.08951693455717132,
+        "ci_high": 0.9440748193723957,
+        "accuracy": 0.6058883961205391,
+        "roc_auc": 0.6503144792088076,
+        "teacher_long_return_atr": 0.4889443355169881,
+        "teacher_long_n_trades": 67,
+        "teacher_short_return_atr": 0.3531834629470974,
+        "teacher_short_n_trades": 97
       },
       "2026-07": {
-        "n_rows": 4441,
-        "n_trades": 171,
-        "return_atr": 0.7904977125292586,
-        "ci_low": 0.28013420748375195,
-        "ci_high": 1.3065950409433762,
-        "accuracy": 0.6187616848114136,
-        "roc_auc": 0.6531847346383682,
-        "teacher_long_return_atr": 1.9519357353386428,
-        "teacher_long_n_trades": 91,
-        "teacher_short_return_atr": -0.5306380384164155,
-        "teacher_short_n_trades": 80
+        "n_rows": 4311,
+        "n_trades": 158,
+        "return_atr": 0.8004279233266176,
+        "ci_low": 0.2581877214468414,
+        "ci_high": 1.3341952194554156,
+        "accuracy": 0.6164866694003204,
+        "roc_auc": 0.6521460174209914,
+        "teacher_long_return_atr": 2.0976462882220686,
+        "teacher_long_n_trades": 85,
+        "teacher_short_return_atr": -0.7100318166201397,
+        "teacher_short_n_trades": 73
       },
       "2026-08": {
-        "n_rows": 3127,
-        "n_trades": 185,
-        "return_atr": 1.0483423412086574,
-        "ci_low": 0.4564347618242302,
-        "ci_high": 1.6772960085517739,
-        "accuracy": 0.6118285518405138,
-        "roc_auc": 0.6061301653275295,
-        "teacher_long_return_atr": 2.400566825327652,
-        "teacher_long_n_trades": 108,
-        "teacher_short_return_atr": -0.8482842079452572,
-        "teacher_short_n_trades": 77
+        "n_rows": 3011,
+        "n_trades": 177,
+        "return_atr": 0.9125699413862226,
+        "ci_low": 0.31896066401893525,
+        "ci_high": 1.5154435623607145,
+        "accuracy": 0.6169875587261602,
+        "roc_auc": 0.6086151695196386,
+        "teacher_long_return_atr": 2.172333301113782,
+        "teacher_long_n_trades": 104,
+        "teacher_short_return_atr": -0.8821614204174236,
+        "teacher_short_n_trades": 73
       },
       "2026-09": {
-        "n_rows": 17,
-        "n_trades": 4,
-        "return_atr": 0.222642400872762,
-        "ci_low": -0.8223188116210267,
-        "ci_high": 1.162729005727685,
-        "accuracy": 0.6384425216316439,
-        "roc_auc": 0.5563891577928364,
-        "teacher_long_return_atr": 0.7751526704851233,
-        "teacher_long_n_trades": 3,
+        "n_rows": 4,
+        "n_trades": 1,
+        "return_atr": -1.4348884079643218,
+        "ci_low": -1.4348884079643218,
+        "ci_high": -1.4348884079643218,
+        "accuracy": 0.0,
+        "roc_auc": null,
+        "teacher_long_return_atr": null,
+        "teacher_long_n_trades": 0,
         "teacher_short_return_atr": -1.4348884079643218,
         "teacher_short_n_trades": 1
       }
     },
     "overall_return_atr": 0.6014965284150177,
-    "block_bootstrap": {
+    "partition_check": {
+      "pooled_unique_test_trades": 638,
+      "sum_block_unique_trade_counts": 638,
+      "union_equals_pooled": true,
+      "pairwise_disjoint": true,
+      "pre_fix_row_based_sum_block_trade_counts": 678,
+      "pre_fix_row_based_block_counts": {
+        "2026-05": 139,
+        "2026-06": 179,
+        "2026-07": 171,
+        "2026-08": 185,
+        "2026-09": 4
+      },
+      "post_fix_opportunity_owned_sum_block_trade_counts": 638
+    },
+    "temporal_block_robustness_diagnostic": {
       "n_blocks": 5,
-      "cluster": "calendar month (candidate_decision_time)",
-      "resampled_mean": 0.6141944390814135,
-      "ci_low": 0.22657811122007232,
-      "ci_high": 0.9559980223983399
+      "cluster": "oracle opportunity entry month (disjoint)",
+      "resampled_mean": 0.5956282508907452,
+      "ci_low": 0.2816889611993711,
+      "ci_high": 0.8689641912848244,
+      "label": "temporal_block_robustness_diagnostic",
+      "caveat": "only ~5 disjoint calendar-month blocks; a percentile cluster bootstrap with very few clusters is a diagnostic, not definitive proof"
     }
   },
   "symbol_robustness": {
@@ -540,6 +558,10 @@
       "ci_low": 0.29996220856239336,
       "ci_high": 1.046329134178583
     }
+  },
+  "loso_provenance": {
+    "reused_from": "research/liquidity_oracle_atlas/evidence/direction_robustness_v1_summary.json",
+    "refit_this_run": false
   },
   "params": {
     "base_params": {
