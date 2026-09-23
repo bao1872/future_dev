@@ -113,18 +113,60 @@ def frame_path(symbol: str) -> Path:
     return ARTIFACT_DIR / f"{symbol}_exec_frame.parquet"
 
 
+def save_summary(summary: Dict[str, Any]) -> None:
+    """Atomically write the verified-loader manifest (summary.json)."""
+    tmp = SUMMARY_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(summary, indent=2, default=str))
+    tmp.replace(SUMMARY_FILE)
+
+
 def save_execution_frame_m15(symbol: str, max_bars: Optional[int] = None) -> Dict[str, Any]:
-    """Build + persist the canonical 15m execution frame; return its SHA metadata."""
+    """Build + persist the canonical 15m execution frame; return its SHA metadata.
+
+    Also atomically upserts the canonical verified-loader manifest
+    (summary.json -> execution_frames[symbol]) consumed by
+    load_execution_frame_m15_verified(). The upsert is atomic per-symbol so
+    concurrent/partial writes cannot corrupt the manifest.
+    """
     df = build_execution_frame_m15(symbol, max_bars)
     p = frame_path(symbol)
     df.to_parquet(p, index=False)
     sha = hashlib.sha256(p.read_bytes()).hexdigest()
-    return {
+    meta = {
         "symbol": symbol,
         "rows": int(len(df)),
         "sha256": sha,
         "path": str(p),
     }
+    summary = load_summary()
+    summary.setdefault("execution_frames", {})[symbol] = meta
+    save_summary(summary)
+    return meta
+
+
+def backfill_execution_frames_manifest(symbols) -> list:
+    """Populate the verified-loader manifest from already-existing frame parquet
+    files. No resample, no recompute. Idempotent: re-upserts every present
+    symbol's SHA from the on-disk parquet (fail-closed: matches the loader's
+    expected hash)."""
+    done = []
+    for s in symbols:
+        p = frame_path(s)
+        if not p.exists():
+            continue
+        sha = hashlib.sha256(p.read_bytes()).hexdigest()
+        n = int(len(pd.read_parquet(p)))
+        summary = load_summary()
+        summary.setdefault("frame_math_version", FRAME_MATH_VERSION)
+        summary.setdefault("execution_frames", {})[s] = {
+            "symbol": s,
+            "rows": n,
+            "sha256": sha,
+            "path": str(p),
+        }
+        save_summary(summary)
+        done.append(s)
+    return done
 
 
 def load_summary() -> Dict[str, Any]:

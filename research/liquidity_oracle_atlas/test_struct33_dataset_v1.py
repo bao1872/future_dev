@@ -365,12 +365,13 @@ def test_review_sample_is_unique(built):
 
 
 def test_frozen_teacher_identity_is_pinned():
-    # The builder must consume exactly the Phase 0.5 FIX2 Teacher artifact.
+    # The builder accepts the frozen legacy (AG) identity OR the normalized
+    # upstream-materialization SHA; any other identity fails closed.
     from research.liquidity_oracle_atlas.build_struct33_dataset_v1 import (
-        FROZEN_TEACHER_SOURCE_SHA,
+        ACCEPTED_TEACHER_SOURCE_SHAS,
     )
     art = load_oracle_artifact(ARTIFACT_ROOT, "AG")
-    assert art["metadata"].get("oracle_source_sha") == FROZEN_TEACHER_SOURCE_SHA
+    assert art["metadata"].get("oracle_source_sha") in ACCEPTED_TEACHER_SOURCE_SHAS
     # And the pinned identity actually gates the load (fail-closed).
     bad = load_oracle_artifact(
         ARTIFACT_ROOT, "AG", expected_source_sha="does-not-match"

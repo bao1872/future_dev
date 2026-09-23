@@ -56,7 +56,7 @@ def build_dp_proximity_m15(
         open, high, low, close,
         dp_proximity_bits, dp_proximity_any, dp_proximity_episode_id
     """
-    env = run_environment_m15(symbol, max_bars)
+    env = run_environment_m15(symbol, max_bars, capture_provenance=False)
     exec_frame = env["exec_frame"]
     geom = env["geom_by_decision"]
     n = len(exec_frame)

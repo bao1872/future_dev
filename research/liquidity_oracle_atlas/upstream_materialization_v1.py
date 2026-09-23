@@ -68,6 +68,10 @@ import time
 # tree that was committed as this upstream-materialization commit. This is the
 # correct provenance (not the task base SHA, which only names the task's base).
 UPSTREAM_SHA = "c45a1efa8042d44cb36282d15f0ff7b7fea0d23e"
+# AG's Phase-1 FIX1 dataset was frozen in an EARLIER round and was NOT recomputed
+# during this upstream materialization. Its artifact-generation SHA is distinct
+# from UPSTREAM_SHA and must not be overwritten with it.
+AG_DATASET_SHA = "df868eb8790438ee55db3fc817bcf2650bc994e3"
 BUILDER_TASK_ID = "FUTURE-R4-M15-STRUCT33-DATASET-V1-PHASE1"
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -389,8 +393,14 @@ def build_manifest() -> list:
                 "first_candidate_time": str(times.min()),
                 "last_candidate_time": str(times.max()),
                 "n_segments": n_seg,
-                "builder_task_id": BUILDER_TASK_ID,
-                "builder_source_git_sha": UPSTREAM_SHA,
+                "dataset_builder_contract_id": BUILDER_TASK_ID,
+                "dataset_builder_source_git_sha": (
+                    AG_DATASET_SHA if s == "AG" else UPSTREAM_SHA
+                ),
+                "builder_task_id": BUILDER_TASK_ID,  # legacy alias
+                "builder_source_git_sha": (
+                    AG_DATASET_SHA if s == "AG" else UPSTREAM_SHA
+                ),  # legacy alias
                 "teacher_contract_id": tmeta.get("teacher_contract_id") or tmeta.get("task_id"),
                 "teacher_source_git_sha": tmeta.get("teacher_source_git_sha")
                 or tmeta.get("oracle_source_sha"),
@@ -530,6 +540,40 @@ def write_materialization_summary(eff_rows, path: Path | None = None) -> Path:
     return path
 
 
+def write_upstream_fix2_refresh(path: Path | None = None) -> Path:
+    """Record what FIX2 actually changed (metadata/identity only).
+
+    This run did NOT materialize anything new, so it must NOT overwrite the real
+    materialization execution evidence (15sym_materialization_summary.json).
+    """
+    path = path or (ROOT / "artifacts" / "15sym_upstream_fix2_refresh.json")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    refresh = {
+        "task_id": "FUTURE-R4-M15-15SYM-UPSTREAM-MATERIALIZATION-V1-FIX2",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "base_sha": UPSTREAM_SHA,
+        "actions": [
+            "save_execution_frame_m15 now atomically upserts summary.json execution_frames[symbol]",
+            "backfilled execution-frame manifest from 15 existing parquet files (no resample)",
+            "run_environment_m15 cache gated on capture_provenance=False so provenance "
+            "callers always receive real entry_matches (no None-on-cache-hit regression)",
+            "build_dp_proximity_m15 now calls run_environment_m15(capture_provenance=False)",
+            "manifest dataset_builder_source_git_sha: AG=df868eb..., 14 new=c45a1ef...",
+        ],
+        "symbols_materialized_this_session": [],
+        "environment_runs_total": 0,
+        "teacher_runs_total": 0,
+        "dataset_builds_total": 0,
+        "historical_execution_evidence": (
+            "artifacts/15sym_materialization_summary.json (restored, unchanged from the "
+            "materialization run) + artifacts/15sym_materialization_execution.json (archival copy)"
+        ),
+        "note": "metadata/identity only; no Teacher DP rerun, no dataset rebuild, no model train.",
+    }
+    path.write_text(json.dumps(refresh, indent=2, default=str))
+    return path
+
+
 def materialize_all_missing() -> list:
     """Build Teacher + dataset for every missing symbol lacking a dataset artifact."""
     eff_rows = []
@@ -544,15 +588,27 @@ def materialize_all_missing() -> list:
 
 if __name__ == "__main__":
     write_preflight()  # initial inventory (pre-build)
-    build_missing_execution_frames()
+    # Upsert the canonical execution-frame manifest from the 15 ALREADY-EXISTING
+    # parquet files (no resample). Required for load_execution_frame_m15_verified().
+    # MUST run before build_missing_execution_frames so that step sees the frames
+    # as present and does NOT re-resample them.
+    from research.liquidity_oracle_atlas.build_execution_frame_m15_v1 import (
+        backfill_execution_frames_manifest,
+    )
+    backfilled = backfill_execution_frames_manifest(SYMBOLS)
+    print(f"[U2] execution-frame manifest backfilled for {len(backfilled)} symbols: {backfilled}")
+    build_missing_execution_frames()  # no-op now that all frames are in the manifest
     eff = materialize_all_missing()
     # Correct provenance on already-generated Teachers (no DP rerun). Must run
     # before the manifest, which reads the corrected teacher identity.
     normalized = normalize_teacher_metadata()
     print(f"[U9] teacher metadata normalized for {len(normalized)} symbols: {normalized}")
     write_validation_csv()
-    write_manifest_json()
+    write_manifest_json()  # manifest now records per-symbol dataset provenance
     write_teacher_hygiene_csv()
-    write_materialization_summary(eff)
-    write_preflight()  # final inventory (post-build)
-    print(f"MATERIALIZATION DONE. symbols this session: {[r['symbol'] for r in eff]}")
+    # Preserve historical materialization evidence: do NOT overwrite the real
+    # materialization summary with an empty metadata-refresh run. Emit a FIX2
+    # provenance-refresh record instead.
+    write_upstream_fix2_refresh()
+    write_preflight()  # final inventory (exec frames now present)
+    print(f"FIX2 DONE. symbols materialized this session: {[r['symbol'] for r in eff]}")

@@ -1,0 +1,18 @@
+{
+  "task_id": "FUTURE-R4-M15-15SYM-UPSTREAM-MATERIALIZATION-V1-FIX2",
+  "generated_at": "2026-09-23T10:12:43.567044+00:00",
+  "base_sha": "c45a1efa8042d44cb36282d15f0ff7b7fea0d23e",
+  "actions": [
+    "save_execution_frame_m15 now atomically upserts summary.json execution_frames[symbol]",
+    "backfilled execution-frame manifest from 15 existing parquet files (no resample)",
+    "run_environment_m15 cache gated on capture_provenance=False so provenance callers always receive real entry_matches (no None-on-cache-hit regression)",
+    "build_dp_proximity_m15 now calls run_environment_m15(capture_provenance=False)",
+    "manifest dataset_builder_source_git_sha: AG=df868eb..., 14 new=c45a1ef..."
+  ],
+  "symbols_materialized_this_session": [],
+  "environment_runs_total": 0,
+  "teacher_runs_total": 0,
+  "dataset_builds_total": 0,
+  "historical_execution_evidence": "artifacts/15sym_materialization_summary.json (restored, unchanged from the materialization run) + artifacts/15sym_materialization_execution.json (archival copy)",
+  "note": "metadata/identity only; no Teacher DP rerun, no dataset rebuild, no model train."
+}

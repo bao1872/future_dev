@@ -431,7 +431,13 @@ def run_environment_m15(
     module, so any semantic change invalidates the cache (fail-closed).
     """
     ident = _r4_env_identity(symbol, max_bars)
-    if _use_cache:
+    # The cached artifact intentionally omits `entry_matches` (the provenance
+    # proof), so the cache is served ONLY for non-provenance callers. Provenance
+    # callers (capture_provenance=True: viewer / proof / audit) must always get
+    # the real entry_matches and therefore always recompute. This prevents the
+    # "same function + same args returns None proof on cache hit" API regression.
+    cache_enabled = _use_cache and not capture_provenance
+    if cache_enabled:
         cached = _load_r4_env_cache(symbol, ident, max_bars)
         if cached is not None:
             return cached

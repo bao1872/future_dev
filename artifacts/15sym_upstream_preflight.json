@@ -1,6 +1,6 @@
 {
   "task_id": "FUTURE-R4-M15-15SYM-UPSTREAM-MATERIALIZATION-V1",
-  "generated_at": "2026-09-23T09:32:55.020842+00:00",
+  "generated_at": "2026-09-23T10:12:44.226489+00:00",
   "conclusion": "Raw 5m canonical data present for ALL 15 frozen symbols in research/exports/v3r_5m. No PyTDX network acquisition required.",
   "symbols": {
     "AG": {
@@ -55,7 +55,9 @@
         "4h": false
       },
       "exec_frame_r4": {
-        "exists": false
+        "exists": true,
+        "rows": 14817,
+        "sha256": "b342ff9a82f106ce106c07722d9f8dd5deef756c58009a476d9739b2b5b70850"
       },
       "teacher_artifact": {
         "exists": true,
@@ -90,7 +92,9 @@
         "4h": false
       },
       "exec_frame_r4": {
-        "exists": false
+        "exists": true,
+        "rows": 12441,
+        "sha256": "f3d4e630055f0d67410ee15a0a437b3e9b85b6943ae8f51fb69afc3f3e563066"
       },
       "teacher_artifact": {
         "exists": true,
@@ -125,7 +129,9 @@
         "4h": false
       },
       "exec_frame_r4": {
-        "exists": false
+        "exists": true,
+        "rows": 12441,
+        "sha256": "d2da47c79a1a29ed2e0c5ec3043378a2e499122c34c164df9da7b05448416063"
       },
       "teacher_artifact": {
         "exists": true,
@@ -160,7 +166,9 @@
         "4h": false
       },
       "exec_frame_r4": {
-        "exists": false
+        "exists": true,
+        "rows": 12441,
+        "sha256": "aa0836cbbe769760bdadf2d1144569e474fcc53b5791a1d307319a94801ce4cf"
       },
       "teacher_artifact": {
         "exists": true,
@@ -195,7 +203,9 @@
         "4h": false
       },
       "exec_frame_r4": {
-        "exists": false
+        "exists": true,
+        "rows": 12441,
+        "sha256": "e7f32a961f1950bf7ee41c7ef4a791c8e7bc5cb730dd59e5397aae56e2ff3491"
       },
       "teacher_artifact": {
         "exists": true,
@@ -230,7 +240,9 @@
         "4h": false
       },
       "exec_frame_r4": {
-        "exists": false
+        "exists": true,
+        "rows": 9273,
+        "sha256": "39906a9114be673c6039771959e388daf2abe47277ef9a766f59501a6be20bb4"
       },
       "teacher_artifact": {
         "exists": true,
@@ -265,7 +277,9 @@
         "4h": false
       },
       "exec_frame_r4": {
-        "exists": false
+        "exists": true,
+        "rows": 9273,
+        "sha256": "43cfc969d574ac1b552d5ff7cc15db98de2642c7fd464938266b55201ca431a5"
       },
       "teacher_artifact": {
         "exists": true,
@@ -300,7 +314,9 @@
         "4h": false
       },
       "exec_frame_r4": {
-        "exists": false
+        "exists": true,
+        "rows": 14819,
+        "sha256": "047eebef988eabee46bda9972ad66ae22f3601a8babb0b35fc0474aebe1ca77f"
       },
       "teacher_artifact": {
         "exists": true,
@@ -335,7 +351,9 @@
         "4h": false
       },
       "exec_frame_r4": {
-        "exists": false
+        "exists": true,
+        "rows": 9273,
+        "sha256": "149c9dbe707baf64520ec2de54afbcf5e0b5fd513ea0983e12c725f84bb144d2"
       },
       "teacher_artifact": {
         "exists": true,
@@ -370,7 +388,9 @@
         "4h": false
       },
       "exec_frame_r4": {
-        "exists": false
+        "exists": true,
+        "rows": 9273,
+        "sha256": "bf8975cde6603b2efffd0be9bbd45ecb6b3f74e80a68187747715746abbb369d"
       },
       "teacher_artifact": {
         "exists": true,
@@ -405,7 +425,9 @@
         "4h": false
       },
       "exec_frame_r4": {
-        "exists": false
+        "exists": true,
+        "rows": 9273,
+        "sha256": "550f1711cf85b657b04af0078de82dc2de89eaf1f17f778f742177e71985dbc5"
       },
       "teacher_artifact": {
         "exists": true,
@@ -440,7 +462,9 @@
         "4h": false
       },
       "exec_frame_r4": {
-        "exists": false
+        "exists": true,
+        "rows": 9273,
+        "sha256": "fedead92cccd50cfa81de635e92e6d124323921cee9d67aa8d670b9b8b161931"
       },
       "teacher_artifact": {
         "exists": true,
@@ -475,7 +499,9 @@
         "4h": false
       },
       "exec_frame_r4": {
-        "exists": false
+        "exists": true,
+        "rows": 9273,
+        "sha256": "a3dcc440ed8e4ce41ebc728f098681ba17c1f2a8fa96124d6bc4e02ee48034f8"
       },
       "teacher_artifact": {
         "exists": true,
@@ -510,7 +536,9 @@
         "4h": false
       },
       "exec_frame_r4": {
-        "exists": false
+        "exists": true,
+        "rows": 9273,
+        "sha256": "130b7901963dd87c983b8b786553fcb893b40ce87c40ab5ecd5c378ef20e81a2"
       },
       "teacher_artifact": {
         "exists": true,
