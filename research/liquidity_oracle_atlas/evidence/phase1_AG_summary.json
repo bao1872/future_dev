@@ -1,0 +1,160 @@
+{
+  "meta": {
+    "task_id": "FUTURE-R4-M15-STRUCT33-DATASET-V1-PHASE1-AG",
+    "base_sha": "29e52876fb894b40046fcd2e4035cb66eb931c1d",
+    "symbol": "AG",
+    "generated_at": "2026-09-23T07:13:15.673743+00:00",
+    "teacher_artifact": {
+      "math_version": "intraday_dp_oracle_r2_one_entry_proximity_15m_port",
+      "oracle_source_sha": "phase0p5-fix2",
+      "data_start": "2025-01-02 09:00:00",
+      "data_end": "2026-09-04 14:45:00",
+      "row_count_trades": 566
+    },
+    "struct33": [
+      "m15_trend_state",
+      "m15_slope_atr",
+      "m15_dev",
+      "m15_sr_support_dist_atr",
+      "m15_sr_resistance_dist_atr",
+      "m15_sr_support_strength",
+      "m15_sr_resistance_strength",
+      "m15_liq_up_dist_atr",
+      "m15_liq_down_dist_atr",
+      "m15_liq_up_count",
+      "m15_liq_down_count",
+      "h1_trend_state",
+      "h1_slope_atr",
+      "h1_dev",
+      "h1_sr_support_dist_atr",
+      "h1_sr_resistance_dist_atr",
+      "h1_sr_support_strength",
+      "h1_sr_resistance_strength",
+      "h1_liq_up_dist_atr",
+      "h1_liq_down_dist_atr",
+      "h1_liq_up_count",
+      "h1_liq_down_count",
+      "h4_trend_state",
+      "h4_slope_atr",
+      "h4_dev",
+      "h4_sr_support_dist_atr",
+      "h4_sr_resistance_dist_atr",
+      "h4_sr_support_strength",
+      "h4_sr_resistance_strength",
+      "h4_liq_up_dist_atr",
+      "h4_liq_down_dist_atr",
+      "h4_liq_up_count",
+      "h4_liq_down_count"
+    ],
+    "dtp9": [
+      "m15_trend_state",
+      "m15_slope_atr",
+      "m15_dev",
+      "h1_trend_state",
+      "h1_slope_atr",
+      "h1_dev",
+      "h4_trend_state",
+      "h4_slope_atr",
+      "h4_dev"
+    ],
+    "n_candidates": 5573,
+    "n_label_eligible": 5555,
+    "efficiency": {
+      "environment_runs": 1,
+      "dp_reruns": 0,
+      "teacher_reloaded": true,
+      "candidate_source": "run_environment_m15 touch_bits (single pass)"
+    }
+  },
+  "stats": {
+    "n_candidates": 5573,
+    "fill": {
+      "valid_next_fill": 5573,
+      "hard_segment_censored": 0
+    },
+    "mapping": {
+      "mapped": 5573,
+      "censored_no_future_teacher": 0,
+      "ineligible_teacher_exit": 15
+    },
+    "direction_label_eligible": {
+      "LONG": 3246,
+      "SHORT": 2309,
+      "ratio_LONG": 0.5843384338433844
+    },
+    "opportunity": {
+      "unique_oracle_trades_mapped": 418,
+      "unique_oracle_trades_eligible": 417
+    },
+    "density_candidates_per_oracle_trade": {
+      "p10": 1.0,
+      "p25": 2.0,
+      "p50": 6.0,
+      "p75": 14.0,
+      "p90": 31.0,
+      "max": 219
+    },
+    "entry_quality_atr": {
+      "p1": 0.19869159697758484,
+      "p5": 0.7471279576756246,
+      "p10": 1.2731433149812215,
+      "p25": 2.7440144459438316,
+      "p50": 5.663034874591651,
+      "p75": 9.64628031869972,
+      "p90": 18.207875818341982,
+      "p95": 22.130181611063794,
+      "p99": 29.57183775360148
+    },
+    "timing_bars_to_oracle_entry_sign": {
+      "neg": 4593,
+      "zero": 161,
+      "pos": 801
+    },
+    "timing_bars_to_oracle_exit": {
+      "p10": 4.0,
+      "p25": 9.0,
+      "p50": 25.0,
+      "p75": 60.0,
+      "p90": 116.0
+    },
+    "weight": {
+      "min": 0.0045662100456621,
+      "max": 1.0
+    },
+    "feature_nonnull_rate": {
+      "m15_trend_state": 1.0,
+      "m15_slope_atr": 0.9994616902924816,
+      "m15_dev": 0.9994616902924816,
+      "m15_sr_support_dist_atr": 0.9633949398887494,
+      "m15_sr_resistance_dist_atr": 0.9395298761887673,
+      "m15_sr_support_strength": 0.9633949398887494,
+      "m15_sr_resistance_strength": 0.9395298761887673,
+      "m15_liq_up_dist_atr": 0.3884801722591064,
+      "m15_liq_down_dist_atr": 0.485375919612417,
+      "m15_liq_up_count": 1.0,
+      "m15_liq_down_count": 1.0,
+      "h1_trend_state": 1.0,
+      "h1_slope_atr": 0.9635743764579221,
+      "h1_dev": 0.9635743764579221,
+      "h1_sr_support_dist_atr": 0.8682935582271667,
+      "h1_sr_resistance_dist_atr": 0.7938273820204558,
+      "h1_sr_support_strength": 0.8682935582271667,
+      "h1_sr_resistance_strength": 0.7938273820204558,
+      "h1_liq_up_dist_atr": 0.12094024762246545,
+      "h1_liq_down_dist_atr": 0.807823434415934,
+      "h1_liq_up_count": 1.0,
+      "h1_liq_down_count": 1.0,
+      "h4_trend_state": 1.0,
+      "h4_slope_atr": 0.8629104611519828,
+      "h4_dev": 0.8629104611519828,
+      "h4_sr_support_dist_atr": 0.7261797954423111,
+      "h4_sr_resistance_dist_atr": 0.6025479992822538,
+      "h4_sr_support_strength": 0.7261797954423111,
+      "h4_sr_resistance_strength": 0.6025479992822538,
+      "h4_liq_up_dist_atr": 0.016328727794724565,
+      "h4_liq_down_dist_atr": 0.2526466893952988,
+      "h4_liq_up_count": 1.0,
+      "h4_liq_down_count": 1.0
+    }
+  }
+}
