@@ -53,10 +53,14 @@ BASE_SHA = "29e52876fb894b40046fcd2e4035cb66eb931c1d"
 # same-math-version Teacher can never be consumed silently (governance: explicit
 # source identity, fail-closed).
 # Frozen Teacher identity. AG's Phase-0.5 Teacher was produced with the free-text
-# source tag "phase0p5-fix2". Newly materialized Teachers record the actual frozen
-# git SHA 67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de. Both are accepted; any other
-# identity fails closed (governance: explicit source identity, no silent swap).
-ACCEPTED_TEACHER_SOURCE_SHAS = ("phase0p5-fix2", "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de")
+# source tag "phase0p5-fix2" (legacy). The 14-symbol upstream materialization
+# (commit c45a1efa8042d44cb36282d15f0ff7b7fea0d23e) records the real frozen git SHA.
+# Both are accepted; any other identity fails closed (governance: explicit source
+# identity, no silent swap).
+ACCEPTED_TEACHER_SOURCE_SHAS = (
+    "phase0p5-fix2",
+    "c45a1efa8042d44cb36282d15f0ff7b7fea0d23e",
+)
 
 TF_ORDER = ("m15", "h1", "h4")
 

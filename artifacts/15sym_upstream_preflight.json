@@ -1,6 +1,6 @@
 {
   "task_id": "FUTURE-R4-M15-15SYM-UPSTREAM-MATERIALIZATION-V1",
-  "generated_at": "2026-09-23T09:16:37.638035+00:00",
+  "generated_at": "2026-09-23T09:32:55.020842+00:00",
   "conclusion": "Raw 5m canonical data present for ALL 15 frozen symbols in research/exports/v3r_5m. No PyTDX network acquisition required.",
   "symbols": {
     "AG": {
@@ -62,7 +62,7 @@
         "has_metadata": true,
         "has_trades": true,
         "math_version": "intraday_dp_oracle_r2_one_entry_proximity_15m_port",
-        "oracle_source_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
+        "oracle_source_sha": "c45a1efa8042d44cb36282d15f0ff7b7fea0d23e",
         "row_count_trades": 520,
         "data_start": "2025-01-02 09:00:00",
         "data_end": "2026-09-04 14:45:00"
@@ -97,7 +97,7 @@
         "has_metadata": true,
         "has_trades": true,
         "math_version": "intraday_dp_oracle_r2_one_entry_proximity_15m_port",
-        "oracle_source_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
+        "oracle_source_sha": "c45a1efa8042d44cb36282d15f0ff7b7fea0d23e",
         "row_count_trades": 326,
         "data_start": "2025-01-02 09:00:00",
         "data_end": "2026-09-04 14:45:00"
@@ -132,7 +132,7 @@
         "has_metadata": true,
         "has_trades": true,
         "math_version": "intraday_dp_oracle_r2_one_entry_proximity_15m_port",
-        "oracle_source_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
+        "oracle_source_sha": "c45a1efa8042d44cb36282d15f0ff7b7fea0d23e",
         "row_count_trades": 351,
         "data_start": "2025-01-02 09:00:00",
         "data_end": "2026-09-04 14:45:00"
@@ -167,7 +167,7 @@
         "has_metadata": true,
         "has_trades": true,
         "math_version": "intraday_dp_oracle_r2_one_entry_proximity_15m_port",
-        "oracle_source_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
+        "oracle_source_sha": "c45a1efa8042d44cb36282d15f0ff7b7fea0d23e",
         "row_count_trades": 358,
         "data_start": "2025-01-02 09:00:00",
         "data_end": "2026-09-04 14:45:00"
@@ -202,7 +202,7 @@
         "has_metadata": true,
         "has_trades": true,
         "math_version": "intraday_dp_oracle_r2_one_entry_proximity_15m_port",
-        "oracle_source_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
+        "oracle_source_sha": "c45a1efa8042d44cb36282d15f0ff7b7fea0d23e",
         "row_count_trades": 325,
         "data_start": "2025-01-02 09:00:00",
         "data_end": "2026-09-04 14:45:00"
@@ -237,7 +237,7 @@
         "has_metadata": true,
         "has_trades": true,
         "math_version": "intraday_dp_oracle_r2_one_entry_proximity_15m_port",
-        "oracle_source_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
+        "oracle_source_sha": "c45a1efa8042d44cb36282d15f0ff7b7fea0d23e",
         "row_count_trades": 220,
         "data_start": "2025-01-02 09:00:00",
         "data_end": "2026-09-04 14:45:00"
@@ -272,7 +272,7 @@
         "has_metadata": true,
         "has_trades": true,
         "math_version": "intraday_dp_oracle_r2_one_entry_proximity_15m_port",
-        "oracle_source_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
+        "oracle_source_sha": "c45a1efa8042d44cb36282d15f0ff7b7fea0d23e",
         "row_count_trades": 157,
         "data_start": "2025-01-02 09:00:00",
         "data_end": "2026-09-04 14:45:00"
@@ -307,7 +307,7 @@
         "has_metadata": true,
         "has_trades": true,
         "math_version": "intraday_dp_oracle_r2_one_entry_proximity_15m_port",
-        "oracle_source_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
+        "oracle_source_sha": "c45a1efa8042d44cb36282d15f0ff7b7fea0d23e",
         "row_count_trades": 481,
         "data_start": "2025-01-02 09:00:00",
         "data_end": "2026-09-04 14:45:00"
@@ -342,7 +342,7 @@
         "has_metadata": true,
         "has_trades": true,
         "math_version": "intraday_dp_oracle_r2_one_entry_proximity_15m_port",
-        "oracle_source_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
+        "oracle_source_sha": "c45a1efa8042d44cb36282d15f0ff7b7fea0d23e",
         "row_count_trades": 266,
         "data_start": "2025-01-02 09:00:00",
         "data_end": "2026-09-04 14:45:00"
@@ -377,7 +377,7 @@
         "has_metadata": true,
         "has_trades": true,
         "math_version": "intraday_dp_oracle_r2_one_entry_proximity_15m_port",
-        "oracle_source_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
+        "oracle_source_sha": "c45a1efa8042d44cb36282d15f0ff7b7fea0d23e",
         "row_count_trades": 284,
         "data_start": "2025-01-02 09:00:00",
         "data_end": "2026-09-04 14:45:00"
@@ -412,7 +412,7 @@
         "has_metadata": true,
         "has_trades": true,
         "math_version": "intraday_dp_oracle_r2_one_entry_proximity_15m_port",
-        "oracle_source_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
+        "oracle_source_sha": "c45a1efa8042d44cb36282d15f0ff7b7fea0d23e",
         "row_count_trades": 285,
         "data_start": "2025-01-02 09:00:00",
         "data_end": "2026-09-04 14:45:00"
@@ -447,7 +447,7 @@
         "has_metadata": true,
         "has_trades": true,
         "math_version": "intraday_dp_oracle_r2_one_entry_proximity_15m_port",
-        "oracle_source_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
+        "oracle_source_sha": "c45a1efa8042d44cb36282d15f0ff7b7fea0d23e",
         "row_count_trades": 258,
         "data_start": "2025-01-02 09:00:00",
         "data_end": "2026-09-04 14:45:00"
@@ -482,7 +482,7 @@
         "has_metadata": true,
         "has_trades": true,
         "math_version": "intraday_dp_oracle_r2_one_entry_proximity_15m_port",
-        "oracle_source_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
+        "oracle_source_sha": "c45a1efa8042d44cb36282d15f0ff7b7fea0d23e",
         "row_count_trades": 287,
         "data_start": "2025-01-02 09:00:00",
         "data_end": "2026-09-04 14:45:00"
@@ -517,7 +517,7 @@
         "has_metadata": true,
         "has_trades": true,
         "math_version": "intraday_dp_oracle_r2_one_entry_proximity_15m_port",
-        "oracle_source_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
+        "oracle_source_sha": "c45a1efa8042d44cb36282d15f0ff7b7fea0d23e",
         "row_count_trades": 259,
         "data_start": "2025-01-02 09:00:00",
         "data_end": "2026-09-04 14:45:00"

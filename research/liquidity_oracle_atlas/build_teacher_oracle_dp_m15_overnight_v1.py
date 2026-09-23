@@ -78,6 +78,8 @@ OPTIMAL_FLAT = "OPTIMAL_FLAT"
 REVERSAL = "REVERSAL"
 
 TASK_ID = "FUTURE-R4-M15-STRUCT33-DIRECTION-QUALITY-V1-TEACHER"
+# Clean Teacher contract id, separated from the legacy pseudo-SHA field.
+TEACHER_CONTRACT_ID = "FUTURE-R4-M15-OVERNIGHT-TEACHER-V1"
 ARTIFACT_ROOT = "artifacts/teacher_oracle_dp_m15_overnight_v1"
 
 ORACLE_ACTIONS_FILE = "oracle_actions.parquet"
@@ -562,7 +564,7 @@ def write_oracle_artifact(
         data_start=pd.Timestamp(times[0]), data_end=pd.Timestamp(times[-1]),
         generated_at=generated_at,
         row_count_actions=len(actions), row_count_trades=len(trades),
-        teacher_contract_id=TASK_ID,
+        teacher_contract_id=TEACHER_CONTRACT_ID,
         teacher_source_git_sha=oracle_source_sha,
     )
     (outdir / ORACLE_METADATA_FILE).write_text(json.dumps(meta, indent=2, default=str))

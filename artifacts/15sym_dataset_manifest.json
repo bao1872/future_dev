@@ -11,11 +11,12 @@
     "last_candidate_time": "2026-09-04 09:30:00",
     "n_segments": 1,
     "builder_task_id": "FUTURE-R4-M15-STRUCT33-DATASET-V1-PHASE1",
-    "builder_source_git_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
-    "teacher_contract_id": null,
-    "teacher_source_git_sha": null,
+    "builder_source_git_sha": "c45a1efa8042d44cb36282d15f0ff7b7fea0d23e",
+    "teacher_contract_id": "FUTURE-R4-M15-STRUCT33-DIRECTION-QUALITY-V1-TEACHER",
+    "teacher_source_git_sha": "phase0p5-fix2",
     "teacher_artifact_sha256": "40a6ed8e17b011d5bf8e2766bb7949174993084fb7aaa8ad9d573adce74c89c4",
-    "struct33_schema_hash": "41e6462e2ffabaccce6168c2ac46fcb88df6f5c495a10694b132b9a7bddd7b8e"
+    "struct33_schema_hash": "41e6462e2ffabaccce6168c2ac46fcb88df6f5c495a10694b132b9a7bddd7b8e",
+    "ag_legacy": true
   },
   {
     "symbol": "AU",
@@ -29,11 +30,12 @@
     "last_candidate_time": "2026-09-03 09:45:00",
     "n_segments": 1,
     "builder_task_id": "FUTURE-R4-M15-STRUCT33-DATASET-V1-PHASE1",
-    "builder_source_git_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
-    "teacher_contract_id": "FUTURE-R4-M15-STRUCT33-DIRECTION-QUALITY-V1-TEACHER",
-    "teacher_source_git_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
+    "builder_source_git_sha": "c45a1efa8042d44cb36282d15f0ff7b7fea0d23e",
+    "teacher_contract_id": "FUTURE-R4-M15-OVERNIGHT-TEACHER-V1",
+    "teacher_source_git_sha": "c45a1efa8042d44cb36282d15f0ff7b7fea0d23e",
     "teacher_artifact_sha256": "b0b11a5b0d5817f980c9a518c900a57ef745adf8eb2fd6ecbd9ccd7dfa87f5b6",
-    "struct33_schema_hash": "41e6462e2ffabaccce6168c2ac46fcb88df6f5c495a10694b132b9a7bddd7b8e"
+    "struct33_schema_hash": "41e6462e2ffabaccce6168c2ac46fcb88df6f5c495a10694b132b9a7bddd7b8e",
+    "ag_legacy": false
   },
   {
     "symbol": "CU",
@@ -47,11 +49,12 @@
     "last_candidate_time": "2026-09-04 15:00:00",
     "n_segments": 1,
     "builder_task_id": "FUTURE-R4-M15-STRUCT33-DATASET-V1-PHASE1",
-    "builder_source_git_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
-    "teacher_contract_id": "FUTURE-R4-M15-STRUCT33-DIRECTION-QUALITY-V1-TEACHER",
-    "teacher_source_git_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
+    "builder_source_git_sha": "c45a1efa8042d44cb36282d15f0ff7b7fea0d23e",
+    "teacher_contract_id": "FUTURE-R4-M15-OVERNIGHT-TEACHER-V1",
+    "teacher_source_git_sha": "c45a1efa8042d44cb36282d15f0ff7b7fea0d23e",
     "teacher_artifact_sha256": "1eba352eee0c71bdf1a790921c4f2eae25a5b2b352bd0779688edc17d0d96284",
-    "struct33_schema_hash": "41e6462e2ffabaccce6168c2ac46fcb88df6f5c495a10694b132b9a7bddd7b8e"
+    "struct33_schema_hash": "41e6462e2ffabaccce6168c2ac46fcb88df6f5c495a10694b132b9a7bddd7b8e",
+    "ag_legacy": false
   },
   {
     "symbol": "AL",
@@ -65,11 +68,12 @@
     "last_candidate_time": "2026-09-02 23:15:00",
     "n_segments": 1,
     "builder_task_id": "FUTURE-R4-M15-STRUCT33-DATASET-V1-PHASE1",
-    "builder_source_git_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
-    "teacher_contract_id": "FUTURE-R4-M15-STRUCT33-DIRECTION-QUALITY-V1-TEACHER",
-    "teacher_source_git_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
+    "builder_source_git_sha": "c45a1efa8042d44cb36282d15f0ff7b7fea0d23e",
+    "teacher_contract_id": "FUTURE-R4-M15-OVERNIGHT-TEACHER-V1",
+    "teacher_source_git_sha": "c45a1efa8042d44cb36282d15f0ff7b7fea0d23e",
     "teacher_artifact_sha256": "cc6b9e40e53e3779591aedceb45919a13c8616a4b55259afdcb751609345aff0",
-    "struct33_schema_hash": "41e6462e2ffabaccce6168c2ac46fcb88df6f5c495a10694b132b9a7bddd7b8e"
+    "struct33_schema_hash": "41e6462e2ffabaccce6168c2ac46fcb88df6f5c495a10694b132b9a7bddd7b8e",
+    "ag_legacy": false
   },
   {
     "symbol": "SN",
@@ -83,11 +87,12 @@
     "last_candidate_time": "2026-09-04 15:00:00",
     "n_segments": 1,
     "builder_task_id": "FUTURE-R4-M15-STRUCT33-DATASET-V1-PHASE1",
-    "builder_source_git_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
-    "teacher_contract_id": "FUTURE-R4-M15-STRUCT33-DIRECTION-QUALITY-V1-TEACHER",
-    "teacher_source_git_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
+    "builder_source_git_sha": "c45a1efa8042d44cb36282d15f0ff7b7fea0d23e",
+    "teacher_contract_id": "FUTURE-R4-M15-OVERNIGHT-TEACHER-V1",
+    "teacher_source_git_sha": "c45a1efa8042d44cb36282d15f0ff7b7fea0d23e",
     "teacher_artifact_sha256": "e769b21a6816019d05aa6b0f204038502931ba7951e9e7bb13f98a56eb2d08e3",
-    "struct33_schema_hash": "41e6462e2ffabaccce6168c2ac46fcb88df6f5c495a10694b132b9a7bddd7b8e"
+    "struct33_schema_hash": "41e6462e2ffabaccce6168c2ac46fcb88df6f5c495a10694b132b9a7bddd7b8e",
+    "ag_legacy": false
   },
   {
     "symbol": "NI",
@@ -101,11 +106,12 @@
     "last_candidate_time": "2026-09-04 15:00:00",
     "n_segments": 1,
     "builder_task_id": "FUTURE-R4-M15-STRUCT33-DATASET-V1-PHASE1",
-    "builder_source_git_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
-    "teacher_contract_id": "FUTURE-R4-M15-STRUCT33-DIRECTION-QUALITY-V1-TEACHER",
-    "teacher_source_git_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
+    "builder_source_git_sha": "c45a1efa8042d44cb36282d15f0ff7b7fea0d23e",
+    "teacher_contract_id": "FUTURE-R4-M15-OVERNIGHT-TEACHER-V1",
+    "teacher_source_git_sha": "c45a1efa8042d44cb36282d15f0ff7b7fea0d23e",
     "teacher_artifact_sha256": "4ad3745c8530a6928ba05967fecc7f8f40da813ba8d18a9fdc3a8dd862c5e133",
-    "struct33_schema_hash": "41e6462e2ffabaccce6168c2ac46fcb88df6f5c495a10694b132b9a7bddd7b8e"
+    "struct33_schema_hash": "41e6462e2ffabaccce6168c2ac46fcb88df6f5c495a10694b132b9a7bddd7b8e",
+    "ag_legacy": false
   },
   {
     "symbol": "RB",
@@ -119,11 +125,12 @@
     "last_candidate_time": "2026-09-03 14:15:00",
     "n_segments": 1,
     "builder_task_id": "FUTURE-R4-M15-STRUCT33-DATASET-V1-PHASE1",
-    "builder_source_git_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
-    "teacher_contract_id": "FUTURE-R4-M15-STRUCT33-DIRECTION-QUALITY-V1-TEACHER",
-    "teacher_source_git_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
+    "builder_source_git_sha": "c45a1efa8042d44cb36282d15f0ff7b7fea0d23e",
+    "teacher_contract_id": "FUTURE-R4-M15-OVERNIGHT-TEACHER-V1",
+    "teacher_source_git_sha": "c45a1efa8042d44cb36282d15f0ff7b7fea0d23e",
     "teacher_artifact_sha256": "536b686de8ad8a615dff8f83d24b4c71050aa1703ca82c9035e4aea2955fb22b",
-    "struct33_schema_hash": "41e6462e2ffabaccce6168c2ac46fcb88df6f5c495a10694b132b9a7bddd7b8e"
+    "struct33_schema_hash": "41e6462e2ffabaccce6168c2ac46fcb88df6f5c495a10694b132b9a7bddd7b8e",
+    "ag_legacy": false
   },
   {
     "symbol": "I",
@@ -137,11 +144,12 @@
     "last_candidate_time": "2026-09-04 15:00:00",
     "n_segments": 1,
     "builder_task_id": "FUTURE-R4-M15-STRUCT33-DATASET-V1-PHASE1",
-    "builder_source_git_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
-    "teacher_contract_id": "FUTURE-R4-M15-STRUCT33-DIRECTION-QUALITY-V1-TEACHER",
-    "teacher_source_git_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
+    "builder_source_git_sha": "c45a1efa8042d44cb36282d15f0ff7b7fea0d23e",
+    "teacher_contract_id": "FUTURE-R4-M15-OVERNIGHT-TEACHER-V1",
+    "teacher_source_git_sha": "c45a1efa8042d44cb36282d15f0ff7b7fea0d23e",
     "teacher_artifact_sha256": "e03d89cecf4f45ddb52065e998090065c9e616a13fd1794967e161b95874b03b",
-    "struct33_schema_hash": "41e6462e2ffabaccce6168c2ac46fcb88df6f5c495a10694b132b9a7bddd7b8e"
+    "struct33_schema_hash": "41e6462e2ffabaccce6168c2ac46fcb88df6f5c495a10694b132b9a7bddd7b8e",
+    "ag_legacy": false
   },
   {
     "symbol": "SC",
@@ -155,11 +163,12 @@
     "last_candidate_time": "2026-09-04 14:00:00",
     "n_segments": 3,
     "builder_task_id": "FUTURE-R4-M15-STRUCT33-DATASET-V1-PHASE1",
-    "builder_source_git_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
-    "teacher_contract_id": "FUTURE-R4-M15-STRUCT33-DIRECTION-QUALITY-V1-TEACHER",
-    "teacher_source_git_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
+    "builder_source_git_sha": "c45a1efa8042d44cb36282d15f0ff7b7fea0d23e",
+    "teacher_contract_id": "FUTURE-R4-M15-OVERNIGHT-TEACHER-V1",
+    "teacher_source_git_sha": "c45a1efa8042d44cb36282d15f0ff7b7fea0d23e",
     "teacher_artifact_sha256": "252b19f956bf08bcb47d1923abfcda77d0799ad967317c7da0e0138a819795c3",
-    "struct33_schema_hash": "41e6462e2ffabaccce6168c2ac46fcb88df6f5c495a10694b132b9a7bddd7b8e"
+    "struct33_schema_hash": "41e6462e2ffabaccce6168c2ac46fcb88df6f5c495a10694b132b9a7bddd7b8e",
+    "ag_legacy": false
   },
   {
     "symbol": "RU",
@@ -173,11 +182,12 @@
     "last_candidate_time": "2026-09-04 15:00:00",
     "n_segments": 1,
     "builder_task_id": "FUTURE-R4-M15-STRUCT33-DATASET-V1-PHASE1",
-    "builder_source_git_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
-    "teacher_contract_id": "FUTURE-R4-M15-STRUCT33-DIRECTION-QUALITY-V1-TEACHER",
-    "teacher_source_git_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
+    "builder_source_git_sha": "c45a1efa8042d44cb36282d15f0ff7b7fea0d23e",
+    "teacher_contract_id": "FUTURE-R4-M15-OVERNIGHT-TEACHER-V1",
+    "teacher_source_git_sha": "c45a1efa8042d44cb36282d15f0ff7b7fea0d23e",
     "teacher_artifact_sha256": "995d84674d97cf00ac97bfa96be7dd282af383eae5498bbcd272da43c9afdebe",
-    "struct33_schema_hash": "41e6462e2ffabaccce6168c2ac46fcb88df6f5c495a10694b132b9a7bddd7b8e"
+    "struct33_schema_hash": "41e6462e2ffabaccce6168c2ac46fcb88df6f5c495a10694b132b9a7bddd7b8e",
+    "ag_legacy": false
   },
   {
     "symbol": "MA",
@@ -191,11 +201,12 @@
     "last_candidate_time": "2026-09-04 11:30:00",
     "n_segments": 1,
     "builder_task_id": "FUTURE-R4-M15-STRUCT33-DATASET-V1-PHASE1",
-    "builder_source_git_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
-    "teacher_contract_id": "FUTURE-R4-M15-STRUCT33-DIRECTION-QUALITY-V1-TEACHER",
-    "teacher_source_git_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
+    "builder_source_git_sha": "c45a1efa8042d44cb36282d15f0ff7b7fea0d23e",
+    "teacher_contract_id": "FUTURE-R4-M15-OVERNIGHT-TEACHER-V1",
+    "teacher_source_git_sha": "c45a1efa8042d44cb36282d15f0ff7b7fea0d23e",
     "teacher_artifact_sha256": "451a7d3fbdcf3c525e609b9db20f42bea088b788f3cb7e3356b0f0a34c0394bf",
-    "struct33_schema_hash": "41e6462e2ffabaccce6168c2ac46fcb88df6f5c495a10694b132b9a7bddd7b8e"
+    "struct33_schema_hash": "41e6462e2ffabaccce6168c2ac46fcb88df6f5c495a10694b132b9a7bddd7b8e",
+    "ag_legacy": false
   },
   {
     "symbol": "TA",
@@ -209,11 +220,12 @@
     "last_candidate_time": "2026-09-04 15:00:00",
     "n_segments": 1,
     "builder_task_id": "FUTURE-R4-M15-STRUCT33-DATASET-V1-PHASE1",
-    "builder_source_git_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
-    "teacher_contract_id": "FUTURE-R4-M15-STRUCT33-DIRECTION-QUALITY-V1-TEACHER",
-    "teacher_source_git_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
+    "builder_source_git_sha": "c45a1efa8042d44cb36282d15f0ff7b7fea0d23e",
+    "teacher_contract_id": "FUTURE-R4-M15-OVERNIGHT-TEACHER-V1",
+    "teacher_source_git_sha": "c45a1efa8042d44cb36282d15f0ff7b7fea0d23e",
     "teacher_artifact_sha256": "f4497fb2e3b9f484dd61e063a15796412544016a40938f1fb94ff1e5375ccce6",
-    "struct33_schema_hash": "41e6462e2ffabaccce6168c2ac46fcb88df6f5c495a10694b132b9a7bddd7b8e"
+    "struct33_schema_hash": "41e6462e2ffabaccce6168c2ac46fcb88df6f5c495a10694b132b9a7bddd7b8e",
+    "ag_legacy": false
   },
   {
     "symbol": "M",
@@ -227,11 +239,12 @@
     "last_candidate_time": "2026-09-04 15:00:00",
     "n_segments": 1,
     "builder_task_id": "FUTURE-R4-M15-STRUCT33-DATASET-V1-PHASE1",
-    "builder_source_git_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
-    "teacher_contract_id": "FUTURE-R4-M15-STRUCT33-DIRECTION-QUALITY-V1-TEACHER",
-    "teacher_source_git_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
+    "builder_source_git_sha": "c45a1efa8042d44cb36282d15f0ff7b7fea0d23e",
+    "teacher_contract_id": "FUTURE-R4-M15-OVERNIGHT-TEACHER-V1",
+    "teacher_source_git_sha": "c45a1efa8042d44cb36282d15f0ff7b7fea0d23e",
     "teacher_artifact_sha256": "1c8ccce9c39fc1f27c7c95fad217a7c4e423f16862253168dba27e5ad35ea858",
-    "struct33_schema_hash": "41e6462e2ffabaccce6168c2ac46fcb88df6f5c495a10694b132b9a7bddd7b8e"
+    "struct33_schema_hash": "41e6462e2ffabaccce6168c2ac46fcb88df6f5c495a10694b132b9a7bddd7b8e",
+    "ag_legacy": false
   },
   {
     "symbol": "P",
@@ -245,11 +258,12 @@
     "last_candidate_time": "2026-09-04 09:30:00",
     "n_segments": 1,
     "builder_task_id": "FUTURE-R4-M15-STRUCT33-DATASET-V1-PHASE1",
-    "builder_source_git_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
-    "teacher_contract_id": "FUTURE-R4-M15-STRUCT33-DIRECTION-QUALITY-V1-TEACHER",
-    "teacher_source_git_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
+    "builder_source_git_sha": "c45a1efa8042d44cb36282d15f0ff7b7fea0d23e",
+    "teacher_contract_id": "FUTURE-R4-M15-OVERNIGHT-TEACHER-V1",
+    "teacher_source_git_sha": "c45a1efa8042d44cb36282d15f0ff7b7fea0d23e",
     "teacher_artifact_sha256": "13f142a199bfe232c71a1c92bbc38b3ef3f6251d7b26654289749eb4226932f7",
-    "struct33_schema_hash": "41e6462e2ffabaccce6168c2ac46fcb88df6f5c495a10694b132b9a7bddd7b8e"
+    "struct33_schema_hash": "41e6462e2ffabaccce6168c2ac46fcb88df6f5c495a10694b132b9a7bddd7b8e",
+    "ag_legacy": false
   },
   {
     "symbol": "CF",
@@ -263,10 +277,11 @@
     "last_candidate_time": "2026-09-04 15:00:00",
     "n_segments": 1,
     "builder_task_id": "FUTURE-R4-M15-STRUCT33-DATASET-V1-PHASE1",
-    "builder_source_git_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
-    "teacher_contract_id": "FUTURE-R4-M15-STRUCT33-DIRECTION-QUALITY-V1-TEACHER",
-    "teacher_source_git_sha": "67ea37bf3d37d4656c3d5fd3785cbf9b2efbc0de",
+    "builder_source_git_sha": "c45a1efa8042d44cb36282d15f0ff7b7fea0d23e",
+    "teacher_contract_id": "FUTURE-R4-M15-OVERNIGHT-TEACHER-V1",
+    "teacher_source_git_sha": "c45a1efa8042d44cb36282d15f0ff7b7fea0d23e",
     "teacher_artifact_sha256": "c2c3bd81faf850090445a3e3935aa108794a31225a3114b56f8f78c3bc254519",
-    "struct33_schema_hash": "41e6462e2ffabaccce6168c2ac46fcb88df6f5c495a10694b132b9a7bddd7b8e"
+    "struct33_schema_hash": "41e6462e2ffabaccce6168c2ac46fcb88df6f5c495a10694b132b9a7bddd7b8e",
+    "ag_legacy": false
   }
 ]

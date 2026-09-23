@@ -32,6 +32,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
 
 import hashlib
+import importlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -72,15 +73,55 @@ from research.liquidity_oracle_atlas.build_execution_frame_m15_v1 import (
 # environment instead of each re-running the indicators. The cheap 15m execution
 # frame aggregation is rebuilt on load (deterministic, fast). entry_matches is
 # not persisted: neither canonical caller consumes it.
-R4_ENV_CACHE_VERSION = "r4_env_cache_v1"
+R4_ENV_CONTRACT_ID = "FUTURE-R4-M15-ENVIRONMENT-V1"
+R4_ENV_CACHE_VERSION = "r4_env_cache_v2"  # bumped: invalidates pre-FIX1 caches
 _R4_ENV_DIR = Path("artifacts/candidate_gate_r4_m15_touch_nextbar_v1")
 _R4_ENV_MANIFEST = _R4_ENV_DIR / "r4_env_manifest.json"
+
+# Every module whose code can change the semantics of the cached environment.
+# ANY edit to DTP / SR / Liquidity / forming-state / env math in these files MUST
+# invalidate the cache. We bind a combined SHA of all their current source bytes,
+# so a stale cache can never be silently reused after a semantic change.
+_R4_ENV_SOURCE_MODULES = (
+    "research.liquidity_oracle_atlas.build_execution_environment_m15_v1",
+    "research.liquidity_oracle_atlas.build_execution_frame_m15_v1",
+    "research.liquidity_oracle_atlas.build_dp_proximity_m15_v1",
+    "research.liquidity_oracle_atlas.experiment_structure_interaction_entry_v1",
+    "research.liquidity_oracle_atlas.forming_indicator_state_v1",
+    "research.liquidity_oracle_atlas.build_forming_environment_v1",
+    "research.liquidity_oracle_atlas.experiment_structural_reversion_pgm_v1",
+)
+
+
+def _r4_env_exec_frame_sha(symbol: str, max_bars) -> str:
+    p = _R4_ENV_DIR / f"{symbol}_exec_frame.parquet"
+    if p.exists():
+        return hashlib.sha256(p.read_bytes()).hexdigest()
+    return ""
+
+
+def _r4_env_code_identity() -> str:
+    h = hashlib.sha256()
+    for modname in _R4_ENV_SOURCE_MODULES:
+        mod = importlib.import_module(modname)
+        h.update(Path(mod.__file__).read_bytes())
+    return h.hexdigest()
 
 
 def _r4_env_identity(symbol: str, max_bars) -> str:
     raw_path = RAW_5M_ROOT / f"{symbol}_5m.csv"
     raw_sha = hashlib.sha256(Path(raw_path).read_bytes()).hexdigest()
-    key = f"{raw_sha}|{symbol}|{max_bars}|{R4_ENV_CACHE_VERSION}"
+    frame_sha = _r4_env_exec_frame_sha(symbol, max_bars)
+    code = _r4_env_code_identity()
+    key = "|".join([
+        raw_sha,
+        symbol,
+        str(max_bars),
+        R4_ENV_CACHE_VERSION,
+        R4_ENV_CONTRACT_ID,
+        frame_sha,
+        code,
+    ])
     return hashlib.sha256(key.encode()).hexdigest()
 
 
@@ -173,7 +214,7 @@ def _load_r4_env_cache(symbol: str, ident: str, max_bars):
         return None
 
 
-def _save_r4_env_cache(symbol: str, ident: str, env: dict) -> None:
+def _save_r4_env_cache(symbol: str, ident: str, env: dict, max_bars=None) -> None:
     p = _r4_env_cache_path(symbol)
     try:
         cache = env["features"].copy()
@@ -194,6 +235,15 @@ def _save_r4_env_cache(symbol: str, ident: str, env: dict) -> None:
             "sha256": sha,
             "rows": int(len(cache)),
             "created": datetime.now(timezone.utc).isoformat(),
+            "symbol": symbol,
+            "max_bars": str(max_bars),
+            "raw_sha256": hashlib.sha256(
+                Path(RAW_5M_ROOT / f"{symbol}_5m.csv").read_bytes()
+            ).hexdigest(),
+            "execution_frame_sha256": _r4_env_exec_frame_sha(symbol, max_bars),
+            "environment_contract_id": R4_ENV_CONTRACT_ID,
+            "cache_schema_version": R4_ENV_CACHE_VERSION,
+            "code_identity": _r4_env_code_identity(),
         }
         _R4_ENV_MANIFEST.write_text(json.dumps(manifest, indent=2))
     except Exception as exc:  # cache failure must never break the compute path
@@ -376,13 +426,25 @@ def run_environment_m15(
     to a SHA-identified artifact so the Teacher builder and the STRUCT33 dataset
     builder -- both of which call this function -- share ONE computed environment
     per symbol. The cheap 15m execution-frame aggregation is rebuilt on load.
+    Cache identity binds raw data SHA, execution-frame SHA, environment contract
+    id, cache schema version, and a combined SHA of every indicator/forming source
+    module, so any semantic change invalidates the cache (fail-closed).
     """
     ident = _r4_env_identity(symbol, max_bars)
     if _use_cache:
         cached = _load_r4_env_cache(symbol, ident, max_bars)
         if cached is not None:
             return cached
+    return _compute_r4_env(symbol, max_bars, capture_provenance, ident)
 
+
+def _compute_r4_env(
+    symbol: str,
+    max_bars: Optional[int],
+    capture_provenance: bool,
+    ident: str,
+) -> Dict[str, Any]:
+    """Expensive indicator pass (monkeypatch target for cache-hit tests)."""
     exec_frame = build_execution_frame_m15(symbol, max_bars)
     n = len(exec_frame)
 
@@ -526,5 +588,5 @@ def run_environment_m15(
         "touch_bits": touch_bits,
         "entry_matches": entry_matches,
     }
-    _save_r4_env_cache(symbol, ident, env)
+    _save_r4_env_cache(symbol, ident, env, max_bars)
     return env
