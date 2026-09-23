@@ -1,5 +1,5 @@
-quarter,n_fit_rows,n_pred_rows,n_pred_rows_dropped_straddling,fit_max_time,pred_min_time,fit_has_both_classes,gid_overlap_size,router_long_share
-2025Q2,7732,10371,672,2025-03-31 23:45:00,2025-04-01 00:15:00,True,0,0.6817086105486453
-2025Q3,18775,11372,1227,2025-06-30 23:45:00,2025-07-01 01:00:00,True,0,0.5571579317622231
-2025Q4,31374,9434,819,2025-09-30 15:00:00,2025-10-09 10:45:00,True,0,0.6513673945304219
-2026Q1,41627,406,87,2025-12-31 15:00:00,2026-01-05 09:30:00,True,0,0.729064039408867
+quarter,T_block,n_candidate_fit_rows_before_label_horizon_filter,n_candidate_fit_trades_before_label_horizon_filter,n_fit_rows_after_label_horizon_filter,n_fit_trades_after_label_horizon_filter,n_fit_rows_dropped_unresolved_label,n_fit_trades_dropped_unresolved_label,max_fit_candidate_decision_time,max_fit_oracle_exit_fill_time,pred_min_candidate_decision_time,fit_has_both_classes,n_pred_rows,n_pred_rows_dropped_straddling,gid_overlap_size,router_long_share
+2025Q2,2025-04-01 00:15:00,7732,591,7411,577,321,14,2025-03-31 23:30:00,2025-04-01 00:00:00,2025-04-01 00:15:00,True,10371,672,0,0.618744576222158
+2025Q3,2025-07-01 01:00:00,18785,1169,18216,1157,569,12,2025-06-30 15:00:00,2025-06-30 21:15:00,2025-07-01 01:00:00,True,11372,1227,0,0.5650721069293
+2025Q4,2025-10-09 10:45:00,31388,1587,30199,1576,1189,11,2025-09-30 13:45:00,2025-10-09 09:00:00,2025-10-09 10:45:00,True,9434,819,0,0.6425694297222811
+2026Q1,2026-01-05 09:30:00,41627,2248,41124,2236,503,12,2025-12-31 13:45:00,2025-12-31 14:30:00,2026-01-05 09:30:00,True,406,87,0,0.7339901477832512
