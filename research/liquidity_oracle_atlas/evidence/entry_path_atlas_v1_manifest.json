@@ -1,0 +1,118 @@
+{
+  "task_id": "FUTURE-R5-M15-ENTRY-PATH-ATLAS-V1",
+  "base_sha": "cb9261d4498d328e6dd8edca5d655eaf609b0611",
+  "stage": "kernel_checkpoint",
+  "primary_endpoint": {
+    "name": "delta_PS_4h",
+    "definition": "E[PS_4h | direction_correct=1] - E[PS_4h | direction_correct=0]",
+    "ps": "MFE - MAE (side-normalized, ATR0 units)",
+    "checkpoint": "h4",
+    "bars": 16,
+    "inference": "whole-gid cluster bootstrap"
+  },
+  "audit_only_fields": [
+    "direction_correct",
+    "oracle_direction",
+    "oracle_entry_quality_atr",
+    "e9_teacher_exit_return_atr",
+    "oracle_exit_fill_time",
+    "final_mfe",
+    "final_mae"
+  ],
+  "realtime_policy": "FORBIDDEN_REALTIME_FEATURE",
+  "counters": {
+    "raw_exec_load_count": 1,
+    "direction_chain_run_count": 1,
+    "atr_precompute_count": 1,
+    "sr_liq_precompute_count": 1,
+    "full_history_recompute_count": 0,
+    "reference_call_count_production": 0,
+    "candidate_python_loop_count": 0,
+    "hotloop_dataframe_concat_count": 0,
+    "path_step_count": 567
+  },
+  "checkpoints": [
+    "m15",
+    "h1",
+    "h4",
+    "td1",
+    "td3",
+    "td5"
+  ],
+  "horizon": {
+    "trading_days": 5,
+    "stops_at": "earliest of 5th trading day end / hard segment / data end",
+    "never_stops_at_oracle_exit": true
+  },
+  "branch": "entry-path-atlas-v1",
+  "population": {
+    "test_rows": 13773,
+    "test_trades": 638,
+    "long_trades": 319,
+    "short_trades": 319,
+    "e9_predicted_long_rows": 7086,
+    "e9_predicted_short_rows": 6687,
+    "direction_correct_rate": 0.633703623030567
+  },
+  "symbols_evaluated": [
+    "AG"
+  ],
+  "symbol_blocks": {
+    "AG": {
+      "env_complete": true,
+      "n_candidates": 1048,
+      "production_runtime_sec_full": 0.013200332992710173,
+      "t1": {
+        "rows": 150,
+        "cells": 1950,
+        "mismatch": 0,
+        "max_abs_error": 0.0,
+        "first_mismatch": null
+      }
+    }
+  },
+  "tp": {
+    "counters": {
+      "raw_exec_load_count": 1,
+      "direction_chain_run_count": 1,
+      "atr_precompute_count": 1,
+      "sr_liq_precompute_count": 1,
+      "full_history_recompute_count": 0,
+      "reference_call_count_production": 0,
+      "candidate_python_loop_count": 0,
+      "hotloop_dataframe_concat_count": 0,
+      "path_step_count": 567
+    },
+    "scaling": {
+      "candidate_scaling": {
+        "N": 200,
+        "2N": 400,
+        "4N": 800,
+        "H": 32,
+        "t_N": 0.0012122499756515026,
+        "t_2N": 0.0013742499868385494,
+        "t_4N": 0.0021162500488571823,
+        "ratio_2N": 1.1336358131085815,
+        "ratio_4N": 1.7457208425348416
+      },
+      "horizon_scaling": {
+        "H": 32,
+        "2H": 64,
+        "N": 200,
+        "t_H": 0.001211749971844256,
+        "t_2H": 0.0022921659983694553,
+        "ratio_2H": 1.8916163000860902
+      }
+    },
+    "peak_rss_bytes": 844660736.0
+  },
+  "artifacts": {
+    "artifacts/entry_path_atlas_v1/e9_direction_state_v1.parquet": "67a2311a4907a2acc2684219f25f5478768244cc5cd63a8856d76f69fa55edf4"
+  },
+  "runtime_sec": 8.290327787399292,
+  "unverified_items": [
+    "Full 15-symbol canonical environment materialization DEFERRED to T1.5 (only symbols with a complete persisted R4 m15 env cache are evaluated).",
+    "Primary endpoint delta_PS_4h is NOT estimated here (full experiment not authorized).",
+    "L2 row metrics parquet is not produced at kernel stage."
+  ]
+}
