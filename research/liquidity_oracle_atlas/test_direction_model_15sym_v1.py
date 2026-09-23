@@ -1,19 +1,18 @@
-"""Tests for FUTURE-R4-M15-DIRECTION-MODEL-V1-15SYM-CONFIRMATION.
+"""Tests for FUTURE-R4-M15-DIRECTION-MODEL-V1-15SYM-CONFIRMATION (FIX1).
 
 Proves the governance + methodology invariants required by the task:
   - no environment / Candidate / Teacher-DP rerun (source-level guard)
-  - fail-closed 15-symbol dataset identity verification (dataset SHA, STRUCT33
-    schema hash, builder provenance, Teacher artifact SHA, execution-frame SHA)
-  - one unified calendar (T1/T2 strictly inside [START, END], shared by all)
+  - fail-closed 15-symbol dataset identity verification
+  - common STUDY WINDOW enforced as whole-opportunity eligibility (not a purge)
+  - T1/T2 snapped to the canonical 15-minute decision grid (ceil)
   - no oracle_trade_id crosses a Train/Val/Test split (pooled)
-  - every retained row's four timestamps live in the same split
+  - every retained row AND all four timestamps live in the common window + one split
   - retained per-trade raw weights still sum to 1 (pooled)
-  - DIR-M0 uses exactly DTP9, DIR-M1 uses exactly STRUCT33; no symbol feature
+  - DIR-M0 = DTP9, DIR-M1 = STRUCT33; no symbol feature
   - TEST never participates in fit / eval_set
-  - bootstrap clusters by Oracle opportunity (trade), is chunked + deterministic
-  - majority baseline is opportunity-weighted (differs from row-weighted)
-  - the required outputs exist (pooled / pooled-ex-AG / 15 per-symbol; phases;
-    TEACHER_LONG / TEACHER_SHORT; M1-M0 paired)
+  - chunked bootstrap == unchunked reference (identical seed/B)
+  - majority baseline is opportunity-weighted
+  - required outputs + old->new deltas present
 """
 
 import inspect
@@ -60,7 +59,6 @@ def test_schemas_match_builder():
 
 
 def test_schema_hash_matches_manifest_formula():
-    # The manifest records sha256("|".join(STRUCT33)); the module recomputes it.
     man = {m["symbol"]: m for m in json.loads(open(M.MANIFEST_PATH).read())}
     assert man["AG"]["struct33_schema_hash"] == M.struct33_schema_hash()
 
@@ -81,7 +79,7 @@ def test_manifest_verification_passes_15():
 
 def test_manifest_verification_is_fail_closed(tmp_path):
     man = json.loads(open(M.MANIFEST_PATH).read())
-    man[0]["dataset_sha256"] = "0" * 64  # corrupt one dataset identity
+    man[0]["dataset_sha256"] = "0" * 64
     p = tmp_path / "man.json"
     p.write_text(json.dumps(man))
     with pytest.raises(RuntimeError):
@@ -92,8 +90,6 @@ def test_manifest_verification_is_fail_closed(tmp_path):
 # 4. Bootstrap + majority helpers (pure)
 # --------------------------------------------------------------------------- #
 def test_chunked_bootstrap_clusters_by_trade_not_row():
-    # Trade A: 100 candidates each return 1.0 ; Trade B: 1 candidate return 0.0.
-    # Per-trade mean = (1.0 + 0.0)/2 = 0.5 ; per-row mean would be ~0.99.
     trade_return = np.array([1.0, 0.0])
     mean, lo, hi = M.bootstrap_trade_returns_chunked(trade_return, B=2000)
     assert abs(mean - 0.5) < 1e-9
@@ -114,13 +110,21 @@ def test_chunked_bootstrap_mean_independent_of_chunk():
     assert abs(m1 - m2) < 1e-9
 
 
+def test_chunked_bootstrap_matches_reference_exactly():
+    # Same seed, same B: the chunked bootstrap must equal the unchunked reference
+    # on mean AND both CI bounds (numpy Generator.integers is chunk-invariant).
+    tr = np.random.default_rng(20260923).normal(size=40)
+    ref = M.bootstrap_reference(tr, B=3000)
+    for chunk in (1, 7, 250, 3000):
+        got = M.bootstrap_trade_returns_chunked(tr, B=3000, chunk=chunk)
+        assert np.allclose(ref, got, atol=1e-12), chunk
+
+
 def test_opportunity_weighted_majority_differs_from_row_weighted():
-    # 1 LONG trade with 99 rows, 3 SHORT trades with 1 row each.
-    # row-weighted mean = 99/102 ~ 0.97 -> LONG ; opportunity-weighted = 1/4 -> SHORT.
     y = np.array([1] * 99 + [0] * 3, dtype=np.uint8)
     w = np.array([1.0 / 99] * 99 + [1.0, 1.0, 1.0])
     assert M.opportunity_weighted_majority(y, w) == 0
-    assert int(round(float(y.mean()))) == 1  # the old (row-weighted) answer differs
+    assert int(round(float(y.mean()))) == 1
 
 
 # --------------------------------------------------------------------------- #
@@ -131,19 +135,53 @@ def run():
     return M.run_direction_models_15sym()
 
 
-def test_calendar_shared_and_ordered(run):
-    s = run["summary"]
-    cal = s["calendar"]
-    t_start = pd.Timestamp(cal["start"])
-    t_end = pd.Timestamp(cal["end"])
+def test_calendar_snapped_to_15m_grid(run):
+    cal = run["summary"]["calendar"]
+    start = pd.Timestamp(cal["start"])
+    end = pd.Timestamp(cal["end"])
+    raw1 = pd.Timestamp(cal["raw_t1"])
+    raw2 = pd.Timestamp(cal["raw_t2"])
     t1 = pd.Timestamp(cal["t1"])
     t2 = pd.Timestamp(cal["t2"])
-    assert t_start < t1 < t2 < t_end
-    # exact 60% / 80% of the common span
-    span = t_end.value - t_start.value
-    assert abs((t1.value - t_start.value) - 0.60 * span) <= 1
-    assert abs((t2.value - t_start.value) - 0.80 * span) <= 1
+
+    assert cal["snap_rule"] == "CEIL_15MIN"
     assert cal["frac_train"] == 0.6 and cal["frac_val"] == 0.2
+    assert start < raw1 < raw2 < end
+    assert raw1 <= t1 < raw2 <= t2
+
+    span = end.value - start.value
+    assert abs((raw1.value - start.value) - 0.60 * span) <= 1
+    assert abs((raw2.value - start.value) - 0.80 * span) <= 1
+
+    for t in (t1, t2):
+        assert t.minute % 15 == 0
+        assert t.second == 0 and t.microsecond == 0 and t.nanosecond == 0
+    assert 0 <= t1.value - raw1.value < 15 * 60 * 10 ** 9
+    assert 0 <= t2.value - raw2.value < 15 * 60 * 10 ** 9
+
+
+def test_common_window_enforced(run):
+    ds, kept = run["ds"], run["kept"]
+    cal = run["summary"]["calendar"]
+    start = pd.Timestamp(cal["start"]).value
+    end = pd.Timestamp(cal["end"]).value
+
+    e = np.flatnonzero(kept)
+    for col in M._WINDOW_TIME_COLS:
+        t = pd.to_datetime(ds[col]).to_numpy(dtype="datetime64[ns]").astype("int64")[e]
+        assert bool(((t >= start) & (t <= end)).all()), f"retained row outside window: {col}"
+
+    cw = run["summary"]["common_window"]
+    for k in ("rows_outside_common_window", "opportunities_total",
+              "opportunities_dropped_common_start", "opportunities_dropped_common_end",
+              "opportunities_dropped_common_window", "opportunities_after_window",
+              "eligible_rows_after_window"):
+        assert k in cw
+    assert cw["opportunities_dropped_common_window"] > 0
+    assert (cw["opportunities_dropped_common_window"]
+            <= cw["opportunities_dropped_common_start"]
+            + cw["opportunities_dropped_common_end"])
+    assert cw["opportunities_after_window"] == cw["opportunities_total"] - cw["opportunities_dropped_common_window"]
 
 
 def test_no_oracle_trade_crosses_split(run):
@@ -159,8 +197,7 @@ def test_no_oracle_trade_crosses_split(run):
 def test_all_retained_timestamps_same_split(run):
     ds, kept, split, cuts = run["ds"], run["kept"], run["split"], run["cuts"]
     e = np.flatnonzero(kept)
-    for col in ("candidate_decision_time", "candidate_fill_time",
-                "oracle_entry_fill_time", "oracle_exit_fill_time"):
+    for col in M._WINDOW_TIME_COLS:
         t = pd.to_datetime(ds[col]).to_numpy(dtype="datetime64[ns]")[e]
         sp = np.searchsorted(cuts, t, side="right")
         assert bool((sp == split[e]).all()), f"timestamp split mismatch: {col}"
@@ -180,7 +217,6 @@ def test_m0_exactly_dtp9_and_m1_exactly_struct33(run):
     fs = run["summary"]["feature_schemas"]
     assert tuple(fs["dtp9"]) == tuple(M.DTP9)
     assert tuple(fs["struct33"]) == tuple(M.STRUCT33)
-    # no symbol feature anywhere in the model schemas
     assert "symbol" not in M.DTP9 and "symbol" not in M.STRUCT33
 
 
@@ -197,8 +233,9 @@ def test_test_never_in_fit_or_eval(run):
 
 def test_required_outputs_present(run):
     s = run["summary"]
-    for k in ("task_id", "base_sha", "calendar", "boundary_removal", "splits",
-              "params", "feature_schemas", "scopes", "manifest_verification"):
+    for k in ("task_id", "base_sha", "calendar", "common_window", "boundary_removal",
+              "splits", "params", "feature_schemas", "pre_fix1_deltas",
+              "scopes", "manifest_verification"):
         assert k in s
     assert s["task_id"] == M.TASK_ID
     assert s["base_sha"] == M.BASE_SHA
@@ -207,7 +244,7 @@ def test_required_outputs_present(run):
     assert "POOLED" in scopes and "POOLED_EX_AG" in scopes
     for sym in M.SYMBOLS:
         assert f"SYM_{sym}" in scopes
-    assert len(scopes) == 17  # pooled + ex-ag + 15 per-symbol
+    assert len(scopes) == 17
 
     for name in ("POOLED", "POOLED_EX_AG", "SYM_AG"):
         blk = scopes[name]
@@ -243,3 +280,17 @@ def test_manifest_verification_recorded_in_summary(run):
     for r in rep.values():
         assert r["builder_provenance_ok"] and r["struct33_schema_hash_match"]
         assert r["dataset_sha256_match"] and r["teacher_sha256_match"]
+
+
+def test_pre_fix1_deltas_present(run):
+    d = run["summary"]["pre_fix1_deltas"]
+    assert d["pre_fix1_sha"] == M.PRE_FIX1_SHA
+    for k in ("train_rows", "train_trades", "val_rows", "val_trades",
+              "test_rows", "test_trades"):
+        assert "old" in d["splits_pooled"][k] and "new" in d["splits_pooled"][k]
+    assert "delta" in d["boundary_trades_dropped_total"]
+    for k in ("pooled_m0_return_atr", "pooled_m1_return_atr",
+              "pooled_ex_ag_m0_return_atr", "pooled_ex_ag_m1_return_atr"):
+        assert "delta" in d[k]
+    assert "new" in d["pooled_m1_minus_m0"] and "old" in d["pooled_m1_minus_m0"]
+    assert "new" in d["pooled_ex_ag_m1_minus_m0"]

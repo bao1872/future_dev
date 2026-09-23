@@ -1,7 +1,7 @@
 """train_direction_model_15sym_v1
 ================================
 
-FUTURE-R4-M15-DIRECTION-MODEL-V1-15SYM-CONFIRMATION
+FUTURE-R4-M15-DIRECTION-MODEL-V1-15SYM-CONFIRMATION  (FIX1)
 
 Pooled 15-symbol Direction confirmation trainer. It is the pooled generalization
 of FUTURE-R4-M15-DIRECTION-MODEL-V1-AG (``train_direction_model_ag_v1``), with the
@@ -15,17 +15,27 @@ Hard governance contracts (enforced structurally + by tests):
      STRUCT33 schema hash, dataset builder provenance, Teacher artifact SHA and
      execution-frame SHA are all verified against the committed 15-symbol manifest.
      Any mismatch STOPS.
-  3. One unified calendar shared by all 15 symbols:
+  3. Common STUDY WINDOW (FIX1). The 15-symbol common study universe is
         START = max over symbols of first eligible candidate_decision_time
         END   = min over symbols of last  eligible candidate_decision_time
-        T1    = START + 60% * (END - START)
-        T2    = START + 80% * (END - START)
-     All symbols use the SAME absolute T1/T2 (no per-symbol quantiles).
-  4. Boundary rule (frozen, reused verbatim): a retained Candidate must have
-     decision / fill / oracle_entry / oracle_exit times in the SAME split; if ANY
-     Candidate of an oracle_trade_id violates that, the ENTIRE trade is dropped
-     from ALL splits. No additional bar purge.
-  5. Only direction is trained. entry_quality_atr is used ONLY to translate a
+     START/END are STUDY BOUNDARIES, not a bar-count purge. An Oracle opportunity
+     participates only if ALL of its retained Candidate / Teacher timestamps
+     (candidate_decision_time, candidate_fill_time, oracle_entry_fill_time,
+     oracle_exit_fill_time) lie inside [START, END]; otherwise the ENTIRE
+     opportunity is dropped. This is study-window eligibility, which is distinct
+     from the (still absent) T1/T2 bar-count purge.
+  4. Canonical 15m clock (FIX1). The split cuts are derived on the common span and
+     then SNAPPED to the canonical 15-minute decision grid:
+        raw_T1 = START + 60% * (END - START)
+        raw_T2 = START + 80% * (END - START)
+        T1 = ceil(raw_T1, 15min);  T2 = ceil(raw_T2, 15min)
+     All symbols share the SAME absolute (snapped) T1/T2.
+  5. Boundary rule (frozen, reused verbatim from the AG module): after the common
+     study window is enforced, a retained Candidate must have decision / fill /
+     oracle_entry / oracle_exit times in the SAME split; if ANY Candidate of an
+     oracle_trade_id violates that, the ENTIRE trade is dropped. No additional
+     50/100/200-bar purge.
+  6. Only direction is trained. entry_quality_atr is used ONLY to translate a
      predicted direction into an economic return.
 
 Two models, identical fixed params (imported from the AG module so they cannot
@@ -37,7 +47,8 @@ No symbol feature is used (the pooled model sees features only).
 Three engineering fixes over the AG trainer:
   (a) dataset SHA (and all manifest identities) verified fail-closed;
   (b) majority baseline is OPPORTUNITY-weighted (per Oracle trade), not row-weighted;
-  (c) the trade-level bootstrap is CHUNKED (bounded memory on the pooled trade set).
+  (c) the trade-level bootstrap is CHUNKED (bounded memory) and provably identical
+      to the unchunked reference for the same seed/B.
 
 Primary metric: mean PredictedDirectionReturnATR per Oracle opportunity, with a
 trade-level (NOT row-level) bootstrap 95% CI. Reported for: POOLED, POOLED_EX_AG,
@@ -104,9 +115,39 @@ EXPECTED_DATASET_BUILDER_SHA = {"AG": "df868eb8790438ee55db3fc817bcf2650bc994e3"
 DEFAULT_DATASET_BUILDER_SHA = "c45a1efa8042d44cb36282d15f0ff7b7fea0d23e"
 
 BOOTSTRAP_CHUNK = 500
+SNAP_RULE = "CEIL_15MIN"
 
-_TEST_PHASES = ("ALL", "BEFORE_ENTRY", "AT_ENTRY", "IN_POSITION")
-_TEST_TEACHER = ("TEACHER_LONG", "TEACHER_SHORT")
+_WINDOW_TIME_COLS = (
+    "candidate_decision_time",
+    "candidate_fill_time",
+    "oracle_entry_fill_time",
+    "oracle_exit_fill_time",
+)
+
+# Frozen pre-FIX1 (ea49c84) result, used only to report old->new deltas.
+PRE_FIX1_SHA = "ea49c84161c5a859d893ae3b6dc9dcc75de1c0f9"
+PRE_FIX1_BASELINE = {
+    "splits_pooled": {
+        "train_rows": 43235, "train_trades": 2396,
+        "val_rows": 12046, "val_trades": 643,
+        "test_rows": 14722, "test_trades": 677,
+    },
+    "boundary_trades_dropped_total": 26,
+    "pooled_m0": {"return_atr": 0.6427545328750323,
+                  "ci_low": 0.3513963604033949, "ci_high": 0.9144324641189835},
+    "pooled_m1": {"return_atr": 0.6522414528446739,
+                  "ci_low": 0.3807024587029232, "ci_high": 0.908452300455112},
+    "pooled_m1_minus_m0": {"mean_delta": 0.009486919969641716,
+                           "ci_low": -0.12792035947455227,
+                           "ci_high": 0.15073942739541704, "n_trades": 677},
+    "pooled_ex_ag_m0": {"return_atr": 0.5918661651099241,
+                        "ci_low": 0.2920386862364857, "ci_high": 0.8945227991358379},
+    "pooled_ex_ag_m1": {"return_atr": 0.6145575549815256,
+                        "ci_low": 0.33023390067685476, "ci_high": 0.898653026571771},
+    "pooled_ex_ag_m1_minus_m0": {"mean_delta": 0.022691389871601644,
+                                 "ci_low": -0.11598376042970478,
+                                 "ci_high": 0.1677519468719708, "n_trades": 600},
+}
 
 
 # --------------------------------------------------------------------------- #
@@ -198,7 +239,7 @@ def verify_manifest(symbols=SYMBOLS, manifest_path: str | None = None) -> dict:
 
 
 # --------------------------------------------------------------------------- #
-# Pooled load + unified calendar                                                #
+# Pooled load + common calendar (study window + 15m-snapped cuts)               #
 # --------------------------------------------------------------------------- #
 def load_pooled(symbols=SYMBOLS) -> pd.DataFrame:
     frames = []
@@ -214,7 +255,11 @@ def load_pooled(symbols=SYMBOLS) -> pd.DataFrame:
 
 def common_calendar(ds: pd.DataFrame, symbols=SYMBOLS,
                     frac_train: float = FRAC_TRAIN, frac_val: float = FRAC_VAL) -> dict:
-    """One unified calendar shared by all symbols (see module docstring)."""
+    """One unified calendar shared by all symbols (see module docstring).
+
+    raw_T1/raw_T2 are the exact 60%/80% fractions of the common span; T1/T2 are
+    snapped to the canonical 15-minute decision grid via ceiling.
+    """
     el = ds["label_eligible"].to_numpy(bool)
     sym = ds["symbol"].to_numpy(object)
     dt = pd.to_datetime(ds["candidate_decision_time"]).to_numpy(dtype="datetime64[ns]")
@@ -232,25 +277,90 @@ def common_calendar(ds: pd.DataFrame, symbols=SYMBOLS,
     start_ns = int(np.datetime64(start, "ns").astype("int64"))
     end_ns = int(np.datetime64(end, "ns").astype("int64"))
     span = end_ns - start_ns
-    t1_ns = start_ns + int(round(span * frac_train))
-    t2_ns = start_ns + int(round(span * (frac_train + frac_val)))
-    cuts = np.array([t1_ns, t2_ns], dtype="datetime64[ns]")
+
+    raw_t1 = pd.Timestamp(start_ns + int(round(span * frac_train)))
+    raw_t2 = pd.Timestamp(start_ns + int(round(span * (frac_train + frac_val))))
+    t1 = raw_t1.ceil("15min")
+    t2 = raw_t2.ceil("15min")
+
+    for t in (t1, t2):
+        if not (t.minute % 15 == 0 and t.second == 0
+                and t.microsecond == 0 and t.nanosecond == 0):
+            raise RuntimeError(f"STOP_15SYM_CUT_NOT_ON_15M_GRID:{t}")
+
+    cuts = np.array([t1.value, t2.value], dtype="datetime64[ns]")
     return {
         "start": pd.Timestamp(start),
         "end": pd.Timestamp(end),
-        "t1": pd.Timestamp(t1_ns),
-        "t2": pd.Timestamp(t2_ns),
+        "raw_t1": raw_t1,
+        "raw_t2": raw_t2,
+        "t1": t1,
+        "t2": t2,
+        "cuts": cuts,
         "start_ns": start_ns,
         "end_ns": end_ns,
-        "cuts": cuts,
         "span_days": round(span / 1e9 / 86400.0, 3),
         "frac_train": frac_train,
         "frac_val": frac_val,
+        "snap_rule": SNAP_RULE,
     }
 
 
+def common_window_eligibility(ds: pd.DataFrame, start_ns: int, end_ns: int):
+    """Whole-opportunity eligibility against the common study window [START, END].
+
+    A row is window-eligible iff ALL of its four timestamps lie inside the window.
+    If ANY eligible row of an oracle_trade_id is not window-eligible, the ENTIRE
+    opportunity is dropped (no partial trades). Returns (win_ok_mask_over_all_rows,
+    report).
+    """
+    el = ds["label_eligible"].to_numpy(bool)
+    e = np.flatnonzero(el)
+
+    times = {
+        c: pd.to_datetime(ds[c]).to_numpy(dtype="datetime64[ns]").astype("int64")[e]
+        for c in _WINDOW_TIME_COLS
+    }
+    row_in = np.ones(e.size, dtype=bool)
+    below = np.zeros(e.size, dtype=bool)
+    above = np.zeros(e.size, dtype=bool)
+    for c in _WINDOW_TIME_COLS:
+        t = times[c]
+        row_in &= (t >= start_ns) & (t <= end_ns)
+        below |= t < start_ns
+        above |= t > end_ns
+
+    tids = ds["oracle_trade_id"].to_numpy(object)[e]
+    uniq, inv = np.unique(tids, return_inverse=True)
+
+    trade_bad = np.zeros(len(uniq), dtype=bool)
+    np.logical_or.at(trade_bad, inv, ~row_in)
+    trade_below = np.zeros(len(uniq), dtype=bool)
+    np.logical_or.at(trade_below, inv, below)
+    trade_above = np.zeros(len(uniq), dtype=bool)
+    np.logical_or.at(trade_above, inv, above)
+
+    keep = row_in & ~trade_bad[inv]
+    win_ok = np.zeros(len(ds), dtype=bool)
+    win_ok[e] = keep
+
+    report = {
+        "start": pd.Timestamp(start_ns).isoformat(),
+        "end": pd.Timestamp(end_ns).isoformat(),
+        "eligible_rows_total": int(e.size),
+        "rows_outside_common_window": int((~row_in).sum()),
+        "opportunities_total": int(len(uniq)),
+        "opportunities_dropped_common_start": int((trade_bad & trade_below).sum()),
+        "opportunities_dropped_common_end": int((trade_bad & trade_above).sum()),
+        "opportunities_dropped_common_window": int(trade_bad.sum()),
+        "opportunities_after_window": int((~trade_bad).sum()),
+        "eligible_rows_after_window": int(keep.sum()),
+    }
+    return win_ok, report
+
+
 # --------------------------------------------------------------------------- #
-# Chunked trade-level bootstrap + opportunity-weighted majority                 #
+# Chunked trade-level bootstrap (+ unchunked reference) + weighted majority     #
 # --------------------------------------------------------------------------- #
 def bootstrap_trade_returns_chunked(
     trade_return: np.ndarray,
@@ -258,7 +368,12 @@ def bootstrap_trade_returns_chunked(
     chunk: int = BOOTSTRAP_CHUNK,
     seed: int = BOOTSTRAP_SEED,
 ):
-    """Trade-clustered bootstrap with bounded memory (chunked replicates)."""
+    """Trade-clustered bootstrap with bounded memory (chunked replicates).
+
+    numpy's Generator.integers is chunk-invariant (the stream advances
+    element-wise), so for the same seed/B this is EXACTLY the unchunked reference
+    computed by ``bootstrap_reference``.
+    """
     n = len(trade_return)
     if n == 0:
         return 0.0, 0.0, 0.0
@@ -271,6 +386,22 @@ def bootstrap_trade_returns_chunked(
         means[done:done + m] = trade_return[idx].mean(axis=1)
         done += m
     lo, hi = np.quantile(means, [0.025, 0.975])
+    return float(trade_return.mean()), float(lo), float(hi)
+
+
+def bootstrap_reference(
+    trade_return: np.ndarray,
+    B: int = BOOTSTRAP_REPLICATES,
+    seed: int = BOOTSTRAP_SEED,
+):
+    """Unchunked reference (single draw). Same result as the chunked version."""
+    n = len(trade_return)
+    if n == 0:
+        return 0.0, 0.0, 0.0
+    rng = np.random.default_rng(seed)
+    idx = rng.integers(0, n, size=(B, n))
+    boot = trade_return[idx].mean(axis=1)
+    lo, hi = np.quantile(boot, [0.025, 0.975])
     return float(trade_return.mean()), float(lo), float(hi)
 
 
@@ -320,7 +451,7 @@ def evaluate_subset(ds: pd.DataFrame, idx: np.ndarray, pred_dir: np.ndarray,
 
 def evaluate_block(ds, idx, pred_dir, pred_long_proba):
     block = {}
-    for ph in _TEST_PHASES:
+    for ph in ("ALL", "BEFORE_ENTRY", "AT_ENTRY", "IN_POSITION"):
         sub = phase_mask(ds, idx, ph)
         block[ph] = evaluate_subset(
             ds, idx[sub], pred_dir[sub],
@@ -350,6 +481,12 @@ def paired_m1_minus_m0(ds, idx, pred_dir_m0, pred_dir_m1):
     return {"mean_delta": mean, "ci_low": lo, "ci_high": hi, "n_trades": int(len(delta))}
 
 
+def _delta(old, new):
+    if old is None or new is None:
+        return {"old": old, "new": new, "delta": None}
+    return {"old": old, "new": new, "delta": new - old}
+
+
 # --------------------------------------------------------------------------- #
 # Main orchestration                                                            #
 # --------------------------------------------------------------------------- #
@@ -362,16 +499,19 @@ def run_direction_models_15sym(symbols=SYMBOLS, frac_train: float = FRAC_TRAIN,
 
     dt = pd.to_datetime(ds["candidate_decision_time"]).to_numpy(dtype="datetime64[ns]")
     split = np.searchsorted(cuts, dt, side="right")
-    kept, boundary_report = remove_boundary_opportunities(ds, split, cuts)
+
+    # (1) common study window (whole-opportunity eligibility)
+    win_ok, window_report = common_window_eligibility(ds, cal["start_ns"], cal["end_ns"])
+    # (2) T1/T2 whole-opportunity boundary removal among window-eligible rows
+    #     (frozen rule reused verbatim; fed the window-eligible label mask).
+    kept, boundary_report = remove_boundary_opportunities(
+        ds.assign(label_eligible=win_ok), split, cuts
+    )
 
     k = np.flatnonzero(kept)
     train_idx = k[split[k] == 0]
     val_idx = k[split[k] == 1]
     test_idx = k[split[k] == 2]
-
-    # window membership report (all rows are kept; no extra purge)
-    dt_ns = dt.astype("int64")
-    in_win = (dt_ns >= cal["start_ns"]) & (dt_ns <= cal["end_ns"])
 
     # ---- fit pooled models (fixed params; no tuning) ----
     preds = {}
@@ -467,6 +607,38 @@ def run_direction_models_15sym(symbols=SYMBOLS, frac_train: float = FRAC_TRAIN,
     os.makedirs(EVIDENCE_DIR, exist_ok=True)
     trade_df.to_csv(TRADE_CSV, index=False)
 
+    # ---- pre-FIX1 -> post-FIX1 deltas ----
+    new_pool = split_report["pooled"]
+    b = PRE_FIX1_BASELINE
+    deltas = {
+        "pre_fix1_sha": PRE_FIX1_SHA,
+        "splits_pooled": {
+            "train_rows": _delta(b["splits_pooled"]["train_rows"], new_pool["train"]["rows"]),
+            "train_trades": _delta(b["splits_pooled"]["train_trades"], new_pool["train"]["trades"]),
+            "val_rows": _delta(b["splits_pooled"]["val_rows"], new_pool["val"]["rows"]),
+            "val_trades": _delta(b["splits_pooled"]["val_trades"], new_pool["val"]["trades"]),
+            "test_rows": _delta(b["splits_pooled"]["test_rows"], new_pool["test"]["rows"]),
+            "test_trades": _delta(b["splits_pooled"]["test_trades"], new_pool["test"]["trades"]),
+        },
+        "boundary_trades_dropped_total": _delta(
+            b["boundary_trades_dropped_total"], boundary_report["trades_dropped_total"]),
+        "pooled_m0_return_atr": _delta(
+            b["pooled_m0"]["return_atr"], scopes["POOLED"]["models"]["dir_m0"]["ALL"]["return_atr"]),
+        "pooled_m1_return_atr": _delta(
+            b["pooled_m1"]["return_atr"], scopes["POOLED"]["models"]["dir_m1"]["ALL"]["return_atr"]),
+        "pooled_m1_minus_m0": {
+            "old": b["pooled_m1_minus_m0"], "new": scopes["POOLED"]["m1_minus_m0"]},
+        "pooled_ex_ag_m0_return_atr": _delta(
+            b["pooled_ex_ag_m0"]["return_atr"],
+            scopes["POOLED_EX_AG"]["models"]["dir_m0"]["ALL"]["return_atr"]),
+        "pooled_ex_ag_m1_return_atr": _delta(
+            b["pooled_ex_ag_m1"]["return_atr"],
+            scopes["POOLED_EX_AG"]["models"]["dir_m1"]["ALL"]["return_atr"]),
+        "pooled_ex_ag_m1_minus_m0": {
+            "old": b["pooled_ex_ag_m1_minus_m0"],
+            "new": scopes["POOLED_EX_AG"]["m1_minus_m0"]},
+    }
+
     summary = {
         "task_id": TASK_ID,
         "base_sha": BASE_SHA,
@@ -476,15 +648,18 @@ def run_direction_models_15sym(symbols=SYMBOLS, frac_train: float = FRAC_TRAIN,
         "calendar": {
             "start": cal["start"].isoformat(),
             "end": cal["end"].isoformat(),
+            "raw_t1": cal["raw_t1"].isoformat(),
+            "raw_t2": cal["raw_t2"].isoformat(),
             "t1": cal["t1"].isoformat(),
             "t2": cal["t2"].isoformat(),
             "frac_train": frac_train,
             "frac_val": frac_val,
             "span_days": cal["span_days"],
-            "rows_inside_window": int(in_win.sum()),
-            "rows_outside_window": int((~in_win).sum()),
-            "note": "shared absolute T1/T2 for all symbols; all rows kept (no extra purge)",
+            "snap_rule": cal["snap_rule"],
+            "note": ("T1/T2 = ceil(raw, 15min) on the canonical 15m decision grid; "
+                     "shared by all symbols. START/END are study boundaries."),
         },
+        "common_window": window_report,
         "boundary_removal": boundary_report,
         "splits": split_report,
         "params": {
@@ -492,12 +667,15 @@ def run_direction_models_15sym(symbols=SYMBOLS, frac_train: float = FRAC_TRAIN,
             "decision_threshold": DECISION_THRESHOLD,
             "base_params": BASE_PARAMS,
             "bootstrap": {"replicates": BOOTSTRAP_REPLICATES, "seed": BOOTSTRAP_SEED,
-                          "chunk": BOOTSTRAP_CHUNK, "cluster": "oracle opportunity (trade)"},
+                          "chunk": BOOTSTRAP_CHUNK, "cluster": "oracle opportunity (trade)",
+                          "reference": "unchunked single draw (provably identical)"},
             "majority_baseline": "opportunity-weighted (train)",
             "majority_class": int(majority),
             "symbol_feature_used": False,
+            "snap_rule": cal["snap_rule"],
         },
         "feature_schemas": {"dtp9": list(DTP9), "struct33": list(STRUCT33)},
+        "pre_fix1_deltas": deltas,
         "scopes": scopes,
     }
 
@@ -523,10 +701,13 @@ if __name__ == "__main__":
     print(json.dumps({
         "task_id": s["task_id"],
         "calendar": s["calendar"],
+        "common_window": s["common_window"],
+        "boundary_removal": s["boundary_removal"],
         "splits_pooled": s["splits"]["pooled"],
-        "POOLED_dir_m1_TEST": s["scopes"]["POOLED"]["models"]["dir_m1"]["ALL"],
         "POOLED_dir_m0_TEST": s["scopes"]["POOLED"]["models"]["dir_m0"]["ALL"],
+        "POOLED_dir_m1_TEST": s["scopes"]["POOLED"]["models"]["dir_m1"]["ALL"],
         "POOLED_m1_minus_m0": s["scopes"]["POOLED"]["m1_minus_m0"],
         "POOLED_EX_AG_m1_minus_m0": s["scopes"]["POOLED_EX_AG"]["m1_minus_m0"],
+        "pre_fix1_deltas": s["pre_fix1_deltas"],
     }, indent=2, default=str))
     print("paths:", r["paths"])
