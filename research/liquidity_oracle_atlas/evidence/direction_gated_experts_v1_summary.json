@@ -1,0 +1,2571 @@
+{
+  "task_id": "FUTURE-R4-M15-DIRECTION-GATED-EXPERTS-V1",
+  "base_sha": "89f655be47794f06146daef0573f8ddcbfdaa7b2",
+  "test_status": "architecture_diagnostic_not_pristine_confirmation",
+  "metric": "TeacherFixedExitDirectionReturnATR",
+  "model_roles": {
+    "A": "frozen_direct_dtp9_router",
+    "M9": "shared_router_correctness_META10",
+    "E9": "gated_long_short_experts_META10",
+    "M33": "shared_router_correctness_META34",
+    "E33": "gated_long_short_experts_META34"
+  },
+  "frozen_split": {
+    "test_rows": 13773,
+    "test_trades": 638,
+    "long_trades": 319,
+    "short_trades": 319,
+    "train_rows": 42120,
+    "val_rows": 12046
+  },
+  "A_reproduction": {
+    "return_atr": 0.6014965284150177,
+    "expected": 0.6014965284150177,
+    "max_abs_dev_prob_fixed_router": 0.0,
+    "router_hard_prediction_match": true,
+    "match": true
+  },
+  "router": {
+    "best_iteration": 18,
+    "n_estimators_fixed": 18,
+    "oof_audit": {
+      "train_rows": 42120,
+      "oof_eligible_rows": 34388,
+      "oof_coverage_fraction": 0.8164292497625831,
+      "router_long_share": 0.6530284135059737,
+      "router_short_share": 0.3469715864940264,
+      "oof_weighted_accuracy": 0.5730318514065575,
+      "oof_long_recall": 0.7135883890065207,
+      "oof_short_recall": 0.4150425961475611
+    }
+  },
+  "features": {
+    "META10_cols": [
+      "m15_trend_with_side",
+      "m15_slope_with_side",
+      "m15_dev_with_side",
+      "h1_trend_with_side",
+      "h1_slope_with_side",
+      "h1_dev_with_side",
+      "h4_trend_with_side",
+      "h4_slope_with_side",
+      "h4_dev_with_side",
+      "router_p_side"
+    ],
+    "META34_cols": [
+      "m15_trend_with_side",
+      "m15_slope_with_side",
+      "m15_dev_with_side",
+      "m15_sr_backstop_dist_atr",
+      "m15_sr_ahead_dist_atr",
+      "m15_sr_backstop_strength",
+      "m15_sr_ahead_strength",
+      "m15_liq_ahead_dist_atr",
+      "m15_liq_behind_dist_atr",
+      "m15_liq_ahead_count",
+      "m15_liq_behind_count",
+      "h1_trend_with_side",
+      "h1_slope_with_side",
+      "h1_dev_with_side",
+      "h1_sr_backstop_dist_atr",
+      "h1_sr_ahead_dist_atr",
+      "h1_sr_backstop_strength",
+      "h1_sr_ahead_strength",
+      "h1_liq_ahead_dist_atr",
+      "h1_liq_behind_dist_atr",
+      "h1_liq_ahead_count",
+      "h1_liq_behind_count",
+      "h4_trend_with_side",
+      "h4_slope_with_side",
+      "h4_dev_with_side",
+      "h4_sr_backstop_dist_atr",
+      "h4_sr_ahead_dist_atr",
+      "h4_sr_backstop_strength",
+      "h4_sr_ahead_strength",
+      "h4_liq_ahead_dist_atr",
+      "h4_liq_behind_dist_atr",
+      "h4_liq_ahead_count",
+      "h4_liq_behind_count",
+      "router_p_side"
+    ],
+    "orientation_source": "router_prediction (NOT Teacher)",
+    "n_meta10": 10,
+    "n_meta34": 34
+  },
+  "contract": {
+    "threshold": 0.5,
+    "no_threshold_tuning": true,
+    "no_hyperparameter_tuning": true,
+    "teacher_direction_is_label_only": true,
+    "prequential_quarter_oof_gates": true,
+    "equal_opportunity_meta_weights": true,
+    "final_evaluation_uses_sample_weight_raw": true
+  },
+  "pooled": {
+    "A": {
+      "n_rows": 13773,
+      "n_trades": 638,
+      "return_atr": 0.6014965284150177,
+      "ci_low": 0.32163075790678136,
+      "ci_high": 0.8885465168994324,
+      "accuracy": 0.5973520786915624,
+      "balanced_accuracy": 0.5973520786915625,
+      "long_recall": 0.7177186815261937,
+      "short_recall": 0.47698547585693135,
+      "pred_long_share": 0.6203666028346312,
+      "repair_damage": {
+        "ALL": {
+          "n_rows": 13773,
+          "repair_rate": 0.0,
+          "damage_rate": 0.0,
+          "flip_rate": 0.0
+        },
+        "TEACHER_LONG": {
+          "n_rows": 6963,
+          "repair_rate": 0.0,
+          "damage_rate": 0.0,
+          "flip_rate": 0.0
+        },
+        "TEACHER_SHORT": {
+          "n_rows": 6810,
+          "repair_rate": 0.0,
+          "damage_rate": 0.0,
+          "flip_rate": 0.0
+        },
+        "ROUTER_LONG": {
+          "n_rows": 8662,
+          "repair_rate": 0.0,
+          "damage_rate": 0.0,
+          "flip_rate": 0.0,
+          "n_opportunities": 535
+        },
+        "ROUTER_SHORT": {
+          "n_rows": 5111,
+          "repair_rate": 0.0,
+          "damage_rate": 0.0,
+          "flip_rate": 0.0,
+          "n_opportunities": 427
+        }
+      },
+      "roc_auc": 0.6368109177293068,
+      "roc_auc_scope": "direction",
+      "long_return": 1.525813321755975,
+      "short_return": -0.32282026492593974,
+      "phase": {
+        "BEFORE_ENTRY": {
+          "n_rows": 1599,
+          "n_trades": 184,
+          "return_atr": 0.27398871198381614,
+          "ci_low": -0.6139371654852734,
+          "ci_high": 1.1366585851967026,
+          "accuracy": 0.5955327172530316,
+          "balanced_accuracy": 0.5953092411701435,
+          "long_recall": 0.7887880247029323,
+          "short_recall": 0.40183045763735475,
+          "pred_long_share": 0.6935888696905101,
+          "repair_damage": {
+            "ALL": {
+              "n_rows": 1599,
+              "repair_rate": 0.0,
+              "damage_rate": 0.0,
+              "flip_rate": 0.0
+            },
+            "TEACHER_LONG": {
+              "n_rows": 859,
+              "repair_rate": 0.0,
+              "damage_rate": 0.0,
+              "flip_rate": 0.0
+            },
+            "TEACHER_SHORT": {
+              "n_rows": 740,
+              "repair_rate": 0.0,
+              "damage_rate": 0.0,
+              "flip_rate": 0.0
+            },
+            "ROUTER_LONG": {
+              "n_rows": 1061,
+              "repair_rate": 0.0,
+              "damage_rate": 0.0,
+              "flip_rate": 0.0,
+              "n_opportunities": 144
+            },
+            "ROUTER_SHORT": {
+              "n_rows": 538,
+              "repair_rate": 0.0,
+              "damage_rate": 0.0,
+              "flip_rate": 0.0,
+              "n_opportunities": 92
+            }
+          },
+          "long_return": 1.4002768398573757,
+          "short_return": -0.9546892456964305
+        },
+        "AT_ENTRY": {
+          "n_rows": 252,
+          "n_trades": 252,
+          "return_atr": -4.818985069237274,
+          "ci_low": -5.82124663768541,
+          "ci_high": -3.859505740486473,
+          "accuracy": 0.30824128876810053,
+          "balanced_accuracy": 0.2951543263159461,
+          "long_recall": 0.4147107069431682,
+          "short_recall": 0.17559794568872408,
+          "pred_long_share": 0.597133423141178,
+          "repair_damage": {
+            "ALL": {
+              "n_rows": 252,
+              "repair_rate": 0.0,
+              "damage_rate": 0.0,
+              "flip_rate": 0.0
+            },
+            "TEACHER_LONG": {
+              "n_rows": 140,
+              "repair_rate": 0.0,
+              "damage_rate": 0.0,
+              "flip_rate": 0.0
+            },
+            "TEACHER_SHORT": {
+              "n_rows": 112,
+              "repair_rate": 0.0,
+              "damage_rate": 0.0,
+              "flip_rate": 0.0
+            },
+            "ROUTER_LONG": {
+              "n_rows": 142,
+              "repair_rate": 0.0,
+              "damage_rate": 0.0,
+              "flip_rate": 0.0,
+              "n_opportunities": 142
+            },
+            "ROUTER_SHORT": {
+              "n_rows": 110,
+              "repair_rate": 0.0,
+              "damage_rate": 0.0,
+              "flip_rate": 0.0,
+              "n_opportunities": 110
+            }
+          },
+          "long_return": -3.66404439431819,
+          "short_return": -6.262660912886127
+        },
+        "IN_POSITION": {
+          "n_rows": 11922,
+          "n_trades": 597,
+          "return_atr": 0.7894697683505186,
+          "ci_low": 0.49340202845458275,
+          "ci_high": 1.0811479985565386,
+          "accuracy": 0.621638633748814,
+          "balanced_accuracy": 0.6226725964453259,
+          "long_recall": 0.7341973556924699,
+          "short_recall": 0.511147837198182,
+          "pred_long_share": 0.6103874432873072,
+          "repair_damage": {
+            "ALL": {
+              "n_rows": 11922,
+              "repair_rate": 0.0,
+              "damage_rate": 0.0,
+              "flip_rate": 0.0
+            },
+            "TEACHER_LONG": {
+              "n_rows": 5964,
+              "repair_rate": 0.0,
+              "damage_rate": 0.0,
+              "flip_rate": 0.0
+            },
+            "TEACHER_SHORT": {
+              "n_rows": 5958,
+              "repair_rate": 0.0,
+              "damage_rate": 0.0,
+              "flip_rate": 0.0
+            },
+            "ROUTER_LONG": {
+              "n_rows": 7459,
+              "repair_rate": 0.0,
+              "damage_rate": 0.0,
+              "flip_rate": 0.0,
+              "n_opportunities": 489
+            },
+            "ROUTER_SHORT": {
+              "n_rows": 4463,
+              "repair_rate": 0.0,
+              "damage_rate": 0.0,
+              "flip_rate": 0.0,
+              "n_opportunities": 395
+            }
+          },
+          "long_return": 1.6387078890456979,
+          "short_return": -0.07411359086991719
+        }
+      }
+    },
+    "M9": {
+      "n_rows": 13773,
+      "n_trades": 638,
+      "return_atr": 0.6109514280637042,
+      "ci_low": 0.33886957818271884,
+      "ci_high": 0.8960311914578822,
+      "accuracy": 0.5978196522493073,
+      "balanced_accuracy": 0.5978196522493073,
+      "long_recall": 0.6886722566493614,
+      "short_recall": 0.5069670478492533,
+      "pred_long_share": 0.5908526044000542,
+      "repair_damage": {
+        "ALL": {
+          "n_rows": 13773,
+          "repair_rate": 0.09581933814178654,
+          "damage_rate": 0.06380472275191595,
+          "flip_rate": 0.07669534109013647
+        },
+        "TEACHER_LONG": {
+          "n_rows": 6963,
+          "repair_rate": 0.09126220973361657,
+          "damage_rate": 0.07636424016541406,
+          "flip_rate": 0.0805696586577089
+        },
+        "TEACHER_SHORT": {
+          "n_rows": 6810,
+          "repair_rate": 0.09827891078486059,
+          "damage_rate": 0.04490645281523368,
+          "flip_rate": 0.07282102352256405
+        },
+        "ROUTER_LONG": {
+          "n_rows": 8662,
+          "repair_rate": 0.09827891078486059,
+          "damage_rate": 0.07636424016541406,
+          "flip_rate": 0.08560207709394164,
+          "n_opportunities": 535
+        },
+        "ROUTER_SHORT": {
+          "n_rows": 5111,
+          "repair_rate": 0.09126220973361657,
+          "damage_rate": 0.04490645281523368,
+          "flip_rate": 0.062140663871844685,
+          "n_opportunities": 427
+        }
+      },
+      "roc_auc": 0.5958912231392999,
+      "roc_auc_scope": "router_correctness",
+      "long_return": 1.266596477729313,
+      "short_return": -0.04469362160190456,
+      "phase": {
+        "BEFORE_ENTRY": {
+          "n_rows": 1599,
+          "n_trades": 184,
+          "return_atr": -0.005803376522132152,
+          "ci_low": -0.8997430262644732,
+          "ci_high": 0.8418297128577943,
+          "accuracy": 0.5766877022907665,
+          "balanced_accuracy": 0.5765028027258985,
+          "long_recall": 0.7365832123342618,
+          "short_recall": 0.4164223931175352,
+          "pred_long_share": 0.6601687735435242,
+          "repair_damage": {
+            "ALL": {
+              "n_rows": 1599,
+              "repair_rate": 0.056007411916091654,
+              "damage_rate": 0.06968245315735536,
+              "flip_rate": 0.06415134638504871
+            },
+            "TEACHER_LONG": {
+              "n_rows": 859,
+              "repair_rate": 0.04825785145179424,
+              "damage_rate": 0.07910547136018732,
+              "flip_rate": 0.07259008462612244
+            },
+            "TEACHER_SHORT": {
+              "n_rows": 740,
+              "repair_rate": 0.0587500883219853,
+              "damage_rate": 0.05114240987599052,
+              "flip_rate": 0.055693091410473364
+            },
+            "ROUTER_LONG": {
+              "n_rows": 1061,
+              "repair_rate": 0.0587500883219853,
+              "damage_rate": 0.07910547136018732,
+              "flip_rate": 0.07033809710323956,
+              "n_opportunities": 144
+            },
+            "ROUTER_SHORT": {
+              "n_rows": 538,
+              "repair_rate": 0.04825785145179424,
+              "damage_rate": 0.05114240987599052,
+              "flip_rate": 0.050147085399644,
+              "n_opportunities": 92
+            }
+          },
+          "long_return": 0.6604610556581081,
+          "short_return": -0.7326373025369396
+        },
+        "AT_ENTRY": {
+          "n_rows": 252,
+          "n_trades": 252,
+          "return_atr": -4.931366519283695,
+          "ci_low": -5.929293539296593,
+          "ci_high": -3.97021620457831,
+          "accuracy": 0.3043074433124789,
+          "balanced_accuracy": 0.29622944876826074,
+          "long_recall": 0.37002623652279304,
+          "short_recall": 0.2224326610137285,
+          "pred_long_share": 0.5514915160590006,
+          "repair_damage": {
+            "ALL": {
+              "n_rows": 252,
+              "repair_rate": 0.06432187795124465,
+              "damage_rate": 0.1571141395260154,
+              "flip_rate": 0.09292428424675869
+            },
+            "TEACHER_LONG": {
+              "n_rows": 140,
+              "repair_rate": 0.04042479206606794,
+              "damage_rate": 0.16480082922011335,
+              "flip_rate": 0.09200486636101186
+            },
+            "TEACHER_SHORT": {
+              "n_rows": 112,
+              "repair_rate": 0.08545857082131333,
+              "damage_rate": 0.1344976214041697,
+              "flip_rate": 0.09406972736218835
+            },
+            "ROUTER_LONG": {
+              "n_rows": 142,
+              "repair_rate": 0.08545857082131333,
+              "damage_rate": 0.16480082922011335,
+              "flip_rate": 0.11602615593012573,
+              "n_opportunities": 142
+            },
+            "ROUTER_SHORT": {
+              "n_rows": 110,
+              "repair_rate": 0.04042479206606794,
+              "damage_rate": 0.1344976214041697,
+              "flip_rate": 0.05868242723589177,
+              "n_opportunities": 110
+            }
+          },
+          "long_return": -3.7918722625314096,
+          "short_return": -6.3557343402240525
+        },
+        "IN_POSITION": {
+          "n_rows": 11922,
+          "n_trades": 597,
+          "return_atr": 0.8407283443406632,
+          "ci_low": 0.5440518040441737,
+          "ci_high": 1.1383244363451337,
+          "accuracy": 0.625611966637964,
+          "balanced_accuracy": 0.6263909168812222,
+          "long_recall": 0.7104096524100024,
+          "short_recall": 0.5423721813524419,
+          "pred_long_share": 0.5828469464649408,
+          "repair_damage": {
+            "ALL": {
+              "n_rows": 11922,
+              "repair_rate": 0.10751867768600581,
+              "damage_rate": 0.05904970975867698,
+              "flip_rate": 0.07738849468444603
+            },
+            "TEACHER_LONG": {
+              "n_rows": 5964,
+              "repair_rate": 0.10727994621516028,
+              "damage_rate": 0.07123833430085895,
+              "flip_rate": 0.08081829005278601
+            },
+            "TEACHER_SHORT": {
+              "n_rows": 5958,
+              "repair_rate": 0.10764609791500569,
+              "damage_rate": 0.04186398155563369,
+              "flip_rate": 0.07402171141159357
+            },
+            "ROUTER_LONG": {
+              "n_rows": 7459,
+              "repair_rate": 0.10764609791500569,
+              "damage_rate": 0.07123833430085895,
+              "flip_rate": 0.08595277692944184,
+              "n_opportunities": 489
+            },
+            "ROUTER_SHORT": {
+              "n_rows": 4463,
+              "repair_rate": 0.10727994621516028,
+              "damage_rate": 0.04186398155563369,
+              "flip_rate": 0.06397124143362552,
+              "n_opportunities": 395
+            }
+          },
+          "long_return": 1.4128805821910997,
+          "short_return": 0.2589113727427532
+        }
+      }
+    },
+    "E9": {
+      "n_rows": 13773,
+      "n_trades": 638,
+      "return_atr": 0.5930174994420312,
+      "ci_low": 0.32932138776992986,
+      "ci_high": 0.8639593592658216,
+      "accuracy": 0.5945211572945277,
+      "balanced_accuracy": 0.5945211572945279,
+      "long_recall": 0.7093333515545278,
+      "short_recall": 0.4797089630345279,
+      "pred_long_share": 0.61481219426,
+      "repair_damage": {
+        "ALL": {
+          "n_rows": 13773,
+          "repair_rate": 0.21982343042481944,
+          "damage_rate": 0.15291211325915893,
+          "flip_rate": 0.17985381602792172
+        },
+        "TEACHER_LONG": {
+          "n_rows": 6963,
+          "repair_rate": 0.27661418981061275,
+          "damage_rate": 0.12047665806343325,
+          "flip_rate": 0.16455136638827286
+        },
+        "TEACHER_SHORT": {
+          "n_rows": 6810,
+          "repair_rate": 0.1891723305097334,
+          "damage_rate": 0.20171764993919133,
+          "flip_rate": 0.1951562656675706
+        },
+        "ROUTER_LONG": {
+          "n_rows": 8662,
+          "repair_rate": 0.1891723305097334,
+          "damage_rate": 0.12047665806343325,
+          "flip_rate": 0.1494344019772906,
+          "n_opportunities": 535
+        },
+        "ROUTER_SHORT": {
+          "n_rows": 5111,
+          "repair_rate": 0.27661418981061275,
+          "damage_rate": 0.20171764993919133,
+          "flip_rate": 0.22956279499477955,
+          "n_opportunities": 427
+        }
+      },
+      "roc_auc": 0.5512257657818675,
+      "roc_auc_scope": "router_correctness",
+      "long_return": 1.3953149612845246,
+      "short_return": -0.20927996240046234,
+      "phase": {
+        "BEFORE_ENTRY": {
+          "n_rows": 1599,
+          "n_trades": 184,
+          "return_atr": 0.5022576899562565,
+          "ci_low": -0.3406234087910925,
+          "ci_high": 1.3774812003384262,
+          "accuracy": 0.5701799678101936,
+          "balanced_accuracy": 0.57002044516633,
+          "long_recall": 0.7081302897716956,
+          "short_recall": 0.4319106005609643,
+          "pred_long_share": 0.6381907211465663,
+          "repair_damage": {
+            "ALL": {
+              "n_rows": 1599,
+              "repair_rate": 0.16490965449761744,
+              "damage_rate": 0.15457305136960056,
+              "flip_rate": 0.1587538691496234
+            },
+            "TEACHER_LONG": {
+              "n_rows": 859,
+              "repair_rate": 0.21223178560579298,
+              "damage_rate": 0.1590840956759185,
+              "flip_rate": 0.1703095242484833
+            },
+            "TEACHER_SHORT": {
+              "n_rows": 740,
+              "repair_rate": 0.1481616991697065,
+              "damage_rate": 0.1456974496374343,
+              "flip_rate": 0.14717148865242094
+            },
+            "ROUTER_LONG": {
+              "n_rows": 1061,
+              "repair_rate": 0.1481616991697065,
+              "damage_rate": 0.1590840956759185,
+              "flip_rate": 0.15437965273947166,
+              "n_opportunities": 144
+            },
+            "ROUTER_SHORT": {
+              "n_rows": 538,
+              "repair_rate": 0.21223178560579298,
+              "damage_rate": 0.1456974496374343,
+              "flip_rate": 0.1686552973798395,
+              "n_opportunities": 92
+            }
+          },
+          "long_return": 0.9644579950864328,
+          "short_return": -0.0019608247312086617
+        },
+        "AT_ENTRY": {
+          "n_rows": 252,
+          "n_trades": 252,
+          "return_atr": -3.84423165178477,
+          "ci_low": -4.903214419532165,
+          "ci_high": -2.8095037844351016,
+          "accuracy": 0.3374837992674213,
+          "balanced_accuracy": 0.32123475843565485,
+          "long_recall": 0.46967841123991083,
+          "short_recall": 0.17279110563139882,
+          "pred_long_share": 0.6288755294483185,
+          "repair_damage": {
+            "ALL": {
+              "n_rows": 252,
+              "repair_rate": 0.13138752441005844,
+              "damage_rate": 0.19999252632540454,
+              "flip_rate": 0.1525344186163827
+            },
+            "TEACHER_LONG": {
+              "n_rows": 140,
+              "repair_rate": 0.2206931833183918,
+              "damage_rate": 0.17892389009456952,
+              "flip_rate": 0.203371010197024
+            },
+            "TEACHER_SHORT": {
+              "n_rows": 112,
+              "repair_rate": 0.05239771397984837,
+              "damage_rate": 0.26198269531624147,
+              "flip_rate": 0.0892004061497286
+            },
+            "ROUTER_LONG": {
+              "n_rows": 142,
+              "repair_rate": 0.05239771397984837,
+              "damage_rate": 0.17892389009456952,
+              "flip_rate": 0.10114348621939712,
+              "n_opportunities": 142
+            },
+            "ROUTER_SHORT": {
+              "n_rows": 110,
+              "repair_rate": 0.2206931833183918,
+              "damage_rate": 0.26198269531624147,
+              "flip_rate": 0.22870664322707002,
+              "n_opportunities": 110
+            }
+          },
+          "long_return": -2.576885300334,
+          "short_return": -5.4284145910982335
+        },
+        "IN_POSITION": {
+          "n_rows": 11922,
+          "n_trades": 597,
+          "return_atr": 0.7981655305283275,
+          "ci_low": 0.5236554547367708,
+          "ci_high": 1.079703930019248,
+          "accuracy": 0.6198086244673013,
+          "balanced_accuracy": 0.6208373863958028,
+          "long_recall": 0.7318011830451475,
+          "short_recall": 0.5098735897464581,
+          "pred_long_share": 0.6098434951959215,
+          "repair_damage": {
+            "ALL": {
+              "n_rows": 11922,
+              "repair_rate": 0.2427863823049312,
+              "damage_rate": 0.15071617417434663,
+              "flip_rate": 0.18555198391366565
+            },
+            "TEACHER_LONG": {
+              "n_rows": 5964,
+              "repair_rate": 0.2964636162748833,
+              "damage_rate": 0.11059286057708148,
+              "flip_rate": 0.15999779894099608
+            },
+            "TEACHER_SHORT": {
+              "n_rows": 5958,
+              "repair_rate": 0.21413676430396966,
+              "damage_rate": 0.20728928131221158,
+              "flip_rate": 0.21063668818248124
+            },
+            "ROUTER_LONG": {
+              "n_rows": 7459,
+              "repair_rate": 0.21413676430396966,
+              "damage_rate": 0.11059286057708148,
+              "flip_rate": 0.15244082594721461,
+              "n_opportunities": 489
+            },
+            "ROUTER_SHORT": {
+              "n_rows": 4463,
+              "repair_rate": 0.2964636162748833,
+              "damage_rate": 0.20728928131221158,
+              "flip_rate": 0.2374256586893169,
+              "n_opportunities": 395
+            }
+          },
+          "long_return": 1.582849090633486,
+          "short_return": 0.0002271805565278023
+        }
+      }
+    },
+    "M33": {
+      "n_rows": 13773,
+      "n_trades": 638,
+      "return_atr": 0.7121405896164676,
+      "ci_low": 0.4577752615756299,
+      "ci_high": 0.9716779017559679,
+      "accuracy": 0.6130697444270392,
+      "balanced_accuracy": 0.6130697444270393,
+      "long_recall": 0.6667069147501282,
+      "short_recall": 0.5594325741039504,
+      "pred_long_share": 0.5536371703230889,
+      "repair_damage": {
+        "ALL": {
+          "n_rows": 13773,
+          "repair_rate": 0.21323299238520346,
+          "damage_rate": 0.11741845036588462,
+          "flip_rate": 0.1559979765410833
+        },
+        "TEACHER_LONG": {
+          "n_rows": 6963,
+          "repair_rate": 0.179601774912314,
+          "damage_rate": 0.14171289561847253,
+          "flip_rate": 0.15240821842103303
+        },
+        "TEACHER_SHORT": {
+          "n_rows": 6810,
+          "repair_rate": 0.23138442790352126,
+          "damage_rate": 0.08086266806712199,
+          "flip_rate": 0.15958773466113363
+        },
+        "ROUTER_LONG": {
+          "n_rows": 8662,
+          "repair_rate": 0.23138442790352126,
+          "damage_rate": 0.14171289561847253,
+          "flip_rate": 0.1795127333055332,
+          "n_opportunities": 535
+        },
+        "ROUTER_SHORT": {
+          "n_rows": 5111,
+          "repair_rate": 0.179601774912314,
+          "damage_rate": 0.08086266806712199,
+          "flip_rate": 0.11757203751841615,
+          "n_opportunities": 427
+        }
+      },
+      "roc_auc": 0.6218665018031023,
+      "roc_auc_scope": "router_correctness",
+      "long_return": 1.0182930497637321,
+      "short_return": 0.40598812946920326,
+      "phase": {
+        "BEFORE_ENTRY": {
+          "n_rows": 1599,
+          "n_trades": 184,
+          "return_atr": 0.2415673834736381,
+          "ci_low": -0.6173562660603198,
+          "ci_high": 1.0670455741650275,
+          "accuracy": 0.5223952422274131,
+          "balanced_accuracy": 0.5222849407342407,
+          "long_recall": 0.6177806127769829,
+          "short_recall": 0.42678926869149836,
+          "pred_long_share": 0.5955214120808578,
+          "repair_damage": {
+            "ALL": {
+              "n_rows": 1599,
+              "repair_rate": 0.12367763710893709,
+              "damage_rate": 0.2068081723733522,
+              "flip_rate": 0.17318459066165318
+            },
+            "TEACHER_LONG": {
+              "n_rows": 859,
+              "repair_rate": 0.10843589981052962,
+              "damage_rate": 0.24583331192315627,
+              "flip_rate": 0.2168133331101431
+            },
+            "TEACHER_SHORT": {
+              "n_rows": 740,
+              "repair_rate": 0.1290718983016537,
+              "damage_rate": 0.1300251543699248,
+              "flip_rate": 0.1294549456238127
+            },
+            "ROUTER_LONG": {
+              "n_rows": 1061,
+              "repair_rate": 0.1290718983016537,
+              "damage_rate": 0.24583331192315627,
+              "flip_rate": 0.19554238838372812,
+              "n_opportunities": 144
+            },
+            "ROUTER_SHORT": {
+              "n_rows": 538,
+              "repair_rate": 0.10843589981052962,
+              "damage_rate": 0.1300251543699248,
+              "flip_rate": 0.12257572526188756,
+              "n_opportunities": 92
+            }
+          },
+          "long_return": 0.18590824882593304,
+          "short_return": 0.3022864394529524
+        },
+        "AT_ENTRY": {
+          "n_rows": 252,
+          "n_trades": 252,
+          "return_atr": -5.214223932374971,
+          "ci_low": -6.190138672473345,
+          "ci_high": -4.276543673797707,
+          "accuracy": 0.26297364771348497,
+          "balanced_accuracy": 0.2559735879512533,
+          "long_recall": 0.31992286666328207,
+          "short_recall": 0.19202430923922453,
+          "pred_long_share": 0.5372374923978086,
+          "repair_damage": {
+            "ALL": {
+              "n_rows": 252,
+              "repair_rate": 0.08996489976689803,
+              "damage_rate": 0.34875809338556446,
+              "flip_rate": 0.16973564729232832
+            },
+            "TEACHER_LONG": {
+              "n_rows": 140,
+              "repair_rate": 0.07729537706187979,
+              "damage_rate": 0.33765223451581744,
+              "flip_rate": 0.18526815347410397
+            },
+            "TEACHER_SHORT": {
+              "n_rows": 112,
+              "repair_rate": 0.1011709443663545,
+              "damage_rate": 0.38143482008875834,
+              "flip_rate": 0.15038470519396852
+            },
+            "ROUTER_LONG": {
+              "n_rows": 142,
+              "repair_rate": 0.1011709443663545,
+              "damage_rate": 0.33765223451581744,
+              "flip_rate": 0.192278282488139,
+              "n_opportunities": 142
+            },
+            "ROUTER_SHORT": {
+              "n_rows": 110,
+              "repair_rate": 0.07729537706187979,
+              "damage_rate": 0.38143482008875834,
+              "flip_rate": 0.1363226969650681,
+              "n_opportunities": 110
+            }
+          },
+          "long_return": -4.706928501556997,
+          "short_return": -5.848343220897436
+        },
+        "IN_POSITION": {
+          "n_rows": 11922,
+          "n_trades": 597,
+          "return_atr": 0.9810535308408505,
+          "ci_low": 0.7095688875277082,
+          "ci_high": 1.2555843262284725,
+          "accuracy": 0.6568661389826503,
+          "balanced_accuracy": 0.6573264107878685,
+          "long_recall": 0.7069720144816691,
+          "short_recall": 0.6076808070940679,
+          "pred_long_share": 0.5481870070464833,
+          "repair_damage": {
+            "ALL": {
+              "n_rows": 11922,
+              "repair_rate": 0.24750241970011158,
+              "damage_rate": 0.09397396696868945,
+              "flip_rate": 0.15206320210258095
+            },
+            "TEACHER_LONG": {
+              "n_rows": 5964,
+              "repair_rate": 0.20982834045274465,
+              "damage_rate": 0.11304626516329494,
+              "flip_rate": 0.13877119669680113
+            },
+            "TEACHER_SHORT": {
+              "n_rows": 5958,
+              "repair_rate": 0.26761053442858695,
+              "damage_rate": 0.06708239016725925,
+              "flip_rate": 0.16511100719204427
+            },
+            "ROUTER_LONG": {
+              "n_rows": 7459,
+              "repair_rate": 0.26761053442858695,
+              "damage_rate": 0.11304626516329494,
+              "flip_rate": 0.17551445454829895,
+              "n_opportunities": 489
+            },
+            "ROUTER_SHORT": {
+              "n_rows": 4463,
+              "repair_rate": 0.20982834045274465,
+              "damage_rate": 0.06708239016725925,
+              "flip_rate": 0.11532324140161551,
+              "n_opportunities": 395
+            }
+          },
+          "long_return": 1.2644433396905537,
+          "short_return": 0.6928767319767943
+        }
+      }
+    },
+    "E33": {
+      "n_rows": 13773,
+      "n_trades": 638,
+      "return_atr": 0.6601207308514166,
+      "ci_low": 0.4054339897191599,
+      "ci_high": 0.9213458245409573,
+      "accuracy": 0.5985507092460857,
+      "balanced_accuracy": 0.5985507092460858,
+      "long_recall": 0.7235260124016538,
+      "short_recall": 0.47357540609051774,
+      "pred_long_share": 0.624975303155568,
+      "repair_damage": {
+        "ALL": {
+          "n_rows": 13773,
+          "repair_rate": 0.3062096898701613,
+          "damage_rate": 0.20439547950287085,
+          "flip_rate": 0.2453907596669203
+        },
+        "TEACHER_LONG": {
+          "n_rows": 6963,
+          "repair_rate": 0.40974527251497217,
+          "damage_rate": 0.15306290293973057,
+          "flip_rate": 0.22551954065241064
+        },
+        "TEACHER_SHORT": {
+          "n_rows": 6810,
+          "repair_rate": 0.2503294811401716,
+          "damage_rate": 0.2816354606659241,
+          "flip_rate": 0.26526197868143003
+        },
+        "ROUTER_LONG": {
+          "n_rows": 8662,
+          "repair_rate": 0.2503294811401716,
+          "damage_rate": 0.15306290293973057,
+          "flip_rate": 0.19406433086966784,
+          "n_opportunities": 535
+        },
+        "ROUTER_SHORT": {
+          "n_rows": 5111,
+          "repair_rate": 0.40974527251497217,
+          "damage_rate": 0.2816354606659241,
+          "flip_rate": 0.3292643137491894,
+          "n_opportunities": 427
+        }
+      },
+      "roc_auc": 0.5758062421398547,
+      "roc_auc_scope": "router_correctness",
+      "long_return": 1.6788307709298893,
+      "short_return": -0.35858930922705606,
+      "phase": {
+        "BEFORE_ENTRY": {
+          "n_rows": 1599,
+          "n_trades": 184,
+          "return_atr": 1.194837575573484,
+          "ci_low": 0.37055999083670305,
+          "ci_high": 2.0614302613217386,
+          "accuracy": 0.5962923352245642,
+          "balanced_accuracy": 0.5961246634091293,
+          "long_recall": 0.7412898124658238,
+          "short_recall": 0.4509595143524348,
+          "pred_long_share": 0.6452761770611887,
+          "repair_damage": {
+            "ALL": {
+              "n_rows": 1599,
+              "repair_rate": 0.28028152665546824,
+              "damage_rate": 0.18908296094693444,
+              "flip_rate": 0.225969797009486
+            },
+            "TEACHER_LONG": {
+              "n_rows": 859,
+              "repair_rate": 0.5133403107583754,
+              "damage_rate": 0.19767266792712473,
+              "flip_rate": 0.2643454543068823
+            },
+            "TEACHER_SHORT": {
+              "n_rows": 740,
+              "repair_rate": 0.19779880633989066,
+              "damage_rate": 0.17218248004378747,
+              "flip_rate": 0.1875053862213397
+            },
+            "ROUTER_LONG": {
+              "n_rows": 1061,
+              "repair_rate": 0.19779880633989066,
+              "damage_rate": 0.19767266792712473,
+              "flip_rate": 0.197726997667362,
+              "n_opportunities": 144
+            },
+            "ROUTER_SHORT": {
+              "n_rows": 538,
+              "repair_rate": 0.5133403107583754,
+              "damage_rate": 0.17218248004378747,
+              "flip_rate": 0.2898998874497842,
+              "n_opportunities": 92
+            }
+          },
+          "long_return": 2.3057047179995274,
+          "short_return": -0.017017488891290664
+        },
+        "AT_ENTRY": {
+          "n_rows": 252,
+          "n_trades": 252,
+          "return_atr": -3.773597738002018,
+          "ci_low": -4.828718903138931,
+          "ci_high": -2.7296052777016437,
+          "accuracy": 0.3561861527535073,
+          "balanced_accuracy": 0.3416962616536665,
+          "long_recall": 0.47406914358964053,
+          "short_recall": 0.2093233797176925,
+          "pred_long_share": 0.6150445296648077,
+          "repair_damage": {
+            "ALL": {
+              "n_rows": 252,
+              "repair_rate": 0.18830975258096944,
+              "damage_rate": 0.26706366334438214,
+              "flip_rate": 0.21258495953021178
+            },
+            "TEACHER_LONG": {
+              "n_rows": 140,
+              "repair_rate": 0.25585800216843424,
+              "damage_rate": 0.21796522504062374,
+              "flip_rate": 0.24014346177772
+            },
+            "TEACHER_SHORT": {
+              "n_rows": 112,
+              "repair_rate": 0.12856411613386545,
+              "damage_rate": 0.4115258133520641,
+              "flip_rate": 0.17825160887397593
+            },
+            "ROUTER_LONG": {
+              "n_rows": 142,
+              "repair_rate": 0.12856411613386545,
+              "damage_rate": 0.21796522504062374,
+              "flip_rate": 0.16300699765097226,
+              "n_opportunities": 142
+            },
+            "ROUTER_SHORT": {
+              "n_rows": 110,
+              "repair_rate": 0.25585800216843424,
+              "damage_rate": 0.4115258133520641,
+              "flip_rate": 0.28606997861554434,
+              "n_opportunities": 110
+            }
+          },
+          "long_return": -1.9835981057298986,
+          "short_return": -6.0110972783421674
+        },
+        "IN_POSITION": {
+          "n_rows": 11922,
+          "n_trades": 597,
+          "return_atr": 0.8147243453839126,
+          "ci_low": 0.5500325723559965,
+          "ci_high": 1.0899117770088806,
+          "accuracy": 0.6190296059294449,
+          "balanced_accuracy": 0.6201756340127806,
+          "long_recall": 0.7437879330982758,
+          "short_recall": 0.4965633349272855,
+          "pred_long_share": 0.6224981328372317,
+          "repair_damage": {
+            "ALL": {
+              "n_rows": 11922,
+              "repair_rate": 0.32860402812841344,
+              "damage_rate": 0.20420239342616447,
+              "flip_rate": 0.2512711658959883
+            },
+            "TEACHER_LONG": {
+              "n_rows": 5964,
+              "repair_rate": 0.42770650643848696,
+              "damage_rate": 0.14178060188585237,
+              "flip_rate": 0.2177804633919651
+            },
+            "TEACHER_SHORT": {
+              "n_rows": 5958,
+              "repair_rate": 0.2757091984857095,
+              "damage_rate": 0.29221592929694695,
+              "flip_rate": 0.2841465782390861
+            },
+            "ROUTER_LONG": {
+              "n_rows": 7459,
+              "repair_rate": 0.2757091984857095,
+              "damage_rate": 0.14178060188585237,
+              "flip_rate": 0.19590874531923486,
+              "n_opportunities": 489
+            },
+            "ROUTER_SHORT": {
+              "n_rows": 4463,
+              "repair_rate": 0.42770650643848696,
+              "damage_rate": 0.29221592929694695,
+              "flip_rate": 0.33800483442854645,
+              "n_opportunities": 395
+            }
+          },
+          "long_return": 1.8083179271521799,
+          "short_return": -0.19565291175206231
+        }
+      }
+    }
+  },
+  "pooled_ex_ag": {
+    "A": {
+      "n_rows": 12725,
+      "n_trades": 564,
+      "return_atr": 0.5667872725025894,
+      "ci_low": 0.274569799031794,
+      "ci_high": 0.8592958157156836,
+      "accuracy": 0.6000626321782826,
+      "balanced_accuracy": 0.5987867563783651,
+      "long_recall": 0.7187190815706064,
+      "short_recall": 0.47885443118612375,
+      "pred_long_share": 0.6209832481324367,
+      "repair_damage": {
+        "ALL": {
+          "n_rows": 12725,
+          "repair_rate": 0.0,
+          "damage_rate": 0.0,
+          "flip_rate": 0.0
+        },
+        "TEACHER_LONG": {
+          "n_rows": 6508,
+          "repair_rate": 0.0,
+          "damage_rate": 0.0,
+          "flip_rate": 0.0
+        },
+        "TEACHER_SHORT": {
+          "n_rows": 6217,
+          "repair_rate": 0.0,
+          "damage_rate": 0.0,
+          "flip_rate": 0.0
+        },
+        "ROUTER_LONG": {
+          "n_rows": 8069,
+          "repair_rate": 0.0,
+          "damage_rate": 0.0,
+          "flip_rate": 0.0,
+          "n_opportunities": 473
+        },
+        "ROUTER_SHORT": {
+          "n_rows": 4656,
+          "repair_rate": 0.0,
+          "damage_rate": 0.0,
+          "flip_rate": 0.0,
+          "n_opportunities": 384
+        }
+      },
+      "roc_auc": 0.6362071100637231,
+      "roc_auc_scope": "direction",
+      "long_return": 1.4961260643154435,
+      "short_return": -0.3825372997793584
+    },
+    "M9": {
+      "n_rows": 12725,
+      "n_trades": 564,
+      "return_atr": 0.5532523811863397,
+      "ci_low": 0.2680742799138242,
+      "ci_high": 0.850988950794615,
+      "accuracy": 0.5978359174788299,
+      "balanced_accuracy": 0.596892069547454,
+      "long_recall": 0.6856137750967877,
+      "short_recall": 0.5081703639981204,
+      "pred_long_share": 0.589752472246647,
+      "repair_damage": {
+        "ALL": {
+          "n_rows": 12725,
+          "repair_rate": 0.09854585122842144,
+          "damage_rate": 0.06939089491099466,
+          "flip_rate": 0.08105105139954347
+        },
+        "TEACHER_LONG": {
+          "n_rows": 6508,
+          "repair_rate": 0.09001957982762901,
+          "damage_rate": 0.08129197910911821,
+          "flip_rate": 0.08374688665490597
+        },
+        "TEACHER_SHORT": {
+          "n_rows": 6217,
+          "repair_rate": 0.10324675143010074,
+          "damage_rate": 0.05114425720059562,
+          "flip_rate": 0.07829724119245277
+        },
+        "ROUTER_LONG": {
+          "n_rows": 8069,
+          "repair_rate": 0.10324675143010074,
+          "damage_rate": 0.08129197910911821,
+          "flip_rate": 0.09040648650588635,
+          "n_opportunities": 473
+        },
+        "ROUTER_SHORT": {
+          "n_rows": 4656,
+          "repair_rate": 0.09001957982762901,
+          "damage_rate": 0.05114425720059562,
+          "flip_rate": 0.06572305217153306,
+          "n_opportunities": 384
+        }
+      },
+      "roc_auc": 0.594278763472549,
+      "roc_auc_scope": "router_correctness",
+      "long_return": 1.2063441388770244,
+      "short_return": -0.11388436054070375
+    },
+    "E9": {
+      "n_rows": 12725,
+      "n_trades": 564,
+      "return_atr": 0.5399781629345658,
+      "ci_low": 0.2665605927438042,
+      "ci_high": 0.8115851816518058,
+      "accuracy": 0.5951045474409301,
+      "balanced_accuracy": 0.5938354484864914,
+      "long_recall": 0.7131307502037435,
+      "short_recall": 0.47454014676923917,
+      "pred_long_share": 0.6202935511692361,
+      "repair_damage": {
+        "ALL": {
+          "n_rows": 12725,
+          "repair_rate": 0.22250197001856167,
+          "damage_rate": 0.15655855226427584,
+          "flip_rate": 0.18293178918609285
+        },
+        "TEACHER_LONG": {
+          "n_rows": 6508,
+          "repair_rate": 0.29361014880683917,
+          "damage_rate": 0.12268390522031697,
+          "flip_rate": 0.17076219600002018
+        },
+        "TEACHER_SHORT": {
+          "n_rows": 6217,
+          "repair_rate": 0.1832969721603195,
+          "damage_rate": 0.20849486343466583,
+          "flip_rate": 0.19536309405358637
+        },
+        "ROUTER_LONG": {
+          "n_rows": 8069,
+          "repair_rate": 0.1832969721603195,
+          "damage_rate": 0.12268390522031697,
+          "flip_rate": 0.1478473748700324,
+          "n_opportunities": 473
+        },
+        "ROUTER_SHORT": {
+          "n_rows": 4656,
+          "repair_rate": 0.29361014880683917,
+          "damage_rate": 0.20849486343466583,
+          "flip_rate": 0.24041429742209866,
+          "n_opportunities": 384
+        }
+      },
+      "roc_auc": 0.5531630967806456,
+      "roc_auc_scope": "router_correctness",
+      "long_return": 1.372514551977706,
+      "short_return": -0.3104622344750933
+    },
+    "M33": {
+      "n_rows": 12725,
+      "n_trades": 564,
+      "return_atr": 0.645202266350763,
+      "ci_low": 0.3839063618626015,
+      "ci_high": 0.9141509883225682,
+      "accuracy": 0.6118145304609663,
+      "balanced_accuracy": 0.6112444028820814,
+      "long_recall": 0.6648363952972807,
+      "short_recall": 0.557652410466882,
+      "pred_long_share": 0.5547754435096895,
+      "repair_damage": {
+        "ALL": {
+          "n_rows": 12725,
+          "repair_rate": 0.21981389830098716,
+          "damage_rate": 0.12691990724030972,
+          "flip_rate": 0.1640716855115712
+        },
+        "TEACHER_LONG": {
+          "n_rows": 6508,
+          "repair_rate": 0.19359434653457516,
+          "damage_rate": 0.15073633725232669,
+          "flip_rate": 0.16279147746529302
+        },
+        "TEACHER_SHORT": {
+          "n_rows": 6217,
+          "repair_rate": 0.23426986508797115,
+          "damage_rate": 0.09040476603553896,
+          "flip_rate": 0.16537942491368335
+        },
+        "ROUTER_LONG": {
+          "n_rows": 8069,
+          "repair_rate": 0.23426986508797115,
+          "damage_rate": 0.15073633725232669,
+          "flip_rate": 0.18541521919219855,
+          "n_opportunities": 473
+        },
+        "ROUTER_SHORT": {
+          "n_rows": 4656,
+          "repair_rate": 0.19359434653457516,
+          "damage_rate": 0.09040476603553896,
+          "flip_rate": 0.1291023159353915,
+          "n_opportunities": 384
+        }
+      },
+      "roc_auc": 0.6142182322992237,
+      "roc_auc_scope": "router_correctness",
+      "long_return": 0.936791723894957,
+      "short_return": 0.34734206778411314
+    },
+    "E33": {
+      "n_rows": 12725,
+      "n_trades": 564,
+      "return_atr": 0.6095216320583331,
+      "ci_low": 0.35189244135577064,
+      "ci_high": 0.8715007084403925,
+      "accuracy": 0.5971490175137123,
+      "balanced_accuracy": 0.5958823385553684,
+      "long_recall": 0.7149501606396974,
+      "short_recall": 0.47681451647103934,
+      "pred_long_share": 0.6200878469625776,
+      "repair_damage": {
+        "ALL": {
+          "n_rows": 12725,
+          "repair_rate": 0.30643694710914865,
+          "damage_rate": 0.20909350785477385,
+          "flip_rate": 0.2480247867248817
+        },
+        "TEACHER_LONG": {
+          "n_rows": 6508,
+          "repair_rate": 0.39292172573553175,
+          "damage_rate": 0.1590194385362704,
+          "flip_rate": 0.22481168870241441
+        },
+        "TEACHER_SHORT": {
+          "n_rows": 6217,
+          "repair_rate": 0.2587541682981004,
+          "damage_rate": 0.285866630902185,
+          "flip_rate": 0.27173709115643435
+        },
+        "ROUTER_LONG": {
+          "n_rows": 8069,
+          "repair_rate": 0.2587541682981004,
+          "damage_rate": 0.1590194385362704,
+          "flip_rate": 0.20042423740362628,
+          "n_opportunities": 473
+        },
+        "ROUTER_SHORT": {
+          "n_rows": 4656,
+          "repair_rate": 0.39292172573553175,
+          "damage_rate": 0.285866630902185,
+          "flip_rate": 0.32601380326505336,
+          "n_opportunities": 384
+        }
+      },
+      "roc_auc": 0.5738001654914308,
+      "roc_auc_scope": "router_correctness",
+      "long_return": 1.5765648898816491,
+      "short_return": -0.37831825496548444
+    }
+  },
+  "paired_contrasts": {
+    "E9_minus_A": {
+      "mean": -0.008479028972986595,
+      "ci_low": -0.17156924985385427,
+      "ci_high": 0.14647816271039102
+    },
+    "E9_minus_M9": {
+      "mean": -0.017933928621672996,
+      "ci_low": -0.17054150101356316,
+      "ci_high": 0.13527668019564562
+    },
+    "E33_minus_E9": {
+      "mean": 0.06710323140938551,
+      "ci_low": -0.1219599446927557,
+      "ci_high": 0.25770329384120777
+    },
+    "E33_minus_M33": {
+      "mean": -0.052019858765051066,
+      "ci_low": -0.24336482244250782,
+      "ci_high": 0.14740537718114774
+    },
+    "M9_minus_A": {
+      "mean": 0.009454899648686406,
+      "ci_low": -0.1168833358695932,
+      "ci_high": 0.12959329141881115
+    },
+    "M33_minus_M9": {
+      "mean": 0.10118916155276357,
+      "ci_low": -0.06037737514108729,
+      "ci_high": 0.2594768940632293
+    },
+    "E33_minus_A": {
+      "mean": 0.05862420243639891,
+      "ci_low": -0.16368485593107526,
+      "ci_high": 0.2833633897283469
+    }
+  },
+  "side_contrasts": {
+    "E9_minus_A": {
+      "LONG": {
+        "mean": 0.13049836047145055,
+        "ci_low": -0.1191247219199473,
+        "ci_high": 0.3852450975018334
+      },
+      "SHORT": {
+        "mean": -0.11354030252547737,
+        "ci_low": -0.31766623941213296,
+        "ci_high": 0.09364106233067501
+      }
+    },
+    "E9_minus_M9": {
+      "LONG": {
+        "mean": -0.12871848355521182,
+        "ci_low": -0.364489188080384,
+        "ci_high": 0.09909291607839552
+      },
+      "SHORT": {
+        "mean": 0.1645863407985578,
+        "ci_low": -0.030847917591896045,
+        "ci_high": 0.3696366458227715
+      }
+    },
+    "E33_minus_E9": {
+      "LONG": {
+        "mean": -0.2835158096453647,
+        "ci_low": -0.5380251691264808,
+        "ci_high": -0.04378251461055555
+      },
+      "SHORT": {
+        "mean": 0.14930934682659366,
+        "ci_low": -0.13709829543852178,
+        "ci_high": 0.4521575649977415
+      }
+    },
+    "E33_minus_M33": {
+      "LONG": {
+        "mean": -0.6605377211661572,
+        "ci_low": -0.9368419523090138,
+        "ci_high": -0.38863785135801143
+      },
+      "SHORT": {
+        "mean": 0.7645774386962594,
+        "ci_low": 0.502905388725085,
+        "ci_high": 1.0404039461223344
+      }
+    },
+    "M9_minus_A": {
+      "LONG": {
+        "mean": 0.25921684402666234,
+        "ci_low": 0.06242672632685458,
+        "ci_high": 0.48225066848441756
+      },
+      "SHORT": {
+        "mean": -0.2781266433240352,
+        "ci_low": -0.4116943585590322,
+        "ci_high": -0.1567562494910685
+      }
+    },
+    "M33_minus_M9": {
+      "LONG": {
+        "mean": 0.24830342796558064,
+        "ci_low": 0.012663240801931203,
+        "ci_high": 0.4841484888856243
+      },
+      "SHORT": {
+        "mean": -0.45068175107110786,
+        "ci_low": -0.6483551940285998,
+        "ci_high": -0.26331504440536924
+      }
+    },
+    "E33_minus_A": {
+      "LONG": {
+        "mean": -0.1530174491739141,
+        "ci_low": -0.4728547325827191,
+        "ci_high": 0.15613766850149408
+      },
+      "SHORT": {
+        "mean": 0.03576904430111632,
+        "ci_low": -0.26683833633682297,
+        "ci_high": 0.3536670568594514
+      }
+    }
+  },
+  "per_symbol": [
+    {
+      "symbol": "AG",
+      "n_trades": 74,
+      "A_return": 0.8660373437475797,
+      "A_long_return": 1.7746623914780784,
+      "A_short_return": 0.09370605317665595,
+      "A_long_recall": 0.7093329752715566,
+      "A_short_recall": 0.46394951243581384,
+      "M9_return": 1.0507117312911838,
+      "M9_long_return": 1.7716528475205533,
+      "M9_short_return": 0.4379117824962201,
+      "M9_long_recall": 0.7143095284871113,
+      "M9_short_recall": 0.498573917710904,
+      "E9_return": 0.9972632533637937,
+      "E9_long_return": 1.586436039297565,
+      "E9_short_return": 0.49646638532008813,
+      "E9_long_recall": 0.677502215818454,
+      "E9_short_recall": 0.5157614564849153,
+      "M33_return": 1.2223191615334608,
+      "M33_long_return": 1.7014659283696405,
+      "M33_short_return": 0.8150444097227076,
+      "M33_long_recall": 0.6823862689872329,
+      "M33_short_recall": 0.5718492154725031,
+      "E33_return": 1.0457679162473503,
+      "E33_long_return": 2.5360594797166076,
+      "E33_short_return": -0.2209799127015179,
+      "E33_long_recall": 0.795411828641583,
+      "E33_short_recall": 0.4509826111863783,
+      "E9_minus_A_mean": -0.13122590961621397,
+      "E9_minus_M9_mean": 0.053448477927389944,
+      "E33_minus_E9_mean": -0.048504662883556815,
+      "E33_minus_M33_mean": 0.17655124528611016,
+      "M9_minus_A_mean": -0.18467438754360396,
+      "M33_minus_M9_mean": -0.17160743024227687,
+      "E33_minus_A_mean": -0.17973057249977065
+    },
+    {
+      "symbol": "AU",
+      "n_trades": 73,
+      "A_return": 0.37245761001170524,
+      "A_long_return": 0.7174156090129196,
+      "A_short_return": 0.054733137247429085,
+      "A_long_recall": 0.6298879394415109,
+      "A_short_recall": 0.3998282289825886,
+      "M9_return": 0.5627639543180666,
+      "M9_long_return": 0.5091334827258662,
+      "M9_short_return": 0.6121604413108828,
+      "M9_long_recall": 0.6282550187907331,
+      "M9_short_recall": 0.4691459716743457,
+      "E9_return": 0.44296258054875637,
+      "E9_long_return": 0.5810368065139724,
+      "E9_short_return": 0.3157889513702679,
+      "E9_long_recall": 0.6440546655725227,
+      "E9_short_recall": 0.4090771351135446,
+      "M33_return": 0.35211044120885193,
+      "M33_long_return": -0.5104794229485455,
+      "M33_short_return": 1.14660110556435,
+      "M33_long_recall": 0.5098906153370439,
+      "M33_short_recall": 0.5277741949669642,
+      "E33_return": 0.2915261984657203,
+      "E33_long_return": 0.8891244801180542,
+      "E33_short_return": -0.25889327147721886,
+      "E33_long_recall": 0.6244481411445696,
+      "E33_short_recall": 0.46527983998534267,
+      "E9_minus_A_mean": -0.0705049705370511,
+      "E9_minus_M9_mean": 0.11980137376931023,
+      "E33_minus_E9_mean": 0.15143638208303614,
+      "E33_minus_M33_mean": 0.06058424274313171,
+      "M9_minus_A_mean": -0.19030634430636129,
+      "M33_minus_M9_mean": 0.2106535131092146,
+      "E33_minus_A_mean": 0.08093141154598513
+    },
+    {
+      "symbol": "CU",
+      "n_trades": 38,
+      "A_return": 0.9124857835505992,
+      "A_long_return": 1.9423896013205215,
+      "A_short_return": -0.3597483442828344,
+      "A_long_recall": 0.7354281505207337,
+      "A_short_recall": 0.44202708247024963,
+      "M9_return": 0.8089146991057407,
+      "M9_long_return": 1.7111064770421256,
+      "M9_short_return": -0.30555749716861663,
+      "M9_long_recall": 0.7210411967993138,
+      "M9_short_recall": 0.4459705638029611,
+      "E9_return": 1.0457201663562259,
+      "E9_long_return": 2.200136485699758,
+      "E9_short_return": -0.3803235222446078,
+      "E9_long_recall": 0.753786600437032,
+      "E9_short_recall": 0.5177651035223924,
+      "M33_return": 0.7694830933920124,
+      "M33_long_return": 1.0309782384201946,
+      "M33_short_return": 0.4464596789454344,
+      "M33_long_recall": 0.6793597296395574,
+      "M33_short_recall": 0.5590912099966384,
+      "E33_return": 0.8358547877120784,
+      "E33_long_return": 1.8616655178116748,
+      "E33_short_return": -0.43132317299918776,
+      "E33_long_recall": 0.7441595489237125,
+      "E33_short_recall": 0.5280892059897359,
+      "E9_minus_A_mean": -0.13323438280562652,
+      "E9_minus_M9_mean": -0.2368054672504849,
+      "E33_minus_E9_mean": 0.20986537864414703,
+      "E33_minus_M33_mean": -0.06637169432006611,
+      "M9_minus_A_mean": 0.10357108444485838,
+      "M33_minus_M9_mean": 0.03943160571372829,
+      "E33_minus_A_mean": 0.0766309958385206
+    },
+    {
+      "symbol": "AL",
+      "n_trades": 34,
+      "A_return": 0.8354033248155891,
+      "A_long_return": 1.7260912700978805,
+      "A_short_return": -0.05528462046670241,
+      "A_long_recall": 0.7822669392956828,
+      "A_short_recall": 0.5295164908803561,
+      "M9_return": 0.6048176416769184,
+      "M9_long_return": 1.6462645978518389,
+      "M9_short_return": -0.43662931449800185,
+      "M9_long_recall": 0.7787486636421909,
+      "M9_short_recall": 0.5090717742212871,
+      "E9_return": 0.3032664876656477,
+      "E9_long_return": 1.4683093661947901,
+      "E9_short_return": -0.8617763908634947,
+      "E9_long_recall": 0.7970741263154291,
+      "E9_short_recall": 0.46343749828609754,
+      "M33_return": 0.8169010689226905,
+      "M33_long_return": 1.5047597879842973,
+      "M33_short_return": 0.1290423498610843,
+      "M33_long_recall": 0.7243906102870121,
+      "M33_short_recall": 0.6459706850976453,
+      "E33_return": 0.9999486666742707,
+      "E33_long_return": 1.1840156599377092,
+      "E33_short_return": 0.8158816734108323,
+      "E33_long_recall": 0.6937706853746732,
+      "E33_short_recall": 0.6737410603302018,
+      "E9_minus_A_mean": 0.5321368371499414,
+      "E9_minus_M9_mean": 0.30155115401127075,
+      "E33_minus_E9_mean": -0.6966821790086231,
+      "E33_minus_M33_mean": -0.18304759775158014,
+      "M9_minus_A_mean": 0.23058568313867073,
+      "M33_minus_M9_mean": -0.21208342724577223,
+      "E33_minus_A_mean": -0.1645453418586817
+    },
+    {
+      "symbol": "SN",
+      "n_trades": 44,
+      "A_return": 0.03928740846674664,
+      "A_long_return": 1.1883425630904616,
+      "A_short_return": -0.9182585537196827,
+      "A_long_recall": 0.7108874164659359,
+      "A_short_recall": 0.40616092434534745,
+      "M9_return": 0.1912995647496187,
+      "M9_long_return": 1.3468800333431632,
+      "M9_short_return": -0.771684159078335,
+      "M9_long_recall": 0.7036552860251071,
+      "M9_short_recall": 0.39279316617093457,
+      "E9_return": -0.07199571973863197,
+      "E9_long_return": 1.2419199849625426,
+      "E9_short_return": -1.1669254736562775,
+      "E9_long_recall": 0.7401181293769892,
+      "E9_short_recall": 0.32580041116858727,
+      "M33_return": 0.5230790168043498,
+      "M33_long_return": 1.1661070999411045,
+      "M33_short_return": -0.012777719142945601,
+      "M33_long_recall": 0.7387569926278675,
+      "M33_short_recall": 0.4631865691817731,
+      "E33_return": 0.35136601531762274,
+      "E33_long_return": 1.240502612088408,
+      "E33_short_return": -0.3895811486580317,
+      "E33_long_recall": 0.6994730598624448,
+      "E33_short_recall": 0.38282900577476686,
+      "E9_minus_A_mean": 0.1112831282053787,
+      "E9_minus_M9_mean": 0.2632952844882508,
+      "E33_minus_E9_mean": -0.4233617350562547,
+      "E33_minus_M33_mean": 0.17171300148672722,
+      "M9_minus_A_mean": -0.15201215628287212,
+      "M33_minus_M9_mean": -0.3317794520547311,
+      "E33_minus_A_mean": -0.3120786068508761
+    },
+    {
+      "symbol": "NI",
+      "n_trades": 35,
+      "A_return": 0.16554690169715164,
+      "A_long_return": 0.8267670658966335,
+      "A_short_return": -0.33036822145245975,
+      "A_long_recall": 0.6065434676830752,
+      "A_short_recall": 0.6596923139162745,
+      "M9_return": 0.061094476342633645,
+      "M9_long_return": 0.23373316888817677,
+      "M9_short_return": -0.06838454306652367,
+      "M9_long_recall": 0.5222183443972026,
+      "M9_short_recall": 0.677783312100307,
+      "E9_return": -0.11927213578634215,
+      "E9_long_return": 0.5620590092673846,
+      "E9_short_return": -0.6302704945766372,
+      "E9_long_recall": 0.5781545528512522,
+      "E9_short_recall": 0.605628768361417,
+      "M33_return": 0.4110174004145587,
+      "M33_long_return": 0.6394975705868963,
+      "M33_short_return": 0.2396572727853056,
+      "M33_long_recall": 0.6092178153395815,
+      "M33_short_recall": 0.6924921048625349,
+      "E33_return": 0.35931047073261413,
+      "E33_long_return": 0.9771023584191373,
+      "E33_short_return": -0.10403344503227832,
+      "E33_long_recall": 0.5927792662783742,
+      "E33_short_recall": 0.6089626037744008,
+      "E9_minus_A_mean": 0.28481903748349385,
+      "E9_minus_M9_mean": 0.18036661212897584,
+      "E33_minus_E9_mean": -0.47858260651895623,
+      "E33_minus_M33_mean": 0.05170692968194466,
+      "M9_minus_A_mean": 0.10445242535451797,
+      "M33_minus_M9_mean": -0.34992292407192505,
+      "E33_minus_A_mean": -0.19376356903546246
+    },
+    {
+      "symbol": "RB",
+      "n_trades": 27,
+      "A_return": 0.590516193509403,
+      "A_long_return": 0.9081040917645821,
+      "A_short_return": 0.29561314512959397,
+      "A_long_recall": 0.7274704967771768,
+      "A_short_recall": 0.4652460403044516,
+      "M9_return": 0.7485587420421226,
+      "M9_long_return": 0.6442449063455639,
+      "M9_short_return": 0.845421589474641,
+      "M9_long_recall": 0.7100642778274358,
+      "M9_short_recall": 0.5499933400550892,
+      "E9_return": 0.7836118383982072,
+      "E9_long_return": 0.8461375916509559,
+      "E9_short_return": 0.7255522103777975,
+      "E9_long_recall": 0.6424159089897956,
+      "E9_short_recall": 0.5540875675096304,
+      "M33_return": 0.8178914719563385,
+      "M33_long_return": 0.7263842828149223,
+      "M33_short_return": 0.9028624333019385,
+      "M33_long_recall": 0.7008297539167985,
+      "M33_short_recall": 0.5752088220462721,
+      "E33_return": 0.4017957043625774,
+      "E33_long_return": 1.4118613535690443,
+      "E33_short_return": -0.5361223984719986,
+      "E33_long_recall": 0.7479594376608546,
+      "E33_short_recall": 0.4497458217251276,
+      "E9_minus_A_mean": -0.1930956448888043,
+      "E9_minus_M9_mean": -0.0350530963560847,
+      "E33_minus_E9_mean": 0.38181613403562964,
+      "E33_minus_M33_mean": 0.41609576759376066,
+      "M9_minus_A_mean": -0.1580425485327195,
+      "M33_minus_M9_mean": -0.0693327299142158,
+      "E33_minus_A_mean": 0.1887204891468254
+    },
+    {
+      "symbol": "I",
+      "n_trades": 30,
+      "A_return": -0.36019326368513255,
+      "A_long_return": 0.48576412195354174,
+      "A_short_return": -1.1004059761189726,
+      "A_long_recall": 0.6157015916414411,
+      "A_short_recall": 0.6170449108853854,
+      "M9_return": 0.08166932881424192,
+      "M9_long_return": 0.44125665155002736,
+      "M9_short_return": -0.23296957857957037,
+      "M9_long_recall": 0.6207759658887477,
+      "M9_short_recall": 0.6144940784150545,
+      "E9_return": 0.07770508202670957,
+      "E9_long_return": 1.2872205892736859,
+      "E9_short_return": -0.9806209868143948,
+      "E9_long_recall": 0.7236337597239851,
+      "E9_short_recall": 0.4650060206911254,
+      "M33_return": 0.42819629399971876,
+      "M33_long_return": 0.23244110843491478,
+      "M33_short_return": 0.5994820813689223,
+      "M33_long_recall": 0.4933144549685902,
+      "M33_short_recall": 0.6766629664578705,
+      "E33_return": 0.18641607882586025,
+      "E33_long_return": 0.68403917477495,
+      "E33_short_return": -0.24900413012959333,
+      "E33_long_recall": 0.6549018650522408,
+      "E33_short_recall": 0.5267152139631296,
+      "E9_minus_A_mean": -0.43789834571184216,
+      "E9_minus_M9_mean": 0.00396424678753241,
+      "E33_minus_E9_mean": -0.10871099679915082,
+      "E33_minus_M33_mean": 0.24178021517385842,
+      "M9_minus_A_mean": -0.4418625924993746,
+      "M33_minus_M9_mean": -0.3465269651854769,
+      "E33_minus_A_mean": -0.5466093425109931
+    },
+    {
+      "symbol": "SC",
+      "n_trades": 76,
+      "A_return": 0.0790072384108832,
+      "A_long_return": 0.6383117943968967,
+      "A_short_return": -0.6118983895718394,
+      "A_long_recall": 0.6766439461918294,
+      "A_short_recall": 0.5393993937232563,
+      "M9_return": 0.002397861319739309,
+      "M9_long_return": 0.3314549237442561,
+      "M9_short_return": -0.4040843922634873,
+      "M9_long_recall": 0.6040927246261225,
+      "M9_short_recall": 0.5557283392542391,
+      "E9_return": -0.05201855989520796,
+      "E9_long_return": -0.1378331184346342,
+      "E9_short_return": 0.05398765947702455,
+      "E9_long_recall": 0.5810986707820897,
+      "E9_short_recall": 0.5844094240266341,
+      "M33_return": 0.10589544266572529,
+      "M33_long_return": -0.09979930345669301,
+      "M33_short_return": 0.35998895258165364,
+      "M33_long_recall": 0.5983011252838055,
+      "M33_short_recall": 0.6234255130324611,
+      "E33_return": 0.46172716717270174,
+      "E33_long_return": 1.2305734151298648,
+      "E33_short_return": -0.4880240803037939,
+      "E33_long_recall": 0.7321581443863995,
+      "E33_short_recall": 0.5036374565484756,
+      "E9_minus_A_mean": 0.131025798306091,
+      "E9_minus_M9_mean": 0.05441642121494733,
+      "E33_minus_E9_mean": -0.5137457270679097,
+      "E33_minus_M33_mean": -0.3558317245069765,
+      "M9_minus_A_mean": 0.07660937709114378,
+      "M33_minus_M9_mean": -0.1034975813459859,
+      "E33_minus_A_mean": -0.38271992876181865
+    },
+    {
+      "symbol": "RU",
+      "n_trades": 47,
+      "A_return": 1.0851235558905263,
+      "A_long_return": 2.3925454713831535,
+      "A_short_return": -0.6798960300245203,
+      "A_long_recall": 0.774829456979978,
+      "A_short_recall": 0.3118339984193771,
+      "M9_return": 0.5789517875951828,
+      "M9_long_return": 1.4712712050520003,
+      "M9_short_return": -0.625679425971521,
+      "M9_long_recall": 0.7025587075512588,
+      "M9_short_recall": 0.3634895142452996,
+      "E9_return": 1.2028336774785455,
+      "E9_long_return": 2.534592934476812,
+      "E9_short_return": -0.5950413194691142,
+      "E9_long_recall": 0.8603466670716232,
+      "E9_short_recall": 0.3821077871793159,
+      "M33_return": 1.0360515480461272,
+      "M33_long_return": 2.2728726410229787,
+      "M33_short_return": -0.6336569274726226,
+      "M33_long_recall": 0.8085255166287053,
+      "M33_short_recall": 0.3499562700039558,
+      "E33_return": 0.6197330902156982,
+      "E33_long_return": 2.065811922892302,
+      "E33_short_return": -1.3324733338977177,
+      "E33_long_recall": 0.757570167563925,
+      "E33_short_recall": 0.2823237455625254,
+      "E9_minus_A_mean": -0.11771012158801904,
+      "E9_minus_M9_mean": -0.6238818898833627,
+      "E33_minus_E9_mean": 0.5831005872628474,
+      "E33_minus_M33_mean": 0.41631845783042926,
+      "M9_minus_A_mean": 0.5061717682953436,
+      "M33_minus_M9_mean": -0.4570997604509445,
+      "E33_minus_A_mean": 0.46539046567482817
+    },
+    {
+      "symbol": "MA",
+      "n_trades": 30,
+      "A_return": 1.7685161216068475,
+      "A_long_return": 4.755087390367316,
+      "A_short_return": 0.03944854495604981,
+      "A_long_recall": 0.8965936547442032,
+      "A_short_recall": 0.5931282545034668,
+      "M9_return": 1.8758204887161913,
+      "M9_long_return": 4.548059583616612,
+      "M9_short_return": 0.32873469693173785,
+      "M9_long_recall": 0.8723439724753963,
+      "M9_short_recall": 0.6332168209078226,
+      "E9_return": 1.914458406346513,
+      "E9_long_return": 4.5831780574511205,
+      "E9_short_return": 0.36941018728595093,
+      "E9_long_recall": 0.8312844579952348,
+      "E9_short_recall": 0.575736188960519,
+      "M33_return": 1.5266259494609737,
+      "M33_long_return": 4.293311873460919,
+      "M33_short_return": -0.07513958548636239,
+      "M33_long_recall": 0.8504128167207113,
+      "M33_short_recall": 0.46626537590588674,
+      "E33_return": 1.6959299664703962,
+      "E33_long_return": 4.847047205947413,
+      "E33_short_return": -0.12840106691103395,
+      "E33_long_recall": 0.8737166017892022,
+      "E33_short_recall": 0.4696697465244007,
+      "E9_minus_A_mean": -0.14594228473966558,
+      "E9_minus_M9_mean": -0.03863791763032154,
+      "E33_minus_E9_mean": 0.21852843987611656,
+      "E33_minus_M33_mean": -0.16930401700942235,
+      "M9_minus_A_mean": -0.10730436710934406,
+      "M33_minus_M9_mean": 0.3491945392552175,
+      "E33_minus_A_mean": 0.07258615513645097
+    },
+    {
+      "symbol": "TA",
+      "n_trades": 31,
+      "A_return": 0.9296633975548925,
+      "A_long_return": 1.3089031868249934,
+      "A_short_return": 0.525140955666785,
+      "A_long_recall": 0.765167178597813,
+      "A_short_recall": 0.5459081999517834,
+      "M9_return": 0.9635784666101456,
+      "M9_long_return": 1.2499288859510547,
+      "M9_short_return": 0.6581380193131757,
+      "M9_long_recall": 0.765054353579942,
+      "M9_short_recall": 0.5610737374902024,
+      "E9_return": 0.7915796325561973,
+      "E9_long_return": 1.2543749000380653,
+      "E9_short_return": 0.29793134724220477,
+      "E9_long_recall": 0.7759305996352196,
+      "E9_short_recall": 0.5822947417853177,
+      "M33_return": 0.5854437175548839,
+      "M33_long_return": 0.12279808638427417,
+      "M33_short_return": 1.0789323908035342,
+      "M33_long_recall": 0.6804821260385808,
+      "M33_short_recall": 0.6669613114891566,
+      "E33_return": 0.2625352705603773,
+      "E33_long_return": 1.0491255560405666,
+      "E33_short_return": -0.5764943672851579,
+      "E33_long_recall": 0.7451358722463481,
+      "E33_short_recall": 0.49053576175662295,
+      "E9_minus_A_mean": 0.13808376499869504,
+      "E9_minus_M9_mean": 0.1719988340539482,
+      "E33_minus_E9_mean": 0.5290443619958202,
+      "E33_minus_M33_mean": 0.3229084469945067,
+      "M9_minus_A_mean": -0.03391506905525319,
+      "M33_minus_M9_mean": 0.37813474905526184,
+      "E33_minus_A_mean": 0.6671281269945152
+    },
+    {
+      "symbol": "M",
+      "n_trades": 31,
+      "A_return": 1.8802152893522939,
+      "A_long_return": 3.189592647399361,
+      "A_short_return": 0.06723125513327798,
+      "A_long_recall": 0.7053626620293288,
+      "A_short_recall": 0.5886147343415895,
+      "M9_return": 1.9343872650194534,
+      "M9_long_return": 3.210093862165975,
+      "M9_short_return": 0.16802428435503883,
+      "M9_long_recall": 0.7041997508664175,
+      "M9_short_recall": 0.596263745742946,
+      "E9_return": 1.6166509921188739,
+      "E9_long_return": 2.936140059126354,
+      "E9_short_return": -0.21033386989148334,
+      "E9_long_recall": 0.7264954798288131,
+      "E9_short_recall": 0.5157011262012233,
+      "M33_return": 1.7383611226253197,
+      "M33_long_return": 2.822333773221483,
+      "M33_short_return": 0.2374759141075552,
+      "M33_long_recall": 0.6522777222777224,
+      "M33_short_recall": 0.6381288537431385,
+      "E33_return": 1.595766781814719,
+      "E33_long_return": 2.5467591075978486,
+      "E33_short_return": 0.2790081768842316,
+      "E33_long_recall": 0.622017797017797,
+      "E33_short_recall": 0.5797536479751657,
+      "E9_minus_A_mean": 0.26356429723342006,
+      "E9_minus_M9_mean": 0.31773627290057965,
+      "E33_minus_E9_mean": 0.020884210304154917,
+      "E33_minus_M33_mean": 0.14259434081060082,
+      "M9_minus_A_mean": -0.054171975667159575,
+      "M33_minus_M9_mean": 0.1960261423941337,
+      "E33_minus_A_mean": 0.28444850753757495
+    },
+    {
+      "symbol": "P",
+      "n_trades": 27,
+      "A_return": 0.8512900712878142,
+      "A_long_return": 2.297505405499023,
+      "A_short_return": -0.9564790964761963,
+      "A_long_recall": 0.80558109236513,
+      "A_short_recall": 0.3366426719910327,
+      "M9_return": 0.7779524983720658,
+      "M9_long_return": 2.044222758563463,
+      "M9_short_return": -0.8048853268671806,
+      "M9_long_recall": 0.7685216029112744,
+      "M9_short_recall": 0.42656259951341924,
+      "E9_return": 0.7746932358298466,
+      "E9_long_return": 1.7625617585009126,
+      "E9_short_return": -0.4601424175089859,
+      "E9_long_recall": 0.725008262660845,
+      "E9_short_recall": 0.39879787789623866,
+      "M33_return": 1.060372308611937,
+      "M33_long_return": 2.1684138381855838,
+      "M33_short_return": -0.32467960335512164,
+      "M33_long_recall": 0.7713033102234981,
+      "M33_short_recall": 0.4332936075763945,
+      "E33_return": 0.7739530804014096,
+      "E33_long_return": 2.112502315177444,
+      "E33_short_return": -0.8992334630686335,
+      "E33_long_recall": 0.7487012816355538,
+      "E33_short_recall": 0.38513572038162214,
+      "E9_minus_A_mean": 0.07659683545796757,
+      "E9_minus_M9_mean": 0.0032592625422192072,
+      "E33_minus_E9_mean": 0.0007401554284369398,
+      "E33_minus_M33_mean": 0.2864192282105273,
+      "M9_minus_A_mean": 0.07333757291574836,
+      "M33_minus_M9_mean": -0.28241981023987117,
+      "E33_minus_A_mean": 0.07733699088640451
+    },
+    {
+      "symbol": "CF",
+      "n_trades": 41,
+      "A_return": -0.08322916139914596,
+      "A_long_return": 0.9450836444560667,
+      "A_short_return": -1.1629576075471193,
+      "A_long_recall": 0.7823143672517748,
+      "A_short_recall": 0.3418389225716812,
+      "M9_return": -0.19697265256145005,
+      "M9_long_return": 0.23592002727144173,
+      "M9_short_return": -0.6515099663859862,
+      "M9_long_recall": 0.705775017028214,
+      "M9_short_recall": 0.38598956359732217,
+      "E9_return": 0.01051857863785178,
+      "E9_long_return": 1.1884356738150665,
+      "E9_short_return": -1.226294371298224,
+      "E9_long_recall": 0.7722402871644263,
+      "E9_short_recall": 0.3183522009599596,
+      "M33_return": 0.13745659858296522,
+      "M33_long_return": 0.11017994833181469,
+      "M33_short_return": 0.1660970813466731,
+      "M33_long_recall": 0.69565572889035,
+      "M33_short_recall": 0.5321723559008041,
+      "E33_return": 0.4548877591925541,
+      "E33_long_return": 1.7374918513242745,
+      "E33_short_return": -0.8918465375457523,
+      "E33_long_recall": 0.8354989017527719,
+      "E33_short_recall": 0.3809066197212748,
+      "E9_minus_A_mean": -0.09374774003699778,
+      "E9_minus_M9_mean": -0.20749123119930177,
+      "E33_minus_E9_mean": -0.4443691805547022,
+      "E33_minus_M33_mean": -0.317431160609589,
+      "M9_minus_A_mean": 0.113743491162304,
+      "M33_minus_M9_mean": -0.3344292511444151,
+      "E33_minus_A_mean": -0.5381169205917001
+    }
+  ],
+  "per_symbol_cluster_bootstrap": {
+    "E9_minus_A": {
+      "mean": 0.014276686594051154,
+      "ci_low": -0.096754801808083,
+      "ci_high": 0.1343602066147682,
+      "positive_symbols": 7,
+      "negative_symbols": 8
+    },
+    "E9_minus_M9": {
+      "mean": 0.02186455583365791,
+      "ci_low": -0.10343200869759496,
+      "ci_high": 0.1297389685412903,
+      "positive_symbols": 10,
+      "negative_symbols": 5
+    },
+    "E33_minus_E9": {
+      "mean": -0.041236095883930984,
+      "ci_low": -0.23493800355612032,
+      "ci_high": 0.15129371450223214,
+      "positive_symbols": 8,
+      "negative_symbols": 7
+    },
+    "E33_minus_M33": {
+      "mean": 0.07964571210759752,
+      "ci_low": -0.045218809027478164,
+      "ci_high": 0.19986909144066428,
+      "positive_symbols": 10,
+      "negative_symbols": 5
+    }
+  },
+  "loso": {
+    "folds": [
+      {
+        "held_out_symbol": "AG",
+        "router_best_iteration": 20,
+        "n_trades": 74,
+        "A_return": 1.1267981213203577,
+        "A_long_return": 1.8877318146492659,
+        "A_short_return": 0.4800044819907862,
+        "M9_return": 1.0855626622244947,
+        "M9_long_return": 1.7863281968800269,
+        "M9_short_return": 0.4899119577672926,
+        "E9_return": 1.2935305895307065,
+        "E9_long_return": 1.8213294258628563,
+        "E9_short_return": 0.8449015786483794,
+        "M33_return": 1.5029128431990277,
+        "M33_long_return": 1.7864587365128295,
+        "M33_short_return": 1.261898833882296,
+        "E33_return": 1.6818778948603637,
+        "E33_long_return": 2.0110472783319286,
+        "E33_short_return": 1.4020839189095338,
+        "E9_minus_A_mean": -0.16673246821034876,
+        "E9_minus_M9_mean": -0.2079679273062117,
+        "E33_minus_E9_mean": -0.3883473053296571,
+        "E33_minus_M33_mean": -0.17896505166133603
+      },
+      {
+        "held_out_symbol": "AU",
+        "router_best_iteration": 15,
+        "n_trades": 73,
+        "A_return": 0.06898087708479962,
+        "A_long_return": 0.6014632485802891,
+        "A_short_return": -0.42146341245051966,
+        "M9_return": -0.056402150109853735,
+        "M9_long_return": -0.06335626500125183,
+        "M9_short_return": -0.0499970442888291,
+        "E9_return": 0.24479820051225737,
+        "E9_long_return": -0.4369996351429072,
+        "E9_short_return": 0.8727698912472773,
+        "M33_return": 0.5670531193279822,
+        "M33_long_return": 0.2177442278452267,
+        "M33_short_return": 0.8887849930620989,
+        "E33_return": 0.3414160888607174,
+        "E33_long_return": -0.12342358119616453,
+        "E33_short_return": 0.769557890228898,
+        "E9_minus_A_mean": -0.1758173234274577,
+        "E9_minus_M9_mean": -0.301200350622111,
+        "E33_minus_E9_mean": -0.09661788834846008,
+        "E33_minus_M33_mean": 0.22563703046726488
+      },
+      {
+        "held_out_symbol": "CU",
+        "router_best_iteration": 27,
+        "n_trades": 38,
+        "A_return": 0.9579936818240189,
+        "A_long_return": 1.4388461579837366,
+        "A_short_return": 0.363999446567897,
+        "M9_return": 0.6173185433219536,
+        "M9_long_return": 1.1595957476604701,
+        "M9_short_return": -0.052553297331507855,
+        "E9_return": 0.5418855938656083,
+        "E9_long_return": 1.0822215729108644,
+        "E9_short_return": -0.1255882626020611,
+        "M33_return": 0.9723411863376173,
+        "M33_long_return": 1.2584603232539133,
+        "M33_short_return": 0.6188998995586639,
+        "E33_return": 0.9779861520873471,
+        "E33_long_return": 2.043660280495711,
+        "E33_short_return": -0.3384348300641613,
+        "E9_minus_A_mean": 0.41610808795841064,
+        "E9_minus_M9_mean": 0.07543294945634538,
+        "E33_minus_E9_mean": -0.43610055822173915,
+        "E33_minus_M33_mean": -0.0056449657497298885
+      },
+      {
+        "held_out_symbol": "AL",
+        "router_best_iteration": 23,
+        "n_trades": 34,
+        "A_return": 0.776120932806352,
+        "A_long_return": 1.7253440111045506,
+        "A_short_return": -0.17310214549184688,
+        "M9_return": 0.8199624373396738,
+        "M9_long_return": 1.7253440111045506,
+        "M9_short_return": -0.08541913642520302,
+        "E9_return": 0.5384967272789266,
+        "E9_long_return": 0.9012710617262264,
+        "E9_short_return": 0.1757223928316266,
+        "M33_return": 0.6277428244507399,
+        "M33_long_return": 1.4592072874447557,
+        "M33_short_return": -0.20372163854327557,
+        "E33_return": 1.0475431094886596,
+        "E33_long_return": 1.1340438207017232,
+        "E33_short_return": 0.9610423982755959,
+        "E9_minus_A_mean": 0.23762420552742536,
+        "E9_minus_M9_mean": 0.28146571006074733,
+        "E33_minus_E9_mean": -0.5090463822097329,
+        "E33_minus_M33_mean": -0.41980028503791944
+      },
+      {
+        "held_out_symbol": "SN",
+        "router_best_iteration": 17,
+        "n_trades": 44,
+        "A_return": -0.02789944276496897,
+        "A_long_return": 1.3244218217188466,
+        "A_short_return": -1.1548338298348158,
+        "M9_return": -0.044948184987063856,
+        "M9_long_return": 1.2454600597514036,
+        "M9_short_return": -1.1202883889357873,
+        "E9_return": 0.20846110023749534,
+        "E9_long_return": 0.98989576429996,
+        "E9_short_return": -0.44273445314789206,
+        "M33_return": 0.08331594390384459,
+        "M33_long_return": 1.1146518146635958,
+        "M33_short_return": -0.7761306150626149,
+        "E33_return": 0.7996804978778819,
+        "E33_long_return": 0.678871159226839,
+        "E33_short_return": 0.9003549467537507,
+        "E9_minus_A_mean": -0.23636054300246434,
+        "E9_minus_M9_mean": -0.25340928522455924,
+        "E33_minus_E9_mean": -0.5912193976403866,
+        "E33_minus_M33_mean": -0.7163645539740371
+      },
+      {
+        "held_out_symbol": "NI",
+        "router_best_iteration": 20,
+        "n_trades": 35,
+        "A_return": 0.2592574291766794,
+        "A_long_return": 1.1016839230482984,
+        "A_short_return": -0.3725624412270352,
+        "M9_return": 0.20498979832819034,
+        "M9_long_return": 0.852957374649078,
+        "M9_short_return": -0.2809858839124755,
+        "E9_return": 0.4129268986464707,
+        "E9_long_return": 0.486936973430127,
+        "E9_short_return": 0.35741934255872837,
+        "M33_return": 0.8228494530284566,
+        "M33_long_return": 1.034132042221775,
+        "M33_short_return": 0.6643875111334676,
+        "E33_return": 0.5958157267255292,
+        "E33_long_return": -0.30275184447468384,
+        "E33_short_return": 1.269741405125689,
+        "E9_minus_A_mean": -0.15366946946979138,
+        "E9_minus_M9_mean": -0.2079371003182803,
+        "E33_minus_E9_mean": -0.1828888280790585,
+        "E33_minus_M33_mean": 0.22703372630292742
+      },
+      {
+        "held_out_symbol": "RB",
+        "router_best_iteration": 20,
+        "n_trades": 27,
+        "A_return": 0.1420198800180676,
+        "A_long_return": 1.0199642302485388,
+        "A_short_return": -0.6732141594816559,
+        "M9_return": 0.601726288009368,
+        "M9_long_return": 1.404648753201959,
+        "M9_short_return": -0.14384457252660923,
+        "E9_return": 0.0030525508216005586,
+        "E9_long_return": -0.02330324917871611,
+        "E9_short_return": 0.027525793679037562,
+        "M33_return": 0.4524267669626733,
+        "M33_long_return": 0.9881036438043048,
+        "M33_short_return": -0.044987475818841674,
+        "E33_return": 0.38359288438443595,
+        "E33_long_return": 0.5470122355370108,
+        "E33_short_return": 0.23184634402847365,
+        "E9_minus_A_mean": 0.13896732919646695,
+        "E9_minus_M9_mean": 0.5986737371877674,
+        "E33_minus_E9_mean": -0.3805403335628354,
+        "E33_minus_M33_mean": 0.06883388257823736
+      },
+      {
+        "held_out_symbol": "I",
+        "router_best_iteration": 19,
+        "n_trades": 30,
+        "A_return": -0.49130661193651265,
+        "A_long_return": 1.092483992441,
+        "A_short_return": -1.8771233907668363,
+        "M9_return": -0.4957064103783487,
+        "M9_long_return": 1.0811261552881422,
+        "M9_short_return": -1.8754349053365282,
+        "E9_return": -0.22961051334718488,
+        "E9_long_return": 0.6900040486847777,
+        "E9_short_return": -1.0342732551251523,
+        "M33_return": -0.5696672191774378,
+        "M33_long_return": 0.5534959953712782,
+        "M33_short_return": -1.5524350319075646,
+        "E33_return": 0.32909657753956784,
+        "E33_long_return": 0.17298700401098902,
+        "E33_short_return": 0.4656924543770743,
+        "E9_minus_A_mean": -0.26169609858932774,
+        "E9_minus_M9_mean": -0.2660958970311638,
+        "E33_minus_E9_mean": -0.5587070908867525,
+        "E33_minus_M33_mean": -0.8987637967170058
+      },
+      {
+        "held_out_symbol": "SC",
+        "router_best_iteration": 19,
+        "n_trades": 76,
+        "A_return": -0.19173109713792855,
+        "A_long_return": 0.3604552793273118,
+        "A_short_return": -0.8738436798302843,
+        "M9_return": -0.19173109713792855,
+        "M9_long_return": 0.3604552793273118,
+        "M9_short_return": -0.8738436798302843,
+        "E9_return": 0.6331187545480104,
+        "E9_long_return": 1.5743874872903194,
+        "E9_short_return": -0.5296249741336654,
+        "M33_return": 0.04728042333731439,
+        "M33_long_return": 0.23583816404137156,
+        "M33_short_return": -0.18564384459122682,
+        "E33_return": 0.4246499511651896,
+        "E33_long_return": 1.2118190447227792,
+        "E33_short_return": -0.5477353997000682,
+        "E9_minus_A_mean": -0.824849851685939,
+        "E9_minus_M9_mean": -0.824849851685939,
+        "E33_minus_E9_mean": 0.20846880338282087,
+        "E33_minus_M33_mean": -0.37736952782787514
+      },
+      {
+        "held_out_symbol": "RU",
+        "router_best_iteration": 24,
+        "n_trades": 47,
+        "A_return": 1.0632851958971015,
+        "A_long_return": 2.3521236573616195,
+        "A_short_return": -0.6766467270799986,
+        "M9_return": 1.068749207647795,
+        "M9_long_return": 2.4547308545873645,
+        "M9_short_return": -0.802326015720624,
+        "E9_return": 0.8631500950139497,
+        "E9_long_return": 1.770173362154917,
+        "E9_short_return": -0.3613313156263566,
+        "M33_return": 1.040136725009598,
+        "M33_long_return": 2.349289478763334,
+        "M33_short_return": -0.7272194925579459,
+        "E33_return": 0.34166951442424326,
+        "E33_long_return": 0.9581585147601387,
+        "E33_short_return": -0.49059063602921543,
+        "E9_minus_A_mean": 0.2001351008831517,
+        "E9_minus_M9_mean": 0.2055991126338454,
+        "E33_minus_E9_mean": 0.5214805805897064,
+        "E33_minus_M33_mean": 0.6984672105853547
+      },
+      {
+        "held_out_symbol": "MA",
+        "router_best_iteration": 22,
+        "n_trades": 30,
+        "A_return": 2.1329338964970446,
+        "A_long_return": 5.018862244531936,
+        "A_short_return": 0.46213327395052856,
+        "M9_return": 2.0951738190317912,
+        "M9_long_return": 4.593631714369456,
+        "M9_short_return": 0.6486981954152482,
+        "E9_return": 2.0682329611142984,
+        "E9_long_return": 3.7340953008007762,
+        "E9_short_return": 1.1037863434010746,
+        "M33_return": 2.121593134001282,
+        "M33_long_return": 4.67375013706222,
+        "M33_short_return": 0.644028553281791,
+        "E33_return": 1.4264698818006316,
+        "E33_long_return": 2.8441087373683915,
+        "E33_short_return": 0.6057315969982446,
+        "E9_minus_A_mean": 0.06470093538274636,
+        "E9_minus_M9_mean": 0.026940857917492848,
+        "E33_minus_E9_mean": 0.6417630793136665,
+        "E33_minus_M33_mean": 0.6951232522006501
+      },
+      {
+        "held_out_symbol": "TA",
+        "router_best_iteration": 28,
+        "n_trades": 31,
+        "A_return": 0.9329702526808537,
+        "A_long_return": 1.1303584307295558,
+        "A_short_return": 0.7224228627622379,
+        "M9_return": 0.8271763919682169,
+        "M9_long_return": 1.06646452861915,
+        "M9_short_return": 0.5719357128738879,
+        "E9_return": 0.8896847621879315,
+        "E9_long_return": 1.195220199349626,
+        "E9_short_return": 0.5637802958821235,
+        "M33_return": 0.7889009158390862,
+        "M33_long_return": 0.7564042168883873,
+        "M33_short_return": 0.8235640613864984,
+        "E33_return": 0.2654131268871455,
+        "E33_long_return": 0.40258566464428774,
+        "E33_short_return": 0.11909575327952698,
+        "E9_minus_A_mean": 0.04328549049292218,
+        "E9_minus_M9_mean": -0.06250837021971455,
+        "E33_minus_E9_mean": 0.6242716353007859,
+        "E33_minus_M33_mean": 0.5234877889519405
+      },
+      {
+        "held_out_symbol": "M",
+        "router_best_iteration": 22,
+        "n_trades": 31,
+        "A_return": 1.920828437961272,
+        "A_long_return": 3.159137183450177,
+        "A_short_return": 0.2062470980535573,
+        "M9_return": 1.7478815021772585,
+        "M9_long_return": 2.854957592941626,
+        "M9_short_return": 0.21500691496505642,
+        "E9_return": 1.044733649903845,
+        "E9_long_return": 2.6581145418884677,
+        "E9_short_return": -1.1891783543825551,
+        "M33_return": 1.6373416254113011,
+        "M33_long_return": 2.681541597665257,
+        "M33_short_return": 0.1915262792135169,
+        "E33_return": 1.4199430376482889,
+        "E33_long_return": 2.7496338734999917,
+        "E33_short_return": -0.4211673504540697,
+        "E9_minus_A_mean": 0.8760947880574265,
+        "E9_minus_M9_mean": 0.703147852273413,
+        "E33_minus_E9_mean": -0.3752093877444434,
+        "E33_minus_M33_mean": 0.21739858776301266
+      },
+      {
+        "held_out_symbol": "P",
+        "router_best_iteration": 18,
+        "n_trades": 27,
+        "A_return": 1.1604453224681954,
+        "A_long_return": 2.4388193395169826,
+        "A_short_return": -0.43752219884278915,
+        "M9_return": 0.8637439508260626,
+        "M9_long_return": 2.1794839877380756,
+        "M9_short_return": -0.7809310953139544,
+        "E9_return": 1.0889480151917463,
+        "E9_long_return": 2.1613517184372486,
+        "E9_short_return": -0.25155661386513145,
+        "M33_return": 1.237872545636235,
+        "M33_long_return": 2.3838164748295165,
+        "M33_short_return": -0.19455736585536712,
+        "E33_return": 0.8891174639229876,
+        "E33_long_return": 1.8684675714179049,
+        "E33_short_return": -0.3350701704456589,
+        "E9_minus_A_mean": 0.07149730727644897,
+        "E9_minus_M9_mean": -0.22520406436568394,
+        "E33_minus_E9_mean": 0.1998305512687587,
+        "E33_minus_M33_mean": 0.34875508171324754
+      },
+      {
+        "held_out_symbol": "CF",
+        "router_best_iteration": 16,
+        "n_trades": 41,
+        "A_return": 0.11701168408717456,
+        "A_long_return": 1.1698811928459114,
+        "A_short_return": -0.988501300109499,
+        "M9_return": 0.19252990043925455,
+        "M9_long_return": 0.795541378508693,
+        "M9_short_return": -0.44063215153365576,
+        "E9_return": 0.12308008057312864,
+        "E9_long_return": 0.597515984955025,
+        "E9_short_return": -0.3750776190278626,
+        "M33_return": 0.30791769645914524,
+        "M33_long_return": 0.8033502601250501,
+        "M33_short_return": -0.2122864953900549,
+        "E33_return": 0.027652135150871376,
+        "E33_long_return": 0.9693367828752854,
+        "E33_short_return": -0.9611167449597634,
+        "E9_minus_A_mean": -0.006068396485954036,
+        "E9_minus_M9_mean": 0.06944981986612597,
+        "E33_minus_E9_mean": 0.09542794542225724,
+        "E33_minus_M33_mean": 0.28026556130827385
+      }
+    ],
+    "aggregate": {
+      "E9_minus_A": {
+        "mean": 0.014881272926914383,
+        "ci_low": -0.16866876566707478,
+        "ci_high": 0.19834448555316544,
+        "positive_symbols": 8,
+        "negative_symbols": 7
+      },
+      "E9_minus_M9": {
+        "mean": -0.025897520491861743,
+        "ci_low": -0.20765287423668036,
+        "ci_high": 0.16502215172619109,
+        "positive_symbols": 7,
+        "negative_symbols": 8
+      },
+      "E33_minus_E9": {
+        "mean": -0.0818289717830046,
+        "ci_low": -0.28699396745957645,
+        "ci_high": 0.14047823272387502,
+        "positive_symbols": 6,
+        "negative_symbols": 9
+      },
+      "E33_minus_M33": {
+        "mean": 0.0458729293935337,
+        "ci_low": -0.1872571474952067,
+        "ci_high": 0.2770742851537591,
+        "positive_symbols": 9,
+        "negative_symbols": 6
+      }
+    }
+  },
+  "time_blocks": [
+    {
+      "month": "2026-05",
+      "n_opportunities": 138,
+      "A": 0.21868924377008714,
+      "E9": 0.02810821619393844,
+      "E33": 0.1999467134302992,
+      "E9_minus_A": -0.19058102757614867,
+      "E33_minus_E9": 0.1718384972363607
+    },
+    {
+      "month": "2026-06",
+      "n_opportunities": 164,
+      "A": 0.4086467462530892,
+      "E9": 0.3031912321408182,
+      "E33": 0.31306572165655894,
+      "E9_minus_A": -0.10545551411227101,
+      "E33_minus_E9": 0.009874489515740737
+    },
+    {
+      "month": "2026-07",
+      "n_opportunities": 158,
+      "A": 0.8004279233266177,
+      "E9": 0.7223843326463425,
+      "E33": 0.9418045545251957,
+      "E9_minus_A": -0.078043590680275,
+      "E33_minus_E9": 0.2194202218788531
+    },
+    {
+      "month": "2026-08",
+      "n_opportunities": 177,
+      "A": 0.9125699413862224,
+      "E9": 1.1935012190930296,
+      "E33": 1.0963844828395264,
+      "E9_minus_A": 0.28093127770680715,
+      "E33_minus_E9": -0.09711673625350342
+    },
+    {
+      "month": "2026-09",
+      "n_opportunities": 1,
+      "A": -1.4348884079643218,
+      "E9": -0.64357159943023,
+      "E33": -0.64357159943023,
+      "E9_minus_A": 0.7913168085340918,
+      "E33_minus_E9": 0.0
+    }
+  ],
+  "verdict": {
+    "expert_total_increment": {
+      "contrast": "E9_minus_A",
+      "state": "no_identifiable_increment",
+      "mean": -0.008479028972986595,
+      "ci": [
+        -0.17156924985385427,
+        0.14647816271039102
+      ],
+      "LONG": {
+        "mean": 0.13049836047145055,
+        "ci_low": -0.1191247219199473,
+        "ci_high": 0.3852450975018334
+      },
+      "SHORT": {
+        "mean": -0.11354030252547737,
+        "ci_low": -0.31766623941213296,
+        "ci_high": 0.09364106233067501
+      },
+      "LONG_state": "no_identifiable_increment",
+      "SHORT_state": "no_identifiable_increment"
+    },
+    "expert_split_increment": {
+      "contrast": "E9_minus_M9",
+      "state": "no_identifiable_increment",
+      "mean": -0.017933928621672996,
+      "ci": [
+        -0.17054150101356316,
+        0.13527668019564562
+      ],
+      "LONG": {
+        "mean": -0.12871848355521182,
+        "ci_low": -0.364489188080384,
+        "ci_high": 0.09909291607839552
+      },
+      "SHORT": {
+        "mean": 0.1645863407985578,
+        "ci_low": -0.030847917591896045,
+        "ci_high": 0.3696366458227715
+      },
+      "LONG_state": "no_identifiable_increment",
+      "SHORT_state": "no_identifiable_increment"
+    },
+    "struct33_within_experts_increment": {
+      "contrast": "E33_minus_E9",
+      "state": "no_identifiable_increment",
+      "mean": 0.06710323140938551,
+      "ci": [
+        -0.1219599446927557,
+        0.25770329384120777
+      ],
+      "LONG": {
+        "mean": -0.2835158096453647,
+        "ci_low": -0.5380251691264808,
+        "ci_high": -0.04378251461055555
+      },
+      "SHORT": {
+        "mean": 0.14930934682659366,
+        "ci_low": -0.13709829543852178,
+        "ci_high": 0.4521575649977415
+      },
+      "LONG_state": "harmful_diagnostically",
+      "SHORT_state": "no_identifiable_increment"
+    },
+    "struct33_specialist_increment": {
+      "contrast": "E33_minus_M33",
+      "state": "no_identifiable_increment",
+      "mean": -0.052019858765051066,
+      "ci": [
+        -0.24336482244250782,
+        0.14740537718114774
+      ],
+      "LONG": {
+        "mean": -0.6605377211661572,
+        "ci_low": -0.9368419523090138,
+        "ci_high": -0.38863785135801143
+      },
+      "SHORT": {
+        "mean": 0.7645774386962594,
+        "ci_low": 0.502905388725085,
+        "ci_high": 1.0404039461223344
+      },
+      "LONG_state": "harmful_diagnostically",
+      "SHORT_state": "supported_diagnostically"
+    }
+  },
+  "provenance": {
+    "base_sha": "89f655be47794f06146daef0573f8ddcbfdaa7b2",
+    "model_architecture_experiment": true,
+    "upstream_changed": false,
+    "feature_schema_changed": false,
+    "hyperparameter_tuning": false,
+    "threshold_tuning": false,
+    "bootstrap_seed": 20260923,
+    "bootstrap_replicates": 5000,
+    "note": "Two-stage gated Direction architecture. Router = frozen DTP9 M0. Second stage judges only whether the router thesis is correct; Teacher direction is the label and never orients or routes."
+  }
+}
