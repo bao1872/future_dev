@@ -1,6 +1,7 @@
 {
   "task_id": "FUTURE-R5-M15-ENTRY-PATH-ATLAS-V1",
   "base_sha": "cb9261d4498d328e6dd8edca5d655eaf609b0611",
+  "reviewed_parent_sha": "6376c63f973d8c5f6705ccaf421abc8740c7b0ef",
   "stage": "kernel_checkpoint",
   "primary_endpoint": {
     "name": "delta_PS_4h",
@@ -8,7 +9,7 @@
     "ps": "MFE - MAE (side-normalized, ATR0 units)",
     "checkpoint": "h4",
     "bars": 16,
-    "inference": "whole-gid cluster bootstrap"
+    "inference": "whole-gid cluster bootstrap (correct and wrong means recomputed inside the SAME replicate)"
   },
   "audit_only_fields": [
     "direction_correct",
@@ -39,12 +40,39 @@
     "td3",
     "td5"
   ],
+  "diff_fields": [
+    "mfe_final",
+    "mae_final",
+    "sr_first_touch",
+    "sr_first_pierce",
+    "sr_same_bar_reclaim",
+    "sr_first_reclaim",
+    "sr_bars_to_reclaim",
+    "sr_first_failed_reclaim",
+    "sr_break_continue",
+    "lb_first_touch",
+    "lb_first_pierce",
+    "lb_same_bar_reclaim",
+    "lb_first_reclaim",
+    "lb_bars_to_reclaim",
+    "lb_first_failed_reclaim",
+    "lb_break_continue",
+    "first_ahead_sr_touch",
+    "first_ahead_sr_cross",
+    "first_ahead_liq_touch",
+    "first_ahead_liq_cross",
+    "mfe_at_first_ahead_sr",
+    "mae_before_first_ahead_sr",
+    "mfe_at_first_ahead_liq",
+    "mae_before_first_ahead_liq"
+  ],
   "horizon": {
     "trading_days": 5,
     "stops_at": "earliest of 5th trading day end / hard segment / data end",
     "never_stops_at_oracle_exit": true
   },
   "branch": "entry-path-atlas-v1",
+  "code_sha": "95c507367d42cd064f7043032fd3bf8a4f6eb597",
   "population": {
     "test_rows": 13773,
     "test_trades": 638,
@@ -61,15 +89,43 @@
     "AG": {
       "env_complete": true,
       "n_candidates": 1048,
-      "production_runtime_sec_full": 0.013200332992710173,
+      "production_runtime_sec_full": 0.02032137499190867,
       "t1": {
         "rows": 150,
-        "cells": 1950,
+        "cells": 6300,
         "mismatch": 0,
         "max_abs_error": 0.0,
         "first_mismatch": null
-      }
+      },
+      "env_provenance": {
+        "symbol": "AG",
+        "max_bars": "None",
+        "identity": "f3fb1b654f985375751cd01000383109395cc7717204ea3869797dd7a67c3976",
+        "sha256": "6da2b0a2dd7678d9e6a11a1b10949cc5ab8a18d8debd73cf414cd2cf80d9dbf2",
+        "rows": 14817,
+        "contract_id": null,
+        "code_identity": "11817563ce0f413a165d63a1c94705598d1fbbc49bce9685fddbb6ad514b2561",
+        "execution_frame_sha256": "70cc98f85b0988ec38cf3d6039f3b293e8422bf26ccebbc09fa82aa897f3f22c",
+        "raw_sha256": "a80e18f12a4f56a37f9a0efacf1633089cd0d3a07752ac6155b7705a4d801ddd",
+        "cache_version": null
+      },
+      "zone_geometry_audit": {
+        "sr_support_price_max_dev": 0.0,
+        "sr_resistance_price_max_dev": 0.0,
+        "liq_up_level_max_dev": 0.0,
+        "liq_dn_level_max_dev": 0.0
+      },
+      "frame_rows": 14817
     }
+  },
+  "zone_semantics": {
+    "long_backstop": "support: touch=low<=support_top, pierce=low<support_bottom, reclaim=close>=support_bottom",
+    "short_backstop": "resistance: touch=high>=resistance_bottom, pierce=high>resistance_top, reclaim=close<=resistance_top",
+    "rule": "entering a zone is NEVER a pierce-through"
+  },
+  "checkpoint_semantics": {
+    "nan_filled": true,
+    "truncated_candidate_checkpoints": "unavailable (NaN), never inherited"
   },
   "tp": {
     "counters": {
@@ -89,30 +145,30 @@
         "2N": 400,
         "4N": 800,
         "H": 32,
-        "t_N": 0.0012122499756515026,
-        "t_2N": 0.0013742499868385494,
-        "t_4N": 0.0021162500488571823,
-        "ratio_2N": 1.1336358131085815,
-        "ratio_4N": 1.7457208425348416
+        "t_N": 0.001684832968749106,
+        "t_2N": 0.001877125003375113,
+        "t_4N": 0.003177875012625009,
+        "ratio_2N": 1.1141312154929952,
+        "ratio_4N": 1.8861662085022013
       },
       "horizon_scaling": {
         "H": 32,
         "2H": 64,
         "N": 200,
-        "t_H": 0.001211749971844256,
-        "t_2H": 0.0022921659983694553,
-        "ratio_2H": 1.8916163000860902
+        "t_H": 0.0019000000320374966,
+        "t_2H": 0.003154959005769342,
+        "ratio_2H": 1.6605047118794358
       }
     },
-    "peak_rss_bytes": 844660736.0
+    "peak_rss_bytes": 754712576.0
   },
   "artifacts": {
     "artifacts/entry_path_atlas_v1/e9_direction_state_v1.parquet": "67a2311a4907a2acc2684219f25f5478768244cc5cd63a8856d76f69fa55edf4"
   },
-  "runtime_sec": 8.290327787399292,
+  "runtime_sec": 9.431034803390503,
   "unverified_items": [
-    "Full 15-symbol canonical environment materialization DEFERRED to T1.5 (only symbols with a complete persisted R4 m15 env cache are evaluated).",
-    "Primary endpoint delta_PS_4h is NOT estimated here (full experiment not authorized).",
+    "Full 15-symbol canonical environment materialization DEFERRED to T1.5.",
+    "Primary endpoint delta_PS_4h is NOT estimated (full experiment not authorized).",
     "L2 row metrics parquet is not produced at kernel stage."
   ]
 }
