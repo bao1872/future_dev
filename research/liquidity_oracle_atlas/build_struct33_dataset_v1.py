@@ -40,11 +40,19 @@ from research.liquidity_oracle_atlas.build_execution_environment_m15_v1 import (
 )
 from research.liquidity_oracle_atlas.build_teacher_oracle_dp_m15_overnight_v1 import (
     ARTIFACT_ROOT,
+    MATH_VERSION,
     load_oracle_artifact,
 )
 
 TASK_ID = "FUTURE-R4-M15-STRUCT33-DATASET-V1-PHASE1-AG"
 BASE_SHA = "29e52876fb894b40046fcd2e4035cb66eb931c1d"
+
+# Frozen Teacher identity. The Phase 0.5 FIX2 overnight Teacher was produced from
+# source git SHA c4261fc; the Teacher module records that under oracle_source_sha
+# == "phase0p5-fix2". We pin the dataset to that exact artifact so a stale,
+# same-math-version Teacher can never be consumed silently (governance: explicit
+# source identity, fail-closed).
+FROZEN_TEACHER_SOURCE_SHA = "phase0p5-fix2"
 
 TF_ORDER = ("m15", "h1", "h4")
 
@@ -176,6 +184,10 @@ def build_struct33_dataset(
     trading_day = exec_frame["trading_day"].to_numpy()
 
     bar_start = pd.to_datetime(exec_frame["bar_start_time"]).to_numpy()
+    # decision_time = 15m bar END (= bar_start + 15min): the moment this bar's
+    # indicators are final and a decision is actually made. This is the correct
+    # candidate_decision_time, NOT bar_start_time.
+    decision_time = pd.to_datetime(exec_frame["decision_time"]).to_numpy()
     open_px = exec_frame["open"].to_numpy(float)
 
     # --- 2. candidate gate ONCE (no second Candidate source) --------------
@@ -203,13 +215,23 @@ def build_struct33_dataset(
     )
 
     # --- 3. load verified Teacher (NO DP rerun) ---------------------------
-    art = load_oracle_artifact(teacher_root, symbol)
+    art = load_oracle_artifact(
+        teacher_root,
+        symbol,
+        expected_math_version=MATH_VERSION,
+        expected_source_sha=FROZEN_TEACHER_SOURCE_SHA,
+    )
     if not art["ok"]:
         raise RuntimeError(f"STOP_PHASE1_TEACHER_ARTIFACT: {art['reason']}")
     trades = art["trades"].reset_index(drop=True)
 
     # --- 4. vectorized mapping --------------------------------------------
-    mapped = map_candidates_fast(fill_idx, has_next_bar, segment, trades)
+    # A Candidate whose next fill crosses a hard segment is INVALID for mapping:
+    # it must not attach to a Teacher trade in another segment. Pass the
+    # same_segment_fill gate into the mapper so such candidates stay mapped=-1
+    # and carry no Oracle identity.
+    valid_for_mapping = has_next_bar & same_segment_fill
+    mapped = map_candidates_fast(fill_idx, valid_for_mapping, segment, trades)
 
     # --- 5. gather Teacher fields (NumPy) ---------------------------------
     t_trade_id = trades["trade_id"].to_numpy(object)
@@ -315,7 +337,7 @@ def build_struct33_dataset(
         {
             "symbol": symbol,
             "candidate_decision_index": decision_idx.astype(np.int64),
-            "candidate_decision_time": bar_start[decision_idx],
+            "candidate_decision_time": decision_time[decision_idx],
             "candidate_fill_index": fill_idx.astype(np.int64),
             "candidate_fill_time": fill_time,
             "candidate_fill_price": fill_price,
@@ -489,6 +511,27 @@ def _compute_stats(
     } if be.size else {"neg": 0, "zero": 0, "pos": 0}
     boe_q = _quantiles(boe, (0.10, 0.25, 0.50, 0.75, 0.90))
 
+    # Phase split: where the Candidate sits relative to the Oracle trade.
+    # Explicitly required by review: models must report BEFORE_ENTRY / AT_ENTRY /
+    # IN_POSITION separately so "trend already started" is not mistaken for
+    # "predict direction before start".
+    n_elig = be.size
+    phase_split = {
+        "n_eligible": n_elig,
+        "before_entry": {
+            "count": int((be > 0).sum()),
+            "pct": (float((be > 0).sum()) / n_elig) if n_elig else None,
+        },
+        "at_entry": {
+            "count": int((be == 0).sum()),
+            "pct": (float((be == 0).sum()) / n_elig) if n_elig else None,
+        },
+        "in_position": {
+            "count": int(((be < 0) & (boe > 0)).sum()),
+            "pct": (float(((be < 0) & (boe > 0)).sum()) / n_elig) if n_elig else None,
+        },
+    }
+
     w = sample_weight_raw[label_eligible]
     weight_min = float(w.min()) if w.size else None
     weight_max = float(w.max()) if w.size else None
@@ -515,6 +558,7 @@ def _compute_stats(
         "entry_quality_atr": eql,
         "timing_bars_to_oracle_entry_sign": be_sign,
         "timing_bars_to_oracle_exit": boe_q,
+        "candidate_phase_split": phase_split,
         "weight": {"min": weight_min, "max": weight_max},
         "feature_nonnull_rate": nonnull,
     }
@@ -523,21 +567,26 @@ def _compute_stats(
 def _build_review_sample(ds: pd.DataFrame, label_ok: np.ndarray, *, random_state: int):
     rng = np.random.RandomState(random_state)
 
-    def _pick(mask, k):
+    def _pick_remaining(mask, k, used):
+        # Draw from candidates not already chosen by a previous group, so the
+        # 48 review rows are 48 DISTINCT candidates (no wasted duplication).
         idx = np.flatnonzero(mask)
+        if used:
+            idx = idx[~np.isin(idx, np.array(sorted(used)))]
         if idx.size == 0:
             return np.array([], dtype=np.int64)
-        if idx.size <= k:
-            return idx
-        return rng.choice(idx, size=k, replace=False)
+        sel = idx if idx.size <= k else rng.choice(idx, size=k, replace=False)
+        used.update(sel.tolist())
+        return sel
 
     be = ds["bars_to_oracle_entry"].to_numpy()
     boe = ds["bars_to_oracle_exit"].to_numpy()
 
-    g_before = _pick((be > 0) & label_ok, 12)
-    g_near = _pick((np.abs(be) <= 2) & label_ok, 12)
-    g_in = _pick((be < 0) & (boe > 0) & label_ok, 12)
-    g_exit = _pick((boe <= 4) & (boe > 0) & label_ok, 12)
+    used: set = set()
+    g_before = _pick_remaining((be > 0) & label_ok, 12, used)
+    g_near = _pick_remaining((np.abs(be) <= 2) & label_ok, 12, used)
+    g_in = _pick_remaining((be < 0) & (boe > 0) & label_ok, 12, used)
+    g_exit = _pick_remaining((boe <= 4) & (boe > 0) & label_ok, 12, used)
 
     sel = np.concatenate([g_before, g_near, g_in, g_exit])
     grp = (
@@ -563,6 +612,8 @@ def _build_review_sample(ds: pd.DataFrame, label_ok: np.ndarray, *, random_state
     ]
     sample = ds.iloc[sel][cols].copy()
     sample["group"] = grp
+    # Reviewer requirement: 48 distinct candidates.
+    assert sample["candidate_decision_index"].is_unique
     return sample.reset_index(drop=True)
 
 

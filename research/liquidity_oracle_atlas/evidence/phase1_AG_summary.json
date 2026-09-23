@@ -3,7 +3,7 @@
     "task_id": "FUTURE-R4-M15-STRUCT33-DATASET-V1-PHASE1-AG",
     "base_sha": "29e52876fb894b40046fcd2e4035cb66eb931c1d",
     "symbol": "AG",
-    "generated_at": "2026-09-23T07:13:15.673743+00:00",
+    "generated_at": "2026-09-23T07:52:29.951873+00:00",
     "teacher_artifact": {
       "math_version": "intraday_dp_oracle_r2_one_entry_proximity_15m_port",
       "oracle_source_sha": "phase0p5-fix2",
@@ -116,6 +116,21 @@
       "p50": 25.0,
       "p75": 60.0,
       "p90": 116.0
+    },
+    "candidate_phase_split": {
+      "n_eligible": 5555,
+      "before_entry": {
+        "count": 801,
+        "pct": 0.1441944194419442
+      },
+      "at_entry": {
+        "count": 161,
+        "pct": 0.028982898289828984
+      },
+      "in_position": {
+        "count": 4593,
+        "pct": 0.8268226822682269
+      }
     },
     "weight": {
       "min": 0.0045662100456621,

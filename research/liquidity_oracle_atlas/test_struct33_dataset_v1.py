@@ -120,10 +120,67 @@ def test_no_mapped_row_crosses_hard_segment(built, env):
     segment = env["exec_frame"]["segment"].to_numpy(np.int64)
     mapped_ok = ds["teacher_row_index"].to_numpy() >= 0
     oracle_entry = ds["oracle_entry_fill_index"].to_numpy(np.int64)
-    fill_idx = ds["candidate_fill_index"].to_numpy(np.int64)
+    decision_idx = ds["candidate_decision_index"].to_numpy(np.int64)
+    # A mapped Candidate's decision bar, its fill bar and the Oracle entry bar
+    # must all share the same hard segment. (Cross-segment candidates now map to -1.)
     assert bool(
-        (segment[oracle_entry[mapped_ok]] == segment[fill_idx[mapped_ok]]).all()
+        (segment[oracle_entry[mapped_ok]] == segment[decision_idx[mapped_ok]]).all()
     )
+
+
+def test_no_oracle_identity_without_mapping(built):
+    ds = built["dataset"]
+    mapped = ds["teacher_row_index"].to_numpy() >= 0
+    # Every row that did not map to a Teacher trade must carry no Oracle identity.
+    assert ds.loc[~mapped, "oracle_trade_id"].isna().all()
+    assert ds.loc[~mapped, "oracle_direction"].isna().all()
+
+
+def test_map_candidates_fast_rejects_hard_segment_crossing():
+    # Synthetic: decision = last bar of segment 0, fill = first bar of segment 1.
+    # A Teacher trade exists in segment 1. The candidate must NOT map to it.
+    segment = np.array([0, 0, 0, 1, 1, 1, 1, 1], dtype=np.int64)
+    trades = pd.DataFrame({
+        "trade_id": ["t1"],
+        "direction": ["LONG"],
+        "entry_fill_index": [4],
+        "exit_fill_index": [7],
+        "entry_fill_price": [10.0],
+        "exit_fill_price": [11.0],
+        "training_eligible": [True],
+        "terminal_reason": ["OPTIMAL_FLAT"],
+    })
+    fill_idx = np.array([3], dtype=np.int64)   # segment 1 -> crosses hard segment
+    has_next_bar = np.array([True])
+    same_segment_fill = np.array([False])      # decision seg0, fill seg1
+    valid_for_mapping = has_next_bar & same_segment_fill
+    mapped = map_candidates_fast(fill_idx, valid_for_mapping, segment, trades)
+    assert list(mapped) == [-1]
+
+
+def test_decision_time_is_exec_frame_decision_time(built, env):
+    ds = built["dataset"]
+    decision_idx = ds["candidate_decision_index"].to_numpy().astype(int)
+    exp = pd.to_datetime(
+        env["exec_frame"]["decision_time"]
+    ).to_numpy()[decision_idx]
+    got = pd.to_datetime(ds["candidate_decision_time"]).to_numpy()
+    assert np.array_equal(exp, got)
+    # decision_time must be exactly 15 min after bar_start_time (the bar END).
+    bs = pd.to_datetime(
+        env["exec_frame"]["bar_start_time"]
+    ).to_numpy()[decision_idx]
+    delta_min = (exp - bs).astype("timedelta64[m]").astype(int)
+    assert (delta_min == 15).all()
+
+
+def test_fill_time_is_next_bar_start(built, env):
+    ds = built["dataset"]
+    fill_idx = ds["candidate_fill_index"].to_numpy(np.int64)
+    bs = pd.to_datetime(env["exec_frame"]["bar_start_time"]).to_numpy()
+    exp = bs[fill_idx]
+    got = pd.to_datetime(ds["candidate_fill_time"]).to_numpy()
+    assert np.array_equal(exp, got)
 
 
 def test_mapped_exit_is_after_candidate_fill(built):
@@ -283,3 +340,40 @@ def test_teacher_artifact_used_not_rerun(trades):
     assert "trade_id" in trades.columns
     assert "entry_fill_index" in trades.columns
     assert "exit_fill_index" in trades.columns
+
+
+def test_summary_reports_phase_split(built):
+    ps = built["stats"]["candidate_phase_split"]
+    assert set(ps) >= {"before_entry", "at_entry", "in_position", "n_eligible"}
+    n = ps["n_eligible"]
+    total = (
+        ps["before_entry"]["count"]
+        + ps["at_entry"]["count"]
+        + ps["in_position"]["count"]
+    )
+    # All label-eligible rows fall into exactly one phase bucket.
+    assert total == n
+    for k in ("before_entry", "at_entry", "in_position"):
+        assert ps[k]["count"] >= 0
+        assert 0.0 <= ps[k]["pct"] <= 1.0
+
+
+def test_review_sample_is_unique(built):
+    rv = built["review_sample"]
+    assert len(rv) == 48
+    assert rv["candidate_decision_index"].is_unique
+
+
+def test_frozen_teacher_identity_is_pinned():
+    # The builder must consume exactly the Phase 0.5 FIX2 Teacher artifact.
+    from research.liquidity_oracle_atlas.build_struct33_dataset_v1 import (
+        FROZEN_TEACHER_SOURCE_SHA,
+    )
+    art = load_oracle_artifact(ARTIFACT_ROOT, "AG")
+    assert art["metadata"].get("oracle_source_sha") == FROZEN_TEACHER_SOURCE_SHA
+    # And the pinned identity actually gates the load (fail-closed).
+    bad = load_oracle_artifact(
+        ARTIFACT_ROOT, "AG", expected_source_sha="does-not-match"
+    )
+    assert bad["ok"] is False
+    assert bad["reason"] == "source_sha_mismatch"
