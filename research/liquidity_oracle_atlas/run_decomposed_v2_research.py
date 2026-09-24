@@ -26,10 +26,15 @@ from __future__ import annotations
 import json
 import os
 import time
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 
 import numpy as np
 import pandas as pd
+
+from research.liquidity_oracle_atlas.build_decomposed_value_dataset_v1 import (
+    HORIZONS,
+)
+from research.liquidity_oracle_atlas import decomposed_models_v2 as M
 
 # --------------------------------------------------------------------------- #
 # Directories                                                                  #
@@ -284,6 +289,173 @@ def build_plan_from_devframe() -> Any:
         "symbol", "decision_bar", "side", "horizon", "decision_time",
         "label_available_time", "sample_weight", "episode_return_atr"])
     return build_fold_plan(frame)
+
+
+def _unit_paths(arch_name: str, fold: int, horizon: str):
+    tag = f"{arch_name}_f{fold}_{horizon}"
+    return (os.path.join(V2_OOF_DIR, f"{tag}.parquet"),
+            os.path.join(V2_UNIT_DIR, f"{tag}.json"))
+
+
+def run_architecture(arch_name: str, *, horizons=HORIZONS, force: bool = False,
+                     isolated: bool = True, plan=None, dev_path=None):
+    """Run one architecture across all outer folds and horizons.
+
+    Plan §51: each (arch, fold, horizon) unit runs in its OWN subprocess by
+    default, so no two LightGBM boosters ever share a process. Completed units
+    are cached on disk, so an interrupted run resumes instead of refitting.
+    """
+    import subprocess as _sp
+    import sys
+    from research.liquidity_oracle_atlas import decomposed_value_features_v2 as F
+    from research.liquidity_oracle_atlas import decomposed_models_v2 as M
+
+    arch = F.get_arch(arch_name)
+    if arch is None:
+        raise StopV2Leakage(f"STOP_V2_UNKNOWN_ARCH {arch_name}")
+    if plan is None:
+        plan = build_plan_from_devframe()
+    dev_path = dev_path or DEV_FRAME_PARQUET
+
+    os.makedirs(V2_OOF_DIR, exist_ok=True)
+    os.makedirs(V2_UNIT_DIR, exist_ok=True)
+
+    shards, metas = [], []
+    n_launched = 0
+    for k in range(plan.n_outer):
+        for h in horizons:
+            shard_p, meta_p = _unit_paths(arch.name, k, h)
+            if (not force) and os.path.exists(shard_p) and os.path.exists(meta_p):
+                with open(meta_p) as f:
+                    metas.append(json.load(f))
+                shards.append(shard_p)
+                continue
+            args_path = os.path.join(V2_UNIT_DIR, f"_args_{arch.name}_{k}_{h}.json")
+            with open(args_path, "w") as f:
+                json.dump({
+                    "arch": arch.name, "fold": int(k),
+                    "outer_bounds": list(plan.outer[k]),
+                    "es_frac": float(plan.es_frac), "horizon": h,
+                    "dev_path": dev_path, "out_path": shard_p,
+                    "out_meta": meta_p,
+                }, f)
+            if isolated:
+                env = dict(os.environ)
+                env["OMP_NUM_THREADS"] = "1"
+                env["PYTHONPATH"] = os.getcwd()
+                r = _sp.run([sys.executable, "-m",
+                             "research.liquidity_oracle_atlas.decomposed_models_v2",
+                             args_path], env=env, capture_output=True, text=True)
+                if r.returncode != 0:
+                    raise StopV2FitError(
+                        f"STOP_V2_UNIT_FAILED arch={arch.name} fold={k} "
+                        f"horizon={h} rc={r.returncode}\n{r.stderr[-2000:]}")
+            else:
+                M.worker_main(args_path)
+            with open(meta_p) as f:
+                metas.append(json.load(f))
+            shards.append(shard_p)
+            n_launched += 1
+
+    oof = pd.concat([read_parquet(p) for p in shards], ignore_index=True)
+    return {
+        "arch": arch.name,
+        "n_features": arch.n_payoff,
+        "shared_state": arch.shared_state,
+        "oof": oof,
+        "metas": metas,
+        "n_units_launched": n_launched,
+        "n_units_total": len(shards),
+    }
+
+
+class StopV2FitError(RuntimeError):
+    pass
+
+
+# --------------------------------------------------------------------------- #
+# Comparison / selection inputs (plan §13, §24, §26)                           #
+# --------------------------------------------------------------------------- #
+def per_fold_ev_mse(oof: pd.DataFrame) -> list:
+    """One weighted EV MSE per outer fold (all horizons pooled in that fold)."""
+    out = []
+    for k in sorted(oof["fold"].unique()):
+        g = oof[oof["fold"] == k]
+        out.append(M.weighted_ev_mse(
+            g["episode_return_atr"], g["ev_c"], g["sample_weight"]))
+    return out
+
+
+def ev_decile_spread(oof: pd.DataFrame, n_bins: int = 10):
+    """Mean actual return in the top EV decile minus the bottom EV decile."""
+    q = pd.qcut(oof["ev_c"].rank(method="first"), n_bins, labels=False)
+    means = []
+    for d in range(n_bins):
+        m = (q.to_numpy() == d)
+        means.append(M.weighted_mean(
+            oof["episode_return_atr"].to_numpy(float)[m],
+            oof["sample_weight"].to_numpy(float)[m]))
+    return float(means[-1] - means[0]), means
+
+
+def overall_metrics(oof: pd.DataFrame) -> dict:
+    y = oof["episode_return_atr"].to_numpy(float)
+    w = oof["sample_weight"].to_numpy(float)
+    win = (y > 0).astype(float)
+    avg_win = M.weighted_mean(y[y > 0], w[y > 0])
+    avg_loss = M.weighted_mean(np.abs(y[~(y > 0)]), w[~(y > 0)])
+    spread, _ = ev_decile_spread(oof)
+    return {
+        "n_rows": int(len(oof)),
+        "weighted_ev_mse": M.weighted_ev_mse(y, oof["ev_c"].to_numpy(float), w),
+        "weighted_ev_mae": M.weighted_ev_mae(y, oof["ev_c"].to_numpy(float), w),
+        "win_brier": M.weighted_brier(win, oof["p_win"].to_numpy(float), w),
+        "win_logloss": M.weighted_logloss(win, oof["p_win"].to_numpy(float), w),
+        "actual_win_rate": M.weighted_mean(win, w),
+        "win_magnitude_mae": M.weighted_mae(
+            y[y > 0], oof["mu_win"].to_numpy(float)[y > 0], w[y > 0]),
+        "loss_magnitude_mae": M.weighted_mae(
+            np.abs(y[~(y > 0)]),
+            oof["mu_loss"].to_numpy(float)[~(y > 0)], w[~(y > 0)]),
+        "actual_rr": (avg_win / avg_loss
+                      if np.isfinite(avg_loss) and avg_loss > 0 else float("nan")),
+        "ev_decile_spread": spread,
+    }
+
+
+def build_model_comparison(arch_names: Sequence[str], *,
+                           baseline: str = "A0",
+                           horizons=HORIZONS, write: bool = True):
+    """R12/R13 comparison table: per-fold EV MSE, mean/SE, paired bootstrap."""
+    oofs, summaries, shared = {}, {}, {}
+    for name in arch_names:
+        r = run_architecture(name, horizons=horizons)
+        oofs[name] = r["oof"]
+        shared[name] = bool(r["shared_state"])
+        summaries[name] = M.fold_summary(
+            candidate=r["arch"], n_features=r["n_features"],
+            fold_losses=per_fold_ev_mse(r["oof"]))
+
+    base_oof = oofs[baseline]
+    base_days = M.daily_loss_series(base_oof)
+
+    rows = []
+    for name in arch_names:
+        row = dict(summaries[name])
+        row.update(overall_metrics(oofs[name]))
+        row["shared_state"] = shared[name]
+        if name != baseline:
+            cand_days = M.daily_loss_series(oofs[name])
+            aligned = cand_days.align(base_days, join="inner")
+            boot = M.paired_block_bootstrap(
+                aligned[0].to_numpy(float), aligned[1].to_numpy(float))
+            row.update({f"paired_{k}": v for k, v in boot.items()})
+        rows.append(row)
+
+    out = pd.DataFrame(rows)
+    if write:
+        write_csv_evidence(out, MODEL_COMPARISON_CSV)
+    return out
 
 
 def main() -> dict:
