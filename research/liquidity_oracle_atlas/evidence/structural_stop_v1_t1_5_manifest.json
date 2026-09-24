@@ -2,8 +2,8 @@
   "task_id": "FUTURE-R6-M15-STRUCTURAL-STOP-V1",
   "stage": "t1_5_integration",
   "base_sha": "c0126551040f3e758ba5352ecb693bcbff0ad8b0",
-  "reviewed_parent_sha": "c0126551040f3e758ba5352ecb693bcbff0ad8b0",
-  "generator_code_sha": "2f2fe75b03509549ec40589f6e2eb957c21aff89",
+  "reviewed_parent_sha": "9700d0c629274000f67ce3ecbacca753f668f2a8",
+  "generator_code_sha": "b80e131d2724340884b2805e047b641ebdddf3bf",
   "frozen_inputs_sha256": {
     "artifacts/entry_path_atlas_v1/entry_path_row_metrics_v1.parquet": "110d5990fd9b3bc17aca65a92eb172e0de088635e89c364428b8c9bfccf94d04",
     "artifacts/entry_path_atlas_v1/entry_path_curve_v1.parquet": "fd8e8d352bc519baae0ee94088ab03ee76a942e1d0746a74bee005bb26f8dff0",
@@ -30,14 +30,15 @@
     "full_history_recompute_count": 0,
     "reference_calls": 30,
     "production_candidate_views": 3000,
-    "runtime_sec": 36.9310736656189
+    "runtime_sec": 38.43602180480957
   },
   "artifact_sha256": {
-    "structural_stop_v1_primary.csv": "a0fffebe22cab98d9794262314d0cedb5625d9b6229bcd8d32fdd15f7aa86f4d",
-    "structural_stop_v1_side_stats.csv": "cc2932010fd34b8280f3633877bb1595bde242feef2c68b768565aa7ee72d29d",
-    "structural_stop_v1_group_stats.csv": "e6b2c1dcd030b2c5179823111b1cd9f6e1bc34ed8728a3e90d24c0ed14f9fd55",
-    "structural_stop_v1_stop_events.csv": "baf1bafead5294b136661d5794120c2e1af844e7eac02ed22e6d9f9676fff645",
-    "structural_stop_v1_summary.json": "26c5034f85bd7f1da49687c146a76446fcc625032d87305b38ae06dee534835b"
+    "structural_stop_v1_t1_5_primary.csv": "a0fffebe22cab98d9794262314d0cedb5625d9b6229bcd8d32fdd15f7aa86f4d",
+    "structural_stop_v1_t1_5_side_stats.csv": "cc2932010fd34b8280f3633877bb1595bde242feef2c68b768565aa7ee72d29d",
+    "structural_stop_v1_t1_5_group_stats.csv": "5b4ea3f4745c0c10a2e2d37b11d11c146bb7d28c6c08da4fff404910ee8f90f7",
+    "structural_stop_v1_t1_5_stop_events.csv": "baf1bafead5294b136661d5794120c2e1af844e7eac02ed22e6d9f9676fff645",
+    "structural_stop_v1_t1_5_summary.json": "79ca5ea6e31092ac0aa165e08c35fbd773587ce4b8211847336cee3901a8ac87"
   },
+  "serialization_manifest_last": true,
   "authorized_review_sha_note": "R6 PRE-T2 authorized under FUTURE-R6 Amendment A1 (GROSS primary)."
 }

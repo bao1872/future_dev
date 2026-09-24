@@ -793,7 +793,7 @@
     "full_history_recompute_count": 0,
     "reference_calls": 30,
     "production_candidate_views": 3000,
-    "runtime_sec": 36.9310736656189
+    "runtime_sec": 38.43602180480957
   },
   "cost_governance": {
     "cost_metadata_status": "UNAVAILABLE_COST_METADATA",
