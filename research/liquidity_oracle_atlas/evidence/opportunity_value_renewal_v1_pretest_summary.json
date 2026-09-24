@@ -1,0 +1,461 @@
+{
+  "task_ids": [
+    "FUTURE-R8-M15-STRUCTURAL-RENEWAL-DATASET-V1",
+    "FUTURE-R9-M15-OPPORTUNITY-VALUE-MODEL-V1",
+    "FUTURE-R10-M15-SEQUENTIAL-VALUE-POLICY-V1"
+  ],
+  "program": "FUTURE-R8-R10-M15-OPPORTUNITY-VALUE-RENEWAL-V1",
+  "stage": "PRE_TEST",
+  "base_sha": "f3ca3a04317126e8f35afe7430d7aea202a9175a",
+  "branch": "opportunity-value-renewal-v1",
+  "r8_manifest": {
+    "task_id": "FUTURE-R8-M15-STRUCTURAL-RENEWAL-DATASET-V1",
+    "base_sha": "f3ca3a04317126e8f35afe7430d7aea202a9175a",
+    "generator_code_sha": "b5ba83f88a70ea3e20c2b325560d4a7e4d9540b4",
+    "symbols": [
+      "AG",
+      "AU",
+      "CU",
+      "AL",
+      "SN",
+      "NI",
+      "RB",
+      "I",
+      "SC",
+      "RU",
+      "MA",
+      "TA",
+      "M",
+      "P",
+      "CF"
+    ],
+    "opp36_schema_sha256": "fefcd6e770deed1c34b11571606aa28bde4f4a2fd762c0454ef44b8e0676a4b2",
+    "n_opp36": 36,
+    "state_rows": 168401,
+    "side_rows": 336802,
+    "side_feature_rows": 336802,
+    "label_rows_total": 994566,
+    "label_rows": {
+      "train": 614258,
+      "val": 177774,
+      "test": 202534
+    },
+    "per_horizon_counts": {
+      "td1": 333230,
+      "td3": 331658,
+      "td5": 329678
+    },
+    "event_class_counts": {
+      "NONE": 380622,
+      "FAVORABLE_FIRST": 301987,
+      "ADVERSE_FIRST": 301987,
+      "BOTH_SAME_BAR": 9970
+    },
+    "bracket_coverage": 0.6885291655037677,
+    "cost_governance": {
+      "cost_metadata_status": "UNAVAILABLE_COST_METADATA",
+      "realistic_net_pnl_status": "NOT_ESTIMATED",
+      "formal_primary_basis": "GROSS_PAIRED_POLICY_EFFECT"
+    },
+    "performance": {
+      "environment_loads": 15,
+      "geometry_extract_calls": 15,
+      "candidate_gate_derivations": 15,
+      "feature_matrix_builds": 15,
+      "side_feature_builds": 15,
+      "structural_stream_scans": 15,
+      "direction_reruns": 0,
+      "candidate_python_loops": 0,
+      "side_python_loops": 0,
+      "horizon_path_rescans": 0,
+      "full_history_recompute_count": 0
+    },
+    "runtime_sec": 24.213197231292725,
+    "artifact_sha256": {
+      "state_v1.parquet": "c0b66b94ea027d6f84fd6c130179e44da797ee4f950efb0f80b5e6596bb90426",
+      "side_features_v1.parquet": "c15bc100661bc91b7ac34331eef69a496e1e1a1f4bdb1e820948f734e943f04b",
+      "labels_train_v1.parquet": "842da64d05fd166a534f7da44d4fa1732a801978e7573d091524ca0b28c53384",
+      "labels_val_v1.parquet": "20a7fdc126f8edfd7d70fa21b5d7773f23df09bd0407de3165fb82bcb11c33a0",
+      "labels_test_v1.parquet": "5d95b8229a71c936cba795fd8990c1c10de1897892ddb133bc9c2008f56686f9"
+    }
+  },
+  "r9_model_manifest": {
+    "task_id": "FUTURE-R9-M15-OPPORTUNITY-VALUE-MODEL-V1",
+    "base_sha": "f3ca3a04317126e8f35afe7430d7aea202a9175a",
+    "generator_code_sha": "b5ba83f88a70ea3e20c2b325560d4a7e4d9540b4",
+    "opp36_schema_sha256": "fefcd6e770deed1c34b11571606aa28bde4f4a2fd762c0454ef44b8e0676a4b2",
+    "horizons": [
+      "td1",
+      "td3",
+      "td5"
+    ],
+    "model_count": 9,
+    "clf_params": {
+      "objective": "binary",
+      "learning_rate": 0.05,
+      "num_leaves": 31,
+      "min_child_samples": 100,
+      "subsample": 0.8,
+      "colsample_bytree": 0.8,
+      "reg_alpha": 0.1,
+      "reg_lambda": 1.0,
+      "n_estimators": 2000,
+      "random_state": 20260923,
+      "n_jobs": -1,
+      "verbosity": -1
+    },
+    "reg_params": {
+      "objective": "regression",
+      "learning_rate": 0.05,
+      "num_leaves": 31,
+      "min_child_samples": 100,
+      "subsample": 0.8,
+      "colsample_bytree": 0.8,
+      "reg_alpha": 0.1,
+      "reg_lambda": 1.0,
+      "n_estimators": 2000,
+      "random_state": 20260923,
+      "n_jobs": -1,
+      "verbosity": -1,
+      "metric": "l2"
+    },
+    "early_stopping_rounds": 100,
+    "best_iteration": {
+      "td1": {
+        "win": 39,
+        "win_mag": 54,
+        "loss_mag": 46
+      },
+      "td3": {
+        "win": 48,
+        "win_mag": 62,
+        "loss_mag": 61
+      },
+      "td5": {
+        "win": 44,
+        "win_mag": 55,
+        "loss_mag": 56
+      }
+    },
+    "train_rows": 416484,
+    "val_rows": 131538,
+    "model_sha256": {
+      "td1_win.txt": "fdae4a6c872b17612fa2f885495b6b3e6ab46aaa45af67d03395648c6f5f81fc",
+      "td1_win_mag.txt": "4b91177aada6afadb8229e3ce6e3b2774834a43890e1c2b28f873895c466a4d3",
+      "td1_loss_mag.txt": "e62a0e4744eef8bf03be42c535c9fb9cab96c0fa778a386fc519ef209ea110d0",
+      "td3_win.txt": "014fe641eef04770016a4b6d8d670648d1e34168e5d22247cad520464ae17568",
+      "td3_win_mag.txt": "2b3da3c8aa3139cbbaabb8a5288601d51cba3f44057381cd896d7978c8eecc03",
+      "td3_loss_mag.txt": "0849a5c56362405b2e3f5b0a52b71d5dac4a8c5b34515bfc971c764ef3ca9dff",
+      "td5_win.txt": "138e3c3ed253c86f80ef26bcc8cb5b4f26016c352c6dd5b80e8289715de17e4c",
+      "td5_win_mag.txt": "31180eaf6472e7315e27637792d1a36bd45e971c6f3af281d4c1bb068fb47519",
+      "td5_loss_mag.txt": "051282fa21efe8c1b58c001e8bc65b02c1df45e0de47ccf04ae8e76df61e15bc"
+    },
+    "performance": {
+      "state_artifact_loads": 0,
+      "feature_artifact_loads": 1,
+      "train_label_loads": 1,
+      "val_label_loads": 1,
+      "test_label_reads_during_fit": 0,
+      "environment_loads": 0,
+      "geometry_extract_calls": 0,
+      "model_fit_count": 9,
+      "hyperparameter_search_count": 0
+    }
+  },
+  "r9_val_diagnostics": {
+    "td1": {
+      "n_val_rows": 43846,
+      "brier": 0.2438468247865714,
+      "logloss": 0.6807286464612945,
+      "auc": 0.5899277188196095,
+      "win_magnitude_wmae": 0.7420690138891745,
+      "win_magnitude_wrmse": 1.1717465733743664,
+      "loss_magnitude_wmae": 0.7397263179668486,
+      "loss_magnitude_wrmse": 1.1638939208581316,
+      "ev_deciles": [
+        {
+          "decile": 1,
+          "n_rows": 4385,
+          "mean_predicted_ev": -0.291469224899403,
+          "actual_mean_return_atr": -0.1691332361949821,
+          "actual_win_rate": 0.4880273660205245,
+          "actual_payoff_ratio": 0.27704255973377534
+        },
+        {
+          "decile": 2,
+          "n_rows": 4385,
+          "mean_predicted_ev": -0.0879486490734927,
+          "actual_mean_return_atr": -0.0052156592153966095,
+          "actual_win_rate": 0.520866590649943,
+          "actual_payoff_ratio": 0.41823674603622185
+        },
+        {
+          "decile": 3,
+          "n_rows": 4384,
+          "mean_predicted_ev": -0.0506522032393447,
+          "actual_mean_return_atr": 0.0007021625112974895,
+          "actual_win_rate": 0.4988594890510949,
+          "actual_payoff_ratio": 0.5036701735580503
+        },
+        {
+          "decile": 4,
+          "n_rows": 4385,
+          "mean_predicted_ev": -0.028683845860895337,
+          "actual_mean_return_atr": 0.01696313682247019,
+          "actual_win_rate": 0.4798175598631699,
+          "actual_payoff_ratio": 0.6116796216298184
+        },
+        {
+          "decile": 5,
+          "n_rows": 4384,
+          "mean_predicted_ev": -0.012849656496063785,
+          "actual_mean_return_atr": -0.0030728564516500725,
+          "actual_win_rate": 0.4851733576642336,
+          "actual_payoff_ratio": 0.6481296957633249
+        },
+        {
+          "decile": 6,
+          "n_rows": 4385,
+          "mean_predicted_ev": 0.0017842242125162807,
+          "actual_mean_return_atr": -0.02498358319002424,
+          "actual_win_rate": 0.47137970353477765,
+          "actual_payoff_ratio": 0.6089742430277253
+        },
+        {
+          "decile": 7,
+          "n_rows": 4384,
+          "mean_predicted_ev": 0.019946104528504885,
+          "actual_mean_return_atr": -0.012440080785231108,
+          "actual_win_rate": 0.47992700729927007,
+          "actual_payoff_ratio": 0.5661973458526351
+        },
+        {
+          "decile": 8,
+          "n_rows": 4385,
+          "mean_predicted_ev": 0.0461564684957672,
+          "actual_mean_return_atr": 0.027702800428810407,
+          "actual_win_rate": 0.46864310148232613,
+          "actual_payoff_ratio": 0.5246216727252632
+        },
+        {
+          "decile": 9,
+          "n_rows": 4384,
+          "mean_predicted_ev": 0.08752094650542129,
+          "actual_mean_return_atr": -0.008441847191483862,
+          "actual_win_rate": 0.4635036496350365,
+          "actual_payoff_ratio": 0.43595911766667167
+        },
+        {
+          "decile": 10,
+          "n_rows": 4385,
+          "mean_predicted_ev": 0.31926894891382335,
+          "actual_mean_return_atr": 0.17791386050178465,
+          "actual_win_rate": 0.5069555302166476,
+          "actual_payoff_ratio": 0.32788724428782196
+        }
+      ],
+      "best_iteration": {
+        "win": -1,
+        "win_mag": -1,
+        "loss_mag": -1
+      }
+    },
+    "td3": {
+      "n_val_rows": 43846,
+      "brier": 0.23264206065167656,
+      "logloss": 0.6575783282929863,
+      "auc": 0.6525565269487458,
+      "win_magnitude_wmae": 0.8057293448079669,
+      "win_magnitude_wrmse": 1.356902569382234,
+      "loss_magnitude_wmae": 0.8004523877345256,
+      "loss_magnitude_wrmse": 1.3489372512322608,
+      "ev_deciles": [
+        {
+          "decile": 1,
+          "n_rows": 4385,
+          "mean_predicted_ev": -0.5952690423982943,
+          "actual_mean_return_atr": -0.13423253887956915,
+          "actual_win_rate": 0.475484606613455,
+          "actual_payoff_ratio": 0.16407565355674525
+        },
+        {
+          "decile": 2,
+          "n_rows": 4385,
+          "mean_predicted_ev": -0.14385137116655397,
+          "actual_mean_return_atr": -0.1258758293293719,
+          "actual_win_rate": 0.49806157354618014,
+          "actual_payoff_ratio": 0.2530373992129115
+        },
+        {
+          "decile": 3,
+          "n_rows": 4384,
+          "mean_predicted_ev": -0.06707166320233027,
+          "actual_mean_return_atr": -0.08831208095733867,
+          "actual_win_rate": 0.479470802919708,
+          "actual_payoff_ratio": 0.36818449496888617
+        },
+        {
+          "decile": 4,
+          "n_rows": 4385,
+          "mean_predicted_ev": -0.03429731976647151,
+          "actual_mean_return_atr": -0.006092140757304424,
+          "actual_win_rate": 0.48597491448118585,
+          "actual_payoff_ratio": 0.48762844086747975
+        },
+        {
+          "decile": 5,
+          "n_rows": 4384,
+          "mean_predicted_ev": -0.013673168179963262,
+          "actual_mean_return_atr": 0.00024310835022858782,
+          "actual_win_rate": 0.47878649635036497,
+          "actual_payoff_ratio": 0.5149908907779981
+        },
+        {
+          "decile": 6,
+          "n_rows": 4385,
+          "mean_predicted_ev": 0.006853265601978529,
+          "actual_mean_return_atr": 0.06078550063345686,
+          "actual_win_rate": 0.49783352337514253,
+          "actual_payoff_ratio": 0.521451635279887
+        },
+        {
+          "decile": 7,
+          "n_rows": 4384,
+          "mean_predicted_ev": 0.03023245087897,
+          "actual_mean_return_atr": 0.04487474987721518,
+          "actual_win_rate": 0.500228102189781,
+          "actual_payoff_ratio": 0.45505524981067497
+        },
+        {
+          "decile": 8,
+          "n_rows": 4385,
+          "mean_predicted_ev": 0.06770409157599548,
+          "actual_mean_return_atr": 0.014738965113186498,
+          "actual_win_rate": 0.48825541619156215,
+          "actual_payoff_ratio": 0.384210349992985
+        },
+        {
+          "decile": 9,
+          "n_rows": 4384,
+          "mean_predicted_ev": 0.1477974240556349,
+          "actual_mean_return_atr": 0.10506102842457615,
+          "actual_win_rate": 0.49840328467153283,
+          "actual_payoff_ratio": 0.28692086985094595
+        },
+        {
+          "decile": 10,
+          "n_rows": 4385,
+          "mean_predicted_ev": 0.5626913115462128,
+          "actual_mean_return_atr": 0.12882334626054112,
+          "actual_win_rate": 0.5179019384264538,
+          "actual_payoff_ratio": 0.1736557551651363
+        }
+      ],
+      "best_iteration": {
+        "win": -1,
+        "win_mag": -1,
+        "loss_mag": -1
+      }
+    },
+    "td5": {
+      "n_val_rows": 43846,
+      "brier": 0.2312826042615624,
+      "logloss": 0.6546958929245074,
+      "auc": 0.6587181843877233,
+      "win_magnitude_wmae": 0.7869932997967402,
+      "win_magnitude_wrmse": 1.3299666593192452,
+      "loss_magnitude_wmae": 0.7786985667546902,
+      "loss_magnitude_wrmse": 1.3246017578184588,
+      "ev_deciles": [
+        {
+          "decile": 1,
+          "n_rows": 4385,
+          "mean_predicted_ev": -0.6085981926929309,
+          "actual_mean_return_atr": -0.20242034149969773,
+          "actual_win_rate": 0.4789053591790194,
+          "actual_payoff_ratio": 0.15167644983619774
+        },
+        {
+          "decile": 2,
+          "n_rows": 4385,
+          "mean_predicted_ev": -0.1371608327783039,
+          "actual_mean_return_atr": -0.06306337024890585,
+          "actual_win_rate": 0.5179019384264538,
+          "actual_payoff_ratio": 0.24414499967884581
+        },
+        {
+          "decile": 3,
+          "n_rows": 4384,
+          "mean_predicted_ev": -0.06369518302593179,
+          "actual_mean_return_atr": -0.017483879642829925,
+          "actual_win_rate": 0.5036496350364964,
+          "actual_payoff_ratio": 0.34937595509893193
+        },
+        {
+          "decile": 4,
+          "n_rows": 4385,
+          "mean_predicted_ev": -0.031237428716705314,
+          "actual_mean_return_atr": 0.004025365167454137,
+          "actual_win_rate": 0.4786773090079818,
+          "actual_payoff_ratio": 0.47911369491583095
+        },
+        {
+          "decile": 5,
+          "n_rows": 4384,
+          "mean_predicted_ev": -0.011573539966304358,
+          "actual_mean_return_atr": -0.0032664240492130095,
+          "actual_win_rate": 0.4767335766423358,
+          "actual_payoff_ratio": 0.5193236746005182
+        },
+        {
+          "decile": 6,
+          "n_rows": 4385,
+          "mean_predicted_ev": 0.007895491218123519,
+          "actual_mean_return_atr": 0.026340496659251374,
+          "actual_win_rate": 0.4843785632839225,
+          "actual_payoff_ratio": 0.5114129528351959
+        },
+        {
+          "decile": 7,
+          "n_rows": 4384,
+          "mean_predicted_ev": 0.029089967037608022,
+          "actual_mean_return_atr": 0.029558184075320286,
+          "actual_win_rate": 0.5095802919708029,
+          "actual_payoff_ratio": 0.46149664218707165
+        },
+        {
+          "decile": 8,
+          "n_rows": 4385,
+          "mean_predicted_ev": 0.06306252890203276,
+          "actual_mean_return_atr": -0.02224160053885463,
+          "actual_win_rate": 0.46659064994298743,
+          "actual_payoff_ratio": 0.3769711311933977
+        },
+        {
+          "decile": 9,
+          "n_rows": 4384,
+          "mean_predicted_ev": 0.1379635584988968,
+          "actual_mean_return_atr": 0.07455319329955862,
+          "actual_win_rate": 0.4863138686131387,
+          "actual_payoff_ratio": 0.28829853950702744
+        },
+        {
+          "decile": 10,
+          "n_rows": 4385,
+          "mean_predicted_ev": 0.6053361075115087,
+          "actual_mean_return_atr": 0.1740173872850279,
+          "actual_win_rate": 0.5188141391106044,
+          "actual_payoff_ratio": 0.15948769436231053
+        }
+      ],
+      "best_iteration": {
+        "win": -1,
+        "win_mag": -1,
+        "loss_mag": -1
+      }
+    }
+  },
+  "test_touched": false,
+  "test_prediction_executed": false,
+  "formal_test_executed": false
+}
