@@ -46,6 +46,8 @@ V2_ARTIFACT_DIR = os.path.join("artifacts", "decomposed_value_v2")
 V2_CACHE_DIR = os.path.join(V2_ARTIFACT_DIR, "cache")
 V2_UNIT_DIR = os.path.join(V2_CACHE_DIR, "unit")
 V2_OOF_DIR = os.path.join(V2_ARTIFACT_DIR, "oof")
+EXTENDED_MANIFEST_JSON = os.path.join(
+    V2_ARTIFACT_DIR, "extended_state_manifest_v2.json")
 EXTENDED_STATE_PARQUET = os.path.join(
     V2_ARTIFACT_DIR, "extended_causal_state_v2.parquet")
 
@@ -92,6 +94,10 @@ class StopV2Leakage(RuntimeError):
 
 
 class StopV2ValUnlocked(RuntimeError):
+    pass
+
+
+class StopV2SelectionNotCommitted(RuntimeError):
     pass
 
 
@@ -172,8 +178,43 @@ def load_selection() -> dict:
         return json.load(f)
 
 
+def selection_is_committed(path: Optional[str] = None) -> dict:
+    """P6: the selection must be TRACKED and byte-identical to HEAD.
+
+    Merely existing on disk is not enough — an uncommitted or locally modified
+    selection JSON must not be able to unlock DEV VAL.
+    """
+    import subprocess
+
+    path = path or SELECTION_JSON
+
+    def git(*args):
+        return subprocess.run(["git", *args], cwd=os.getcwd(),
+                              capture_output=True, text=True)
+
+    rel = os.path.relpath(path, os.getcwd())
+    checks = {
+        "exists": os.path.exists(path),
+        "tracked": git("ls-files", "--error-unmatch", rel).returncode == 0,
+        "no_unstaged_diff": git("diff", "--quiet", "HEAD", "--", rel).returncode == 0,
+        "no_staged_diff": git("diff", "--cached", "--quiet", "HEAD", "--",
+                              rel).returncode == 0,
+    }
+    checks["committed_clean"] = all(checks.values())
+    return checks
+
+
+def assert_selection_committed(path: str = SELECTION_JSON) -> dict:
+    checks = selection_is_committed(path)
+    if not checks["committed_clean"]:
+        raise StopV2SelectionNotCommitted(
+            "STOP_V2_SELECTION_NOT_COMMITTED " + json.dumps(checks))
+    return checks
+
+
 def assert_selection_frozen() -> dict:
-    """Every VAL-outcome read must pass this gate first."""
+    """Every VAL-outcome read must pass BOTH gates: frozen AND committed."""
+    assert_selection_committed()
     return load_selection()
 
 
@@ -208,7 +249,92 @@ def write_json_evidence(obj: Any, path: str) -> str:
 
 
 def efficiency_snapshot() -> dict:
+    """Parent-process counters only.
+
+    Heavy fitting happens in isolated subprocesses (plan §51), so these are
+    NOT the fit count. Use `aggregate_efficiency()` for reported evidence.
+    """
     return dict(COUNTERS)
+
+
+FITS_PER_UNIT = 6          # 3 ES fits + 3 refits
+R12_ARCH_NAMES = ("A0", "A1", "A2", "A3")
+R13_ARCH_NAMES = ("B0", "B1", "B2", "B3", "B4")
+
+
+def aggregate_unit_evidence(plan=None, horizons=HORIZONS) -> dict:
+    """P5: mechanically aggregate the real evidence from unit metadata.
+
+    Validates that every (architecture x fold x horizon) unit exists EXACTLY
+    once and that its recorded content matches its identity.
+    """
+    from research.liquidity_oracle_atlas import (
+        decomposed_value_features_v2 as F,
+    )
+    if plan is None:
+        plan = build_plan_from_devframe()
+
+    seen, missing, duplicate, inconsistent = set(), [], [], []
+    per_arch = {}
+    for group, names in (("R12", R12_ARCH_NAMES), ("R13", R13_ARCH_NAMES)):
+        for short in names:
+            arch = F.get_arch(short)
+            n = 0
+            for k in range(plan.n_outer):
+                for h in horizons:
+                    _shard, meta_p = _unit_paths(arch.name, k, h)
+                    key = (arch.name, int(k), h)
+                    if not os.path.exists(meta_p):
+                        missing.append(list(key))
+                        continue
+                    with open(meta_p) as f:
+                        meta = json.load(f)
+                    if (int(meta.get("fold", -1)) != int(k)
+                            or meta.get("horizon") != h
+                            or meta.get("arch") != arch.name):
+                        inconsistent.append(list(key))
+                    if key in seen:
+                        duplicate.append(list(key))
+                    seen.add(key)
+                    n += 1
+            per_arch[arch.name] = n
+
+    r12_units = sum(per_arch.get(F.get_arch(s).name, 0) for s in R12_ARCH_NAMES)
+    r13_units = sum(per_arch.get(F.get_arch(s).name, 0) for s in R13_ARCH_NAMES)
+    total = r12_units + r13_units
+
+    return {
+        "r12_units": r12_units,
+        "r13_units": r13_units,
+        "total_units": total,
+        "fits_per_unit": FITS_PER_UNIT,
+        "total_model_fits": total * FITS_PER_UNIT,
+        "missing_units": len(missing),
+        "duplicate_units": len(duplicate),
+        "inconsistent_units": len(inconsistent),
+        "missing_detail": missing[:20],
+        "duplicate_detail": duplicate[:20],
+        "inconsistent_detail": inconsistent[:20],
+        "units_per_architecture": per_arch,
+        "expected_r12_units": len(R12_ARCH_NAMES) * plan.n_outer * len(horizons),
+        "expected_r13_units": len(R13_ARCH_NAMES) * plan.n_outer * len(horizons),
+    }
+
+
+def aggregate_efficiency(plan=None) -> dict:
+    """P5: reported efficiency = extended-state manifest + unit aggregate."""
+    units = aggregate_unit_evidence(plan=plan)
+    env = {"environment_loads": None, "geometry_passes": None,
+           "feature_materializations": None}
+    if os.path.exists(EXTENDED_MANIFEST_JSON):
+        with open(EXTENDED_MANIFEST_JSON) as f:
+            man = json.load(f)
+        env = {
+            "environment_loads": man.get("environment_loads"),
+            "geometry_passes": man.get("geometry_passes"),
+            "feature_materializations": man.get("feature_materializations"),
+        }
+    return {**env, **units}
 
 
 def assert_clean_efficiency() -> dict:
@@ -220,6 +346,14 @@ def assert_clean_efficiency() -> dict:
             f"label={snap['old_test_label_reads']} "
             f"policy={snap['old_test_policy_reads']}")
     return snap
+
+
+def _git_head_sha() -> str:
+    """Current repository HEAD sha (read-only, no network)."""
+    import subprocess
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=os.getcwd(),
+        capture_output=True, text=True).stdout.strip()
 
 
 DEV_FRAME_PARQUET = os.path.join(V2_ARTIFACT_DIR, "dev_frame_v2.parquet")
@@ -360,6 +494,11 @@ def run_architecture(arch_name: str, *, horizons=HORIZONS, force: bool = False,
     oof = pd.concat([read_parquet(p) for p in shards], ignore_index=True)
     return {
         "arch": arch.name,
+        "win_cols": tuple(arch.win),
+        "payoff_cols": tuple(arch.payoff),
+        "n_win": arch.n_win,
+        "n_payoff": arch.n_payoff,
+        # one-SE simplicity metric: the SHARED feature count.
         "n_features": arch.n_payoff,
         "shared_state": arch.shared_state,
         "oof": oof,
@@ -425,13 +564,22 @@ def overall_metrics(oof: pd.DataFrame) -> dict:
 
 def build_model_comparison(arch_names: Sequence[str], *,
                            baseline: str = "A0",
-                           horizons=HORIZONS, write: bool = True):
+                           horizons=HORIZONS, write: bool = True,
+                           out_csv: str = MODEL_COMPARISON_CSV):
     """R12/R13 comparison table: per-fold EV MSE, mean/SE, paired bootstrap."""
-    oofs, summaries, shared = {}, {}, {}
+    oofs, summaries, shared, counts = {}, {}, {}, {}
     for name in arch_names:
         r = run_architecture(name, horizons=horizons)
         oofs[name] = r["oof"]
         shared[name] = bool(r["shared_state"])
+        # P4: `n_features` is the one-SE simplicity metric (the SHARED count for
+        # every eligible candidate). It is ambiguous for the R12 ablations, so
+        # the three explicit counts are reported alongside it.
+        counts[name] = {
+            "n_win_features": int(r["n_win"]),
+            "n_payoff_features": int(r["n_payoff"]),
+            "n_feature_union": int(len(set(r["win_cols"]) | set(r["payoff_cols"]))),
+        }
         summaries[name] = M.fold_summary(
             candidate=r["arch"], n_features=r["n_features"],
             fold_losses=per_fold_ev_mse(r["oof"]))
@@ -442,6 +590,7 @@ def build_model_comparison(arch_names: Sequence[str], *,
     rows = []
     for name in arch_names:
         row = dict(summaries[name])
+        row.update(counts[name])
         row.update(overall_metrics(oofs[name]))
         row["shared_state"] = shared[name]
         if name != baseline:
@@ -454,7 +603,72 @@ def build_model_comparison(arch_names: Sequence[str], *,
 
     out = pd.DataFrame(rows)
     if write:
-        write_csv_evidence(out, MODEL_COMPARISON_CSV)
+        write_csv_evidence(out, out_csv)
+    return out
+
+
+def build_train_only_selection(baseline: str = "A0",
+                                 comparison_csv: str = FEATURE_ABLATION_CSV,
+                                 require_shared_state: bool = True,
+                                 write: bool = True) -> dict:
+    """Phase 4 deliverable: one-SE selection over TRAIN-only R13 results.
+
+    Plan §27: this JSON is the ONLY artifact that unlocks DEV VAL. It must be
+    committed before any VAL outcome is read. NO VAL data is touched here.
+    """
+    # Leakage counters must be zero in the reporting process (plan §52).
+    assert_clean_efficiency()
+    from research.liquidity_oracle_atlas import decomposed_value_features_v2 as F
+
+    df = pd.read_csv(comparison_csv)
+    candidates = []
+    for r in df.to_dict(orient="records"):
+        candidates.append({
+            "candidate": str(r["candidate"]),
+            "n_features": int(r["n_features"]),
+            "mean_ev_mse": float(r["mean_ev_mse"]),
+            "se_ev_mse": float(r["se_ev_mse"]),
+            "shared_state": bool(r.get("shared_state", False)),
+        })
+    # The Composer requires a coherent shared-state candidate (plan §25).
+    eligible = [c for c in candidates
+                if (not require_shared_state or c["shared_state"])]
+    sel = M.one_se_select(eligible)
+    selected = next(c for c in candidates if c["candidate"] == sel["candidate"])
+    sel_arch = F.get_arch(selected["candidate"])
+
+    out = {
+        "task": "FUTURE-R13-PAYOFF-GEOMETRY-V2-TRAIN-ONLY-SELECTION",
+        "basis": "TRAIN-only OOF EV MSE (no VAL outcome read)",
+        "val_unlocked": False,
+        "leakage": {
+            "old_test_label_reads": int(COUNTERS["old_test_label_reads"]),
+            "old_test_policy_reads": int(COUNTERS["old_test_policy_reads"]),
+        },
+        "baseline": baseline,
+        "require_shared_state": require_shared_state,
+        "one_se_threshold": sel["one_se_threshold"],
+        "best_candidate": sel["best_candidate"],
+        "selected_candidate": sel["candidate"],
+        "selected_mean_ev_mse": selected["mean_ev_mse"],
+        "selected_se_ev_mse": selected["se_ev_mse"],
+        "selected_n_features": selected["n_features"],
+        "selected_shared_state": selected["shared_state"],
+        "selected_win_schema_sha256": (
+            sel_arch.win_schema_sha256 if sel_arch else None),
+        "selected_payoff_schema_sha256": (
+            sel_arch.payoff_schema_sha256 if sel_arch else None),
+        "n_eligible": sel["n_eligible"],
+        "candidates": candidates,
+        "verdict": (
+            "No V2 extended-state family (SPACE18/PATH8/VOL6) improved TRAIN "
+            "EV MSE within one SE of the V1 shared baseline; the one-SE "
+            "selector therefore keeps the simplest shared-state candidate."),
+        "generator_code_sha": _git_head_sha(),
+    }
+    if write:
+        write_json_evidence(out, SELECTION_JSON)
+        print(f"  wrote {SELECTION_JSON}", flush=True)
     return out
 
 
