@@ -6,14 +6,14 @@
   ],
   "program": "FUTURE-R8-R10-M15-OPPORTUNITY-VALUE-RENEWAL-V1",
   "stage": "PRE_TEST",
-  "reviewed_parent_sha": "cef6cac057e7d4bc6fc75bed530c86ec41286ea5",
+  "reviewed_parent_sha": "bf464cece486d419f0f82a1c0217c7ebca32a569",
   "base_sha": "f3ca3a04317126e8f35afe7430d7aea202a9175a",
   "branch": "opportunity-value-renewal-v1",
   "scientific_status": "LOCKED_DEVELOPMENT_TEST_NOT_PRISTINE_CONFIRMATION",
   "r8_manifest": {
     "task_id": "FUTURE-R8-M15-STRUCTURAL-RENEWAL-DATASET-V1",
     "base_sha": "f3ca3a04317126e8f35afe7430d7aea202a9175a",
-    "generator_code_sha": "3aecd43edf8abc829ab217af175eb6a9e6ccfb5a",
+    "generator_code_sha": "bf464cece486d419f0f82a1c0217c7ebca32a569",
     "symbols": [
       "AG",
       "AU",
@@ -68,6 +68,9 @@
         "n_epochs": 65778
       }
     },
+    "n_two_side_epochs_dropped_due_to_one_side_unresolved": {
+      "all_rows_before_retention": 6688
+    },
     "scientific_status": "LOCKED_DEVELOPMENT_TEST_NOT_PRISTINE_CONFIRMATION",
     "cost_governance": {
       "cost_metadata_status": "UNAVAILABLE_COST_METADATA",
@@ -87,14 +90,14 @@
       "horizon_path_rescans": 0,
       "full_history_recompute_count": 0
     },
-    "runtime_sec": 26.011968851089478,
+    "runtime_sec": 25.135955095291138,
     "artifact_sha256": {
-      "state_v1.parquet": "e30ec95c3eca2ed63966544985a14767fa41ee17b5be6fbc010e39cd0b1a39d9",
+      "state_v1.parquet": "d58529a8b5b982d202dfb1df961d48ca4b58b63c3e49d62e034cd5a252c48bc9",
       "side_features_v1.parquet": "c15bc100661bc91b7ac34331eef69a496e1e1a1f4bdb1e820948f734e943f04b",
       "renewal_event_axis_v1.parquet": "2cf8a2c0e4409835a72934c669f28e064eff0b2b859d5e636d4cb24dad087dec",
-      "labels_train_v1.parquet": "21bd3e8e8ed4a7b0a0058e9d06ca8c91f43a7926316ff5ce5b03473151268da7",
-      "labels_val_v1.parquet": "5173b08452cd4ac15f796a4bee28a82bc4219febae752dea7a77f966ddbe6428",
-      "labels_test_v1.parquet": "c666ff7c0e0a8cbb47d6e1f79b6f9348849bba4ff26dcda74a7f754b4c6d4f6e"
+      "labels_train_v1.parquet": "c9cb77b82ecd9b8996c9ce064a18dbb5ccbcacbd4743ad2cd3dc58c1fae1a61e",
+      "labels_val_v1.parquet": "389b36c535dd4cd82a4581ffdb3fb5c62b7bcd2e8bcd4289ce8b368260914865",
+      "labels_test_v1.parquet": "1ae752ede0ca693e7c4bbae15414d73981f28b6b56093883513fab473cb4fc3d"
     }
   },
   "r9_model_manifest": {
@@ -624,13 +627,25 @@
     }
   },
   "root_candidate_universe": {
-    "root_candidates_total": 15124,
+    "test_window": {
+      "t2": "2026-05-07T10:45:00.000000000",
+      "common_end": "2026-09-01T14:00:00.000000000"
+    },
+    "root_candidates_total": 14637,
     "root_candidates_overlapping_frozen_13773": 13773,
-    "root_candidates_outside_frozen_direction_research_population": 1351,
+    "root_candidates_outside_frozen_research_population": 864,
     "frozen_13773_missing_from_root_universe": 0
+  },
+  "fp8_zero_impact": {
+    "train_rows": 416478,
+    "val_rows": 131556,
+    "n_two_side_epochs_dropped": {
+      "all_rows_before_retention": 6688
+    },
+    "retrained": false
   },
   "test_touched": false,
   "test_prediction_executed": false,
-  "e9_test_axis_materialized": false,
+  "e9_root_axis_materialized": false,
   "formal_test_executed": false
 }
