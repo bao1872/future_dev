@@ -8,13 +8,13 @@
   ],
   "program": "FUTURE-R9AB-R10-M15-DECOMPOSED-WIN-PAYOFF-V1",
   "stage": "PRE_TEST",
-  "generator_code_sha": "03cc28019f93fbca2664b34ab1b1fcbfc691ef8e",
+  "generator_code_sha": "836d97f2aa8e636b1cb3b15f05e94dc00354a05d",
   "base_sha": "f3ca3a04317126e8f35afe7430d7aea202a9175a",
   "scientific_status": "LOCKED_DEVELOPMENT_TEST_NOT_PRISTINE_CONFIRMATION",
   "r8_manifest": {
     "task_id": "FUTURE-R8-M15-DECOMPOSED-VALUE-DATASET-V1",
     "base_sha": "f3ca3a04317126e8f35afe7430d7aea202a9175a",
-    "generator_code_sha": "03cc28019f93fbca2664b34ab1b1fcbfc691ef8e",
+    "generator_code_sha": "836d97f2aa8e636b1cb3b15f05e94dc00354a05d",
     "r8_upstream_manifest": "../../artifacts/opportunity_value_v1/manifest_v1.json",
     "symbols": [
       "AG",
@@ -104,13 +104,16 @@
       "test": 140972
     },
     "performance": {
-      "state_artifact_loads": 5,
+      "state_artifact_loads": 6,
       "feature_builds": 30,
-      "symbol_loops": 15
+      "symbol_loops": 15,
+      "environment_reloads_after_r8": 0,
+      "geometry_reloads_after_r8": 0,
+      "load_symbol_state_calls_after_r8": 0
     },
-    "runtime_sec": 16.037585020065308,
+    "runtime_sec": 25.79005002975464,
     "artifact_sha256": {
-      "state_v1.parquet": "d58529a8b5b982d202dfb1df961d48ca4b58b63c3e49d62e034cd5a252c48bc9",
+      "state_v1.parquet": "b0ae386fa8da9f723a1f1f596495d97b8325bb24f02cc566f146a42c6fbcebe9",
       "win_features_v1.parquet": "8e4a79454c51990ebf1c21259aa4e9233f6baa74d621e5f33a8edb4bc83d8ce7",
       "payoff_features_v1.parquet": "7723b55405d12f54486c75fa91ac6dbea57340319701d47efdfd4b3e8beb6178",
       "renewal_event_axis_v1.parquet": "2cf8a2c0e4409835a72934c669f28e064eff0b2b859d5e636d4cb24dad087dec",
@@ -123,7 +126,7 @@
     "model_manifest": {
       "task_id": "FUTURE-R9A-M15-WIN-PROBABILITY-MODEL-V1",
       "base_sha": "f3ca3a04317126e8f35afe7430d7aea202a9175a",
-      "generator_code_sha": "03cc28019f93fbca2664b34ab1b1fcbfc691ef8e",
+      "generator_code_sha": "836d97f2aa8e636b1cb3b15f05e94dc00354a05d",
       "win33_schema_sha256": "f1338aeec28fb5498a804412bea3f6714196d00081f8e520b8196a5e9064b8f4",
       "horizons": [
         "td1",
@@ -147,7 +150,7 @@
       },
       "early_stopping_rounds": 100,
       "upstream": {
-        "state_sha256": "d58529a8b5b982d202dfb1df961d48ca4b58b63c3e49d62e034cd5a252c48bc9",
+        "state_sha256": "b0ae386fa8da9f723a1f1f596495d97b8325bb24f02cc566f146a42c6fbcebe9",
         "win_features_sha256": "8e4a79454c51990ebf1c21259aa4e9233f6baa74d621e5f33a8edb4bc83d8ce7",
         "labels_train_sha256": "c9cb77b82ecd9b8996c9ce064a18dbb5ccbcacbd4743ad2cd3dc58c1fae1a61e",
         "labels_val_sha256": "389b36c535dd4cd82a4581ffdb3fb5c62b7bcd2e8bcd4289ce8b368260914865"
@@ -457,7 +460,7 @@
     "model_manifest": {
       "task_id": "FUTURE-R9B-M15-PAYOFF-RATIO-MODEL-V1",
       "base_sha": "f3ca3a04317126e8f35afe7430d7aea202a9175a",
-      "generator_code_sha": "03cc28019f93fbca2664b34ab1b1fcbfc691ef8e",
+      "generator_code_sha": "836d97f2aa8e636b1cb3b15f05e94dc00354a05d",
       "pay8_schema_sha256": "7bdc493e4268f8051f4e601a56b2fe608dc1600b2c044a5f84d6e3be9ad2fcf3",
       "horizons": [
         "td1",
@@ -482,7 +485,7 @@
       },
       "early_stopping_rounds": 100,
       "upstream": {
-        "state_sha256": "d58529a8b5b982d202dfb1df961d48ca4b58b63c3e49d62e034cd5a252c48bc9",
+        "state_sha256": "b0ae386fa8da9f723a1f1f596495d97b8325bb24f02cc566f146a42c6fbcebe9",
         "payoff_features_sha256": "7723b55405d12f54486c75fa91ac6dbea57340319701d47efdfd4b3e8beb6178",
         "labels_train_sha256": "c9cb77b82ecd9b8996c9ce064a18dbb5ccbcacbd4743ad2cd3dc58c1fae1a61e",
         "labels_val_sha256": "389b36c535dd4cd82a4581ffdb3fb5c62b7bcd2e8bcd4289ce8b368260914865"
@@ -2446,5 +2449,5 @@
       "post_verdict_test_label_reads": 0
     }
   },
-  "runtime_sec": 27.55374574661255
+  "runtime_sec": 37.49631094932556
 }
