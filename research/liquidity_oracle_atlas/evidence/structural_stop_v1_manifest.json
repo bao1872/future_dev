@@ -1,0 +1,43 @@
+{
+  "task_id": "FUTURE-R6-M15-STRUCTURAL-STOP-V1",
+  "stage": "t1_5_integration",
+  "base_sha": "c0126551040f3e758ba5352ecb693bcbff0ad8b0",
+  "reviewed_parent_sha": "c0126551040f3e758ba5352ecb693bcbff0ad8b0",
+  "generator_code_sha": "d9ec538f3aea375d6b5d0e2207cfddc4934e64f2",
+  "frozen_inputs_sha256": {
+    "artifacts/entry_path_atlas_v1/entry_path_row_metrics_v1.parquet": "110d5990fd9b3bc17aca65a92eb172e0de088635e89c364428b8c9bfccf94d04",
+    "artifacts/entry_path_atlas_v1/entry_path_curve_v1.parquet": "fd8e8d352bc519baae0ee94088ab03ee76a942e1d0746a74bee005bb26f8dff0",
+    "artifacts/entry_path_atlas_v1/e9_direction_state_v1.parquet": "1778eeeaf97c0f6b9496fa785d730bc7c23f2e910ddbdc5cfb4772b121e5f2fd"
+  },
+  "cost_governance": {
+    "cost_metadata_status": "UNAVAILABLE_COST_METADATA",
+    "realistic_net_pnl_status": "NOT_ESTIMATED",
+    "formal_primary_basis": "GROSS_PAIRED_POLICY_EFFECT",
+    "friction_proxy_used_for_verdict": false,
+    "entry_cost_estimated": false,
+    "exit_cost_estimated": false
+  },
+  "differential": {
+    "n_symbols_with_reference": 15,
+    "n_mismatch": 0,
+    "max_abs_error": 0.0
+  },
+  "performance": {
+    "r5_artifact_loads": 1,
+    "execution_frame_loads": 15,
+    "direction_artifact_loads": 1,
+    "sr_recompute_count": 0,
+    "full_history_recompute_count": 0,
+    "reference_calls": 30,
+    "production_candidate_views": 3000,
+    "runtime_sec": 31.244786977767944
+  },
+  "artifact_sha256": {
+    "structural_stop_v1_primary.csv": "6d72a7fb4bb270e6f60ebcaa8b43e8287dca3d63ca945b3a584914ec7855fae1",
+    "structural_stop_v1_side_stats.csv": "a7cfc479500159d374a2bb3910eb4df2aae2748a6dad06223d4eecf6e8a07e69",
+    "structural_stop_v1_group_stats.csv": "a614ea0ec84f75dc3f0748bb6d2cc80c8cbdd8e31e09ff8dc8d3d0062d025fea",
+    "structural_stop_v1_stop_events.csv": "edba3157b879401971724790983676f36e5b3f6291e0e7a4c5d3e9518d01973b",
+    "structural_stop_v1_summary.json": "1bfcacebddf4553aed9dc6caff157831f0b19fabdf4ef493f9d47f75294334c9"
+  },
+  "authorized_review_sha_note": "R6 PRE-T2 authorized under FUTURE-R6 Amendment A1 (GROSS primary)."
+}
