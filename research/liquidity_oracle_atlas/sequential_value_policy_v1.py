@@ -51,7 +51,8 @@ GATE_POLICY = "P1"
 
 TEST_PRED_PARQUET = os.path.join(
     ARTIFACT_DIR, "opportunity_value_predictions_test_v1.parquet")
-E9_AXIS_PARQUET = os.path.join(ARTIFACT_DIR, "e9_test_axis_state_v1.parquet")
+# FP3: E9 exists ONLY on canonical ROOT Candidate decision bars.
+E9_ROOT_AXIS_PARQUET = os.path.join(ARTIFACT_DIR, "e9_root_axis_v1.parquet")
 FORMAL_ARTIFACT_DIR = os.path.join(ARTIFACT_DIR, "sequential_test_v1")
 
 BOOTSTRAP_BLOCK_DAYS = 5
@@ -73,6 +74,10 @@ COUNTERS = {
     "model_predict_calls_inside_simulator": 0,
     "path_scans_inside_simulator": 0,
     "sequential_symbol_loops": 0,
+    # FP10: the strategy path must never read TEST labels.
+    "test_label_reads_during_strategy": 0,
+    # FP11: TEST labels may be read exactly ONCE, only after the verdict.
+    "post_verdict_test_label_reads": 0,
 }
 
 
@@ -129,9 +134,12 @@ class SymbolAxis:
     sup_top: np.ndarray
     res_bottom: np.ndarray
     candidate_at_decision: np.ndarray
+    # FP9: TEST mask is the CLOSED window [T2, COMMON_END].
     test_mask: np.ndarray
-    e9_side: np.ndarray
-    # 5-day position deadline, measured from the FILL bar of a decision (§34/§35)
+    # FP3: E9 exists ONLY on canonical ROOT Candidate decision bars (0 elsewhere).
+    e9_root_side: np.ndarray
+    # 5-day position deadline, measured from the FILL bar of a decision, and
+    # capped at the common TEST end (FP9).
     deadline_idx: np.ndarray
     # trading-day ordinal, used only for the frozen remaining-days mapping
     day_ord: np.ndarray
@@ -141,6 +149,9 @@ class SymbolAxis:
     event_idx_short: Optional[np.ndarray] = None
     renewal_fill_long: Optional[np.ndarray] = None
     renewal_fill_short: Optional[np.ndarray] = None
+    # FP7: per-bar structural bracket eligibility from the same R8 axis
+    bracket_eligible_long: Optional[np.ndarray] = None
+    bracket_eligible_short: Optional[np.ndarray] = None
 
 
 def make_epoch(axis, decision_idx, side_sign):
@@ -152,6 +163,35 @@ def make_epoch(axis, decision_idx, side_sign):
         else axis.res_bottom[decision_idx]
     return {"decision_idx": int(decision_idx), "favorable": float(favorable),
             "adverse": float(adverse)}
+
+
+def bracket_eligible(axis, decision_idx, side) -> bool:
+    """FP7: structural bracket eligibility is taken from the R8 renewal axis."""
+    arr = (axis.bracket_eligible_long if side > 0
+           else axis.bracket_eligible_short)
+    if arr is None:
+        raise RuntimeError("STOP_R10_BRACKET_AXIS_MISSING")
+    return bool(arr[decision_idx])
+
+
+def lookup_ev(axis, decision_idx, side, horizon):
+    if not bracket_eligible(axis, decision_idx, side):
+        return -np.inf
+    arr = axis.ev.get((horizon, side))
+    if arr is None:
+        return np.nan
+    return float(arr[decision_idx])
+
+
+def action_value(axis, decision_idx, horizon, side):
+    """FP5: an ineligible side has action value -inf (unselectable)."""
+    if not bracket_eligible(axis, decision_idx, side):
+        return -np.inf
+    arr = axis.ev.get((horizon, side))
+    if arr is None:
+        return -np.inf
+    v = float(arr[decision_idx])
+    return -np.inf if not np.isfinite(v) else v
 
 
 def lookup_precomputed_event(axis, decision_idx, side):
@@ -271,17 +311,24 @@ def simulate_symbol(policy, axis, verbose=False):
             raise RuntimeError("STOP_R10_SIMULATOR_NON_TERMINATING")
 
         if pos == 0:
+            # FP6: ROOT entry is E9-gated for all three policies.
             root_ptr = int(np.searchsorted(root_candidates, i, side="left"))
             if root_ptr >= len(root_candidates):
                 break
             t = int(root_candidates[root_ptr])
-            side = int(axis.e9_side[t])
+            side = int(axis.e9_root_side[t])
             if side == 0:
+                decisions.append(("SKIP_NO_E9", t, side, np.nan))
                 i = t + 1
                 continue
             if policy != "P0":
-                ev = axis.ev.get(("td5", side), None)
-                ev = np.nan if ev is None else float(ev[t])
+                # FP6: P1/P2 additionally require structural bracket eligibility
+                # AND EV>0. P0 does NOT (it stays the frozen Direction baseline).
+                if not bracket_eligible(axis, t, side):
+                    decisions.append(("SKIP_INELIGIBLE", t, side, np.nan))
+                    i = t + 1
+                    continue
+                ev = lookup_ev(axis, t, side, "td5")
                 if not (np.isfinite(ev) and ev > 0.0):
                     decisions.append(("SKIP", t, side, ev))
                     i = t + 1
@@ -322,31 +369,39 @@ def simulate_symbol(policy, axis, verbose=False):
             trade = None
             continue
 
-        new_side = int(axis.e9_side[e])
+        # ---- FP5 / FP17: Opportunity-native renewal decision ----
+        # A Renewal event is a NEW decision epoch. E9 is NOT queried here; the
+        # action value is the Opportunity EV of each side versus flat (0).
         remaining = days_remaining(axis.day_ord, e, trade.deadline_idx)
         H = model_horizon_for_remaining_days(remaining)
-        ev = axis.ev.get((H, new_side), None)
-        ev = np.nan if ev is None else float(ev[e])
-        if new_side == 0 or not np.isfinite(ev) or ev <= 0.0:
+        ev_long = action_value(axis, e, H, +1)
+        ev_short = action_value(axis, e, H, -1)
+        ev_cur = ev_long if pos > 0 else ev_short
+        ev_opp = ev_short if pos > 0 else ev_long
+
+        if max(ev_cur, ev_opp) <= 0.0:
+            # neither side has positive action value
             i = close_trade(trade, axis, nxt, axis.open[nxt], "renewal_exit",
                             trades, i)
+            decisions.append(("EXIT", e, 0, max(ev_cur, ev_opp)))
             pos = 0
             trade = None
             continue
-        if new_side == pos:
-            # HOLD: no synthetic transaction, only refresh the epoch (§34/§35).
-            # The 5-day deadline is NOT reset (§35).
-            trade.decision_idx = e
-            trade.scan_from = nxt
-            decisions.append(("HOLD", e, new_side, ev))
+        if ev_opp > ev_cur:
+            # REVERSE: close old + open new, new ATR and new 5-day lifetime
+            new_side = -pos
+            i = close_trade(trade, axis, nxt, axis.open[nxt], "reversal_close",
+                            trades, i)
+            decisions.append(("REVERSE", e, new_side, ev_opp))
+            trade = open_trade(axis, e, new_side, axis.deadline_idx[e])
+            pos = new_side
             i = nxt
             continue
-        # REVERSE: close old + open new, new ATR and new 5-day lifetime
-        i = close_trade(trade, axis, nxt, axis.open[nxt], "reversal_close",
-                        trades, i)
-        decisions.append(("REVERSE", e, new_side, ev))
-        trade = open_trade(axis, e, new_side, axis.deadline_idx[e])
-        pos = new_side
+        # HOLD (includes the exact-tie rule: equal positive EV -> keep current).
+        # No synthetic transaction; the 5-day deadline is NOT reset (§35).
+        trade.decision_idx = e
+        trade.scan_from = nxt
+        decisions.append(("HOLD", e, pos, ev_cur))
         i = nxt
     return trades, decisions
 
@@ -442,16 +497,23 @@ def formal_verdict(full, gate, renew):
 # --------------------------------------------------------------------------- #
 # 8. TEST-axis construction (§32 / FIX12) — behind authorization                 #
 # --------------------------------------------------------------------------- #
-def build_e9_test_axis(split=None):
-    """FIX12: fit the frozen Direction chain ONCE on frozen TRAIN/VAL, then
-    batch-predict E9 across the TEST decision axis.
+def build_e9_root_axis(state_df, split=None, test_mask=None):
+    """FP3: E9 ROOT axis -- E9 on every canonical TEST ROOT Candidate bar.
 
-    Returns (e9_axis_parquet_frame, reproduction_gate).
+    The frozen Direction chain is fitted EXACTLY ONCE from frozen TRAIN/VAL.
+    The fitted router and the fitted E9 LongExpert/ShortExpert are then applied
+    in ONE batch pass to the raw DTP9 state persisted by R8 (FP2).
+
+    E9 is NOT required on non-Candidate bars: at a structural Renewal the
+    policy is Opportunity-native (FP5) and never queries E9.
     """
     from research.liquidity_oracle_atlas.direction_null_baseline_v1 import (
         build_frozen_split)
     from research.liquidity_oracle_atlas.direction_gated_experts_v1 import (
-        build_direction_expert_data, run_chain)
+        build_direction_expert_data, run_chain, orient_dtp9_router_side,
+        router_confidence, predict_experts)
+    from research.liquidity_oracle_atlas.structural_renewal_dataset_v1 import (
+        DTP9, split_bounds)
     if split is None:
         split = build_frozen_split()
     ds = split["ds"]
@@ -459,39 +521,96 @@ def build_e9_test_axis(split=None):
     chain = run_chain(data, ds, split["train_idx"], split["val_idx"],
                       split["test_idx"])
     _bump("direction_chain_fits")
-    e9 = np.asarray(chain["E9"], dtype=np.uint8)
-    sub = ds.iloc[split["test_idx"]]
-    out = pd.DataFrame({
-        "symbol": data.symbol[split["test_idx"]],
-        "decision_bar": sub["candidate_decision_index"].to_numpy(np.int64),
-        "e9_direction": np.where(e9 == 1, "LONG", "SHORT"),
-        "e9_side": np.where(e9 == 1, 1, -1)})
+
+    _t1, t2, end_t = split_bounds(split)
+    if test_mask is None:
+        dt_all = state_df["decision_time"].to_numpy("datetime64[ns]")
+        test_mask = (dt_all >= t2) & (dt_all <= end_t)
+    s = state_df[state_df["decision_time"].to_numpy("datetime64[ns]") <= end_t]
+    s = s[s["decision_time"].to_numpy("datetime64[ns]") >= t2]
+    root = s[s["candidate_at_decision"].to_numpy(bool)]
+    idx = root["bar_index"].to_numpy(np.int64)
+
+    # FP2 contract: exact DTP9 DataFrame representation the router was fitted on.
+    X9_df = pd.DataFrame({c: root[c].to_numpy() for c in DTP9},
+                         columns=list(DTP9))
+    router = chain["models"]["router"]
+    p_long = router.predict_proba(X9_df)[:, 1]
+    router_pred = (p_long >= 0.5).astype(np.int8)
+
+    # META10 uses ONLY the frozen orientation + frozen router-confidence helpers.
+    router_long = router_pred >= 1
+    X9o = orient_dtp9_router_side(
+        X9_df.to_numpy(np.float32), router_long)
+    ps = router_confidence(p_long, router_long)
+    m10 = np.hstack([X9o, ps.reshape(-1, 1)])
+
+    long_m, short_m = chain["models"]["e9"]
+    fin_e9, p_correct = predict_experts(long_m, short_m, m10, router_pred)
     _bump("direction_batch_prediction_passes")
+    out = pd.DataFrame({
+        "symbol": root["symbol"].to_numpy(object),
+        "decision_bar": idx,
+        "e9_direction": np.where(np.asarray(fin_e9) == 1, "LONG", "SHORT"),
+        "e9_side": np.where(np.asarray(fin_e9) == 1, 1, -1),
+        "router_direction": np.where(router_pred == 1, "LONG", "SHORT"),
+        "router_p_long": np.asarray(p_long, float),
+        "router_p_side": np.asarray(ps, float)})
     return out, chain
 
 
-def e9_axis_reproduction_gate(axis_e9):
-    """FIX12: exact equality on all frozen 13,773 overlapping Candidate rows."""
+def e9_axis_reproduction_gate(axis_e9, state_df=None, split=None):
+    """FP4: exact equality on all frozen 13,773 overlapping Candidate rows.
+
+    Also reports the root Candidate universe split into
+      * overlap with the frozen 13,773 research population,
+      * root Candidates OUTSIDE that population (deployment-only, no Teacher
+        mapping required).
+    The two governance gates are: all 13,773 present, and zero mismatch.
+    """
     frozen = pd.read_parquet(
         "artifacts/entry_path_atlas_v1/e9_direction_state_v1.parquet",
         columns=["symbol", "candidate_decision_index", "e9_direction"])
     m = frozen.merge(axis_e9, how="left",
                      left_on=["symbol", "candidate_decision_index"],
                      right_on=["symbol", "decision_bar"])
+    missing = int(m["e9_direction_y"].isna().sum())
     bad = int((m["e9_direction_x"].to_numpy(object)
                != m["e9_direction_y"].to_numpy(object)).sum())
-    if bad:
+    if missing or bad:
         raise RuntimeError(
-            f"STOP_R10_E9_AXIS_REPRODUCTION_MISMATCH n_mismatch={bad}")
-    return {"n_frozen_rows": int(len(m)), "n_mismatch": bad, "ok": bad == 0}
+            "STOP_R10_E9_AXIS_REPRODUCTION_MISMATCH "
+            f"n_missing={missing} n_mismatch={bad}")
+
+    rep = {"n_frozen_rows": int(len(m)), "n_missing": missing,
+           "n_mismatch": bad, "ok": (missing == 0 and bad == 0)}
+    if state_df is not None and split is not None:
+        from research.liquidity_oracle_atlas.structural_renewal_dataset_v1 import (
+            split_bounds)
+        _t1, t2, end_t = split_bounds(split)
+        dt = state_df["decision_time"].to_numpy("datetime64[ns]")
+        root = state_df[(dt >= t2) & (dt <= end_t)
+                        & state_df["candidate_at_decision"].to_numpy(bool)]
+        rk = set(zip(root["symbol"].to_numpy(object),
+                     root["bar_index"].to_numpy(np.int64)))
+        fk = set(zip(frozen["symbol"].to_numpy(object),
+                     frozen["candidate_decision_index"].to_numpy(np.int64)))
+        rep["root_candidates_total"] = len(rk)
+        rep["root_candidates_overlapping_frozen"] = len(fk & rk)
+        rep["root_candidates_outside_frozen_research_population"] = len(rk - fk)
+    return rep
 
 
 def build_symbol_axes(state_df, pred_df, renewal_df, e9_df, split, symbols=None):
     """FIX13 step 10: construct all SymbolAxis objects (array lookup only)."""
     from research.liquidity_oracle_atlas.structural_renewal_dataset_v1 import (
         horizon_end_indices)
-    t2 = np.datetime64(split["cal"]["cuts"][1], "ns")
+    # FP9: TEST is the CLOSED window [T2, COMMON_END].
+    from research.liquidity_oracle_atlas.structural_renewal_dataset_v1 import (
+        split_bounds)
+    _t1, t2, end_t = split_bounds(split)
     axes = {}
+    common_end_idx = {}
     for sym in (symbols or sorted(state_df["symbol"].unique())):
         s = state_df[state_df["symbol"] == sym].sort_values("bar_index")
         n = len(s)
@@ -499,7 +618,11 @@ def build_symbol_axes(state_df, pred_df, renewal_df, e9_df, split, symbols=None)
         seg = s["segment"].to_numpy(np.int64)
         ends = horizon_end_indices(day, seg, n, (5,))
         fill = np.minimum(np.arange(n) + 1, n - 1)
-        test_mask = s["decision_time"].to_numpy("datetime64[ns]") >= t2
+        dt = s["decision_time"].to_numpy("datetime64[ns]")
+        test_mask = (dt >= t2) & (dt <= end_t)
+        # last canonical bar whose decision time is still inside TEST
+        inside = np.flatnonzero(test_mask)
+        common_end_idx[sym] = int(inside[-1]) if inside.size else n - 1
 
         def side_arrays(side_name, col):
             p = pred_df[(pred_df["symbol"] == sym)
@@ -521,13 +644,24 @@ def build_symbol_axes(state_df, pred_df, renewal_df, e9_df, split, symbols=None)
                 p = p.set_index("decision_bar")[
                     f"{H}_predicted_ev"].reindex(np.arange(n))
                 ev[(H, sd)] = p.to_numpy(float)
-        e9s = e9_df[e9_df["symbol"] == sym].set_index("decision_bar")["e9_side"]
+        # FP3: E9 is defined ONLY on canonical ROOT Candidate decision bars.
         e9_arr = np.zeros(n, np.int8)
-        vals = e9s.reindex(np.arange(n)).to_numpy(float)
-        e9_arr[np.isfinite(vals)] = vals[np.isfinite(vals)].astype(np.int8)
+        if e9_df is not None and len(e9_df):
+            e9s = e9_df[e9_df["symbol"] == sym].set_index("decision_bar")["e9_side"]
+            vals = e9s.reindex(np.arange(n)).to_numpy(float)
+            e9_arr[np.isfinite(vals)] = vals[np.isfinite(vals)].astype(np.int8)
 
         el, fl = side_arrays("LONG", "event_idx_td5")
         es, fs = side_arrays("SHORT", "event_idx_td5")
+        # FP7: bracket eligibility from the SAME R8 renewal axis.
+        bel = renewal_df[(renewal_df["symbol"] == sym)
+                         & (renewal_df["side"] == "LONG")].set_index(
+            "decision_bar")["bracket_eligible"].reindex(np.arange(n))
+        bes = renewal_df[(renewal_df["symbol"] == sym)
+                         & (renewal_df["side"] == "SHORT")].set_index(
+            "decision_bar")["bracket_eligible"].reindex(np.arange(n))
+        # FP9: no position deadline may exceed the common evaluation end.
+        deadline = np.minimum(ends[5][fill], int(common_end_idx.get(sym, n - 1)))
         axes[sym] = SymbolAxis(
             symbol=sym, n_bars=n,
             bar_start_time=s["bar_start_time"].to_numpy(),
@@ -539,11 +673,13 @@ def build_symbol_axes(state_df, pred_df, renewal_df, e9_df, split, symbols=None)
             sup_top=s["sup_top"].to_numpy(float),
             res_bottom=s["res_bottom"].to_numpy(float),
             candidate_at_decision=s["candidate_at_decision"].to_numpy(bool),
-            test_mask=test_mask, e9_side=e9_arr,
-            deadline_idx=ends[5][fill],
+            test_mask=test_mask, e9_root_side=e9_arr,
+            deadline_idx=deadline,
             day_ord=np.asarray(pd.factorize(day, sort=True)[0], np.int64),
             ev=ev, event_idx_long=el, event_idx_short=es,
-            renewal_fill_long=fl, renewal_fill_short=fs)
+            renewal_fill_long=fl, renewal_fill_short=fs,
+            bracket_eligible_long=bel.to_numpy(bool),
+            bracket_eligible_short=bes.to_numpy(bool))
     return axes
 
 
@@ -581,6 +717,9 @@ def run_formal_opportunity_value_test(allow_test: bool = False,
         raise RuntimeError(
             f"STOP_R10_GENERATOR_SHA_MISMATCH head={head} "
             f"authorized_review_sha={authorized_review_sha}")
+    # FP12: counters are reset at the start of the real Formal run so the
+    # performance gate measures THIS run only.
+    reset_counters()
 
     # 2: committed PRE-TEST evidence identity
     ev = os.path.join("research", "liquidity_oracle_atlas", "evidence",
@@ -608,9 +747,9 @@ def run_formal_opportunity_value_test(allow_test: bool = False,
                               authorized_review_sha=authorized_review_sha,
                               write_artifacts=write_artifacts)
     _bump("test_prediction_loads")
-    # 7 + 8: E9 axis once + reproduction gate
-    e9_df, _chain = build_e9_test_axis()
-    gate = e9_axis_reproduction_gate(e9_df)
+    # 7 + 8: E9 ROOT axis once + reproduction gate
+    e9_df, _chain = build_e9_root_axis(state_df)
+    gate = e9_axis_reproduction_gate(e9_df, state_df, split=None)
     # 9: renewal axis once
     renewal_df = pd.read_parquet(RENEWAL_AXIS_PARQUET)
     # 10
@@ -620,20 +759,23 @@ def run_formal_opportunity_value_test(allow_test: bool = False,
     axes = build_symbol_axes(state_df, pred_df, renewal_df, e9_df, split)
     # 11
     trades_by_policy = {}
+    decision_by_policy = {}
     for p in POLICIES:
         per = {}
+        dec = {}
         for sym, ax in axes.items():
             _bump("sequential_symbol_loops")
-            per[sym], _ = simulate_symbol(p, ax)
+            per[sym], dec[sym] = simulate_symbol(p, ax)
         trades_by_policy[p] = per
+        decision_by_policy[p] = dec
     # 12-13
-    common_days = None
+    common_days = _common_days(axes, split)
     daily_by_policy = {}
+    per_symbol_daily = {}
     for p in POLICIES:
-        if common_days is None:
-            common_days = _common_days(axes, split)
         port, per_sym = daily_returns(trades_by_policy[p], axes, common_days)
         daily_by_policy[p] = port
+        per_symbol_daily[p] = per_sym
     # 14
     full = block_bootstrap_delta(daily_by_policy[PRIMARY_POLICY],
                                  daily_by_policy[BASELINE_POLICY])
@@ -641,18 +783,364 @@ def run_formal_opportunity_value_test(allow_test: bool = False,
                                    daily_by_policy[BASELINE_POLICY])
     renew = block_bootstrap_delta(daily_by_policy[PRIMARY_POLICY],
                                   daily_by_policy[GATE_POLICY])
+    ident = policy_decomposition_identity(daily_by_policy[PRIMARY_POLICY],
+                                          daily_by_policy[GATE_POLICY],
+                                          daily_by_policy[BASELINE_POLICY])
     # 15
     verdict = formal_verdict(full, gate_d, renew)
-    result = {"verdict": verdict, "delta_full": {k: v for k, v in full.items()
-                                                 if k != "reps"},
+
+    # FP14 strategy diagnostics, FP15 per-symbol + LOSO (cached, no resim)
+    diag = strategy_diagnostics(trades_by_policy, axes, common_days,
+                                daily_by_policy, full)
+    per_sym_rows = per_symbol_deltas(per_symbol_daily, common_days)
+    loso_rows = loso_deltas(per_symbol_daily, common_days)
+
+    # FP12: performance gate BEFORE Formal evidence acceptance
+    perf = dict(COUNTERS)
+    perf_mismatch = {k: (perf.get(k), v) for k, v in FORMAL_PERF_EXPECTED.items()
+                     if perf.get(k) != v}
+    if perf_mismatch:
+        raise RuntimeError(
+            f"STOP_R10_FORMAL_PERFORMANCE_GATE {perf_mismatch}")
+
+    result = {"verdict": verdict,
+              "delta_full": {k: v for k, v in full.items() if k != "reps"},
               "delta_gate": {k: v for k, v in gate_d.items() if k != "reps"},
               "delta_renew": {k: v for k, v in renew.items() if k != "reps"},
+              "decomposition_identity": ident,
               "e9_reproduction": gate,
+              "strategy_diagnostics": diag,
               "scientific_status": SCIENTIFIC_STATUS,
-              "performance": dict(COUNTERS)}
+              "performance": perf}
+
+    # FP11: only AFTER the verdict is frozen may TEST labels be read, once.
+    deciles = post_verdict_test_diagnostics(pred_df)
+    result["post_verdict_test_ev_deciles"] = deciles
+
+    if write_artifacts:
+        # 16 write Formal evidence, 17 manifest LAST
+        write_formal_evidence(result, trades_by_policy, decision_by_policy,
+                              daily_by_policy, per_sym_rows, loso_rows, deciles,
+                              full, authorized_review_sha, gate)
     if verbose:
-        print(json.dumps(result, indent=2, default=str))
+        print(json.dumps({k: v for k, v in result.items()
+                          if k != "post_verdict_test_ev_deciles"},
+                         indent=2, default=str))
     return result
+
+
+# --------------------------------------------------------------------------- #
+# 9. FP12 frozen Formal performance budget                                      #
+# --------------------------------------------------------------------------- #
+FORMAL_PERF_EXPECTED = {
+    "test_state_loads": 1,
+    "test_prediction_loads": 1,
+    "direction_chain_fits": 1,
+    "direction_batch_prediction_passes": 1,
+    "environment_recomputes": 0,
+    "geometry_recomputes": 0,
+    "model_predict_calls_inside_simulator": 0,
+    "path_scans_inside_simulator": 0,
+    "test_label_reads_during_strategy": 0,
+    # 15 symbols x 3 policies
+    "sequential_symbol_loops": 45,
+}
+
+
+# --------------------------------------------------------------------------- #
+# 10. FP14 strategy diagnostics                                                 #
+# --------------------------------------------------------------------------- #
+def strategy_diagnostics(trades_by_policy, axes, common_days, daily_by_policy,
+                         full):
+    out = {}
+    n_days = int(full.get("n_inference_days", len(common_days)))
+    for p, per in trades_by_policy.items():
+        trades = [t for sym in sorted(per) for t in per[sym]]
+        dec = {}
+        n = len(trades)
+        rets = (np.array([trade_return(t) for t in trades], float) if n
+                else np.zeros(0))
+        hb = (np.array([t.holding_bars for t in trades], float) if n
+              else np.zeros(0))
+        # holding trading days per trade
+        hd = []
+        for t in trades:
+            ax = axes.get(t.symbol)
+            if ax is None:
+                hd.append(0)
+                continue
+            days = pd.Index(ax.trading_day[t.fill_idx:t.exit_idx + 1]).unique()
+            hd.append(len(days))
+        hd = np.array(hd, float) if n else np.zeros(0)
+        total_bars = sum(int(np.flatnonzero(ax.test_mask).size)
+                         for ax in axes.values())
+        port = daily_by_policy.get(p)
+        cum = (np.cumsum(port.to_numpy(float)) if port is not None
+               else np.zeros(0))
+        peak = np.maximum.accumulate(cum) if len(cum) else np.zeros(0)
+        dd = float(np.min(cum - peak)) if len(cum) else 0.0
+        wins = rets[rets > 0]
+        losses = rets[rets <= 0]
+        avg_win = float(wins.mean()) if wins.size else float("nan")
+        avg_loss = float((-losses).mean()) if losses.size else float("nan")
+        out[p] = {
+            "root_candidates_observed": dec.get("root", 0),
+            "n_trades": int(n),
+            "n_long_trades": int(sum(1 for t in trades if t.side > 0)),
+            "n_short_trades": int(sum(1 for t in trades if t.side < 0)),
+            "n_renewal_exits": int(sum(1 for t in trades
+                                       if t.exit_reason == "renewal_exit")),
+            "n_reversals": int(sum(1 for t in trades
+                                   if t.exit_reason == "reversal_close")),
+            "n_terminal": int(sum(1 for t in trades
+                                  if t.exit_reason == "terminal_deadline")),
+            "mean_holding_bars": float(hb.mean()) if n else 0.0,
+            "median_holding_bars": float(np.median(hb)) if n else 0.0,
+            "mean_holding_trading_days": float(hd.mean()) if n else 0.0,
+            "exposure_fraction": (float(hb.sum() / total_bars)
+                                  if total_bars else 0.0),
+            "gross_total_R": float(rets.sum()) if n else 0.0,
+            "gross_R_per_inference_day": (float(rets.sum() / n_days)
+                                          if n_days else 0.0),
+            "mean_trade_R": float(rets.mean()) if n else 0.0,
+            "median_trade_R": float(np.median(rets)) if n else 0.0,
+            "trade_win_rate": float((rets > 0).mean()) if n else 0.0,
+            "average_win": avg_win, "average_loss": avg_loss,
+            "realized_payoff_ratio": (float(avg_win / avg_loss)
+                                      if avg_loss and avg_loss > 0 else np.nan),
+            "max_drawdown_daily_R": dd,
+        }
+    return out
+
+
+# --------------------------------------------------------------------------- #
+# 11. FP15 per-symbol + LOSO (cached daily series, no resimulation)             #
+# --------------------------------------------------------------------------- #
+def per_symbol_deltas(per_symbol_daily, common_days):
+    rows = []
+    syms = sorted(per_symbol_daily[BASELINE_POLICY].keys())
+    for sym in syms:
+        p0 = per_symbol_daily[BASELINE_POLICY][sym].to_numpy(float)
+        p1 = per_symbol_daily[GATE_POLICY][sym].to_numpy(float)
+        p2 = per_symbol_daily[PRIMARY_POLICY][sym].to_numpy(float)
+        rows.append({
+            "symbol": sym,
+            "delta_gate_point": float((p1 - p0).mean()),
+            "delta_renew_point": float((p2 - p1).mean()),
+            "delta_full_point": float((p2 - p0).mean()),
+            "n_inference_days": int(complete_blocks(len(p0))[1]),
+        })
+    return rows
+
+
+def loso_deltas(per_symbol_daily, common_days):
+    """FP15: leave-one-symbol-out, averaging the REMAINING 14 daily series."""
+    rows = []
+    syms = sorted(per_symbol_daily[BASELINE_POLICY].keys())
+    for drop in syms:
+        keep = [s for s in syms if s != drop]
+        ser = {}
+        for p in POLICIES:
+            mat = pd.DataFrame({s: per_symbol_daily[p][s].to_numpy(float)
+                                for s in keep})
+            ser[p] = mat.mean(axis=1)
+        d_full = block_bootstrap_delta(ser[PRIMARY_POLICY],
+                                       ser[BASELINE_POLICY], B=200)
+        d_gate = block_bootstrap_delta(ser[GATE_POLICY],
+                                       ser[BASELINE_POLICY], B=200)
+        d_ren = block_bootstrap_delta(ser[PRIMARY_POLICY],
+                                      ser[GATE_POLICY], B=200)
+        rows.append({"removed_symbol": drop,
+                     "delta_full_point": d_full["point"],
+                     "delta_full_ci_low": d_full["ci_low"],
+                     "delta_full_ci_high": d_full["ci_high"],
+                     "delta_gate_point": d_gate["point"],
+                     "delta_renew_point": d_ren["point"]})
+    return rows
+
+
+# --------------------------------------------------------------------------- #
+# 12. FP11 post-verdict TEST Opportunity diagnostics (labels read ONCE)         #
+# --------------------------------------------------------------------------- #
+def post_verdict_test_diagnostics(pred_df, n_bins=10):
+    """FP11: read labels_test EXACTLY ONCE, after the verdict is frozen.
+
+    Descriptive only: it may not change the EV threshold, policy, verdict,
+    features or models.
+    """
+    lab = pd.read_parquet(LABEL_PARQUETS["test"], columns=[
+        "symbol", "decision_bar", "side", "horizon", "episode_return_atr",
+        "sample_weight", "win"])
+    _bump("post_verdict_test_label_reads")
+    out = {}
+    for H in HORIZONS:
+        col = f"{H}_predicted_ev"
+        if col not in pred_df.columns:
+            continue
+        m = lab[lab["horizon"] == H].merge(
+            pred_df[["symbol", "decision_bar", "side", col]],
+            on=["symbol", "decision_bar", "side"], how="inner")
+        if len(m) == 0:
+            continue
+        w = m["sample_weight"].to_numpy(float)
+        y = m["episode_return_atr"].to_numpy(float)
+        pe = m[col].to_numpy(float)
+        dec = pd.qcut(pd.Series(pe).rank(method="first"), n_bins,
+                      labels=False)
+        dec = np.asarray(dec, dtype=int)
+        rows = []
+        for d in range(n_bins):
+            s = dec == d
+            if not s.any():
+                continue
+            ww, yy = w[s], y[s]
+            win = yy > 0
+            p_act = float(np.average(win.astype(float), weights=ww))
+            avg_win = (float(np.average(yy[win], weights=ww[win]))
+                       if win.any() else np.nan)
+            avg_loss = (float(np.average((-yy)[~win], weights=ww[~win]))
+                        if (~win).any() else np.nan)
+            mean_ret = float(np.average(yy, weights=ww))
+            ident = p_act * avg_win - (1.0 - p_act) * avg_loss
+            dev = abs(ident - mean_ret)
+            if np.isfinite(dev) and dev > 1e-12:
+                raise RuntimeError(
+                    f"STOP_R10_TEST_DECILE_IDENTITY horizon={H} decile={d+1}")
+            denom = avg_win + avg_loss
+            rows.append({
+                "horizon": H, "decile": d + 1, "n_rows": int(s.sum()),
+                "mean_predicted_ev": float(np.average(pe[s], weights=ww)),
+                "actual_win_rate": p_act, "actual_avg_win": avg_win,
+                "actual_avg_loss": avg_loss,
+                "actual_payoff_ratio": (float(avg_win / avg_loss)
+                                        if avg_loss and avg_loss > 0 else np.nan),
+                "actual_break_even_win_rate": (float(avg_loss / denom)
+                                               if denom > 0 else np.nan),
+                "actual_mean_return_atr": mean_ret,
+                "actual_ev_identity_abs_dev": float(dev)})
+        out[H] = rows
+    return out
+
+
+# --------------------------------------------------------------------------- #
+# 13. FP13 Formal evidence writer (manifest LAST)                               #
+# --------------------------------------------------------------------------- #
+FORMAL_EVIDENCE_DIR = os.path.join("research", "liquidity_oracle_atlas",
+                                   "evidence")
+F_POLICY_SUMMARY = os.path.join(FORMAL_EVIDENCE_DIR,
+                                "opportunity_value_renewal_v1_policy_summary.csv")
+F_DAILY = os.path.join(FORMAL_EVIDENCE_DIR,
+                       "opportunity_value_renewal_v1_daily_returns.csv")
+F_PER_SYMBOL = os.path.join(FORMAL_EVIDENCE_DIR,
+                            "opportunity_value_renewal_v1_per_symbol.csv")
+F_TRADE_LEDGER = os.path.join(FORMAL_EVIDENCE_DIR,
+                              "opportunity_value_renewal_v1_trade_ledger.csv")
+F_DECISION_LEDGER = os.path.join(
+    FORMAL_EVIDENCE_DIR, "opportunity_value_renewal_v1_decision_ledger.csv")
+F_EV_DECILES = os.path.join(FORMAL_EVIDENCE_DIR,
+                            "opportunity_value_renewal_v1_test_ev_deciles.csv")
+F_SUMMARY = os.path.join(FORMAL_EVIDENCE_DIR,
+                         "opportunity_value_renewal_v1_summary.json")
+F_MANIFEST = os.path.join(FORMAL_EVIDENCE_DIR,
+                          "opportunity_value_renewal_v1_manifest.json")
+
+
+def _write_csv(path, df):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    df.to_csv(path, index=False)
+
+
+def write_formal_evidence(result, trades_by_policy, decision_by_policy,
+                          daily_by_policy, per_sym_rows, loso_rows, deciles,
+                          full, authorized_review_sha, gate):
+    """FP13 step 16-17: write Formal evidence, then the manifest LAST."""
+    os.makedirs(FORMAL_EVIDENCE_DIR, exist_ok=True)
+
+    pol = pd.DataFrame([dict(policy=p, **v)
+                        for p, v in result["strategy_diagnostics"].items()])
+    _write_csv(F_POLICY_SUMMARY, pol)
+
+    daily = pd.DataFrame({p: daily_by_policy[p].to_numpy(float)
+                          for p in POLICIES})
+    daily.insert(0, "trading_day",
+                 list(daily_by_policy[BASELINE_POLICY].index))
+    for a, b, name in ((PRIMARY_POLICY, BASELINE_POLICY, "delta_full"),
+                       (GATE_POLICY, BASELINE_POLICY, "delta_gate"),
+                       (PRIMARY_POLICY, GATE_POLICY, "delta_renew")):
+        daily[name] = daily[a] - daily[b]
+    _write_csv(F_DAILY, daily)
+
+    _write_csv(F_PER_SYMBOL, pd.DataFrame(per_sym_rows + [
+        dict(symbol="LOSO:" + r["removed_symbol"],
+             delta_full_point=r["delta_full_point"],
+             delta_gate_point=r["delta_gate_point"],
+             delta_renew_point=r["delta_renew_point"],
+             n_inference_days=0) for r in loso_rows]))
+
+    led = []
+    for p in POLICIES:
+        for sym in sorted(trades_by_policy[p]):
+            for t in trades_by_policy[p][sym]:
+                led.append({"policy": p, "symbol": t.symbol,
+                            "side": "LONG" if t.side > 0 else "SHORT",
+                            "decision_idx": t.decision_idx,
+                            "fill_idx": t.fill_idx, "exit_idx": t.exit_idx,
+                            "entry_price": t.entry_price, "atr0": t.atr0,
+                            "exit_price": t.exit_price,
+                            "exit_reason": t.exit_reason,
+                            "holding_bars": t.holding_bars,
+                            "trade_return_atr": trade_return(t)})
+    _write_csv(F_TRADE_LEDGER, pd.DataFrame(led))
+
+    dled = []
+    for p in POLICIES:
+        for sym in sorted(decision_by_policy[p]):
+            for d in decision_by_policy[p][sym]:
+                dled.append({"policy": p, "symbol": sym, "action": d[0],
+                             "bar": d[1], "side": d[2], "ev": d[3]})
+    _write_csv(F_DECISION_LEDGER, pd.DataFrame(dled))
+
+    drows = [r for hs in deciles.values() for r in hs]
+    _write_csv(F_EV_DECILES, pd.DataFrame(drows))
+
+    with open(F_SUMMARY, "w") as f:
+        json.dump(result, f, indent=2, default=str)
+
+    # ---- manifest LAST ----
+    art = {
+        "opportunity_value_predictions_test_v1.parquet":
+            sha256_file(TEST_PRED_PARQUET) if os.path.exists(TEST_PRED_PARQUET)
+            else None,
+        "e9_root_axis_v1.parquet":
+            sha256_file(E9_ROOT_AXIS_PARQUET)
+            if os.path.exists(E9_ROOT_AXIS_PARQUET) else None,
+    }
+    for p in (F_POLICY_SUMMARY, F_DAILY, F_PER_SYMBOL, F_TRADE_LEDGER,
+              F_DECISION_LEDGER, F_EV_DECILES, F_SUMMARY):
+        art[os.path.basename(p)] = sha256_file(p)
+    manifest = {
+        "task_id": TASK_ID,
+        "authorized_review_sha": authorized_review_sha,
+        "generator_code_sha": _git_head_sha(),
+        "reviewed_parent_sha": authorized_review_sha,
+        "scientific_status": SCIENTIFIC_STATUS,
+        "verdict": result["verdict"],
+        "e9_reproduction": gate,
+        "decomposition_identity": result["decomposition_identity"],
+        "performance_gates": {
+            "expected": FORMAL_PERF_EXPECTED,
+            "actual": {k: dict(COUNTERS).get(k) for k in FORMAL_PERF_EXPECTED},
+            "mismatch": {k: (dict(COUNTERS).get(k), v)
+                         for k, v in FORMAL_PERF_EXPECTED.items()
+                         if dict(COUNTERS).get(k) != v},
+            "pass": all(dict(COUNTERS).get(k) == v
+                        for k, v in FORMAL_PERF_EXPECTED.items())},
+        "artifact_sha256": art,
+        "serialization_manifest_last": True,
+    }
+    with open(F_MANIFEST, "w") as f:
+        json.dump(manifest, f, indent=2, default=str)
+    return manifest
 
 
 def _common_days(axes, split):

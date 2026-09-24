@@ -26,7 +26,7 @@ import hashlib
 import json
 import os
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 import numpy as np
@@ -40,7 +40,8 @@ from research.liquidity_oracle_atlas.entry_path_atlas_v1 import (
     SYMBOLS,
     extract_zone_geometry,
 )
-from research.liquidity_oracle_atlas.build_struct33_dataset_v1 import STRUCT33
+from research.liquidity_oracle_atlas.build_struct33_dataset_v1 import (
+    STRUCT33, DTP9)
 from research.liquidity_oracle_atlas.direction_gated_experts_v1 import (
     orient_struct33_router_side,
 )
@@ -167,6 +168,15 @@ class OpportunityState:
 
     candidate_at_decision: np.ndarray
     candidate_trigger_bits: np.ndarray
+    # FP2: raw DTP9 state, column -> array, EXACT canonical dtype/values from
+    # run_environment_m15()["features"]. Deployment-only; never a model feature.
+    dtp9: dict = field(default_factory=dict)
+
+    def dtp9_frame(self, idx=None) -> pd.DataFrame:
+        """Exact DataFrame representation the frozen router was fitted on."""
+        cols = {c: (self.dtp9[c] if idx is None else self.dtp9[c][idx])
+                for c in DTP9}
+        return pd.DataFrame(cols, columns=list(DTP9))
 
 
 def candidate_decision_mask(gate: dict):
@@ -269,7 +279,8 @@ def load_symbol_state(symbol: str) -> OpportunityState:
         res_bottom=np.asarray(zg["res_bottom"], float),
         res_strength=np.asarray(zg["res_strength"], float),
         candidate_at_decision=cand_at_dec,
-        candidate_trigger_bits=cand_bits)
+        candidate_trigger_bits=cand_bits,
+        dtp9={c: feats[c].to_numpy() for c in DTP9})
 
 
 # --------------------------------------------------------------------------- #
@@ -533,6 +544,10 @@ def build_symbol_dataset(symbol: str, split=None, verbose: bool = False):
     side_feat.insert(0, "symbol", symbol)
     SIDE_KEY = ("symbol", "decision_bar", "side")
 
+    # FP2: persist the EXACT raw DTP9 columns with canonical names/values taken
+    # from run_environment_m15()["features"]. These exist ONLY to deploy the
+    # already-frozen E9 root Direction system on the full causal root Candidate
+    # universe; they are NOT part of OPP36 and never enter the Opportunity model.
     state_df = pd.DataFrame({
         "symbol": symbol,
         "bar_index": st.bar_index,
@@ -546,6 +561,8 @@ def build_symbol_dataset(symbol: str, split=None, verbose: bool = False):
         "res_top": st.res_top, "res_bottom": st.res_bottom,
         "candidate_at_decision": st.candidate_at_decision,
         "candidate_trigger_bits": st.candidate_trigger_bits})
+    for c in DTP9:
+        state_df[c] = st.dtp9[c]
 
     label_df = _assemble_labels(symbol, st, views, label_rows, eligible,
                                 entry_idx, w_long, w_short, split,
@@ -605,58 +622,103 @@ def _assemble_labels(symbol, st, views, label_rows, eligible, entry_idx,
         out["bracket_eligible"] = np.tile(np.asarray(bracket_eligible, bool),
                                           len(label_rows))
     if split is not None:
+        # FP8 audit MUST be computed on the FULL row set, BEFORE retention.
+        out.attrs["n_two_side_epochs_dropped_due_to_one_side_unresolved"] = \
+            count_two_side_unresolved(out, split)
         out = assign_split(out, split)
-        out = apply_split_retention(out)
     return out
 
 
-def assign_split(df: pd.DataFrame, split: dict) -> pd.DataFrame:
-    """§19: split purity. A label is usable only if the episode RESOLVES inside
-    its own split window."""
+def split_bounds(split: dict):
+    """FP9: the frozen TEST window has BOTH a lower and an upper bound."""
     cal = split["cal"]
     cuts = cal["cuts"] if "cuts" in cal else split["cuts"]
-    t1 = np.datetime64(cuts[0], "ns")
-    t2 = np.datetime64(cuts[1], "ns")
-    end = np.datetime64(pd.Timestamp(cal["end"]).to_datetime64(), "ns")
+    return (np.datetime64(cuts[0], "ns"), np.datetime64(cuts[1], "ns"),
+            np.datetime64(pd.Timestamp(cal["end"]).to_datetime64(), "ns"))
 
+
+def assign_split_metadata(df: pd.DataFrame, split: dict) -> pd.DataFrame:
+    """FP8 stage 1: add split METADATA ONLY. No row is dropped here.
+
+    - `decision_split` is determined by decision_time alone.
+    - `label_resolved` records whether the episode's label actually resolves
+      before that split's upper bound.
+
+    The retention rule (stage 2) must be able to SEE an opposite side that
+    existed ex ante but failed to resolve; dropping first destroys that.
+    """
+    t1, t2, end = split_bounds(split)
     dt = df["decision_time"].to_numpy("datetime64[ns]")
     lav = df["label_available_time"].to_numpy("datetime64[ns]")
 
-    stage = np.full(len(df), "", dtype=object)
-    stage[(dt < t1) & (lav < t1)] = "train"
-    stage[(dt >= t1) & (dt < t2) & (lav < t2)] = "val"
-    stage[(dt >= t2) & (lav <= end)] = "test"
+    ds = np.full(len(df), "", dtype=object)
+    ds[dt < t1] = "train"
+    ds[(dt >= t1) & (dt < t2)] = "val"
+    # FP9: TEST is a CLOSED window [T2, COMMON_END].
+    ds[(dt >= t2) & (dt <= end)] = "test"
+
+    res = np.zeros(len(df), dtype=bool)
+    res[ds == "train"] = lav[ds == "train"] < t1
+    res[ds == "val"] = lav[ds == "val"] < t2
+    res[ds == "test"] = lav[ds == "test"] <= end
+
     df = df.copy()
-    df["split"] = stage
-    return df[stage != ""]
+    df["decision_split"] = ds
+    df["label_resolved"] = res
+    return df
 
 
 def apply_split_retention(df: pd.DataFrame) -> pd.DataFrame:
-    """FIX6: split-pure COUNTERFACTUAL epoch retention.
+    """FP8 stage 2: split-pure COUNTERFACTUAL epoch retention.
 
-    Operate by (symbol, decision_bar, horizon):
-      * exactly one side structurally usable -> keep it if its label resolved
-        in-split, weight 1.0;
-      * both sides usable -> keep the epoch ONLY if BOTH side labels fully
-        resolve inside the same split, weights 0.5 / 0.5.
-    This prevents a "only the faster-resolving side survives" selection bias
-    near split boundaries and guarantees sum(weight) == 1 per retained epoch.
+    Group by (symbol, decision_bar, horizon) over ALL rows (nothing dropped yet):
+      * exactly one side ex-ante usable   -> keep it iff resolved, weight 1.0;
+      * both sides ex-ante usable         -> keep BOTH iff BOTH resolved,
+                                             weights 0.5 / 0.5;
+      * otherwise                         -> keep neither.
     """
     if len(df) == 0:
         return df
     usable = (df["bracket_eligible"].to_numpy(bool)
               & df["entry_executable"].to_numpy(bool))
-    resolved = (df["split"].to_numpy(object) != "")
+    resolved = df["label_resolved"].to_numpy(bool)
     key = (df["symbol"].astype(str) + "|"
            + df["decision_bar"].astype(str) + "|"
            + df["horizon"].astype(str))
-    tmp = pd.DataFrame({"k": key, "u": usable,
-                        "ru": usable & resolved})
+    tmp = pd.DataFrame({"k": key, "u": usable, "ru": usable & resolved})
     n_usable = tmp.groupby("k")["u"].transform("sum").to_numpy()
     n_res = tmp.groupby("k")["ru"].transform("sum").to_numpy()
     keep_single = usable & resolved & (n_usable == 1)
     keep_both = usable & (n_usable == 2) & (n_res == 2)
-    return df[keep_single | keep_both].reset_index(drop=True)
+    keep = keep_single | keep_both
+    out = df[keep].copy().reset_index(drop=True)
+    # FP8: final split label is assigned ONLY after retention.
+    out["split"] = out["decision_split"].to_numpy(object)
+    dropped = int(((n_usable == 2) & (n_res < 2)).sum())
+    out.attrs["n_two_side_epochs_dropped_due_to_one_side_unresolved"] = dropped
+    return out
+
+
+def count_two_side_unresolved(df: pd.DataFrame, split: dict) -> int:
+    """FP8 audit: epochs with two ex-ante usable sides where at least one side
+    failed to resolve inside its decision split."""
+    if len(df) == 0:
+        return 0
+    d = assign_split_metadata(df, split)
+    usable = (d["bracket_eligible"].to_numpy(bool)
+              & d["entry_executable"].to_numpy(bool))
+    resolved = d["label_resolved"].to_numpy(bool)
+    key = (d["symbol"].astype(str) + "|" + d["decision_bar"].astype(str)
+           + "|" + d["horizon"].astype(str))
+    tmp = pd.DataFrame({"k": key, "u": usable, "ru": usable & resolved})
+    n_usable = tmp.groupby("k")["u"].transform("sum").to_numpy()
+    n_res = tmp.groupby("k")["ru"].transform("sum").to_numpy()
+    return int(((n_usable == 2) & (n_res < 2)).sum())
+
+
+def assign_split(df: pd.DataFrame, split: dict) -> pd.DataFrame:
+    """FP8: metadata -> retention -> final split label."""
+    return apply_split_retention(assign_split_metadata(df, split))
 
 
 # --------------------------------------------------------------------------- #
@@ -672,8 +734,12 @@ def materialize(symbols=SYMBOLS, split=None, verbose: bool = True,
         split = build_frozen_split()
 
     states, sides, side_feats, labels, axes = [], [], [], [], []
+    dropped_two_side = 0
     for sym in symbols:
         s_df, sd_df, sf_df, l_df, ax_df = build_symbol_dataset(sym, split=split)
+        # FP8 audit: recorded by _assemble_labels on the full pre-retention set.
+        dropped_two_side += int(l_df.attrs.get(
+            "n_two_side_epochs_dropped_due_to_one_side_unresolved", 0))
         states.append(s_df)
         sides.append(sd_df)
         side_feats.append(sf_df)
@@ -733,6 +799,8 @@ def materialize(symbols=SYMBOLS, split=None, verbose: bool = True,
         "entry_executable_coverage": float(side_df["entry_executable"].mean()),
         "renewal_axis_rows": int(len(renewal_axis_df)),
         "epoch_weight_gate": weight_gate,
+        "n_two_side_epochs_dropped_due_to_one_side_unresolved": {
+            "all_rows_before_retention": int(dropped_two_side)},
         "scientific_status": SCIENTIFIC_STATUS,
         "cost_governance": {
             "cost_metadata_status": COST_METADATA_STATUS,

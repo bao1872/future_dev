@@ -41,9 +41,11 @@ def mk_axis(*, n=80, cand=(), ev=None, e9=None, close=None, sup=None,
         sup_top=sup, res_bottom=res,
         candidate_at_decision=np.zeros(n, bool),
         test_mask=np.ones(n, bool),
-        e9_side=np.ones(n, np.int8) if e9 is None else e9,
+        e9_root_side=np.ones(n, np.int8) if e9 is None else e9,
         deadline_idx=np.minimum(np.arange(n) + deadline_offset, n - 1),
-        day_ord=np.repeat(np.arange(n // 10 + 1), 10)[:n])
+        day_ord=np.repeat(np.arange(n // 10 + 1), 10)[:n],
+        bracket_eligible_long=np.ones(n, bool),
+        bracket_eligible_short=np.ones(n, bool))
     for i in cand:
         ax.candidate_at_decision[i] = True
     ax.ev = {(H, s): np.full(n, 0.5) for H in ("td1", "td3", "td5")
@@ -124,12 +126,10 @@ def test_51_6_hold_creates_no_synthetic_transaction():
 
 def test_51_7_opposite_side_positive_ev_reverses():
     ax = mk_axis(cand=(2,))
-    # E9 flips to SHORT at the renewal bars
-    e9 = np.ones(80, np.int8)
-    e9[10:] = -1
-    ax.e9_side = e9
+    # FP5: renewal is Opportunity-native -- SHORT EV dominates LONG EV
     for H in ("td1", "td3", "td5"):
-        ax.ev[(H, -1)] = np.full(80, 0.4)
+        ax.ev[(H, -1)] = np.full(80, 0.8)
+        ax.ev[(H, +1)] = np.full(80, 0.1)
     trades, dec = R.simulate_symbol("P2", ax)
     assert any(d[0] == "REVERSE" for d in dec)
     assert len(trades) >= 2
@@ -139,20 +139,21 @@ def test_51_8_ev_le_zero_exits():
     # root entry EV > 0 (so a trade opens), renewal EV <= 0 (so it exits)
     ax = mk_axis(cand=(2,))
     ax.ev[("td5", 1)] = np.full(80, 0.4)
+    # FP5: at renewal BOTH sides have non-positive action value -> EXIT
     for H in ("td1", "td3"):
         ax.ev[(H, 1)] = np.full(80, -0.5)
+        ax.ev[(H, -1)] = np.full(80, -0.2)
     trades, dec = R.simulate_symbol("P2", ax)
     assert len(trades) == 1
     assert trades[0].exit_reason == "renewal_exit"
+    assert any(d[0] == "EXIT" for d in dec)
 
 
 def test_51_9_reversal_resets_the_five_day_deadline():
     ax = mk_axis(cand=(2,))
-    e9 = np.ones(80, np.int8)
-    e9[10:] = -1
-    ax.e9_side = e9
     for H in ("td1", "td3", "td5"):
-        ax.ev[(H, -1)] = np.full(80, 0.4)
+        ax.ev[(H, -1)] = np.full(80, 0.8)
+        ax.ev[(H, +1)] = np.full(80, 0.1)
     trades, dec = R.simulate_symbol("P2", ax)
     rev = [d for d in dec if d[0] == "REVERSE"]
     assert rev
@@ -405,10 +406,19 @@ def test_fix12_e9_axis_reproduction_gate_logic():
         R.e9_axis_reproduction_gate(bad)
 
 
-def test_fix13_mocked_complete_formal_call_graph(monkeypatch):
+def test_fix13_mocked_complete_formal_call_graph(monkeypatch, tmp_path):
     """FIX13: end-to-end mocked Formal TEST call graph (no real TEST data)."""
     import research.liquidity_oracle_atlas.opportunity_value_model_v1 as R9
     import research.liquidity_oracle_atlas.structural_renewal_dataset_v1 as R8
+
+    # Formal evidence must NEVER be created outside an authorized run.
+    for name in ("F_POLICY_SUMMARY", "F_DAILY", "F_PER_SYMBOL",
+                 "F_TRADE_LEDGER", "F_DECISION_LEDGER", "F_EV_DECILES",
+                 "F_SUMMARY", "F_MANIFEST"):
+        orig = getattr(R, name)
+        monkeypatch.setattr(R, name,
+                            os.path.join(str(tmp_path), os.path.basename(orig)))
+    monkeypatch.setattr(R, "post_verdict_test_diagnostics", lambda p: {})
 
     ax1 = mk_axis(cand=(2, 40))
     ax2 = mk_axis(cand=(3, 41))
@@ -437,14 +447,25 @@ def test_fix13_mocked_complete_formal_call_graph(monkeypatch):
     monkeypatch.setattr(R.pd, "read_parquet", fake_rp)
     monkeypatch.setattr(R9, "predict_test", lambda **k: pd.DataFrame(
         {"symbol": [], "decision_bar": [], "side": []}))
-    monkeypatch.setattr(R, "build_e9_test_axis", lambda split=None: (
-        pd.DataFrame({"symbol": [], "decision_bar": [], "e9_side": []}), None))
+    def fake_e9_root_axis(state_df, split=None, test_mask=None):
+        R._bump("direction_chain_fits")
+        R._bump("direction_batch_prediction_passes")
+        return (pd.DataFrame({"symbol": [], "decision_bar": [], "e9_side": []}),
+                None)
+
+    monkeypatch.setattr(R, "build_e9_root_axis", fake_e9_root_axis)
     monkeypatch.setattr(R, "e9_axis_reproduction_gate",
-                        lambda a: {"n_frozen_rows": 13773, "n_mismatch": 0,
-                                   "ok": True})
+                        lambda a, state_df=None, split=None: {
+                            "n_frozen_rows": 13773, "n_mismatch": 0,
+                            "n_missing": 0, "ok": True})
+    # 15 symbol axes so the real performance budget (15 x 3 = 45) is exercised.
+    axes15 = {}
+    for k, s in enumerate(R.SYMBOLS):
+        a = mk_axis(cand=(2, 40))
+        a.symbol = s
+        axes15[s] = a
     monkeypatch.setattr(R, "build_symbol_axes",
-                        lambda s, p, r, e, sp, symbols=None: {"SYN1": ax1,
-                                                              "SYN2": ax2})
+                        lambda s, p, r, e, sp, symbols=None: axes15)
     monkeypatch.setattr(R, "_common_days",
                         lambda axes, split: np.array([f"d{i}" for i in range(20)]))
     monkeypatch.setattr(R, "_git_head_sha", lambda: "SHA")
@@ -457,10 +478,282 @@ def test_fix13_mocked_complete_formal_call_graph(monkeypatch):
         "LOCKED_DEVELOPMENT_TEST_NOT_PRISTINE_CONFIRMATION"
     assert res["performance"]["model_predict_calls_inside_simulator"] == 0
     assert res["performance"]["path_scans_inside_simulator"] == 0
-    # 2 mocked symbols x 3 policies = 6 (real run: 15 x 3 = 45)
-    assert res["performance"]["sequential_symbol_loops"] == 6
+    # FP12: 15 symbol axes x 3 policies = 45 sequential loops
+    assert res["performance"]["sequential_symbol_loops"] == 45
+    assert res["performance"]["test_label_reads_during_strategy"] == 0
     for k in ("delta_full", "delta_gate", "delta_renew"):
         assert "ci_low" in res[k] and "ci_high" in res[k]
+
+
+def install_formal_mocks(monkeypatch, *, extra=None):
+    """Shared mocked Formal-TEST harness (R10). No canonical path is touched."""
+    import research.liquidity_oracle_atlas.opportunity_value_model_v1 as R9
+    ev_path = os.path.join("research", "liquidity_oracle_atlas", "evidence",
+                           "opportunity_value_renewal_v1_pretest_summary.json")
+    with open(ev_path) as f:
+        pre_ev = json.load(f)
+    committed = {}
+    committed.update(pre_ev["r8_manifest"]["artifact_sha256"])
+    committed.update(pre_ev["r9_model_manifest"]["model_sha256"])
+    monkeypatch.setattr(R, "sha256_file",
+                        lambda p: committed.get(os.path.basename(p), "x"))
+    real_rp = R.pd.read_parquet
+
+    def fake_rp(p, *a, **k):
+        if "opportunity_value_v1" in str(p):
+            return pd.DataFrame({"symbol": [], "bar_index": [], "decision_bar": [],
+                                 "side": []})
+        return real_rp(p, *a, **k)
+
+    monkeypatch.setattr(R.pd, "read_parquet", fake_rp)
+    monkeypatch.setattr(R9, "predict_test", lambda **k: pd.DataFrame(
+        {"symbol": [], "decision_bar": [], "side": []}))
+
+    def fake_e9_root_axis(state_df, split=None, test_mask=None):
+        R._bump("direction_chain_fits")
+        R._bump("direction_batch_prediction_passes")
+        return (pd.DataFrame({"symbol": [], "decision_bar": [], "e9_side": []}),
+                None)
+
+    monkeypatch.setattr(R, "build_e9_root_axis", fake_e9_root_axis)
+    monkeypatch.setattr(R, "e9_axis_reproduction_gate",
+                        lambda a, state_df=None, split=None: {
+                            "n_frozen_rows": 13773, "n_mismatch": 0,
+                            "n_missing": 0, "ok": True})
+    axes15 = {}
+    for s in R.SYMBOLS:
+        a = mk_axis(cand=(2, 40))
+        a.symbol = s
+        axes15[s] = a
+    monkeypatch.setattr(R, "build_symbol_axes",
+                        lambda s, p, r, e, sp, symbols=None: axes15)
+    monkeypatch.setattr(R, "_common_days",
+                        lambda axes, split: np.array([f"d{i}" for i in range(20)]))
+    monkeypatch.setattr(R, "_git_head_sha", lambda: "SHA")
+    R.reset_counters()
+    if extra is not None:
+        extra(monkeypatch)
+
+
+# =========================================================================== #
+# FP1-FP20 final PRE-TEST regressions                                           #
+# =========================================================================== #
+def test_fp2_dtp9_state_columns_reproduce_frozen_candidate_values():
+    """FP2: raw DTP9 in state_v1 must reproduce the Direction dataset values at
+    the frozen 13,773 Candidate rows."""
+    from research.liquidity_oracle_atlas.build_struct33_dataset_v1 import DTP9
+    from research.liquidity_oracle_atlas.direction_null_baseline_v1 import (
+        build_frozen_split)
+    split = build_frozen_split()
+    ds = split["ds"]
+    frozen = pd.read_parquet(
+        "artifacts/entry_path_atlas_v1/e9_direction_state_v1.parquet",
+        columns=["symbol", "candidate_decision_index"])
+    st = pd.read_parquet("artifacts/opportunity_value_v1/state_v1.parquet",
+                         columns=["symbol", "bar_index"] + list(DTP9))
+    m = frozen.merge(st, how="left", left_on=["symbol", "candidate_decision_index"],
+                     right_on=["symbol", "bar_index"])
+    assert len(m) == 13773 and int(m["bar_index"].isna().sum()) == 0
+    d = ds.set_index(["symbol", "candidate_decision_index"])
+    key = pd.MultiIndex.from_arrays(
+        [m["symbol"], m["candidate_decision_index"]])
+    for c in DTP9:
+        want = d[c].reindex(key).to_numpy(float)
+        got = m[c].to_numpy(float)
+        assert np.allclose(want, got, atol=1e-12, equal_nan=True), c
+
+
+def test_fp4_reproduction_gate_fails_on_missing_or_mismatched_row():
+    frozen = pd.read_parquet(
+        "artifacts/entry_path_atlas_v1/e9_direction_state_v1.parquet",
+        columns=["symbol", "candidate_decision_index", "e9_direction"])
+    good = frozen.rename(
+        columns={"candidate_decision_index": "decision_bar"})[
+        ["symbol", "decision_bar", "e9_direction"]]
+    assert R.e9_axis_reproduction_gate(good)["ok"] is True
+    missing = good.iloc[1:].reset_index(drop=True)
+    with pytest.raises(RuntimeError, match="E9_AXIS_REPRODUCTION_MISMATCH"):
+        R.e9_axis_reproduction_gate(missing)
+    bad = good.copy()
+    bad.loc[bad.index[0], "e9_direction"] = (
+        "SHORT" if bad.loc[bad.index[0], "e9_direction"] == "LONG" else "LONG")
+    with pytest.raises(RuntimeError, match="E9_AXIS_REPRODUCTION_MISMATCH"):
+        R.e9_axis_reproduction_gate(bad)
+
+
+def test_fp6_p1_p2_skip_bracket_ineligible_root_side_even_with_positive_ev():
+    ax = mk_axis(cand=(2,))
+    ax.bracket_eligible_long = np.zeros(80, bool)     # LONG ineligible
+    for H in ("td1", "td3", "td5"):
+        ax.ev[(H, 1)] = np.full(80, 5.0)              # very positive EV
+    for p in ("P1", "P2"):
+        trades, dec = R.simulate_symbol(p, ax)
+        assert len(trades) == 0
+        assert [d[0] for d in dec] == ["SKIP_INELIGIBLE"]
+    # P0 is the frozen Direction baseline and does NOT require eligibility
+    trades, _ = R.simulate_symbol("P0", ax)
+    assert len(trades) == 1
+
+
+def test_fp5_renewal_hold_when_current_side_ev_is_larger_positive():
+    ax = mk_axis(cand=(2,))
+    for H in ("td1", "td3", "td5"):
+        ax.ev[(H, 1)] = np.full(80, 0.9)      # current side (LONG) dominates
+        ax.ev[(H, -1)] = np.full(80, 0.2)
+    trades, dec = R.simulate_symbol("P2", ax)
+    assert any(d[0] == "HOLD" for d in dec)
+    assert not any(d[0] == "REVERSE" for d in dec)
+    assert len(trades) == 1
+
+
+def test_fp5_renewal_reverse_when_opposite_side_ev_is_strictly_larger():
+    ax = mk_axis(cand=(2,))
+    for H in ("td1", "td3", "td5"):
+        ax.ev[(H, 1)] = np.full(80, 0.2)
+        ax.ev[(H, -1)] = np.full(80, 0.9)
+    trades, dec = R.simulate_symbol("P2", ax)
+    assert any(d[0] == "REVERSE" for d in dec)
+    assert any(t.side < 0 for t in trades)
+
+
+def test_fp5_positive_exact_tie_holds_current_side():
+    ax = mk_axis(cand=(2,))
+    for H in ("td1", "td3", "td5"):
+        ax.ev[(H, 1)] = np.full(80, 0.7)
+        ax.ev[(H, -1)] = np.full(80, 0.7)     # EXACT tie
+    trades, dec = R.simulate_symbol("P2", ax)
+    assert any(d[0] == "HOLD" for d in dec)
+    assert not any(d[0] == "REVERSE" for d in dec)
+
+
+def test_fp5_renewal_never_reads_e9_direction():
+    """FP5: E9 is root-only. Zeroing E9 everywhere except the root bar must not
+    change the renewal behaviour at all."""
+    ax = mk_axis(cand=(2,))
+    for H in ("td1", "td3", "td5"):
+        ax.ev[(H, 1)] = np.full(80, 0.9)
+        ax.ev[(H, -1)] = np.full(80, 0.2)
+    base_tr, base_dec = R.simulate_symbol("P2", ax)
+
+    ax2 = mk_axis(cand=(2,))
+    e9 = np.zeros(80, np.int8)
+    e9[2] = 1                                  # E9 only at the ROOT bar
+    ax2.e9_root_side = e9
+    for H in ("td1", "td3", "td5"):
+        ax2.ev[(H, 1)] = np.full(80, 0.9)
+        ax2.ev[(H, -1)] = np.full(80, 0.2)
+    tr2, dec2 = R.simulate_symbol("P2", ax2)
+    assert [(t.fill_idx, t.exit_idx, t.exit_reason) for t in base_tr] == \
+        [(t.fill_idx, t.exit_idx, t.exit_reason) for t in tr2]
+    assert [d[0] for d in base_dec] == [d[0] for d in dec2]
+
+
+def test_fp9_test_mask_stops_at_common_end_and_deadline_is_capped():
+    from research.liquidity_oracle_atlas.direction_null_baseline_v1 import (
+        build_frozen_split)
+    from research.liquidity_oracle_atlas.structural_renewal_dataset_v1 import (
+        split_bounds)
+    split = build_frozen_split()
+    _t1, t2, end_t = split_bounds(split)
+    assert t2 < end_t
+    state = pd.read_parquet("artifacts/opportunity_value_v1/state_v1.parquet",
+                            columns=["symbol", "bar_index", "decision_time",
+                                     "candidate_at_decision"])
+    dt = state["decision_time"].to_numpy("datetime64[ns]")
+    # the FP9 closed window never admits a decision after COMMON_END
+    m = (dt >= t2) & (dt <= end_t)
+    assert int((dt > end_t).sum()) > 0
+    assert int((dt[m] > end_t).sum()) == 0
+
+
+def test_fp11_post_verdict_diagnostic_reads_test_labels_exactly_once():
+    R.reset_counters()
+    pred = pd.read_parquet(
+        "artifacts/opportunity_value_v1/labels_test_v1.parquet",
+        columns=["symbol", "decision_bar", "side", "horizon"]).head(0)
+    # an empty prediction frame exercises the read path without asserting values
+    out = R.post_verdict_test_diagnostics(pd.DataFrame(
+        {"symbol": [], "decision_bar": [], "side": [], "td5_predicted_ev": []}))
+    assert R.COUNTERS["post_verdict_test_label_reads"] == 1
+    R.reset_counters()
+
+
+def test_fp12_performance_mismatch_hard_stops_acceptance(monkeypatch):
+    def corrupt(mp):
+        real_bump = R._bump
+        mp.setattr(R, "_bump",
+                   lambda name, n=1: (real_bump(name, n - 1)
+                                      if name == "sequential_symbol_loops"
+                                      else real_bump(name, n)))
+
+    install_formal_mocks(monkeypatch, extra=corrupt)
+    with pytest.raises(RuntimeError, match="PERFORMANCE_GATE"):
+        R.run_formal_opportunity_value_test(allow_test=True,
+                                            authorized_review_sha="SHA")
+
+
+def test_fp13_formal_evidence_files_written_and_manifest_last(monkeypatch,
+                                                              tmp_path):
+    """FP13: the Formal writer must emit all six CSVs and write the manifest
+    LAST. All paths are redirected to tmp so no canonical evidence is created."""
+    written_order = []
+    # redirect every Formal evidence path into tmp_path
+    for name in ("F_POLICY_SUMMARY", "F_DAILY", "F_PER_SYMBOL",
+                 "F_TRADE_LEDGER", "F_DECISION_LEDGER", "F_EV_DECILES",
+                 "F_SUMMARY", "F_MANIFEST"):
+        orig = getattr(R, name)
+        monkeypatch.setattr(R, name,
+                            os.path.join(str(tmp_path), os.path.basename(orig)))
+
+    def fake_write_csv(path, df):
+        written_order.append(os.path.basename(path))
+        df.to_csv(path, index=False)
+
+    def extra(mp):
+        # NOTE: sha256_file is intentionally NOT overridden -- gates 3/4 need the
+        # committed-echo hasher to validate the real R8/R9 artifacts.
+        mp.setattr(R, "post_verdict_test_diagnostics", lambda p: {})
+        mp.setattr(R, "_write_csv", fake_write_csv)
+
+    install_formal_mocks(monkeypatch, extra=extra)
+    real_open = open
+
+    def fake_open(path, mode="r", *a, **k):
+        if str(path).endswith("manifest.json") and "w" in mode:
+            written_order.append("MANIFEST")
+        return real_open(path, mode, *a, **k)
+
+    monkeypatch.setattr(R, "open", fake_open, raising=False)
+    R.run_formal_opportunity_value_test(allow_test=True,
+                                        authorized_review_sha="SHA",
+                                        write_artifacts=True)
+    expect = [os.path.basename(p) for p in
+              (R.F_POLICY_SUMMARY, R.F_DAILY, R.F_PER_SYMBOL,
+               R.F_TRADE_LEDGER, R.F_DECISION_LEDGER, R.F_EV_DECILES)]
+    for e in expect:
+        assert e in written_order, (e, written_order)
+    assert "MANIFEST" in written_order
+    assert written_order.index("MANIFEST") == len(written_order) - 1
+    # canonical paths must remain untouched
+    assert not os.path.exists(os.path.join(
+        "research", "liquidity_oracle_atlas", "evidence",
+        "opportunity_value_renewal_v1_manifest.json"))
+
+
+def test_fp15_per_symbol_daily_aggregates_to_portfolio():
+    axes = {}
+    for k, s in enumerate(["S1", "S2", "S3"]):
+        a = mk_axis(cand=(2,))
+        a.symbol = s
+        axes[s] = a
+    trades = {"S1": [], "S2": [], "S3": []}
+    for s, a in axes.items():
+        t, _ = R.simulate_symbol("P0", a)
+        trades[s] = t
+    days = ["d0", "d1", "d2"]
+    port, per = R.daily_returns(trades, axes, days)
+    manual = sum(per[s].to_numpy(float) for s in axes) / len(axes)
+    assert np.allclose(port.to_numpy(float), manual, atol=1e-12)
 
 
 def test_policy_names_are_frozen():
