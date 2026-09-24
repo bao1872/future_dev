@@ -273,3 +273,127 @@ def test_formal_runner_gated():
     with pytest.raises(RuntimeError):
         R10.run_formal_opportunity_value_test(
             allow_test=True, authorized_review_sha="x", write_artifacts=False)
+
+
+# --------------------------------------------------------------------------- #
+# F2 : terminal_no_valid_open is a CLOSE exit, not a next-OPEN exit            #
+# --------------------------------------------------------------------------- #
+def _single_root_axis(n=60, root=0):
+    """Axis with exactly ONE root candidate so a scenario yields one trade."""
+    ax = _blank_axis(n=n)
+    ax.candidate_at_decision[:] = False
+    ax.candidate_at_decision[root] = True
+    ax.e9_root_side[:] = 1                      # always LONG
+    # CLOSE must differ from OPEN, otherwise a next-OPEN mis-mark is invisible.
+    ax.close = np.linspace(100.0, 110.0, n) + 0.37
+    return ax
+
+
+def test_f2_terminal_no_valid_open_closes_at_event_close():
+    ax = _single_root_axis()
+    t, e, nxt = 0, 5, 6
+    ax.event_idx_long[t] = e
+    ax.renewal_fill_long[t] = nxt
+    # Hard segment change at the renewal fill => no valid next OPEN.
+    ax.segment[e] = 1
+    ax.segment[nxt] = 2
+
+    trades, _dec = R10.simulate_symbol("PN", ax)
+    assert len(trades) == 1
+    tr = trades[0]
+    assert tr.exit_reason == "terminal_no_valid_open"
+    assert tr.exit_idx == e
+    assert tr.exit_price == pytest.approx(float(ax.close[e]))
+
+
+def test_f2_terminal_no_valid_open_holds_event_bar_and_pnl_identity():
+    ax = _single_root_axis()
+    t, e, nxt = 0, 5, 6
+    ax.event_idx_long[t] = e
+    ax.renewal_fill_long[t] = nxt
+    ax.segment[e] = 1
+    ax.segment[nxt] = 2
+
+    trades, _dec = R10.simulate_symbol("PN", ax)
+    tr = trades[0]
+    # The event bar IS held (CLOSE exit).
+    assert tr.holding_bars == e - tr.fill_idx + 1
+    assert tr.fill_idx <= e <= tr.exit_idx
+
+    ret = R10.trade_return(tr)
+    pnl_sum = float(np.sum(R10.bar_pnl(tr, ax)))
+    assert abs(pnl_sum - ret) <= 1e-12
+
+
+def test_f2_pnl_identity_holds_for_every_exit_reason():
+    """sum(bar_pnl) == trade_return for all reachable exit reasons."""
+    reasons = {}
+
+    # terminal_no_valid_open
+    ax = _single_root_axis()
+    ax.event_idx_long[0] = 5
+    ax.renewal_fill_long[0] = 6
+    ax.segment[5] = 1
+    ax.segment[6] = 2
+    tr = R10.simulate_symbol("PN", ax)[0][0]
+    reasons[tr.exit_reason] = (R10.trade_return(tr), float(np.sum(R10.bar_pnl(tr, ax))))
+
+    # renewal_exit (both EVs <= 0)
+    ax = _single_root_axis()
+    ax.event_idx_long[0] = 5
+    ax.renewal_fill_long[0] = 6
+    _fill(ax, "evc", -1.0)
+    ax.evc[("td5", 1)][0] = 0.10               # entry gate stays positive
+    tr = R10.simulate_symbol("PN", ax)[0][0]
+    reasons[tr.exit_reason] = (R10.trade_return(tr), float(np.sum(R10.bar_pnl(tr, ax))))
+
+    # terminal_deadline
+    ax = _single_root_axis()
+    ax.event_idx_long[0] = -1
+    tr = R10.simulate_symbol("PN", ax)[0][0]
+    reasons[tr.exit_reason] = (R10.trade_return(tr), float(np.sum(R10.bar_pnl(tr, ax))))
+
+    assert set(reasons) == {
+        "terminal_no_valid_open", "renewal_exit", "terminal_deadline"}
+    for reason, (ret, s) in reasons.items():
+        assert abs(s - ret) <= 1e-12, f"identity broken for {reason}"
+
+
+# --------------------------------------------------------------------------- #
+# F3 : immutable entry decision vs advancing renewal epoch                     #
+# --------------------------------------------------------------------------- #
+def test_f3_hold_keeps_entry_decision_immutable():
+    ax = _single_root_axis()
+    ax.event_idx_long[0] = 5
+    ax.renewal_fill_long[0] = 6
+    ax.event_idx_long[5] = 10
+    ax.renewal_fill_long[5] = 11
+    ax.event_idx_long[10] = -1                  # -> terminal_deadline
+
+    trades, dec = R10.simulate_symbol("PN", ax)
+    assert len(trades) == 1
+    tr = trades[0]
+    # Renewal really progressed through both HOLD events ...
+    holds = [d for d in dec if d[0] == "HOLD"]
+    assert [d[1] for d in holds] == [5, 10]
+    # ... while the entry decision that CREATED the trade is untouched.
+    assert tr.decision_idx == 0
+    assert tr.epoch_decision_idx == 10
+
+
+def test_f3_reverse_opens_new_trade_at_reversal_decision():
+    ax = _single_root_axis()
+    ax.event_idx_long[0] = 5
+    ax.renewal_fill_long[0] = 6
+    # Opposite side strictly better at the renewal decision -> REVERSE.
+    ax.evc[("td5", -1)][5] = 0.90
+    ax.event_idx_short[5] = -1                  # new SHORT trade runs to deadline
+
+    trades, dec = R10.simulate_symbol("PN", ax)
+    assert [d[0] for d in dec].count("REVERSE") == 1
+    assert len(trades) == 2
+    first, second = trades
+    assert first.decision_idx == 0               # original LONG entry preserved
+    assert second.decision_idx == 5              # created by the reversal decision
+    assert second.epoch_decision_idx == 5
+    assert second.side == -1

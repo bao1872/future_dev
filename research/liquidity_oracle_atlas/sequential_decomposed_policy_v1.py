@@ -113,8 +113,13 @@ COUNTERS = {
     "post_verdict_test_label_reads": 0,
 }
 
+# F2: only genuine next-OPEN exits belong here.
+# `terminal_no_valid_open` closes at the EVENT bar's CLOSE (axis.close[e]), not
+# at the next bar's OPEN. Keeping it here made bar_pnl() mark the event bar to
+# OPEN, so sum(bar_pnl) != trade_return and daily PnL was corrupted whenever
+# that path occurred. It is a CLOSE exit, so the event bar is held.
 _NEXT_OPEN_EXIT_REASONS = (
-    "renewal_exit", "reversal_close", "terminal_no_valid_open")
+    "renewal_exit", "reversal_close")
 
 
 def _bump(name, n=1):
@@ -264,6 +269,10 @@ class Trade:
     exit_idx: Optional[int] = None
     exit_price: Optional[float] = None
     exit_reason: str = ""
+    # F3: `decision_idx` is IMMUTABLE — it is always the decision that CREATED
+    # this trade. `epoch_decision_idx` is the mutable renewal cursor: it starts
+    # equal to `decision_idx` and advances to the latest renewal decision on HOLD.
+    epoch_decision_idx: int = -1
 
 
 def open_trade(axis, decision_idx, side, deadline_idx):
@@ -271,7 +280,7 @@ def open_trade(axis, decision_idx, side, deadline_idx):
     return Trade(symbol=axis.symbol, side=side, decision_idx=decision_idx,
                  fill_idx=fill, entry_price=float(axis.open[fill]),
                  atr0=float(axis.atr[decision_idx]), deadline_idx=deadline_idx,
-                 scan_from=fill)
+                 scan_from=fill, epoch_decision_idx=decision_idx)
 
 
 def close_trade(trade, axis, exit_idx, exit_price, reason, trades, i):
@@ -393,7 +402,10 @@ def simulate_symbol(policy, axis, verbose=False):
             i = fill
 
         # ---- PN position management (renewal) ----
-        e, renewal_fill = lookup_precomputed_event(axis, trade.decision_idx, pos)
+        # F3: renewal progression is driven by the epoch cursor, never by the
+        # immutable entry decision.
+        e, renewal_fill = lookup_precomputed_event(
+            axis, trade.epoch_decision_idx, pos)
         deadline_cap = min(trade.deadline_idx, axis.n_bars - 1)
         if (e < 0 or e >= trade.deadline_idx or renewal_fill < 0
                 or renewal_fill > trade.deadline_idx):
@@ -432,7 +444,7 @@ def simulate_symbol(policy, axis, verbose=False):
             i = nxt
             continue
         # HOLD: exact tie (evc_opp == evc_cur > 0) also keeps current side.
-        trade.decision_idx = e
+        trade.epoch_decision_idx = e
         trade.scan_from = nxt
         decisions.append(("HOLD", e, pos, evc_cur))
         i = nxt
@@ -747,6 +759,85 @@ def predict_test(allow_test: bool = False, authorized_review_sha: Optional[str] 
 # and the frozen universe size must match this value.
 E9_FROZEN_UNIVERSE_ROWS = 13773
 
+# F1: (tag, pretest key, model subdir, schema-SHA key, upstream-feature-SHA key)
+_R9_BINDING_SPECS = (
+    ("R9A", "r9a", "win", "win33_schema_sha256", "win_features_sha256"),
+    ("R9B", "r9b", "payoff", "pay8_schema_sha256", "payoff_features_sha256"),
+)
+
+
+def _models_dir(sub: str, art_root: Optional[str] = None) -> str:
+    """Frozen R9 model directory (``sub`` = "win" or "payoff").
+
+    G21: when ``art_root`` is given the model tree is redirected there so a
+    mocked run never reads or writes the canonical bundle.
+    """
+    if art_root is None:
+        return os.path.join("artifacts", "decomposed_value_v1", "models", sub)
+    return os.path.join(art_root, "models", sub)
+
+
+def _r9_binding_fields(manifest: dict, schema_key: str, feature_key: str) -> dict:
+    """F1: the manifest subset that MUST equal the frozen PRE-TEST manifest."""
+    up = manifest.get("upstream", {}) or {}
+    return {
+        "task_id": manifest.get("task_id"),
+        "generator_code_sha": manifest.get("generator_code_sha"),
+        "feature_schema_sha256": manifest.get(schema_key),
+        "upstream_state_sha256": up.get("state_sha256"),
+        "upstream_feature_sha256": up.get(feature_key),
+        "labels_train_sha256": up.get("labels_train_sha256"),
+        "labels_val_sha256": up.get("labels_val_sha256"),
+        "model_sha256": manifest.get("model_sha256"),
+        "best_iteration": manifest.get("best_iteration"),
+        "model_count": manifest.get("model_count"),
+    }
+
+
+def verify_r9_pretest_binding(pre: dict, art_root: Optional[str] = None) -> dict:
+    """F1: three-layer binding of the frozen R9 model bundle.
+
+        PRE-TEST evidence -> local manifest -> model bytes
+
+    A locally self-consistent bundle (local manifest matching local files) that
+    differs from the committed PRE-TEST evidence is REJECTED.
+    """
+    audit = {}
+    for tag, key, sub, schema_key, feat_key in _R9_BINDING_SPECS:
+        stop = f"STOP_R10_{tag}_PRETEST_BINDING_MISMATCH"
+        pre_man = ((pre.get(key) or {}).get("model_manifest") or {})
+        if not pre_man:
+            raise RuntimeError(f"{stop} pretest_manifest_missing")
+        mdir = _models_dir(sub, art_root)
+        mp = os.path.join(mdir, "model_manifest.json")
+        if not os.path.exists(mp):
+            raise RuntimeError(f"STOP_R10_{tag}_MODEL_MANIFEST_MISSING")
+        with open(mp) as f:
+            loc_man = json.load(f)
+        want = _r9_binding_fields(pre_man, schema_key, feat_key)
+        got = _r9_binding_fields(loc_man, schema_key, feat_key)
+        for fname, w in want.items():
+            if got.get(fname) != w:
+                raise RuntimeError(
+                    f"{stop} field={fname} pretest={w!r} local={got.get(fname)!r}")
+        # Third layer: actual model bytes must equal the PRE-TEST frozen map.
+        frozen = pre_man.get("model_sha256") or {}
+        for name, want_sha in frozen.items():
+            p = os.path.join(mdir, name)
+            if not os.path.exists(p):
+                raise RuntimeError(f"{stop} model_missing {name}")
+            got_sha = sha256_file(p)
+            if got_sha != want_sha:
+                raise RuntimeError(
+                    f"{stop} model_bytes {name} pretest={want_sha} local={got_sha}")
+        audit[tag] = {
+            "model_dir": mdir,
+            "fields_verified": sorted(want),
+            "models_verified": {n: frozen[n] for n in sorted(frozen)},
+            "model_count": len(frozen),
+        }
+    return audit
+
 
 def run_formal_opportunity_value_test(allow_test: bool = False,
                                       authorized_review_sha: Optional[str] = None,
@@ -791,22 +882,11 @@ def run_formal_opportunity_value_test(allow_test: bool = False,
             raise RuntimeError(f"STOP_R10_R8_ARTIFACT_MISSING {name}")
         if sha256_file(p) != want:
             raise RuntimeError(f"STOP_R10_R8_ARTIFACT_SHA_MISMATCH {name}")
-    for mod, tag in ((R9A, "r9a_model_manifest"),
-                     (R9B, "r9b_model_manifest")):
-        mp = os.path.join("artifacts", "decomposed_value_v1", "models",
-                          ("win" if mod is R9A else "payoff"), "model_manifest.json")
-        if not os.path.exists(mp):
-            raise RuntimeError(f"STOP_R10_{tag.upper()}_MISSING")
-        with open(mp) as f:
-            mm = json.load(f)
-        for name, want in mm.get("model_sha256", {}).items():
-            p = os.path.join("artifacts", "decomposed_value_v1", "models",
-                             ("win" if mod is R9A else "payoff"), name)
-            # G13: every frozen R9 model MUST exist, then match SHA.
-            if not os.path.exists(p):
-                raise RuntimeError(f"STOP_R10_{tag.upper()}_MODEL_MISSING {name}")
-            if sha256_file(p) != want:
-                raise RuntimeError(f"STOP_R10_{tag.upper()}_MODEL_SHA_MISMATCH {name}")
+    # F1: PRE-TEST evidence -> local manifest -> model bytes (three layers).
+    # Runs BEFORE TEST state load / TEST prediction / direction-chain fit /
+    # strategy simulation, so a locally self-consistent but PRE-TEST-different
+    # bundle can never reach the simulation.
+    binding_audit = verify_r9_pretest_binding(pre, art_root=art_root)
 
     # Frozen split (used by E9 reproduction gate + downstream diagnostics).
     from research.liquidity_oracle_atlas.direction_null_baseline_v1 import (
@@ -905,7 +985,8 @@ def run_formal_opportunity_value_test(allow_test: bool = False,
     if write_artifacts:
         write_formal_evidence(result, trades_by_policy, decision_by_policy,
                               daily_by_policy, per_sym_rows, loso_rows, deciles,
-                              full, authorized_review_sha, gate, art_root=art_root)
+                              full, authorized_review_sha, gate, art_root=art_root,
+                              binding_audit=binding_audit)
     if verbose:
         print(json.dumps({k: v for k, v in result.items()
                           if k != "post_verdict_test_diagnostics"},
@@ -1195,7 +1276,8 @@ def _load_decision_ledger(trades_by_policy, decision_by_policy):
 
 def write_formal_evidence(result, trades_by_policy, decision_by_policy,
                           daily_by_policy, per_sym_rows, loso_rows, deciles,
-                          full, authorized_review_sha, gate, art_root=None):
+                          full, authorized_review_sha, gate, art_root=None,
+                          binding_audit=None):
     # G21: redirect every Formal artifact into art_root when mocking.
     paths = _formal_paths(art_root)
     fdir = paths["evidence_dir"]
@@ -1343,6 +1425,8 @@ def write_formal_evidence(result, trades_by_policy, decision_by_policy,
             "r9b_generator_code_sha": r9b_man.get("generator_code_sha"),
             "r9b_model_sha256": r9b_man.get("model_sha256"),
             "train_priors": R9C.compute_train_priors(),
+            # F1: proof that local models are bound to the PRE-TEST frozen map.
+            "r9_pretest_binding": binding_audit,
         },
         "artifact_sha256": art,
         "serialization_manifest_last": True,

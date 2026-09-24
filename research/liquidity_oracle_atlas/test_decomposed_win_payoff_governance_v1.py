@@ -214,3 +214,118 @@ def test_formal_paths_isolation():
     assert redir["evidence_dir"] == os.path.join(tmp, "evidence")
     assert redir["test_pred"] == os.path.join(tmp, "decomposed_predictions_test_v1.parquet")
     assert redir["e9_root"] == os.path.join(tmp, "e9_root_axis_v1.parquet")
+
+
+# --------------------------------------------------------------------------- #
+# F1 / F4 : PRE-TEST evidence -> local manifest -> model bytes binding          #
+# --------------------------------------------------------------------------- #
+def _real_manifest(sub):
+    with open(os.path.join(R10._models_dir(sub), "model_manifest.json")) as f:
+        return json.load(f)
+
+
+def _write_bundle(root, sub, manifest, contents):
+    """Write a model tree; returns (dir, {name: sha256})."""
+    d = os.path.join(str(root), "models", sub)
+    os.makedirs(d, exist_ok=True)
+    for name, data in contents.items():
+        with open(os.path.join(d, name), "w") as f:
+            f.write(data)
+    with open(os.path.join(d, "model_manifest.json"), "w") as f:
+        json.dump(manifest, f)
+    return d, {n: R10.sha256_file(os.path.join(d, n)) for n in contents}
+
+
+def _mock_pretest(tmp_path, pre_win, pre_pay):
+    """Redirect the formal runner at a temp PRE-TEST + empty R8 artifact set."""
+    dec = tmp_path / "dec"
+    dec.mkdir()
+    (dec / "r8_manifest_v1.json").write_text(json.dumps({"artifact_sha256": {}}))
+    ev = tmp_path / "pretest.json"
+    ev.write_text(json.dumps({
+        "r8_manifest": {"artifact_sha256": {}},
+        "r9a": {"model_manifest": pre_win},
+        "r9b": {"model_manifest": pre_pay},
+    }))
+    return dec, ev
+
+
+def test_f4_binding_rejects_self_consistent_local_bundle(monkeypatch, tmp_path):
+    """F4: local manifest + local files agree with each other but differ from
+    the frozen PRE-TEST bundle -> must hard-fail before any TEST work."""
+    pre_win = _real_manifest("win")
+    pre_pay = _real_manifest("payoff")
+    dec, ev = _mock_pretest(tmp_path, pre_win, pre_pay)
+
+    # Local side ("B"): every local file really hashes to its local manifest
+    # entry, so the pair is self-consistent, but it is NOT the frozen bundle.
+    names = sorted(pre_win["model_sha256"])
+    loc = json.loads(json.dumps(pre_win))
+    _d, local_sha = _write_bundle(
+        tmp_path / "art", "win", loc, {n: f"LOCAL-BYTES-{n}" for n in names})
+    loc["model_sha256"] = dict(local_sha)
+    with open(os.path.join(_d, "model_manifest.json"), "w") as f:
+        json.dump(loc, f)
+    # Sanity: the local pair really is self-consistent.
+    assert all(R10.sha256_file(os.path.join(_d, n)) == local_sha[n] for n in names)
+
+    monkeypatch.setattr(R10, "DEC_ARTIFACT_DIR", str(dec))
+    monkeypatch.setattr(R10, "PRETEST_SUMMARY_PATH", str(ev))
+    with pytest.raises(RuntimeError) as exc:
+        R10.run_formal_opportunity_value_test(
+            allow_test=True, authorized_review_sha=R10._git_head_sha(),
+            art_root=str(tmp_path / "art"))
+    assert "STOP_R10_R9A_PRETEST_BINDING_MISMATCH" in str(exc.value)
+    # Rejected BEFORE TEST state load / TEST prediction / simulation.
+    assert R10.COUNTERS["test_state_loads"] == 0
+    assert R10.COUNTERS["test_prediction_loads"] == 0
+
+
+def test_f4_binding_rejects_wrong_model_bytes(monkeypatch, tmp_path):
+    """F4: manifest matches PRE-TEST but the model bytes do not -> hard fail."""
+    pre_win = _real_manifest("win")
+    pre_pay = _real_manifest("payoff")
+    dec, ev = _mock_pretest(tmp_path, pre_win, pre_pay)
+
+    # Local manifest is IDENTICAL to PRE-TEST; only the bytes differ.
+    _write_bundle(tmp_path / "art", "win", json.loads(json.dumps(pre_win)),
+                  {n: f"WRONG-BYTES-{n}" for n in sorted(pre_win["model_sha256"])})
+
+    monkeypatch.setattr(R10, "DEC_ARTIFACT_DIR", str(dec))
+    monkeypatch.setattr(R10, "PRETEST_SUMMARY_PATH", str(ev))
+    with pytest.raises(RuntimeError) as exc:
+        R10.run_formal_opportunity_value_test(
+            allow_test=True, authorized_review_sha=R10._git_head_sha(),
+            art_root=str(tmp_path / "art"))
+    assert "STOP_R10_R9A_PRETEST_BINDING_MISMATCH" in str(exc.value)
+    assert "model_bytes" in str(exc.value)
+    assert R10.COUNTERS["test_state_loads"] == 0
+    assert R10.COUNTERS["test_prediction_loads"] == 0
+
+
+def test_f4_binding_accepts_identical_bundle(tmp_path):
+    """F4 positive control: a byte-identical bundle is accepted and audited."""
+    import shutil
+    art = tmp_path / "art"
+    for sub in ("win", "payoff"):
+        src = R10._models_dir(sub)
+        dst = os.path.join(str(art), "models", sub)
+        os.makedirs(dst, exist_ok=True)
+        for fn in os.listdir(src):
+            shutil.copy2(os.path.join(src, fn), os.path.join(dst, fn))
+    with open(R10.PRETEST_SUMMARY_PATH) as f:
+        pre = json.load(f)
+
+    audit = R10.verify_r9_pretest_binding(pre, art_root=str(art))
+    assert set(audit) == {"R9A", "R9B"}
+    assert audit["R9A"]["model_count"] == 3
+    assert audit["R9B"]["model_count"] == 6
+    assert sorted(audit["R9A"]["models_verified"]) == [
+        "td1_win.txt", "td3_win.txt", "td5_win.txt"]
+    assert sorted(audit["R9B"]["models_verified"]) == [
+        "td1_loss_mag.txt", "td1_win_mag.txt", "td3_loss_mag.txt",
+        "td3_win_mag.txt", "td5_loss_mag.txt", "td5_win_mag.txt"]
+    # The audit SHAs are exactly the PRE-TEST frozen ones.
+    for tag, key in (("R9A", "r9a"), ("R9B", "r9b")):
+        assert audit[tag]["models_verified"] == \
+            pre[key]["model_manifest"]["model_sha256"]
