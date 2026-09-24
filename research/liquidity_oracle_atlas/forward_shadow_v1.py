@@ -70,8 +70,15 @@ def sha256_file(path: str) -> str:
 def monitor_ingestion(*, symbols_present, feature_rows_by_symbol,
                       artifact_paths: Optional[dict] = None,
                       model_paths: Optional[dict] = None,
+                      expected_artifact_sha: Optional[dict] = None,
+                      expected_model_sha: Optional[dict] = None,
                       days_accumulated: int = 0) -> dict:
-    """§41 allowed checks ONLY. Never computes an outcome."""
+    """§41 allowed checks ONLY. Never computes an outcome.
+
+    P7: "the file exists" is NOT validation. When expected SHA maps are given
+    (from forward_lock_v1.json after Phase 7) every frozen artifact and model
+    must hash EQUAL to its frozen value; otherwise monitoring reports invalid.
+    """
     n_sym = len(set(symbols_present))
     features_complete = bool(feature_rows_by_symbol) and all(
         int(v) > 0 for v in feature_rows_by_symbol.values())
@@ -79,6 +86,30 @@ def monitor_ingestion(*, symbols_present, feature_rows_by_symbol,
               for k, v in (artifact_paths or {}).items()}
     model_hashes = {k: (sha256_file(v) if os.path.exists(v) else None)
                     for k, v in (model_paths or {}).items()}
+
+    def compare(actual: dict, expected: Optional[dict]):
+        if not expected:
+            return None, []
+        mismatched = sorted(
+            k for k, want in expected.items()
+            if actual.get(k) != want)
+        return (len(mismatched) == 0), mismatched
+
+    artifact_match, artifact_bad = compare(hashes, expected_artifact_sha)
+    model_match, model_bad = compare(model_hashes, expected_model_sha)
+
+    if expected_artifact_sha or expected_model_sha:
+        all_present = all(v is not None for v in hashes.values()) and all(
+            v is not None for v in model_hashes.values())
+        hashes_valid = bool(
+            all_present
+            and (artifact_match if expected_artifact_sha else True)
+            and (model_match if expected_model_sha else True))
+    else:
+        # No frozen expectations registered yet: presence is all we can assert.
+        hashes_valid = (all(v is not None for v in hashes.values())
+                        and all(v is not None for v in model_hashes.values()))
+
     return {
         "data_arrived": bool(n_sym) and features_complete,
         "n_symbols_present": n_sym,
@@ -86,8 +117,14 @@ def monitor_ingestion(*, symbols_present, feature_rows_by_symbol,
         "feature_computation_complete": features_complete,
         "artifact_sha256": hashes,
         "model_sha256": model_hashes,
-        "hashes_valid": all(v is not None for v in hashes.values())
-        and all(v is not None for v in model_hashes.values()),
+        "artifact_sha_match": artifact_match,
+        "model_sha_match": model_match,
+        "artifact_mismatch": artifact_bad,
+        "model_mismatch": model_bad,
+        "expected_artifact_sha": expected_artifact_sha,
+        "expected_model_sha": expected_model_sha,
+        "hashes_valid": hashes_valid,
+        "hashes_compared": bool(expected_artifact_sha or expected_model_sha),
         "days_accumulated": int(days_accumulated),
         "days_required": FORWARD_REQUIRED_DAYS,
         "lock_open": False,   # see assert_outcome_lock_open
