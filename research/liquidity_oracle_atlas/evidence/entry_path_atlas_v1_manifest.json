@@ -1,7 +1,7 @@
 {
   "task_id": "FUTURE-R5-M15-ENTRY-PATH-ATLAS-V1",
   "base_sha": "cb9261d4498d328e6dd8edca5d655eaf609b0611",
-  "reviewed_parent_sha": "f1f035fa0bc2ff16c92d15ff079dc0186d178baf",
+  "reviewed_parent_sha": "e77e46d279da0ca5ab30cc1dcd5f575598448b48",
   "stage": "pre_t2_implementation",
   "primary_endpoint": {
     "name": "delta_PS_curve_E9_15m",
@@ -75,7 +75,7 @@
     "never_stops_at_oracle_exit": true
   },
   "branch": "entry-path-atlas-v1",
-  "code_sha": "9653167fa249d01b4ae637d1a2905d1f9f9a884f",
+  "code_sha": "eb54472cfbfdcc11efc3f6aa6db83e1456c961be",
   "curve_kernel_differential": {
     "synthetic_rows": 40,
     "synthetic_final_mismatch": 0,
@@ -152,7 +152,7 @@
       "candidate_python_loop_count": 0,
       "hotloop_dataframe_concat_count": 0,
       "candidate_views_processed": 80,
-      "runtime_sec": 11.406942129135132
+      "runtime_sec": 8.386702060699463
     },
     "evidence_temp": {
       "row_metrics_parquet": "entry_path_row_metrics_v1.parquet",
@@ -435,5 +435,5 @@
     "Stop-Loss / Take-Profit experiments NOT run.",
     "A9-vs-E9 final system verdict reserved for downstream frozen ablation."
   ],
-  "runtime_sec": 22.504155158996582
+  "runtime_sec": 18.5184268951416
 }
