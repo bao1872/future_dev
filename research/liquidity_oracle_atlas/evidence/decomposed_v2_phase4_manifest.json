@@ -1,0 +1,61 @@
+{
+  "task": "FUTURE-R11-R14-V2-PHASE4-EVIDENCE-CLOSURE",
+  "stage": "TRAIN_ONLY_PHASE4_FROZEN",
+  "scientific_status": "NO_V2_MODEL_IMPROVEMENT",
+  "reviewed_parent_sha": "612294a5d32d5f02a34857cff966b4202c763e23",
+  "generator_code_sha": "a56e9c79b3f8fc452dacb367d5ffb4561733af27",
+  "artifact_sha256": {
+    "extended_state_manifest_v2.json": "0b0ecbdca6ae9da8eaf48bf7b9fca425ec010b9bd9fcec79f075855162724487",
+    "extended_causal_state_v2.parquet": "6e23bb35481b46806cdc885ec9d899f0861d368aa2e970a3a4762ac7741c1b44",
+    "dev_frame_v2.parquet": "2288609f2dd054106d86d58e326250d1a6b5bd2c81a3f9f88f56675f07d3c26a",
+    "decomposed_v2_stability_atlas.csv": "0d6f212163ed29f4815fc5e367e329a7efc5530b07635a2e0be4cc082f2de290",
+    "decomposed_v2_model_comparison.csv": "0cbc0e3e2d5a6ac00ed4f0cdb28a1323e379247c7dceb02c4ff4e1ff64e3aaef",
+    "decomposed_v2_feature_ablation.csv": "9355a93959f11880b72de6ff4edc0653fa12c019db00f6d90f62e0c1dfde178e",
+    "model_selection_train_only_v2.json": "559806def839be5d5a9c3a2777d09aae16e41da0a44677d959c3fb5102979d94"
+  },
+  "extended_state_generator_code_sha": "2eb2f7243c8bc1e1d1dd24101ebd8f9dac90f302",
+  "selection_generator_code_sha": "9a221cdc1f45b031f3f0e13f0860c6b6715391f6",
+  "unit_evidence": {
+    "r12_units": 60,
+    "r13_units": 75,
+    "total_units": 135,
+    "fits_per_unit": 6,
+    "total_model_fits": 810,
+    "missing_units": 0,
+    "duplicate_units": 0,
+    "inconsistent_units": 0,
+    "units_per_architecture": {
+      "A0_V1_DISJOINT": 15,
+      "A1_SHARE_TO_WIN": 15,
+      "A2_SHARE_TO_PAYOFF": 15,
+      "A3_SHARED_BOTH": 15,
+      "B0_SHARED41": 15,
+      "B1_PLUS_SPACE18": 15,
+      "B2_PLUS_PATH8": 15,
+      "B3_PLUS_VOL6": 15,
+      "B4_ALL": 15
+    },
+    "unit_identity_sha256": "f09128e5a88186695d222e8cc4c7e118f8a233968f953e70624bda264c548420"
+  },
+  "leakage": {
+    "old_test_label_reads": 0,
+    "old_test_policy_reads": 0,
+    "val_outcomes_read": false,
+    "selection_committed_clean": true
+  },
+  "scientific_interpretation": {
+    "primary_status": "NO_V2_MODEL_IMPROVEMENT",
+    "v2_selected": false,
+    "one_se_candidate": "B0_SHARED41",
+    "secondary_pre_val_challenger": "A1_SHARE_TO_WIN",
+    "a1_evidence": {
+      "a0_mean_ev_mse": 5.10942705,
+      "a1_mean_ev_mse": 5.0860147476,
+      "paired_point": -0.0168112145,
+      "paired_ci_95_low": -0.0638471305,
+      "paired_ci_95_high": 0.0231113744,
+      "status": "PROMISING_DEV_IMPROVEMENT"
+    },
+    "note": "A1 retained as secondary pre-VAL challenger; NOT promoted to SUPPORTED (paired 95% CI crosses zero)."
+  }
+}
