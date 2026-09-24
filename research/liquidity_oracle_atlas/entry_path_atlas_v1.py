@@ -100,7 +100,7 @@ EVIDENCE_DIR = os.path.join("research", "liquidity_oracle_atlas", "evidence")
 MANIFEST_JSON = os.path.join(EVIDENCE_DIR, "entry_path_atlas_v1_manifest.json")
 T1_5_ARCHIVE_JSON = os.path.join(EVIDENCE_DIR, "entry_path_atlas_v1_t1_5_manifest.json")
 STAGE_PRE_T2 = "pre_t2_implementation"
-REVIEWED_PARENT_PRE_T2 = "f1f035fa0bc2ff16c92d15ff079dc0186d178baf"
+REVIEWED_PARENT_PRE_T2 = "e77e46d279da0ca5ab30cc1dcd5f575598448b48"
 R4_ENV_DIR = os.path.join("artifacts", "candidate_gate_r4_m15_touch_nextbar_v1")
 R4_ENV_MANIFEST = os.path.join(R4_ENV_DIR, "r4_env_manifest.json")
 
@@ -2410,20 +2410,25 @@ def write_summary_json(path, summary):
 def check_full_population_gates(*, symbol_universe, n_candidates,
                                 n_unique_semantic_keys, semantic_key_duplicates,
                                 n_gids, oracle_long_gids, oracle_short_gids,
-                                a9_l2, e9_l2, l2_unique_keys,
+                                a9_l2, e9_l2, l2_unique_keys=None,
                                 availability_masks_identical,
                                 inferential_support_any,
                                 inferential_support_complete,
                                 env_provenance_records, counters=None,
+                                gid_weight_ok=True,
+                                oracle_gid_direction_constant=True,
+                                oracle_gid_disjoint=True,
+                                oracle_gid_union_full=True,
                                 expected_symbols=SYMBOLS):
-    """FG10: hard gates enforced only when the full 13773 population runs.
-
-    Implemented NOW; invoked by the authorized full run (not in PRE-T2).
+    """FG10/EG4-EG6: pre-write hard gates for the full 13773 population.
 
     FC6: we do NOT require every h to have inferential support. We require
     (a) at least one h has inferential support, and (b) every h MARKED as
     inferential_support true has B/B valid correct+wrong bootstrap replicates.
     Unsupported (late, descriptive) h must not fail the gate by itself.
+
+    ``l2_unique_keys`` is an OPTIONAL theoretical pre-check; the AUTHORITATIVE
+    L2 key verification is the post-write artifact gate (EG2).
     """
     # FG2: exact frozen symbol universe (order normalized).
     got = sorted(str(s) for s in symbol_universe)
@@ -2450,28 +2455,46 @@ def check_full_population_gates(*, symbol_universe, n_candidates,
         mism["a9_l2"] = a9_l2
     if e9_l2 != FROZEN_FULL_E9_L2_ROWS:
         mism["e9_l2"] = e9_l2
-    if l2_unique_keys != FROZEN_FULL_L2_ROWS:
-        mism["l2_unique_keys"] = (l2_unique_keys, FROZEN_FULL_L2_ROWS)
+    if l2_unique_keys is not None and l2_unique_keys != FROZEN_FULL_L2_ROWS:
+        mism["l2_unique_keys_theoretical"] = (l2_unique_keys, FROZEN_FULL_L2_ROWS)
     if not availability_masks_identical:
         mism["availability_masks"] = True
     if not inferential_support_any:
         mism["no_inferential_support"] = True
     if not inferential_support_complete:
         mism["incomplete_supported_h"] = True
-    # FG5: canonical environment provenance for all 15 symbols.
+    # EG5: per-gid sample_weight must sum to 1 on the base Candidate population.
+    if not gid_weight_ok:
+        mism["gid_weight_ok"] = False
+    # EG6: each gid has exactly one oracle_direction; LONG/SHORT disjoint & covering.
+    if not oracle_gid_direction_constant:
+        mism["oracle_gid_direction_constant"] = False
+    if not oracle_gid_disjoint:
+        mism["oracle_gid_disjoint"] = False
+    if not oracle_gid_union_full:
+        mism["oracle_gid_union_full"] = False
+    # EG4: canonical environment provenance must cover the EXACT frozen universe.
     recs = list(env_provenance_records or [])
-    if len(recs) != len(expected_symbols):
-        mism["env_provenance_count"] = (len(recs), len(expected_symbols))
+    rec_symbols = [str(r.get("symbol")) for r in recs]
+    if sorted(rec_symbols) != exp or len(set(rec_symbols)) != len(rec_symbols):
+        mism["env_provenance_universe"] = (sorted(rec_symbols), exp)
+    env_required = ("environment_contract_id", "cache_schema_version", "identity",
+                    "code_identity", "raw_sha256", "execution_frame_sha256",
+                    "sha256", "rows")
     for rec in recs:
         sym = rec.get("symbol")
         if rec.get("environment_contract_id") != ENV_CONTRACT_ID:
             mism[f"env_contract:{sym}"] = rec.get("environment_contract_id")
         if rec.get("max_bars") is not None:
             mism[f"env_max_bars:{sym}"] = rec.get("max_bars")
-        if not rec.get("execution_frame_sha256"):
-            mism[f"env_exec_frame_sha:{sym}"] = "missing"
-        if not rec.get("raw_sha256"):
-            mism[f"env_raw_sha:{sym}"] = "missing"
+        for k in env_required:
+            if not rec.get(k):
+                mism[f"env_{k}:{sym}"] = "missing"
+        try:
+            if int(rec.get("rows") or 0) <= 0:
+                mism[f"env_rows:{sym}"] = rec.get("rows")
+        except (TypeError, ValueError):
+            mism[f"env_rows:{sym}"] = rec.get("rows")
     if counters is not None:
         cexp = {"direction_chain_run_count": 1, "raw_exec_load_count": 15,
                 "path_scan_count": 15, "reference_call_count_production": 0,
@@ -2482,6 +2505,59 @@ def check_full_population_gates(*, symbol_universe, n_candidates,
                 mism[f"counter:{k}"] = (counters.get(k), v)
     if mism:
         raise RuntimeError(f"STOP_PATH_CURVE_FULL_POP_GATE {mism}")
+
+
+def verify_l2_artifact(path, frozen_semantic_keys):
+    """EG2: mechanically verify the WRITTEN L2 parquet keys (reads 2 columns only)."""
+    t = pq.read_table(path, columns=["semantic_key", "direction_system"])
+    sk = t.column("semantic_key").to_pandas()
+    ds = t.column("direction_system").to_pandas()
+    n = int(len(sk))
+    uniq = int(pd.MultiIndex.from_arrays([sk, ds]).nunique())
+    frozen = set(str(k) for k in frozen_semantic_keys)
+    rep = {
+        "l2_rows": n,
+        "l2_unique_keys": uniq,
+        "l2_duplicate_keys": int(n - uniq),
+        "a9_rows": int((ds == "A9").sum()),
+        "e9_rows": int((ds == "E9").sum()),
+        "semantic_key_unique_count": int(sk.nunique()),
+        "l2_unknown_semantic_key_rows": int((~sk.astype(str).isin(frozen)).sum()),
+    }
+    rep["pass"] = bool(
+        rep["l2_rows"] == FROZEN_FULL_L2_ROWS
+        and rep["l2_unique_keys"] == FROZEN_FULL_L2_ROWS
+        and rep["l2_duplicate_keys"] == 0
+        and rep["a9_rows"] == FROZEN_FULL_A9_L2_ROWS
+        and rep["e9_rows"] == FROZEN_FULL_E9_L2_ROWS
+        and rep["semantic_key_unique_count"] == FROZEN_FULL_CANDIDATE_ROWS
+        and rep["l2_unknown_semantic_key_rows"] == 0)
+    return rep
+
+
+def verify_curve_artifact(path, frozen_semantic_keys):
+    """EG3: mechanically verify the WRITTEN long-format curve parquet keys."""
+    t = pq.read_table(path, columns=["semantic_key", "direction_system", "h_bar"])
+    sk = t.column("semantic_key").to_pandas()
+    ds = t.column("direction_system").to_pandas()
+    hb = t.column("h_bar").to_pandas()
+    n = int(len(sk))
+    uniq = int(pd.MultiIndex.from_arrays([sk, ds, hb]).nunique())
+    frozen = set(str(k) for k in frozen_semantic_keys)
+    rep = {
+        "curve_rows": n,
+        "curve_unique_keys": uniq,
+        "curve_duplicate_keys": int(n - uniq),
+        "curve_invalid_system_rows": int((~ds.isin(["A9", "E9"])).sum()),
+        "curve_invalid_h_rows": int((hb < 1).sum()),
+        "curve_unknown_semantic_key_rows": int((~sk.astype(str).isin(frozen)).sum()),
+    }
+    rep["pass"] = bool(
+        rep["curve_duplicate_keys"] == 0
+        and rep["curve_invalid_system_rows"] == 0
+        and rep["curve_invalid_h_rows"] == 0
+        and rep["curve_unknown_semantic_key_rows"] == 0)
+    return rep
 
 
 def run_formal_t2(symbols=SYMBOLS, n_subset=None, write_artifacts=False,
@@ -2506,6 +2582,13 @@ def run_formal_t2(symbols=SYMBOLS, n_subset=None, write_artifacts=False,
         raise RuntimeError("STOP_FORMAL_T2_FULL_POPULATION_NOT_AUTHORIZED")
     if population == "full" and not authorized_review_sha:
         raise RuntimeError("STOP_FORMAL_T2_AUTHORIZED_REVIEW_SHA_REQUIRED")
+    if population == "full":
+        # EG1: the executing generator tree MUST be the approved tree.
+        head = _git_head_sha()
+        if head != authorized_review_sha:
+            raise RuntimeError(
+                f"STOP_FORMAL_T2_GENERATOR_SHA_MISMATCH head={head} "
+                f"authorized_review_sha={authorized_review_sha}")
     t_start = time.time()
     reset_counters()
     if verbose:
@@ -2841,7 +2924,7 @@ def run_formal_t2(symbols=SYMBOLS, n_subset=None, write_artifacts=False,
             "first_h_bar": int(np.flatnonzero(unsup)[0] + 1) if unsup.any() else None,
             "last_h_bar": int(np.flatnonzero(unsup)[-1] + 1) if unsup.any() else None,
         }
-        # ---- FG10: full hard gates (enforced only on the authorized full run) ----
+        # ---- FG10/EG4-EG6: full hard gates (authorized full run only) ----
         B = int(np.asarray(ps["reps"]).shape[0])
         support_complete = bool(
             sup.any()
@@ -2849,19 +2932,35 @@ def run_formal_t2(symbols=SYMBOLS, n_subset=None, write_artifacts=False,
             and np.all(np.asarray(ps["n_valid_wrong"])[sup] == B))
         sk_all = np.concatenate([s["base"]["semantic_key"] for s in sym_acc])
         n_unique_sk = int(len(np.unique(sk_all)))
-        oracle_long = int(len(np.unique(gid_all[oracle_dir_all == "LONG"])))
-        oracle_short = int(len(np.unique(gid_all[oracle_dir_all == "SHORT"])))
-        l2_unique = int(len({(str(k), ds) for k in sk_all for ds in ("A9", "E9")}))
+        frozen_keys = set(str(k) for k in np.unique(sk_all))
+        # EG6: each gid must have exactly ONE oracle_direction in {LONG, SHORT};
+        # LONG/SHORT gid sets disjoint and their union the full gid set.
+        oracle_gid_constant = True
+        for g in np.unique(gid_all):
+            dirs = set(str(d) for d in np.unique(oracle_dir_all[gid_all == g]))
+            if dirs != {"LONG"} and dirs != {"SHORT"}:
+                oracle_gid_constant = False
+                break
+        gid_long = set(np.unique(gid_all[oracle_dir_all == "LONG"]).tolist())
+        gid_short = set(np.unique(gid_all[oracle_dir_all == "SHORT"]).tolist())
+        gid_full = set(np.unique(gid_all).tolist())
+        oracle_gid_disjoint = len(gid_long & gid_short) == 0
+        oracle_gid_union_full = (gid_long | gid_short) == gid_full
+        oracle_long = int(len(gid_long))
+        oracle_short = int(len(gid_short))
         result["population_gates"] = {
             "symbol_universe": sorted(str(s["symbol"]) for s in sym_acc),
             "n_candidates": int(N_total),
             "n_unique_semantic_keys": n_unique_sk,
             "semantic_key_duplicates": int(N_total - n_unique_sk),
-            "n_gids": int(len(np.unique(gid_all))),
+            "n_gids": int(len(gid_full)),
             "oracle_long_gids": oracle_long,
             "oracle_short_gids": oracle_short,
+            "oracle_gid_direction_constant": bool(oracle_gid_constant),
+            "oracle_gid_disjoint": bool(oracle_gid_disjoint),
+            "oracle_gid_union_full": bool(oracle_gid_union_full),
             "a9_l2": int(N_total), "e9_l2": int(N_total),
-            "l2_unique_keys": l2_unique,
+            "gid_weight_ok": bool(per_system_gid_weight_ok),
             "availability_masks_identical": availability_masks_identical,
             "inferential_support_any": bool(sup.any()),
             "inferential_support_complete": support_complete,
@@ -2871,13 +2970,18 @@ def run_formal_t2(symbols=SYMBOLS, n_subset=None, write_artifacts=False,
             n_candidates=int(N_total),
             n_unique_semantic_keys=n_unique_sk,
             semantic_key_duplicates=int(N_total - n_unique_sk),
-            n_gids=int(len(np.unique(gid_all))),
+            n_gids=int(len(gid_full)),
             oracle_long_gids=oracle_long, oracle_short_gids=oracle_short,
-            a9_l2=int(N_total), e9_l2=int(N_total), l2_unique_keys=l2_unique,
+            a9_l2=int(N_total), e9_l2=int(N_total),
             availability_masks_identical=availability_masks_identical,
             inferential_support_any=bool(sup.any()),
             inferential_support_complete=support_complete,
-            env_provenance_records=env_records, counters=COUNTERS)
+            env_provenance_records=env_records, counters=COUNTERS,
+            gid_weight_ok=bool(per_system_gid_weight_ok),
+            oracle_gid_direction_constant=bool(oracle_gid_constant),
+            oracle_gid_disjoint=bool(oracle_gid_disjoint),
+            oracle_gid_union_full=bool(oracle_gid_union_full))
+        result["_frozen_semantic_keys"] = frozen_keys
 
     if write_artifacts:
         # FC14: small smoke -> temporary dir only; authorized full -> canonical paths
@@ -2899,6 +3003,37 @@ def run_formal_t2(symbols=SYMBOLS, n_subset=None, write_artifacts=False,
         write_curve_parquet(
             curve_parquet,
             (curve_chunk_from_dual(s["base"], s["dual"], s["symbol"]) for s in sym_acc))
+        # ---- EG2/EG3/EG7: post-write artifact key gates (before CSV/summary/manifest) ----
+        artifact_integrity_gates = {"all_pass": True}
+        if not smoke:
+            frozen_keys = result.get("_frozen_semantic_keys", set())
+            l2_gate = verify_l2_artifact(row_parquet, frozen_keys)
+            curve_gate = verify_curve_artifact(curve_parquet, frozen_keys)
+            if not l2_gate["pass"]:
+                raise RuntimeError(f"STOP_FORMAL_T2_L2_ARTIFACT_KEY_MISMATCH {l2_gate}")
+            if not curve_gate["pass"]:
+                raise RuntimeError(f"STOP_FORMAL_T2_CURVE_ARTIFACT_KEY_MISMATCH {curve_gate}")
+            pg = result.get("population_gates", {})
+            artifact_integrity_gates = {
+                "l2_rows": l2_gate["l2_rows"],
+                "l2_unique_keys": l2_gate["l2_unique_keys"],
+                "l2_duplicate_keys": l2_gate["l2_duplicate_keys"],
+                "a9_rows": l2_gate["a9_rows"], "e9_rows": l2_gate["e9_rows"],
+                "curve_rows": curve_gate["curve_rows"],
+                "curve_unique_keys": curve_gate["curve_unique_keys"],
+                "curve_duplicate_keys": curve_gate["curve_duplicate_keys"],
+                "curve_invalid_system_rows": curve_gate["curve_invalid_system_rows"],
+                "curve_invalid_h_rows": curve_gate["curve_invalid_h_rows"],
+                "curve_unknown_semantic_key_rows":
+                    curve_gate["curve_unknown_semantic_key_rows"],
+                "semantic_key_unique_count": l2_gate["semantic_key_unique_count"],
+                "gid_weight_ok": bool(pg.get("gid_weight_ok")),
+                "oracle_gid_direction_constant": bool(pg.get("oracle_gid_direction_constant")),
+                "oracle_long_gids": pg.get("oracle_long_gids"),
+                "oracle_short_gids": pg.get("oracle_short_gids"),
+                "environment_provenance_exact_universe": True,
+                "all_pass": bool(l2_gate["pass"] and curve_gate["pass"]),
+            }
         p_csv = os.path.join(ev_dir, "entry_path_atlas_v1_path_curves.csv")
         e_csv = os.path.join(ev_dir, "entry_path_atlas_v1_event_curves.csv")
         g_csv = os.path.join(ev_dir, "entry_path_atlas_v1_group_stats.csv")
@@ -2915,11 +3050,15 @@ def run_formal_t2(symbols=SYMBOLS, n_subset=None, write_artifacts=False,
             "n_candidates_total": result["n_candidates_total"],
             "H_global": result["H_global"],
             "per_system_gid_weight_ok": result["per_system_gid_weight_ok"],
+            "gid_weight_ok": bool(result.get("population_gates", {}).get(
+                "gid_weight_ok", result["per_system_gid_weight_ok"])),
             "availability_masks_identical": result["availability_masks_identical"],
             "pipeline_smoke_completed": result["pipeline_smoke_completed"],
             "evidence_flag": result["evidence_flag"],
             "verdict_e9": result.get("verdict_e9"),
             "unsupported_h": _clean(result.get("unsupported_h")),
+            "population_gates": _clean(result.get("population_gates")),
+            "artifact_integrity_gates": _clean(artifact_integrity_gates),
             "disagreement_counts": _clean(result["disagreement_counts"]),
             "performance": _clean(result["performance"]),
             "n_path_curve_rows": len(path_rows),
@@ -2935,11 +3074,16 @@ def run_formal_t2(symbols=SYMBOLS, n_subset=None, write_artifacts=False,
             "summary_json": s_json}
         artifact_shas = {k: _sha256_file(v) for k, v in artifact_paths.items()}
         if not smoke:
+            # EG7/EG9: manifest is written LAST and only when ALL artifact gates pass.
+            if not artifact_integrity_gates.get("all_pass", False):
+                raise RuntimeError("STOP_FORMAL_T2_ARTIFACT_INTEGRITY_GATE_FAILED")
             write_manifest(extra={
                 "stage": "formal_t2",
                 "authorized_review_sha": authorized_review_sha,
                 "generator_code_sha": _git_head_sha(),
-                "reviewed_parent_sha": REVIEWED_PARENT_PRE_T2,
+                # EG8: canonical Formal review identity == the approved execution tree.
+                "reviewed_parent_sha": authorized_review_sha,
+                "pre_t2_parent_sha": REVIEWED_PARENT_PRE_T2,
                 "bootstrap_seed": 20260924,
                 "bootstrap_B": int(np.asarray(e9_curves["PS"]["reps"]).shape[0]),
                 "simultaneous_band_method": "studentized max-|t| over inferential-support h",
@@ -2948,6 +3092,7 @@ def run_formal_t2(symbols=SYMBOLS, n_subset=None, write_artifacts=False,
                 "environment_provenance": env_records,
                 "environment_derived_sha256": env_diag,
                 "population_gates": _clean(result.get("population_gates")),
+                "artifact_integrity_gates": artifact_integrity_gates,
                 "peak_rss": int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss),
                 "counters": dict(COUNTERS),
                 "runtime_sec": float(perf["runtime_sec"]),
@@ -3009,7 +3154,7 @@ def run_pret2_checkpoint(verbose=True) -> dict:
     """PRE-T2 checkpoint: validate the 15m curve + event infrastructure on
     synthetic / small fixtures; do NOT estimate the full primary curve.
 
-    Produces the authoritative PRE-T2 manifest (reviewed parent = f1f035f).
+    Produces the authoritative PRE-T2 manifest (reviewed parent = e77e46d).
     """
     t_start = time.time()
     archive_t1_5_manifest()

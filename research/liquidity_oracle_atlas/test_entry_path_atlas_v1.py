@@ -1043,9 +1043,23 @@ def _valid_gate_kwargs():
         inferential_support_any=True, inferential_support_complete=True,
         env_provenance_records=[{"symbol": s,
                                  "environment_contract_id": M.ENV_CONTRACT_ID,
-                                 "max_bars": None, "execution_frame_sha256": "x",
-                                 "raw_sha256": "y"} for s in M.SYMBOLS],
+                                 "cache_schema_version": "v1", "identity": "id",
+                                 "code_identity": "code", "raw_sha256": "r",
+                                 "execution_frame_sha256": "e", "sha256": "s",
+                                 "rows": 1000, "max_bars": None} for s in M.SYMBOLS],
     )
+
+
+def _stub_artifact_gates(monkeypatch):
+    """Patch the post-write artifact gates for the mocked (1-symbol) full path."""
+    monkeypatch.setattr(M, "verify_l2_artifact", lambda path, keys: {
+        "l2_rows": 27546, "l2_unique_keys": 27546, "l2_duplicate_keys": 0,
+        "a9_rows": 13773, "e9_rows": 13773, "semantic_key_unique_count": 13773,
+        "l2_unknown_semantic_key_rows": 0, "pass": True})
+    monkeypatch.setattr(M, "verify_curve_artifact", lambda path, keys: {
+        "curve_rows": 1, "curve_unique_keys": 1, "curve_duplicate_keys": 0,
+        "curve_invalid_system_rows": 0, "curve_invalid_h_rows": 0,
+        "curve_unknown_semantic_key_rows": 0, "pass": True})
 
 
 def test_rc_t2_3_full_gate_fails_closed_on_incomplete_support():
@@ -1535,6 +1549,7 @@ def test_fc16_19_mocked_full_path_invokes_hard_gates(monkeypatch, tmp_path):
     seen = {}
     monkeypatch.setattr(M, "check_full_population_gates",
                         lambda **kw: seen.update(kw))
+    monkeypatch.setattr(M, "_git_head_sha", lambda: "TESTREVIEWSHA")
     monkeypatch.setattr(M, "ARTIFACT_DIR", str(tmp_path / "art"))
     monkeypatch.setattr(M, "EVIDENCE_DIR", str(tmp_path / "ev"))
     M.run_formal_t2(symbols=("AG",), n_subset=20, population="full",
@@ -1546,6 +1561,8 @@ def test_fc16_19_mocked_full_path_invokes_hard_gates(monkeypatch, tmp_path):
 
 def test_fc16_20_mocked_full_evidence_uses_canonical_dirs(monkeypatch, tmp_path):
     monkeypatch.setattr(M, "check_full_population_gates", lambda **kw: None)
+    monkeypatch.setattr(M, "_git_head_sha", lambda: "TESTREVIEWSHA")
+    _stub_artifact_gates(monkeypatch)
     art = tmp_path / "art"; ev = tmp_path / "ev"
     monkeypatch.setattr(M, "ARTIFACT_DIR", str(art))
     monkeypatch.setattr(M, "EVIDENCE_DIR", str(ev))
@@ -1562,6 +1579,8 @@ def test_fc16_20_mocked_full_evidence_uses_canonical_dirs(monkeypatch, tmp_path)
 
 def test_fc16_21_full_evidence_manifest_contains_artifact_sha(monkeypatch, tmp_path):
     monkeypatch.setattr(M, "check_full_population_gates", lambda **kw: None)
+    monkeypatch.setattr(M, "_git_head_sha", lambda: "TESTREVIEWSHA")
+    _stub_artifact_gates(monkeypatch)
     art = tmp_path / "art"; ev = tmp_path / "ev"
     monkeypatch.setattr(M, "ARTIFACT_DIR", str(art))
     monkeypatch.setattr(M, "EVIDENCE_DIR", str(ev))
@@ -1580,10 +1599,11 @@ def test_fc16_21_full_evidence_manifest_contains_artifact_sha(monkeypatch, tmp_p
         assert shas.get(k) and len(shas[k]) == 64
     for k in ("authorized_review_sha", "generator_code_sha", "reviewed_parent_sha",
               "bootstrap_seed", "bootstrap_B", "direction_artifact",
-              "environment_provenance", "population_gates", "peak_rss", "counters",
-              "verdict_e9", "unsupported_h"):
+              "environment_provenance", "population_gates", "artifact_integrity_gates",
+              "peak_rss", "counters", "verdict_e9", "unsupported_h"):
         assert k in man
     assert man["authorized_review_sha"] == "TESTREVIEWSHA"
+    assert man["artifact_integrity_gates"]["all_pass"] is True
 
 
 # =========================================================================== #
@@ -1680,3 +1700,135 @@ def test_fg9_pre_t2_schema_metadata_matches_writer_constants():
     assert sch["entry_path_atlas_v1_a9_e9_disagreement.csv"]["key"] == ["scope", "scope_value"]
     assert sch["entry_path_row_metrics_v1.parquet"]["columns"] == list(M.ROW_METRICS_COLUMNS)
     assert sch["entry_path_curve_v1.parquet"]["columns"] == list(M.CURVE_COLUMNS)
+
+
+# =========================================================================== #
+# EG1..EG10 final evidence-gate regressions                                    #
+# =========================================================================== #
+def test_eg1_generator_sha_mismatch_fails_full_run(monkeypatch):
+    monkeypatch.setattr(M, "_git_head_sha", lambda: "HEAD_AAA")
+    with pytest.raises(RuntimeError, match="GENERATOR_SHA_MISMATCH"):
+        M.run_formal_t2(symbols=("AG",), population="full", allow_full=True,
+                        authorized_review_sha="HEAD_BBB")
+
+
+def _l2_frame(n_keys=13773, dup=False):
+    sk = [f"sk{i}" for i in range(n_keys)]
+    df = pd.DataFrame({"semantic_key": sk + sk,
+                       "direction_system": ["A9"] * n_keys + ["E9"] * n_keys})
+    if dup:
+        df = pd.concat([df, df.iloc[[0]]], ignore_index=True)
+    return df
+
+
+def test_eg2_actual_l2_parquet_duplicate_key_fails(tmp_path):
+    p = tmp_path / "l2.parquet"
+    _l2_frame(dup=True).to_parquet(p, index=False)
+    rep = M.verify_l2_artifact(p, {f"sk{i}" for i in range(13773)})
+    assert rep["pass"] is False
+    assert rep["l2_duplicate_keys"] == 1
+
+
+def test_eg2_actual_l2_parquet_correct_structure_passes(tmp_path):
+    p = tmp_path / "l2.parquet"
+    _l2_frame().to_parquet(p, index=False)
+    rep = M.verify_l2_artifact(p, {f"sk{i}" for i in range(13773)})
+    assert rep["pass"] is True
+    assert rep["l2_rows"] == 27546 and rep["l2_unique_keys"] == 27546
+    assert rep["a9_rows"] == 13773 and rep["e9_rows"] == 13773
+
+
+def _curve_row(sk, ds, h):
+    return {"semantic_key": sk, "direction_system": ds, "h_bar": h}
+
+
+def _write_curve(tmp_path, rows):
+    p = tmp_path / "c.parquet"
+    pd.DataFrame(rows).to_parquet(p, index=False)
+    return p
+
+
+def test_eg3_curve_duplicate_key_fails(tmp_path):
+    p = _write_curve(tmp_path, [_curve_row("sk0", "A9", 1), _curve_row("sk0", "A9", 1)])
+    rep = M.verify_curve_artifact(p, {"sk0"})
+    assert rep["pass"] is False and rep["curve_duplicate_keys"] == 1
+
+
+def test_eg3_curve_unknown_semantic_key_fails(tmp_path):
+    p = _write_curve(tmp_path, [_curve_row("sk0", "A9", 1), _curve_row("ZZZ", "A9", 2)])
+    rep = M.verify_curve_artifact(p, {"sk0"})
+    assert rep["pass"] is False and rep["curve_unknown_semantic_key_rows"] == 1
+
+
+def test_eg3_curve_invalid_system_fails(tmp_path):
+    p = _write_curve(tmp_path, [_curve_row("sk0", "XX", 1)])
+    rep = M.verify_curve_artifact(p, {"sk0"})
+    assert rep["pass"] is False and rep["curve_invalid_system_rows"] == 1
+
+
+def test_eg3_curve_invalid_h_fails(tmp_path):
+    p = _write_curve(tmp_path, [_curve_row("sk0", "A9", 0)])
+    rep = M.verify_curve_artifact(p, {"sk0"})
+    assert rep["pass"] is False and rep["curve_invalid_h_rows"] == 1
+
+
+def test_eg4_env_provenance_duplicate_symbol_fails():
+    bad = _valid_gate_kwargs()
+    bad["env_provenance_records"][-1] = dict(bad["env_provenance_records"][0])
+    with pytest.raises(RuntimeError):
+        M.check_full_population_gates(**bad)
+
+
+def test_eg4_env_provenance_missing_symbol_fails():
+    bad = _valid_gate_kwargs()
+    bad["env_provenance_records"] = bad["env_provenance_records"][:14]
+    with pytest.raises(RuntimeError):
+        M.check_full_population_gates(**bad)
+
+
+def test_eg4_env_provenance_missing_required_field_fails():
+    bad = _valid_gate_kwargs()
+    del bad["env_provenance_records"][0]["code_identity"]
+    with pytest.raises(RuntimeError):
+        M.check_full_population_gates(**bad)
+
+
+def test_eg6_oracle_gid_direction_consistency_gate():
+    for k in ("oracle_gid_direction_constant", "oracle_gid_disjoint",
+              "oracle_gid_union_full"):
+        bad = _valid_gate_kwargs(); bad[k] = False
+        with pytest.raises(RuntimeError):
+            M.check_full_population_gates(**bad)
+
+
+def test_eg5_sample_weight_gid_sum_must_be_one():
+    bad = _valid_gate_kwargs(); bad["gid_weight_ok"] = False
+    with pytest.raises(RuntimeError):
+        M.check_full_population_gates(**bad)
+
+
+def test_eg7_8_9_13_14_formal_manifest_provenance_and_integrity(monkeypatch, tmp_path):
+    monkeypatch.setattr(M, "check_full_population_gates", lambda **kw: None)
+    monkeypatch.setattr(M, "_git_head_sha", lambda: "APPROVEDSHA")
+    _stub_artifact_gates(monkeypatch)
+    art = tmp_path / "art"; ev = tmp_path / "ev"
+    monkeypatch.setattr(M, "ARTIFACT_DIR", str(art))
+    monkeypatch.setattr(M, "EVIDENCE_DIR", str(ev))
+    M.run_formal_t2(symbols=("AG",), n_subset=20, population="full",
+                    allow_full=True, authorized_review_sha="APPROVEDSHA",
+                    write_artifacts=True, verbose=False)
+    with open(ev / "entry_path_atlas_v1_manifest.json") as f:
+        man = json.load(f)
+    assert man["reviewed_parent_sha"] == "APPROVEDSHA"
+    assert man["authorized_review_sha"] == "APPROVEDSHA"
+    assert man["generator_code_sha"] == "APPROVEDSHA"
+    assert man["pre_t2_parent_sha"] == M.REVIEWED_PARENT_PRE_T2
+    gates = man["artifact_integrity_gates"]
+    for k in ("l2_rows", "l2_unique_keys", "l2_duplicate_keys", "a9_rows", "e9_rows",
+              "curve_rows", "curve_unique_keys", "curve_duplicate_keys",
+              "curve_invalid_system_rows", "curve_invalid_h_rows",
+              "curve_unknown_semantic_key_rows", "semantic_key_unique_count",
+              "gid_weight_ok", "oracle_gid_direction_constant", "oracle_long_gids",
+              "oracle_short_gids", "environment_provenance_exact_universe", "all_pass"):
+        assert k in gates
+    assert gates["all_pass"] is True
