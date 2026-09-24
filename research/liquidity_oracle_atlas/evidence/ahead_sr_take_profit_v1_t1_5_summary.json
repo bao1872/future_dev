@@ -353,242 +353,842 @@
       {
         "symbol": "AG",
         "system": "A9",
-        "td1": 7,
-        "td3": 20,
-        "td5": 23,
-        "ok": true
+        "first_touch": {
+          "td1": 10,
+          "td3": 28,
+          "td5": 31
+        },
+        "first_touch_ok": true,
+        "accepted_breakout": {
+          "td1": 1,
+          "td3": 6,
+          "td5": 6
+        },
+        "accepted_breakout_ok": true,
+        "touch_not_profitable": {
+          "td1": 2,
+          "td3": 2,
+          "td5": 2
+        },
+        "touch_not_profitable_ok": true,
+        "tp_signal": {
+          "td1": 7,
+          "td3": 20,
+          "td5": 23
+        },
+        "tp_signal_ok": true
       },
       {
         "symbol": "AG",
         "system": "E9",
-        "td1": 8,
-        "td3": 20,
-        "td5": 23,
-        "ok": true
+        "first_touch": {
+          "td1": 11,
+          "td3": 28,
+          "td5": 31
+        },
+        "first_touch_ok": true,
+        "accepted_breakout": {
+          "td1": 1,
+          "td3": 6,
+          "td5": 6
+        },
+        "accepted_breakout_ok": true,
+        "touch_not_profitable": {
+          "td1": 2,
+          "td3": 2,
+          "td5": 2
+        },
+        "touch_not_profitable_ok": true,
+        "tp_signal": {
+          "td1": 8,
+          "td3": 20,
+          "td5": 23
+        },
+        "tp_signal_ok": true
       },
       {
         "symbol": "AL",
         "system": "A9",
-        "td1": 25,
-        "td3": 34,
-        "td5": 34,
-        "ok": true
+        "first_touch": {
+          "td1": 34,
+          "td3": 45,
+          "td5": 49
+        },
+        "first_touch_ok": true,
+        "accepted_breakout": {
+          "td1": 1,
+          "td3": 1,
+          "td5": 5
+        },
+        "accepted_breakout_ok": true,
+        "touch_not_profitable": {
+          "td1": 8,
+          "td3": 10,
+          "td5": 10
+        },
+        "touch_not_profitable_ok": true,
+        "tp_signal": {
+          "td1": 25,
+          "td3": 34,
+          "td5": 34
+        },
+        "tp_signal_ok": true
       },
       {
         "symbol": "AL",
         "system": "E9",
-        "td1": 25,
-        "td3": 31,
-        "td5": 31,
-        "ok": true
+        "first_touch": {
+          "td1": 34,
+          "td3": 43,
+          "td5": 49
+        },
+        "first_touch_ok": true,
+        "accepted_breakout": {
+          "td1": 1,
+          "td3": 2,
+          "td5": 8
+        },
+        "accepted_breakout_ok": true,
+        "touch_not_profitable": {
+          "td1": 8,
+          "td3": 10,
+          "td5": 10
+        },
+        "touch_not_profitable_ok": true,
+        "tp_signal": {
+          "td1": 25,
+          "td3": 31,
+          "td5": 31
+        },
+        "tp_signal_ok": true
       },
       {
         "symbol": "AU",
         "system": "A9",
-        "td1": 5,
-        "td3": 12,
-        "td5": 24,
-        "ok": true
+        "first_touch": {
+          "td1": 12,
+          "td3": 20,
+          "td5": 34
+        },
+        "first_touch_ok": true,
+        "accepted_breakout": {
+          "td1": 4,
+          "td3": 5,
+          "td5": 7
+        },
+        "accepted_breakout_ok": true,
+        "touch_not_profitable": {
+          "td1": 3,
+          "td3": 3,
+          "td5": 3
+        },
+        "touch_not_profitable_ok": true,
+        "tp_signal": {
+          "td1": 5,
+          "td3": 12,
+          "td5": 24
+        },
+        "tp_signal_ok": true
       },
       {
         "symbol": "AU",
         "system": "E9",
-        "td1": 5,
-        "td3": 14,
-        "td5": 26,
-        "ok": true
+        "first_touch": {
+          "td1": 10,
+          "td3": 20,
+          "td5": 34
+        },
+        "first_touch_ok": true,
+        "accepted_breakout": {
+          "td1": 3,
+          "td3": 4,
+          "td5": 6
+        },
+        "accepted_breakout_ok": true,
+        "touch_not_profitable": {
+          "td1": 2,
+          "td3": 2,
+          "td5": 2
+        },
+        "touch_not_profitable_ok": true,
+        "tp_signal": {
+          "td1": 5,
+          "td3": 14,
+          "td5": 26
+        },
+        "tp_signal_ok": true
       },
       {
         "symbol": "CF",
         "system": "A9",
-        "td1": 6,
-        "td3": 26,
-        "td5": 26,
-        "ok": true
+        "first_touch": {
+          "td1": 11,
+          "td3": 33,
+          "td5": 33
+        },
+        "first_touch_ok": true,
+        "accepted_breakout": {
+          "td1": 1,
+          "td3": 3,
+          "td5": 3
+        },
+        "accepted_breakout_ok": true,
+        "touch_not_profitable": {
+          "td1": 4,
+          "td3": 4,
+          "td5": 4
+        },
+        "touch_not_profitable_ok": true,
+        "tp_signal": {
+          "td1": 6,
+          "td3": 26,
+          "td5": 26
+        },
+        "tp_signal_ok": true
       },
       {
         "symbol": "CF",
         "system": "E9",
-        "td1": 4,
-        "td3": 25,
-        "td5": 25,
-        "ok": true
+        "first_touch": {
+          "td1": 8,
+          "td3": 34,
+          "td5": 35
+        },
+        "first_touch_ok": true,
+        "accepted_breakout": {
+          "td1": 0,
+          "td3": 3,
+          "td5": 4
+        },
+        "accepted_breakout_ok": true,
+        "touch_not_profitable": {
+          "td1": 4,
+          "td3": 6,
+          "td5": 6
+        },
+        "touch_not_profitable_ok": true,
+        "tp_signal": {
+          "td1": 4,
+          "td3": 25,
+          "td5": 25
+        },
+        "tp_signal_ok": true
       },
       {
         "symbol": "CU",
         "system": "A9",
-        "td1": 7,
-        "td3": 10,
-        "td5": 10,
-        "ok": true
+        "first_touch": {
+          "td1": 16,
+          "td3": 19,
+          "td5": 20
+        },
+        "first_touch_ok": true,
+        "accepted_breakout": {
+          "td1": 5,
+          "td3": 5,
+          "td5": 6
+        },
+        "accepted_breakout_ok": true,
+        "touch_not_profitable": {
+          "td1": 4,
+          "td3": 4,
+          "td5": 4
+        },
+        "touch_not_profitable_ok": true,
+        "tp_signal": {
+          "td1": 7,
+          "td3": 10,
+          "td5": 10
+        },
+        "tp_signal_ok": true
       },
       {
         "symbol": "CU",
         "system": "E9",
-        "td1": 7,
-        "td3": 10,
-        "td5": 10,
-        "ok": true
+        "first_touch": {
+          "td1": 16,
+          "td3": 19,
+          "td5": 20
+        },
+        "first_touch_ok": true,
+        "accepted_breakout": {
+          "td1": 5,
+          "td3": 5,
+          "td5": 6
+        },
+        "accepted_breakout_ok": true,
+        "touch_not_profitable": {
+          "td1": 4,
+          "td3": 4,
+          "td5": 4
+        },
+        "touch_not_profitable_ok": true,
+        "tp_signal": {
+          "td1": 7,
+          "td3": 10,
+          "td5": 10
+        },
+        "tp_signal_ok": true
       },
       {
         "symbol": "I",
         "system": "A9",
-        "td1": 7,
-        "td3": 12,
-        "td5": 12,
-        "ok": true
+        "first_touch": {
+          "td1": 20,
+          "td3": 36,
+          "td5": 37
+        },
+        "first_touch_ok": true,
+        "accepted_breakout": {
+          "td1": 11,
+          "td3": 22,
+          "td5": 22
+        },
+        "accepted_breakout_ok": true,
+        "touch_not_profitable": {
+          "td1": 2,
+          "td3": 2,
+          "td5": 3
+        },
+        "touch_not_profitable_ok": true,
+        "tp_signal": {
+          "td1": 7,
+          "td3": 12,
+          "td5": 12
+        },
+        "tp_signal_ok": true
       },
       {
         "symbol": "I",
         "system": "E9",
-        "td1": 6,
-        "td3": 13,
-        "td5": 13,
-        "ok": true
+        "first_touch": {
+          "td1": 16,
+          "td3": 34,
+          "td5": 35
+        },
+        "first_touch_ok": true,
+        "accepted_breakout": {
+          "td1": 8,
+          "td3": 19,
+          "td5": 19
+        },
+        "accepted_breakout_ok": true,
+        "touch_not_profitable": {
+          "td1": 2,
+          "td3": 2,
+          "td5": 3
+        },
+        "touch_not_profitable_ok": true,
+        "tp_signal": {
+          "td1": 6,
+          "td3": 13,
+          "td5": 13
+        },
+        "tp_signal_ok": true
       },
       {
         "symbol": "M",
         "system": "A9",
-        "td1": 17,
-        "td3": 26,
-        "td5": 26,
-        "ok": true
+        "first_touch": {
+          "td1": 21,
+          "td3": 30,
+          "td5": 30
+        },
+        "first_touch_ok": true,
+        "accepted_breakout": {
+          "td1": 1,
+          "td3": 1,
+          "td5": 1
+        },
+        "accepted_breakout_ok": true,
+        "touch_not_profitable": {
+          "td1": 3,
+          "td3": 3,
+          "td5": 3
+        },
+        "touch_not_profitable_ok": true,
+        "tp_signal": {
+          "td1": 17,
+          "td3": 26,
+          "td5": 26
+        },
+        "tp_signal_ok": true
       },
       {
         "symbol": "M",
         "system": "E9",
-        "td1": 18,
-        "td3": 27,
-        "td5": 27,
-        "ok": true
+        "first_touch": {
+          "td1": 23,
+          "td3": 32,
+          "td5": 32
+        },
+        "first_touch_ok": true,
+        "accepted_breakout": {
+          "td1": 2,
+          "td3": 2,
+          "td5": 2
+        },
+        "accepted_breakout_ok": true,
+        "touch_not_profitable": {
+          "td1": 3,
+          "td3": 3,
+          "td5": 3
+        },
+        "touch_not_profitable_ok": true,
+        "tp_signal": {
+          "td1": 18,
+          "td3": 27,
+          "td5": 27
+        },
+        "tp_signal_ok": true
       },
       {
         "symbol": "MA",
         "system": "A9",
-        "td1": 8,
-        "td3": 31,
-        "td5": 31,
-        "ok": true
+        "first_touch": {
+          "td1": 10,
+          "td3": 34,
+          "td5": 34
+        },
+        "first_touch_ok": true,
+        "accepted_breakout": {
+          "td1": 1,
+          "td3": 1,
+          "td5": 1
+        },
+        "accepted_breakout_ok": true,
+        "touch_not_profitable": {
+          "td1": 1,
+          "td3": 2,
+          "td5": 2
+        },
+        "touch_not_profitable_ok": true,
+        "tp_signal": {
+          "td1": 8,
+          "td3": 31,
+          "td5": 31
+        },
+        "tp_signal_ok": true
       },
       {
         "symbol": "MA",
         "system": "E9",
-        "td1": 12,
-        "td3": 27,
-        "td5": 27,
-        "ok": true
+        "first_touch": {
+          "td1": 13,
+          "td3": 29,
+          "td5": 29
+        },
+        "first_touch_ok": true,
+        "accepted_breakout": {
+          "td1": 0,
+          "td3": 0,
+          "td5": 0
+        },
+        "accepted_breakout_ok": true,
+        "touch_not_profitable": {
+          "td1": 1,
+          "td3": 2,
+          "td5": 2
+        },
+        "touch_not_profitable_ok": true,
+        "tp_signal": {
+          "td1": 12,
+          "td3": 27,
+          "td5": 27
+        },
+        "tp_signal_ok": true
       },
       {
         "symbol": "NI",
         "system": "A9",
-        "td1": 13,
-        "td3": 22,
-        "td5": 24,
-        "ok": true
+        "first_touch": {
+          "td1": 29,
+          "td3": 40,
+          "td5": 42
+        },
+        "first_touch_ok": true,
+        "accepted_breakout": {
+          "td1": 6,
+          "td3": 8,
+          "td5": 8
+        },
+        "accepted_breakout_ok": true,
+        "touch_not_profitable": {
+          "td1": 10,
+          "td3": 10,
+          "td5": 10
+        },
+        "touch_not_profitable_ok": true,
+        "tp_signal": {
+          "td1": 13,
+          "td3": 22,
+          "td5": 24
+        },
+        "tp_signal_ok": true
       },
       {
         "symbol": "NI",
         "system": "E9",
-        "td1": 14,
-        "td3": 22,
-        "td5": 24,
-        "ok": true
+        "first_touch": {
+          "td1": 30,
+          "td3": 40,
+          "td5": 42
+        },
+        "first_touch_ok": true,
+        "accepted_breakout": {
+          "td1": 5,
+          "td3": 6,
+          "td5": 6
+        },
+        "accepted_breakout_ok": true,
+        "touch_not_profitable": {
+          "td1": 11,
+          "td3": 12,
+          "td5": 12
+        },
+        "touch_not_profitable_ok": true,
+        "tp_signal": {
+          "td1": 14,
+          "td3": 22,
+          "td5": 24
+        },
+        "tp_signal_ok": true
       },
       {
         "symbol": "P",
         "system": "A9",
-        "td1": 15,
-        "td3": 26,
-        "td5": 26,
-        "ok": true
+        "first_touch": {
+          "td1": 23,
+          "td3": 35,
+          "td5": 35
+        },
+        "first_touch_ok": true,
+        "accepted_breakout": {
+          "td1": 8,
+          "td3": 9,
+          "td5": 9
+        },
+        "accepted_breakout_ok": true,
+        "touch_not_profitable": {
+          "td1": 0,
+          "td3": 0,
+          "td5": 0
+        },
+        "touch_not_profitable_ok": true,
+        "tp_signal": {
+          "td1": 15,
+          "td3": 26,
+          "td5": 26
+        },
+        "tp_signal_ok": true
       },
       {
         "symbol": "P",
         "system": "E9",
-        "td1": 20,
-        "td3": 31,
-        "td5": 31,
-        "ok": true
+        "first_touch": {
+          "td1": 28,
+          "td3": 40,
+          "td5": 40
+        },
+        "first_touch_ok": true,
+        "accepted_breakout": {
+          "td1": 8,
+          "td3": 9,
+          "td5": 9
+        },
+        "accepted_breakout_ok": true,
+        "touch_not_profitable": {
+          "td1": 0,
+          "td3": 0,
+          "td5": 0
+        },
+        "touch_not_profitable_ok": true,
+        "tp_signal": {
+          "td1": 20,
+          "td3": 31,
+          "td5": 31
+        },
+        "tp_signal_ok": true
       },
       {
         "symbol": "RB",
         "system": "A9",
-        "td1": 11,
-        "td3": 23,
-        "td5": 23,
-        "ok": true
+        "first_touch": {
+          "td1": 19,
+          "td3": 31,
+          "td5": 31
+        },
+        "first_touch_ok": true,
+        "accepted_breakout": {
+          "td1": 6,
+          "td3": 6,
+          "td5": 6
+        },
+        "accepted_breakout_ok": true,
+        "touch_not_profitable": {
+          "td1": 2,
+          "td3": 2,
+          "td5": 2
+        },
+        "touch_not_profitable_ok": true,
+        "tp_signal": {
+          "td1": 11,
+          "td3": 23,
+          "td5": 23
+        },
+        "tp_signal_ok": true
       },
       {
         "symbol": "RB",
         "system": "E9",
-        "td1": 11,
-        "td3": 19,
-        "td5": 19,
-        "ok": true
+        "first_touch": {
+          "td1": 19,
+          "td3": 27,
+          "td5": 27
+        },
+        "first_touch_ok": true,
+        "accepted_breakout": {
+          "td1": 5,
+          "td3": 5,
+          "td5": 5
+        },
+        "accepted_breakout_ok": true,
+        "touch_not_profitable": {
+          "td1": 3,
+          "td3": 3,
+          "td5": 3
+        },
+        "touch_not_profitable_ok": true,
+        "tp_signal": {
+          "td1": 11,
+          "td3": 19,
+          "td5": 19
+        },
+        "tp_signal_ok": true
       },
       {
         "symbol": "RU",
         "system": "A9",
-        "td1": 16,
-        "td3": 30,
-        "td5": 31,
-        "ok": true
+        "first_touch": {
+          "td1": 24,
+          "td3": 45,
+          "td5": 46
+        },
+        "first_touch_ok": true,
+        "accepted_breakout": {
+          "td1": 5,
+          "td3": 11,
+          "td5": 11
+        },
+        "accepted_breakout_ok": true,
+        "touch_not_profitable": {
+          "td1": 3,
+          "td3": 4,
+          "td5": 4
+        },
+        "touch_not_profitable_ok": true,
+        "tp_signal": {
+          "td1": 16,
+          "td3": 30,
+          "td5": 31
+        },
+        "tp_signal_ok": true
       },
       {
         "symbol": "RU",
         "system": "E9",
-        "td1": 16,
-        "td3": 31,
-        "td5": 32,
-        "ok": true
+        "first_touch": {
+          "td1": 25,
+          "td3": 43,
+          "td5": 44
+        },
+        "first_touch_ok": true,
+        "accepted_breakout": {
+          "td1": 5,
+          "td3": 5,
+          "td5": 5
+        },
+        "accepted_breakout_ok": true,
+        "touch_not_profitable": {
+          "td1": 4,
+          "td3": 7,
+          "td5": 7
+        },
+        "touch_not_profitable_ok": true,
+        "tp_signal": {
+          "td1": 16,
+          "td3": 31,
+          "td5": 32
+        },
+        "tp_signal_ok": true
       },
       {
         "symbol": "SC",
         "system": "A9",
-        "td1": 14,
-        "td3": 24,
-        "td5": 26,
-        "ok": true
+        "first_touch": {
+          "td1": 29,
+          "td3": 40,
+          "td5": 42
+        },
+        "first_touch_ok": true,
+        "accepted_breakout": {
+          "td1": 8,
+          "td3": 9,
+          "td5": 9
+        },
+        "accepted_breakout_ok": true,
+        "touch_not_profitable": {
+          "td1": 7,
+          "td3": 7,
+          "td5": 7
+        },
+        "touch_not_profitable_ok": true,
+        "tp_signal": {
+          "td1": 14,
+          "td3": 24,
+          "td5": 26
+        },
+        "tp_signal_ok": true
       },
       {
         "symbol": "SC",
         "system": "E9",
-        "td1": 19,
-        "td3": 28,
-        "td5": 28,
-        "ok": true
+        "first_touch": {
+          "td1": 34,
+          "td3": 43,
+          "td5": 43
+        },
+        "first_touch_ok": true,
+        "accepted_breakout": {
+          "td1": 2,
+          "td3": 2,
+          "td5": 2
+        },
+        "accepted_breakout_ok": true,
+        "touch_not_profitable": {
+          "td1": 13,
+          "td3": 13,
+          "td5": 13
+        },
+        "touch_not_profitable_ok": true,
+        "tp_signal": {
+          "td1": 19,
+          "td3": 28,
+          "td5": 28
+        },
+        "tp_signal_ok": true
       },
       {
         "symbol": "SN",
         "system": "A9",
-        "td1": 25,
-        "td3": 42,
-        "td5": 42,
-        "ok": true
+        "first_touch": {
+          "td1": 30,
+          "td3": 48,
+          "td5": 48
+        },
+        "first_touch_ok": true,
+        "accepted_breakout": {
+          "td1": 0,
+          "td3": 1,
+          "td5": 1
+        },
+        "accepted_breakout_ok": true,
+        "touch_not_profitable": {
+          "td1": 5,
+          "td3": 5,
+          "td5": 5
+        },
+        "touch_not_profitable_ok": true,
+        "tp_signal": {
+          "td1": 25,
+          "td3": 42,
+          "td5": 42
+        },
+        "tp_signal_ok": true
       },
       {
         "symbol": "SN",
         "system": "E9",
-        "td1": 25,
-        "td3": 41,
-        "td5": 42,
-        "ok": true
+        "first_touch": {
+          "td1": 30,
+          "td3": 46,
+          "td5": 47
+        },
+        "first_touch_ok": true,
+        "accepted_breakout": {
+          "td1": 0,
+          "td3": 0,
+          "td5": 0
+        },
+        "accepted_breakout_ok": true,
+        "touch_not_profitable": {
+          "td1": 5,
+          "td3": 5,
+          "td5": 5
+        },
+        "touch_not_profitable_ok": true,
+        "tp_signal": {
+          "td1": 25,
+          "td3": 41,
+          "td5": 42
+        },
+        "tp_signal_ok": true
       },
       {
         "symbol": "TA",
         "system": "A9",
-        "td1": 5,
-        "td3": 27,
-        "td5": 28,
-        "ok": true
+        "first_touch": {
+          "td1": 16,
+          "td3": 38,
+          "td5": 39
+        },
+        "first_touch_ok": true,
+        "accepted_breakout": {
+          "td1": 8,
+          "td3": 8,
+          "td5": 8
+        },
+        "accepted_breakout_ok": true,
+        "touch_not_profitable": {
+          "td1": 3,
+          "td3": 3,
+          "td5": 3
+        },
+        "touch_not_profitable_ok": true,
+        "tp_signal": {
+          "td1": 5,
+          "td3": 27,
+          "td5": 28
+        },
+        "tp_signal_ok": true
       },
       {
         "symbol": "TA",
         "system": "E9",
-        "td1": 3,
-        "td3": 28,
-        "td5": 29,
-        "ok": true
+        "first_touch": {
+          "td1": 12,
+          "td3": 37,
+          "td5": 38
+        },
+        "first_touch_ok": true,
+        "accepted_breakout": {
+          "td1": 6,
+          "td3": 6,
+          "td5": 6
+        },
+        "accepted_breakout_ok": true,
+        "touch_not_profitable": {
+          "td1": 3,
+          "td3": 3,
+          "td5": 3
+        },
+        "touch_not_profitable_ok": true,
+        "tp_signal": {
+          "td1": 3,
+          "td3": 28,
+          "td5": 29
+        },
+        "tp_signal_ok": true
       }
     ]
   },
@@ -749,9 +1349,9 @@
       "delta_wrong_gross_n_rows": 209,
       "delta_wrong_gross_n_gids": 39,
       "tp_eligible_rate": 0.8000063882195674,
-      "first_touch_rate": 0.6474561906747421,
-      "first_touch_accepted_breakout_rate": 0.17856625642389032,
-      "first_touch_not_profitable_rate": 0.06835427853514499,
+      "first_touch_rate": 0.3694150825053474,
+      "first_touch_accepted_breakout_rate": 0.13237425184534216,
+      "first_touch_not_profitable_rate": 0.06685177240098719,
       "tp_signal_rate": 0.1701890582590181,
       "tp_executable_rate": 0.15935627201134592,
       "tp_hit_rate_correct": 0.1695777808588006,
@@ -795,9 +1395,9 @@
       "delta_wrong_gross_n_rows": 209,
       "delta_wrong_gross_n_gids": 39,
       "tp_eligible_rate": 0.8000063882195674,
-      "first_touch_rate": 0.6474561906747421,
-      "first_touch_accepted_breakout_rate": 0.17856625642389032,
-      "first_touch_not_profitable_rate": 0.06835427853514499,
+      "first_touch_rate": 0.6086919585742265,
+      "first_touch_accepted_breakout_rate": 0.17389903254184955,
+      "first_touch_not_profitable_rate": 0.06824446343957136,
       "tp_signal_rate": 0.3665484625928056,
       "tp_executable_rate": 0.3665484625928056,
       "tp_hit_rate_correct": 0.3734828151598893,
@@ -887,9 +1487,9 @@
       "delta_wrong_gross_n_rows": 291,
       "delta_wrong_gross_n_gids": 40,
       "tp_eligible_rate": 0.8021922315505091,
-      "first_touch_rate": 0.6797865692634193,
-      "first_touch_accepted_breakout_rate": 0.16703969848750566,
-      "first_touch_not_profitable_rate": 0.11883642156150875,
+      "first_touch_rate": 0.34046523571557347,
+      "first_touch_accepted_breakout_rate": 0.12118681430644167,
+      "first_touch_not_profitable_rate": 0.08577468254009131,
       "tp_signal_rate": 0.13350373886904043,
       "tp_executable_rate": 0.12267095262136826,
       "tp_hit_rate_correct": 0.14899270611784685,
@@ -933,9 +1533,9 @@
       "delta_wrong_gross_n_rows": 291,
       "delta_wrong_gross_n_gids": 40,
       "tp_eligible_rate": 0.8021922315505091,
-      "first_touch_rate": 0.6797865692634193,
-      "first_touch_accepted_breakout_rate": 0.16703969848750566,
-      "first_touch_not_profitable_rate": 0.11883642156150875,
+      "first_touch_rate": 0.640079915372873,
+      "first_touch_accepted_breakout_rate": 0.16081600340601845,
+      "first_touch_not_profitable_rate": 0.11872660646593512,
       "tp_signal_rate": 0.3605373055009195,
       "tp_executable_rate": 0.3605373055009195,
       "tp_hit_rate_correct": 0.4266180988024755,
@@ -1002,7 +1602,7 @@
     "reference_calls": 30,
     "r6_policy_verifications": 1,
     "production_candidate_views": 3000,
-    "runtime_sec": 33.341025829315186
+    "runtime_sec": 37.49102306365967
   },
   "cost_governance": {
     "cost_metadata_status": "UNAVAILABLE_COST_METADATA",

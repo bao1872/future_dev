@@ -2,8 +2,8 @@
   "task_id": "FUTURE-R7-M15-AHEAD-SR-NONACCEPTANCE-TP-V1",
   "stage": "t1_5_integration",
   "base_sha": "273be9d514259d2a7a585cc27b0531f6f51476d7",
-  "reviewed_parent_sha": "273be9d514259d2a7a585cc27b0531f6f51476d7",
-  "generator_code_sha": "4a179abeaf63204294adefde824941c652de1356",
+  "reviewed_parent_sha": "f28f02948efc52d91da8d6196c8e9fbabeab5b2a",
+  "generator_code_sha": "f82268b21f08187ecb66975fdae8346eca21939a",
   "frozen_inputs_sha256": {
     "artifacts/entry_path_atlas_v1/entry_path_row_metrics_v1.parquet": "110d5990fd9b3bc17aca65a92eb172e0de088635e89c364428b8c9bfccf94d04",
     "research/liquidity_oracle_atlas/evidence/structural_stop_v1_manifest.json": "85c60fa975bb7cf77ce1613f716b0652a751b8d659a352bfcf2ca63e5147179c",
@@ -52,14 +52,14 @@
     "reference_calls": 30,
     "r6_policy_verifications": 1,
     "production_candidate_views": 3000,
-    "runtime_sec": 33.341025829315186
+    "runtime_sec": 37.49102306365967
   },
   "artifact_sha256": {
-    "ahead_sr_take_profit_v1_t1_5_primary.csv": "97e4249d9d07fea895f0ac45a2cc7a20aa2529c33c5288e3f425eb93ea2f6a02",
-    "ahead_sr_take_profit_v1_t1_5_side_stats.csv": "da3db967be1d886a0268a1a1bd766ea4e9c870ab4a05e4f30c298bc3e0c7ad8d",
+    "ahead_sr_take_profit_v1_t1_5_primary.csv": "847ccd4b0ed56eec49f483ee410e24b8cc049b67f9227bb27bdd92574bb8c0e4",
+    "ahead_sr_take_profit_v1_t1_5_side_stats.csv": "127ee063b9a6a534f8be863630a7e25e7d68f7cfd1b570d95f05ebae3366de91",
     "ahead_sr_take_profit_v1_t1_5_group_stats.csv": "9badb7ec64f39081f696b07e0a41330060ba4b91520f7088d7cab84ee107c4dd",
-    "ahead_sr_take_profit_v1_t1_5_events.csv": "24e94b2f113212732f400eb7890278794f4861e75da098664444808eb389154e",
-    "ahead_sr_take_profit_v1_t1_5_summary.json": "bb36acc6993ac18dc4bddcd9c0931e9390d8afd6c03b4b7dfd2014229d13fc50"
+    "ahead_sr_take_profit_v1_t1_5_events.csv": "c8589c44facf3453e6ff8448b18f2ad6a574069f9289fd2379d223923875b6ea",
+    "ahead_sr_take_profit_v1_t1_5_summary.json": "e1e0581c7ecf73b46be9d86f9262e3b00697945a872c514ff69491a0f1853551"
   },
   "serialization_manifest_last": true,
   "authorized_review_sha_note": "R7 PRE-T2 authorized under FUTURE-R6/R7 Amendment A1 (GROSS primary, NO_STRUCTURAL_STOP downstream)."
