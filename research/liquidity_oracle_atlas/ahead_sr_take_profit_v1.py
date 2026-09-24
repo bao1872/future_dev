@@ -62,7 +62,9 @@ from research.liquidity_oracle_atlas.structural_stop_v1 import (
 TASK_ID = "FUTURE-R7-M15-AHEAD-SR-NONACCEPTANCE-TP-V1"
 # Lineage is explicit at BOTH levels.
 BASE_SHA = "273be9d514259d2a7a585cc27b0531f6f51476d7"
-REVIEWED_PARENT = "273be9d514259d2a7a585cc27b0531f6f51476d7"
+# RC-R7-14: reviewed_parent_sha is the immediate reviewed R7 parent
+# (f28f029 = the PRE-T2 T1.5 evidence that this patch corrects).
+REVIEWED_PARENT = "f28f02948efc52d91da8d6196c8e9fbabeab5b2a"
 
 ARTIFACT_DIR = os.path.join("artifacts", "ahead_sr_take_profit_v1")
 EVIDENCE_DIR = os.path.join("research", "liquidity_oracle_atlas", "evidence")
@@ -298,17 +300,43 @@ def production_tp_signal_step(touch_step, cross_step, side, entry_idx,
     }
 
 
-def signal_level_reason(eligible, touch, accepted_same_bar, profitable, signal):
-    """Horizon-independent terminal classification of the FIRST encounter (§7)."""
-    touch = np.asarray(touch, np.int64)
-    r = np.full(len(touch), "", dtype=object)
+def signal_level_reason(eligible, touch_observed, accepted, profitable, signal):
+    """Terminal classification of the FIRST encounter, for ONE observation window.
+
+    RC-R7-1/RC-R7-3: `touch_observed` / `accepted` / `profitable` must already be
+    HORIZON-CENSORED. A first touch occurring after Baseline_H exit is not
+    observed at H, so such a row is classified `no_touch` at H -- never
+    `accepted_breakout` and never `touch_not_profitable`.
+    """
+    touch_observed = np.asarray(touch_observed, bool)
+    eligible = np.asarray(eligible, bool)
+    accepted = np.asarray(accepted, bool)
+    profitable = np.asarray(profitable, bool)
+    signal = np.asarray(signal, bool)
+    r = np.full(len(touch_observed), "", dtype=object)
     r[~eligible] = "not_eligible"
-    r[eligible & (touch < 0)] = "no_touch"
-    r[accepted_same_bar] = "accepted_breakout"
-    r[~accepted_same_bar & (touch >= 0) & eligible & ~profitable] = \
+    r[eligible & ~touch_observed] = "no_touch"
+    r[eligible & touch_observed & accepted] = "accepted_breakout"
+    r[eligible & touch_observed & ~accepted & ~profitable] = \
         "touch_not_profitable"
-    r[signal] = "tp_signal"
+    r[eligible & touch_observed & ~accepted & profitable & signal] = "tp_signal"
     return r
+
+
+def horizon_censor(frozen_touch, frozen_cross, exit_step):
+    """RC-R7-1: horizon-causal view of the frozen first-encounter event steps.
+
+    touch_observed_H = (frozen_touch >= 0) AND (frozen_touch <= exit_step_H)
+    cross_observed_H = (frozen_cross >= 0) AND (frozen_cross <= exit_step_H)
+
+    A first touch that occurs AFTER Baseline_H exit is invisible in the H row.
+    """
+    frozen_touch = np.asarray(frozen_touch, np.int64)
+    frozen_cross = np.asarray(frozen_cross, np.int64)
+    exit_step = np.asarray(exit_step, np.int64)
+    touch_observed = (frozen_touch >= 0) & (frozen_touch <= exit_step)
+    cross_observed = (frozen_cross >= 0) & (frozen_cross <= exit_step)
+    return touch_observed, cross_observed
 
 
 # --------------------------------------------------------------------------- #
@@ -525,6 +553,7 @@ ROW_COLUMNS = [
     "first_touch_accepted_breakout",
     "tp_signal_observed", "tp_signal_step", "tp_signal_time",
     "r_touch_close", "mfe_at_first_ahead_sr", "mfe_final",
+    "first_encounter_class_global_audit",
     "tp_executable", "tp_fill_step", "tp_fill_time", "tp_fill_open",
     "tp_gross_return_atr", "paired_delta_gross_atr",
     "saved_giveback_atr", "lost_continuation_atr",
@@ -595,17 +624,36 @@ def treatment_rows_for_symbol(df_l2, st, direction_system):
     bst_np = bst.to_numpy("datetime64[ns]")
     n_bars = case["n_bars"]
 
-    sig_reason0 = signal_level_reason(
-        prod["tp_eligible"], prod["first_touch_step"],
-        prod["accepted_same_bar"], prod["profitable_at_touch"],
-        prod["signal_step"] >= 0)
+    eligible = prod["tp_eligible"]
+    frozen_touch = np.asarray(prod["first_touch_step"], np.int64)
+    frozen_cross = np.asarray(prod["first_cross_step"], np.int64)
+    r_close_global = prod["r_touch_close"]
+    mfe_touch_global = sub["mfe_at_first_ahead_sr"].to_numpy(float)
 
-    touch_step_i = prod["first_touch_step"]
+    # RC-R7-3: the five-day global classification is retained ONLY as an
+    # explicitly AUDIT_ONLY column; it never drives a horizon row's reason.
+    global_audit = signal_level_reason(
+        eligible, frozen_touch >= 0, prod["accepted_same_bar"],
+        prod["profitable_at_touch"], prod["signal_step"] >= 0)
 
     frames = []
     for H in HORIZONS:
         m = prod["per_h"][H]
         exit_step = m["exit_step"].astype(np.int64)
+
+        # ---- RC-R7-1: horizon-causal first-encounter view ----
+        touch_obs, cross_obs = horizon_censor(frozen_touch, frozen_cross,
+                                              exit_step)
+        touch_step_H = np.where(touch_obs, frozen_touch, -1).astype(np.int64)
+        cross_step_H = np.where(cross_obs, frozen_cross, -1).astype(np.int64)
+        accepted_H = touch_obs & (frozen_cross == frozen_touch)
+        r_close_H = np.where(touch_obs, r_close_global, np.nan)
+        mfe_touch_H = np.where(touch_obs, mfe_touch_global, np.nan)
+        profitable_H = (touch_obs & np.isfinite(r_close_H)
+                        & (r_close_H > 0.0))
+        signal_H = prod["signal_step"] >= 0
+        sig_reason0 = signal_level_reason(
+            eligible, touch_obs, accepted_H, profitable_H, signal_H)
         # §11: baseline exit price is the ACTUAL canonical frame close.
         safe_exit = np.clip(case["entry_idx"] + exit_step, 0, n_bars - 1)
         base_close = case["close"][safe_exit]
@@ -625,7 +673,7 @@ def treatment_rows_for_symbol(df_l2, st, direction_system):
         delta = tp_ret - base_r
 
         sig_idx = np.where(m["signal_observed"],
-                           case["entry_idx"] + touch_step_i, -1)
+                           case["entry_idx"] + touch_step_H, -1)
         safe_sig = np.clip(sig_idx, 0, n_bars - 1)
         sig_time = np.where(m["signal_observed"], decision_time[safe_sig],
                             np.datetime64("NaT", "ns"))
@@ -643,7 +691,7 @@ def treatment_rows_for_symbol(df_l2, st, direction_system):
 
         liq_touch = sub["first_ahead_liq_touch"].to_numpy(np.int64)
         liq_cross = sub["first_ahead_liq_cross"].to_numpy(np.int64)
-        tp_sig_step = np.where(m["signal_observed"], touch_step_i, -1)
+        tp_sig_step = np.where(m["signal_observed"], touch_step_H, -1)
 
         rec = pd.DataFrame({
             "semantic_key": sub["semantic_key"].to_numpy(object),
@@ -661,16 +709,20 @@ def treatment_rows_for_symbol(df_l2, st, direction_system):
             "baseline_exit_price": base_close,
             "baseline_gross_return_atr": base_r,
             "tp_eligible": prod["tp_eligible"],
-            "first_ahead_sr_touch_step": touch_step_i.astype(np.int64),
-            "first_ahead_sr_cross_step": prod["first_cross_step"].astype(np.int64),
-            "first_touch_accepted_breakout": prod["accepted_same_bar"],
+            "first_ahead_sr_touch_step": touch_step_H,
+            "first_ahead_sr_cross_step": cross_step_H,
+            "first_touch_accepted_breakout": accepted_H,
             "tp_signal_observed": m["signal_observed"],
             "tp_signal_step": tp_sig_step.astype(np.int64),
             "tp_signal_time": sig_time,
-            "r_touch_close": prod["r_touch_close"],
-            "mfe_at_first_ahead_sr":
-                sub["mfe_at_first_ahead_sr"].to_numpy(float),
+            "r_touch_close": r_close_H,
+            "mfe_at_first_ahead_sr": mfe_touch_H,
+            # RC-R7-13: `mfe_final` is a retrospective TD5/path outcome carried
+            # ONLY for the pre-registered RemainingMFE descriptive. AUDIT ONLY.
             "mfe_final": sub["mfe_final"].to_numpy(float),
+            # RC-R7-3: five-day global classification, AUDIT ONLY, never used by
+            # the horizon-specific reason `tp_reason` or by any H-specific rate.
+            "first_encounter_class_global_audit": global_audit,
             "tp_executable": m["executable"],
             "tp_fill_step": m["fill_step"].astype(np.int64),
             "tp_fill_time": fill_time.astype("datetime64[ns]"),
@@ -1080,6 +1132,15 @@ def formal_verdict(primary_row, side_rows):
 # --------------------------------------------------------------------------- #
 T1_5_PER_SYMBOL = 50
 
+# RC-R7-8 / RC-R7-12: the four horizon-causal first-encounter incidence series.
+# Each consumes ONLY horizon-censored columns.
+CAUSAL_SERIES = (
+    ("first_touch", lambda q: q["first_ahead_sr_touch_step"].to_numpy(np.int64) >= 0),
+    ("accepted_breakout", lambda q: q["first_touch_accepted_breakout"].to_numpy(bool)),
+    ("touch_not_profitable", lambda q: _not_profitable_mask(q)),
+    ("tp_signal", lambda q: q["tp_signal_observed"].to_numpy(bool)),
+)
+
 
 def _perf_counters(t_start):
     perf = dict(COUNTERS)
@@ -1123,17 +1184,26 @@ def run_t1_5(verbose=True):
                              "systems_sharing_frame": sorted(sym_diff.keys())})
     big = pd.concat(all_rows, ignore_index=True)
 
-    # horizon causality (§9): TD1 signal count <= TD3 <= TD5, per symbol/system.
+    # RC-R7-8: horizon-causal incidence monotonicity. Every first-encounter
+    # series must satisfy TD1 <= TD3 <= TD5 per symbol x system. With the
+    # horizon censor in place, a touch occurring after Baseline_H contributes
+    # ZERO to the H-specific incidence.
     causality = []
     caus_ok = True
     for sym in sorted(big.symbol.unique()):
         for ds in ("A9", "E9"):
-            c = {H: int(big[(big.symbol == sym) & (big.direction_system == ds)
+            rec = {"symbol": sym, "system": ds}
+            for name, fn in CAUSAL_SERIES:
+                c = {}
+                for H in HORIZONS:
+                    q = big[(big.symbol == sym) & (big.direction_system == ds)
                             & (big.evaluation_horizon == H)]
-                        ["tp_signal_observed"].sum()) for H in HORIZONS}
-            ok = bool(c["td1"] <= c["td3"] <= c["td5"])
-            caus_ok = caus_ok and ok
-            causality.append({"symbol": sym, "system": ds, **c, "ok": ok})
+                    c[H] = int(np.asarray(fn(q)).sum()) if len(q) else 0
+                ok = bool(c["td1"] <= c["td3"] <= c["td5"])
+                caus_ok = caus_ok and ok
+                rec[name] = c
+                rec[f"{name}_ok"] = ok
+            causality.append(rec)
 
     primary = []
     for ds in ("A9", "E9"):
@@ -1247,7 +1317,8 @@ FORMAL_SUMMARY = SUMMARY_JSON
 FROZEN_FORMAL = {"symbols": 15, "semantic_keys": 13773, "gids": 638,
                  "long_gids": 319, "short_gids": 319,
                  "base_rows": 27546, "base_per_system": 13773,
-                 "rows_per_system": 41319, "total_rows": 82638}
+                 "horizon_rows": 27546, "rows_per_system": 41319,
+                 "total_rows": 82638}
 
 PERF_EXPECTED = {"r5_l2_loads": 1, "execution_frame_loads": 15,
                  "direction_reruns": 0, "sr_recompute_count": 0,
@@ -1335,9 +1406,59 @@ def _base_l2_population_gates(l2):
 
 
 def _formal_population_gates(l2, big=None):
+    """BASE frozen-input gate (§37): R5 L2 identity + per-system gid weights.
+
+    RC-R7-10: this is the BASE gate only. The generated 82638-row R7 treatment
+    frame is verified separately by `_generated_population_gate`.
+    """
     mism = {}
     mism.update(_base_l2_population_gates(l2))
     mism.update(_per_system_gid_weight_mismatches(l2))
+    return mism
+
+
+def _generated_population_gate(big):
+    """RC-R7-9: pre-write gate on the IN-MEMORY generated Formal R7 frame.
+
+    The canonical parquet writer must NOT be called when this fails.
+    """
+    mism = {}
+    n = int(len(big))
+    if n != FROZEN_FORMAL["total_rows"]:
+        mism["rows"] = n
+    nk = int(big.semantic_key.nunique())
+    if nk != FROZEN_FORMAL["semantic_keys"]:
+        mism["semantic_keys"] = nk
+    bad_sys = sorted(set(str(s) for s in big.direction_system.unique())
+                     - {"A9", "E9"})
+    if bad_sys:
+        mism["direction_system_values"] = bad_sys
+    bad_h = sorted(set(str(h) for h in big.evaluation_horizon.unique())
+                   - set(HORIZONS))
+    if bad_h:
+        mism["evaluation_horizon_values"] = bad_h
+    for ds in ("A9", "E9"):
+        c = int((big.direction_system == ds).sum())
+        if c != FROZEN_FORMAL["rows_per_system"]:
+            mism[f"{ds}_rows"] = c
+    for H in HORIZONS:
+        c = int((big.evaluation_horizon == H).sum())
+        if c != FROZEN_FORMAL["horizon_rows"]:
+            mism[f"{H}_rows"] = c
+    keycols = ["semantic_key", "direction_system", "evaluation_horizon"]
+    uq = int(big[keycols].drop_duplicates().shape[0])
+    if uq != FROZEN_FORMAL["total_rows"]:
+        mism["unique_keys"] = uq
+    if n - uq != 0:
+        mism["duplicate_keys"] = int(n - uq)
+    combo = (big["semantic_key"].astype(str) + "|"
+             + big["direction_system"].astype(str) + "|"
+             + big["evaluation_horizon"].astype(str))
+    if int(combo.nunique()) != FROZEN_FORMAL["total_rows"]:
+        mism["unique_system_horizon_keys"] = int(combo.nunique())
+    per = big.groupby("semantic_key").size()
+    if not bool((per == 6).all()):
+        mism["rows_per_semantic_key"] = int((per != 6).sum())
     return mism
 
 
@@ -1423,18 +1544,20 @@ def run_formal_r7(*, allow_full=False, authorized_review_sha=None,
                   write_artifacts=True, verbose=False):
     """§37/§38: frozen Formal R7 path behind an explicit authorization gate.
 
-    Frozen ordering:
-      1. verify authorized SHA
-      2. verify frozen inputs + R6 downstream policy
-      3. compute full Production rows
-      4. population gates
-      5. performance gates
-      6. ONLY if both PASS: write canonical Formal parquet
-      7. mechanically verify the written parquet
-      8. compute Formal statistics / evidence
-      9. write Formal evidence files (canonical, FULL population)
-     10. compute SHA256 of every Formal artifact
-     11. write Formal manifest LAST
+    Frozen ordering (RC-R7-11):
+      1. authorized SHA
+      2. frozen artifact SHA
+      3. R6 downstream-policy verification
+      4. R5 base L2 gate                      <-- base_population_gates
+      5. compute all R7 production rows
+      6. generated-population gate            <-- generated_population_gates
+      7. environment-provenance gate
+      8. performance gate
+      9. canonical parquet write              <-- only reachable if 4/6/7/8 PASS
+     10. actual parquet key verification
+     11. Formal statistics / evidence
+     12. artifact SHA256
+     13. Formal manifest LAST
     """
     if allow_full is not True:
         raise RuntimeError("STOP_R7_FULL_POPULATION_NOT_AUTHORIZED")
@@ -1449,10 +1572,18 @@ def run_formal_r7(*, allow_full=False, authorized_review_sha=None,
             f"authorized_review_sha={authorized_review_sha}")
     t_start = time.time()
     reset_counters()
-    frozen = verify_frozen_inputs()
-    policy = verify_r6_downstream_policy()
+    frozen = verify_frozen_inputs()            # 2
+    policy = verify_r6_downstream_policy()     # 3
     l2 = load_r5_l2()
 
+    # 4: BASE gate on the frozen R5 L2, before ANY R7 row is generated.
+    base_mismatch = _formal_population_gates(l2)
+    gid_weight_report = _per_system_gid_weight_gate(l2)
+    if base_mismatch:
+        raise RuntimeError(
+            f"STOP_R7_FORMAL_BASE_POPULATION_GATE {base_mismatch}")
+
+    # 5: compute all R7 production rows.
     all_rows = []
     states = []
     for sym in SYMBOLS:
@@ -1468,20 +1599,32 @@ def run_formal_r7(*, allow_full=False, authorized_review_sha=None,
     big = pd.concat(all_rows, ignore_index=True)
     frozen_keys = set(l2.semantic_key.astype(str).unique())
 
-    pop_mismatch = _formal_population_gates(l2, big)
-    gid_weight_report = _per_system_gid_weight_gate(l2)
+    # 6: generated-population gate (in-memory, PRE-WRITE).
+    gen_mismatch = _generated_population_gate(big)
+    # 7: environment provenance gate.
     env_records = _env_provenance_records(states)
     env_mismatch = _env_provenance_gate(env_records)
+    # 8: performance gate.
     perf = _perf_counters(t_start)
     perf_mismatch = {k: (perf[k], v) for k, v in PERF_EXPECTED.items()
                      if perf.get(k) != v}
-    if pop_mismatch:
-        raise RuntimeError(f"STOP_R7_FORMAL_POPULATION_GATE {pop_mismatch}")
-    if perf_mismatch:
-        raise RuntimeError(f"STOP_R7_FORMAL_PERFORMANCE_GATE {perf_mismatch}")
+    if gen_mismatch:
+        raise RuntimeError(
+            f"STOP_R7_FORMAL_GENERATED_POPULATION_GATE {gen_mismatch}")
     if env_mismatch:
         raise RuntimeError(
             f"STOP_R7_FORMAL_ENVIRONMENT_PROVENANCE_GATE {env_mismatch}")
+    if perf_mismatch:
+        raise RuntimeError(f"STOP_R7_FORMAL_PERFORMANCE_GATE {perf_mismatch}")
+
+    base_gates = {"pass": not base_mismatch, "mismatch": base_mismatch,
+                  "gid_weight": gid_weight_report}
+    gen_gates = {"pass": not gen_mismatch, "mismatch": gen_mismatch,
+                 "expected": {"rows": FROZEN_FORMAL["total_rows"],
+                              "semantic_keys": FROZEN_FORMAL["semantic_keys"],
+                              "a9_rows": FROZEN_FORMAL["rows_per_system"],
+                              "e9_rows": FROZEN_FORMAL["rows_per_system"],
+                              "horizon_rows": FROZEN_FORMAL["horizon_rows"]}}
 
     _write_formal_artifact(big, FORMAL_ARTIFACT)
     artifact_report = _verify_formal_artifact(FORMAL_ARTIFACT, frozen_keys)
@@ -1517,8 +1660,9 @@ def run_formal_r7(*, allow_full=False, authorized_review_sha=None,
         "primary_row": primary_row, "side_rows": side_rows,
         "tp_diagnostics": diag,
         "downstream_policy": policy,
-        "population_gates": {"pass": not pop_mismatch, "mismatch": pop_mismatch,
-                             "gid_weight": gid_weight_report},
+        # RC-R7-10: base and generated gates are persisted SEPARATELY.
+        "base_population_gates": base_gates,
+        "generated_population_gates": gen_gates,
         "performance_gates": {"pass": not perf_mismatch,
                               "mismatch": perf_mismatch,
                               "expected": PERF_EXPECTED},
@@ -1552,7 +1696,8 @@ def run_formal_r7(*, allow_full=False, authorized_review_sha=None,
         "generator_code_sha": head, "reviewed_parent_sha": head,
         "population": "full", "n_horizon_rows": int(len(big)),
         "frozen_inputs_sha256": frozen,
-        "population_gates": summary["population_gates"],
+        "base_population_gates": base_gates,
+        "generated_population_gates": gen_gates,
         "performance_gates": summary["performance_gates"],
         "artifact_integrity_gates": artifact_report,
         "environment_provenance_gates": summary["environment_provenance_gates"],
@@ -1562,8 +1707,10 @@ def run_formal_r7(*, allow_full=False, authorized_review_sha=None,
         "cost_governance": summary["cost_governance"],
         "artifact_sha256": art_shas,
         "serialization_manifest_last": True,
-        "all_pass": bool(not pop_mismatch and not perf_mismatch
-                         and not env_mismatch and artifact_report.get("pass")),
+        # RC-R7-10: Formal acceptance requires BOTH population gates.
+        "all_pass": bool(base_gates["pass"] and gen_gates["pass"]
+                         and not perf_mismatch and not env_mismatch
+                         and artifact_report.get("pass")),
     }
     write_json(FORMAL_MANIFEST, manifest)   # written LAST
     if verbose:
