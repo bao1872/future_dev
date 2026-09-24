@@ -96,8 +96,9 @@ R4_ENV_DIR = os.path.join("artifacts", "candidate_gate_r4_m15_touch_nextbar_v1")
 R4_ENV_MANIFEST = os.path.join(R4_ENV_DIR, "r4_env_manifest.json")
 
 AUDIT_ONLY_FIELDS = (
-    "direction_correct", "oracle_direction", "oracle_entry_quality_atr",
-    "e9_teacher_exit_return_atr", "oracle_exit_fill_time",
+    "direction_correct", "e9_direction_correct", "a9_direction_correct",
+    "oracle_direction", "oracle_entry_quality_atr",
+    "e9_teacher_exit_return_atr", "a9_teacher_exit_return_atr", "oracle_exit_fill_time",
     "final_mfe", "final_mae",
 )
 FORBIDDEN_REALTIME_FEATURE = "FORBIDDEN_REALTIME_FEATURE"
@@ -108,7 +109,7 @@ COUNTER_NAMES = (
     "raw_exec_load_count", "direction_chain_run_count", "atr_precompute_count",
     "sr_liq_precompute_count", "full_history_recompute_count",
     "reference_call_count_production", "candidate_python_loop_count",
-    "hotloop_dataframe_concat_count", "path_step_count",
+    "hotloop_dataframe_concat_count", "path_step_count", "path_scan_count",
 )
 COUNTERS = {k: 0 for k in COUNTER_NAMES}
 
@@ -162,6 +163,18 @@ def _git_head_sha() -> str:
     return "UNKNOWN"
 
 
+def _arr_eq(a, b):
+    """NaN-aware array equality: equal shapes, equal finite masks, equal finite values."""
+    a = np.asarray(a)
+    b = np.asarray(b)
+    if a.shape != b.shape:
+        return False
+    fa, fb = np.isfinite(a), np.isfinite(b)
+    if not np.array_equal(fa, fb):
+        return False
+    return np.array_equal(a[fa], b[fb])
+
+
 def build_semantic_key(df: pd.DataFrame) -> np.ndarray:
     parts = [df[c].astype(str) for c in SEMANTIC_KEY_FIELDS]
     out = parts[0]
@@ -206,6 +219,19 @@ def materialize_e9_direction_state(save: bool = True, verbose: bool = True):
     if e9.size != n_rows:
         raise RuntimeError("STOP_PATH_ATLAS_E9_SHAPE_MISMATCH")
 
+    # A9 := frozen direct DTP9 router (A). Naming only; the upstream chain already
+    # freezes A == router_te. We assert it hard so a silent divergence fails closed.
+    a9 = np.asarray(chain["A"], dtype=np.uint8)
+    if a9.size != n_rows:
+        raise RuntimeError("STOP_PATH_ATLAS_A9_SHAPE_MISMATCH")
+    if not np.array_equal(a9, np.asarray(chain["router_te"], dtype=np.uint8)):
+        raise RuntimeError(
+            "STOP_PATH_ATLAS_A9_ROUTER_MISMATCH "
+            "(frozen router A must equal router_te exactly)")
+    a9_p_long = np.asarray(chain["A_p"], dtype=np.float64)
+    # router_p_long is a DISTINCT probability artifact (chain['p_te']); it must NOT
+    # be substituted for a9_p_long even though the hard labels agree.
+
     sub = ds.iloc[test_idx]
     df = pd.DataFrame({
         "semantic_key": build_semantic_key(sub),
@@ -218,6 +244,11 @@ def materialize_e9_direction_state(save: bool = True, verbose: bool = True):
         "candidate_fill_time": sub["candidate_fill_time"].to_numpy(object),
         "candidate_fill_price": sub["candidate_fill_price"].to_numpy(np.float64),
         "sample_weight_raw": data.w[test_idx],
+        # A9 (frozen DTP9 router) direction-state artifact
+        "a9_direction": np.where(a9 == 1, "LONG", "SHORT"),
+        "a9_side": np.where(a9 == 1, 1.0, -1.0),
+        "a9_p_long": a9_p_long,
+        # E9 (gated experts) direction-state artifact
         "e9_direction": np.where(e9 == 1, "LONG", "SHORT"),
         "e9_side": np.where(e9 == 1, 1.0, -1.0),
         "router_direction": np.where(router == 1, "LONG", "SHORT"),
@@ -227,11 +258,18 @@ def materialize_e9_direction_state(save: bool = True, verbose: bool = True):
         "oracle_entry_quality_atr": sub["entry_quality_atr"].to_numpy(np.float64),
         "oracle_exit_fill_time": sub["oracle_exit_fill_time"].to_numpy(object),
     })
-    df["direction_correct"] = (
+    df["e9_direction_correct"] = (
         df["e9_direction"].to_numpy(object)
         == df["oracle_direction"].to_numpy(object)).astype(np.uint8)
+    df["a9_direction_correct"] = (
+        df["a9_direction"].to_numpy(object)
+        == df["oracle_direction"].to_numpy(object)).astype(np.uint8)
+    df["direction_correct"] = df["e9_direction_correct"]  # legacy alias
     df["e9_teacher_exit_return_atr"] = np.where(
-        df["direction_correct"].to_numpy() == 1,
+        df["e9_direction_correct"].to_numpy() == 1,
+        df["oracle_entry_quality_atr"], -df["oracle_entry_quality_atr"])
+    df["a9_teacher_exit_return_atr"] = np.where(
+        df["a9_direction_correct"].to_numpy() == 1,
         df["oracle_entry_quality_atr"], -df["oracle_entry_quality_atr"])
     if not df["semantic_key"].is_unique:
         raise RuntimeError("STOP_PATH_ATLAS_SEMANTIC_KEY_NOT_UNIQUE")
@@ -399,20 +437,51 @@ def extract_zone_geometry(geom, n_bars, close, sr_sup_ref, sr_res_ref,
                 audit=audit)
 
 
+def _normalize_max_bars(mb):
+    """The R4 env manifest stores max_bars as the string 'None' for a full run."""
+    if mb is None:
+        return None
+    if isinstance(mb, str):
+        return None if mb == "None" else int(mb)
+    return int(mb)
+
+
 def load_env_provenance(symbol):
-    """Record the R4 environment cache provenance (RC9)."""
+    """Record the R4 environment cache provenance (RC9).
+
+    The canonical R4 owner stores ``environment_contract_id`` and
+    ``cache_schema_version`` (NOT ``contract_id`` / ``cache_version``). Fail closed
+    if any required key is missing, and reject smoke caches (max_bars != None).
+    """
     out = {"symbol": symbol, "max_bars": None}
     try:
         with open(R4_ENV_MANIFEST) as f:
             man = json.load(f)
         ent = man.get(symbol) or (man.get("symbols") or {}).get(symbol)
-        if isinstance(ent, dict):
-            out.update({k: ent.get(k) for k in
-                        ("identity", "sha256", "rows", "max_bars", "contract_id",
-                         "code_identity", "execution_frame_sha256", "raw_sha256")})
-        out["cache_version"] = man.get("cache_version") or man.get("R4_ENV_CACHE_VERSION")
+        if not isinstance(ent, dict):
+            raise RuntimeError(
+                f"STOP_PATH_ATLAS_ENV_PROVENANCE_MISSING symbol={symbol}")
+        required = ("environment_contract_id", "cache_schema_version", "identity",
+                    "code_identity", "raw_sha256", "execution_frame_sha256",
+                    "max_bars")
+        missing = [k for k in required if k not in ent]
+        if missing:
+            raise RuntimeError(
+                f"STOP_PATH_ATLAS_ENV_PROVENANCE_MISSING_KEYS symbol={symbol} "
+                f"keys={missing}")
+        mb = _normalize_max_bars(ent["max_bars"])
+        if mb is not None:
+            # smoke / partial cache is not acceptable for formal use
+            raise RuntimeError(
+                f"STOP_PATH_ATLAS_ENV_SMOKE_CACHE symbol={symbol} max_bars={mb}")
+        out.update({k: ent.get(k) for k in required})
+        out["max_bars"] = None
+        out["sha256"] = ent.get("sha256")
+        out["rows"] = ent.get("rows")
+    except RuntimeError:
+        raise
     except Exception as exc:
-        out["manifest_error"] = str(exc)
+        raise RuntimeError(f"STOP_PATH_ATLAS_ENV_PROVENANCE_ERROR {exc}")
     return out
 
 
@@ -535,8 +604,15 @@ def side_boundaries(e9_long, sup_top, sup_bottom, res_top, res_bottom,
 # --------------------------------------------------------------------------- #
 # 5. Alignment gates (RC6)                                                     #
 # --------------------------------------------------------------------------- #
-def build_anchors_for_symbol(e9_df: pd.DataFrame, state: SymbolState) -> dict:
-    sel = e9_df[e9_df["symbol"] == state.symbol].reset_index(drop=True)
+def build_base_anchors(e9_df_symbol: pd.DataFrame, state: SymbolState) -> dict:
+    """Direction-INVARIANT anchor base (RC D).
+
+    Contains the positional + alignment identity, entry geometry, horizon indices,
+    raw canonical zone identities and BOTH direction systems' labels. It does NOT
+    contain any side-relative boundary. One base is built ONCE per symbol; the
+    canonical environment / zone geometry is consumed exactly once.
+    """
+    sel = e9_df_symbol[e9_df_symbol["symbol"] == state.symbol].reset_index(drop=True)
     if len(sel) == 0:
         return None
     fill = sel["candidate_fill_index"].to_numpy(np.int64)
@@ -569,13 +645,6 @@ def build_anchors_for_symbol(e9_df: pd.DataFrame, state: SymbolState) -> dict:
     if not np.array_equal(dec_ns.astype("int64"), expect_dec.astype("int64")):
         raise RuntimeError("STOP_ENTRY_PATH_DECISION_ALIGNMENT_MISMATCH")
 
-    e9_long = (sel["e9_direction"].to_numpy(object) == "LONG")
-    b = side_boundaries(
-        e9_long,
-        state.sup_top[dec], state.sup_bottom[dec],
-        state.res_top[dec], state.res_bottom[dec],
-        state.liq_up_top[dec], state.liq_up_bottom[dec],
-        state.liq_dn_top[dec], state.liq_dn_bottom[dec])
     end_idx, td_ends = build_horizon_indices(state, fill)
     return {
         "df": sel,
@@ -584,10 +653,18 @@ def build_anchors_for_symbol(e9_df: pd.DataFrame, state: SymbolState) -> dict:
         "end_idx": end_idx,
         "entry_price": sel["candidate_fill_price"].to_numpy(np.float64),
         "atr0": state.atr0_col[dec],
-        "side": np.where(e9_long, 1.0, -1.0),
         "entry_segment": state.segment[fill],
         "td_ends": td_ends,
-        **b,
+        # both direction systems' labels (direction-invariant storage)
+        "a9_direction": sel["a9_direction"].to_numpy(object),
+        "a9_side": sel["a9_side"].to_numpy(np.float64),
+        "a9_direction_correct": sel["a9_direction_correct"].to_numpy(np.uint8),
+        "e9_direction": sel["e9_direction"].to_numpy(object),
+        "e9_side": sel["e9_side"].to_numpy(np.float64),
+        "e9_direction_correct": sel["e9_direction_correct"].to_numpy(np.uint8),
+        "oracle_direction": sel["oracle_direction"].to_numpy(object),
+        "semantic_key": sel["semantic_key"].to_numpy(object),
+        "gid": sel["gid"].to_numpy(object),
         # raw canonical identities preserved (never collapsed)
         "raw_sup_top": state.sup_top[dec], "raw_sup_bottom": state.sup_bottom[dec],
         "raw_res_top": state.res_top[dec], "raw_res_bottom": state.res_bottom[dec],
@@ -596,6 +673,42 @@ def build_anchors_for_symbol(e9_df: pd.DataFrame, state: SymbolState) -> dict:
         "raw_liq_dn_top": state.liq_dn_top[dec],
         "raw_liq_dn_bottom": state.liq_dn_bottom[dec],
     }
+
+
+def make_direction_view(system: str, base: dict, state: SymbolState) -> dict:
+    """Mechanically produce the side-relative boundary triple + SR/Liq backstops +
+    ahead channels for ONE direction system (RC D).
+
+    A9 uses the frozen DTP9 router thesis; E9 uses the gated experts. The canonical
+    environment / zone geometry is NEVER recomputed here.
+    """
+    if system not in ("A9", "E9"):
+        raise ValueError(f"unknown direction system: {system}")
+    if system == "A9":
+        is_long = base["a9_direction"] == "LONG"
+    else:
+        is_long = base["e9_direction"] == "LONG"
+    dec = base["dec_idx"]
+    b = side_boundaries(
+        is_long,
+        state.sup_top[dec], state.sup_bottom[dec],
+        state.res_top[dec], state.res_bottom[dec],
+        state.liq_up_top[dec], state.liq_up_bottom[dec],
+        state.liq_dn_top[dec], state.liq_dn_bottom[dec])
+    return {
+        **base,
+        "system": system,
+        "side": np.where(is_long, 1.0, -1.0),
+        **b,
+    }
+
+
+def build_anchors_for_symbol(e9_df: pd.DataFrame, state: SymbolState) -> dict:
+    """Backward-compatible E9-view anchor builder (used by RC1-RC8 tests)."""
+    base = build_base_anchors(e9_df, state)
+    if base is None:
+        return None
+    return make_direction_view("E9", base, state)
 
 
 # --------------------------------------------------------------------------- #
@@ -654,6 +767,7 @@ def scan_paths_streaming(*, entry_idx, end_idx, entry_price, atr0, side,
                          ahead_liq_touch, ahead_liq_cross,
                          td_ends=None):
     """Production: loop over TIME, vectorized over Candidates. No Candidate loop."""
+    bump("path_scan_count")
     n = len(entry_idx)
     mfe = np.zeros(n, dtype=np.float64)
     mae = np.zeros(n, dtype=np.float64)
@@ -759,6 +873,137 @@ def run_symbol_paths(state: SymbolState, anchors: dict) -> dict:
         ahead_liq_touch=anchors["ahead_liq_touch"],
         ahead_liq_cross=anchors["ahead_liq_cross"],
         td_ends=anchors["td_ends"])
+
+
+# --------------------------------------------------------------------------- #
+# 6b. Dual direction-view batch (A9 + E9)                                       #
+# --------------------------------------------------------------------------- #
+_DUAL_BOUNDARY_KEYS = (
+    "entry_idx", "end_idx", "entry_price", "atr0", "entry_segment",
+    "sr_enter", "sr_pierce", "sr_reclaim",
+    "lb_enter", "lb_pierce", "lb_reclaim",
+    "ahead_sr_touch", "ahead_sr_cross",
+    "ahead_liq_touch", "ahead_liq_cross",
+)
+
+
+def build_dual_case(state: SymbolState, v_a9: dict, v_e9: dict) -> dict:
+    """Stack A9 and E9 views into ONE 2N Candidate-view batch (RC E).
+
+    The canonical environment / ATR / zone geometry are consumed exactly once (the
+    shared ``state``); only the direction-relative boundary arrays are doubled. The
+    time-step loop in scan_paths_streaming remains the single hot loop.
+    """
+    cat = lambda k: np.concatenate([v_a9[k], v_e9[k]])
+    case = {
+        "entry_idx": cat("entry_idx"),
+        "end_idx": cat("end_idx"),
+        "entry_price": cat("entry_price"),
+        "atr0": cat("atr0"),
+        "side": cat("side"),
+        "high": state.high, "low": state.low, "close": state.close,
+        "segment": state.segment,
+        "entry_segment": cat("entry_segment"),
+        "sr_enter": cat("sr_enter"), "sr_pierce": cat("sr_pierce"),
+        "sr_reclaim": cat("sr_reclaim"),
+        "lb_enter": cat("lb_enter"), "lb_pierce": cat("lb_pierce"),
+        "lb_reclaim": cat("lb_reclaim"),
+        "ahead_sr_touch": cat("ahead_sr_touch"),
+        "ahead_sr_cross": cat("ahead_sr_cross"),
+        "ahead_liq_touch": cat("ahead_liq_touch"),
+        "ahead_liq_cross": cat("ahead_liq_cross"),
+        "td_ends": {k: np.concatenate([v_a9["td_ends"][k], v_e9["td_ends"][k]])
+                    for k in v_a9["td_ends"]},
+    }
+    return case
+
+
+def _slice_dual(out: dict, n: int) -> dict:
+    a9 = {k: (v[:n] if k != "checkpoints" else v) for k, v in out.items()}
+    e9 = {k: (v[n:] if k != "checkpoints" else v) for k, v in out.items()}
+    # split checkpoints (nested) by candidate index
+    a9c = {nm: {m: out["checkpoints"][nm][m][:n] for m in ("mfe", "mae", "r")}
+           for nm in out["checkpoints"]}
+    e9c = {nm: {m: out["checkpoints"][nm][m][n:] for m in ("mfe", "mae", "r")}
+           for nm in out["checkpoints"]}
+    a9["checkpoints"] = a9c
+    e9["checkpoints"] = e9c
+    return a9, e9
+
+
+def run_symbol_paths_dual(state: SymbolState, base: dict) -> dict:
+    """Build A9 + E9 views, scan them as ONE 2N batch, return split outputs."""
+    if base is None:
+        return None
+    v_a9 = make_direction_view("A9", base, state)
+    v_e9 = make_direction_view("E9", base, state)
+    case = build_dual_case(state, v_a9, v_e9)
+    full = scan_paths_streaming(**{k: case[k] for k in case
+                                   if k in inspect.signature(scan_paths_streaming).parameters})
+    n = len(base["entry_idx"])
+    a9_out, e9_out = _slice_dual(full, n)
+    return {"n": n, "full": full, "A9": a9_out, "E9": e9_out,
+            "v_a9": v_a9, "v_e9": v_e9, "case": case}
+
+
+# Fields compared by the agreement invariant (RC F): every side-relative output
+# must be IDENTICAL for candidates where A9 and E9 disagree on nothing else but
+# the direction label (i.e. agreement rows).
+_AGREEMENT_FIELDS = (
+    "mfe_final", "mae_final",
+    "sr_first_touch", "sr_first_pierce", "sr_same_bar_reclaim", "sr_first_reclaim",
+    "sr_bars_to_reclaim", "sr_first_failed_reclaim", "sr_break_continue",
+    "lb_first_touch", "lb_first_pierce", "lb_same_bar_reclaim", "lb_first_reclaim",
+    "lb_bars_to_reclaim", "lb_first_failed_reclaim", "lb_break_continue",
+    "first_ahead_sr_touch", "first_ahead_sr_cross",
+    "first_ahead_liq_touch", "first_ahead_liq_cross",
+    "mfe_at_first_ahead_sr", "mae_before_first_ahead_sr",
+    "mfe_at_first_ahead_liq", "mae_before_first_ahead_liq",
+)
+
+
+def check_agreement_invariant(a9_out, e9_out, agreement_mask, symbol="?"):
+    """HARD gate (RC F): for every agreement candidate, A9 and E9 path outputs must
+    be identical (NaN-mask equal)."""
+    idx = np.flatnonzero(agreement_mask)
+    if idx.size == 0:
+        return
+    for f in _AGREEMENT_FIELDS:
+        if not _arr_eq(a9_out[f][idx], e9_out[f][idx]):
+            raise RuntimeError(
+                f"STOP_A9_E9_AGREEMENT_INVARIANT_FAILED symbol={symbol} field={f}")
+    for nm in CHECKPOINT_NAMES:
+        for m in ("mfe", "mae", "r"):
+            if not _arr_eq(a9_out["checkpoints"][nm][m][idx],
+                           e9_out["checkpoints"][nm][m][idx]):
+                raise RuntimeError(
+                    f"STOP_A9_E9_AGREEMENT_INVARIANT_FAILED symbol={symbol} "
+                    f"checkpoint={nm}.{m}")
+
+
+def decompose_disagreement(base, symbol="?"):
+    """RC G: classify disagreement rows into E9_FIX / E9_BREAK and verify exactly
+    one of {A9, E9} is correct (binary oracle)."""
+    a9_c = np.asarray(base["a9_direction_correct"], dtype=np.uint8)
+    e9_c = np.asarray(base["e9_direction_correct"], dtype=np.uint8)
+    agreement = (a9_c == e9_c)
+    disagreement = ~agreement
+    # binary oracle => on disagreement exactly one is correct
+    bad = disagreement & (a9_c + e9_c != 1)
+    if bad.any():
+        raise RuntimeError(
+            f"STOP_A9_E9_DISAGREEMENT_PARITY symbol={symbol} "
+            f"rows={int(bad.sum())}")
+    e9_fix = disagreement & (a9_c == 0) & (e9_c == 1)
+    e9_break = disagreement & (a9_c == 1) & (e9_c == 0)
+    return {
+        "n": int(len(a9_c)),
+        "agreement": int(agreement.sum()),
+        "disagreement": int(disagreement.sum()),
+        "e9_fix": int(e9_fix.sum()),
+        "e9_break": int(e9_break.sum()),
+        "agreement_rate": float(agreement.mean()) if len(a9_c) else 0.0,
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -1092,14 +1337,26 @@ def tp_scaling_benchmark(base_n=200, horizon=32, seed=0) -> dict:
 # --------------------------------------------------------------------------- #
 # 10. Kernel Checkpoint driver                                                 #
 # --------------------------------------------------------------------------- #
-def run_kernel_checkpoint(symbols=("AG",), n_subset=150, verbose=True) -> dict:
+def run_kernel_checkpoint(symbols=SYMBOLS, n_subset=50, verbose=True) -> dict:
+    """T1.5 integration: canonical environment materialization + A9/E9 dual-view
+    path scan over a small deterministic subset per symbol.
+
+    Per symbol gates (RC L):
+      * env complete
+      * environment provenance valid (canonical R4 keys; fail-closed on smoke cache)
+      * anchor alignment pass (RC6)
+      * zone audit pass
+      * Reference vs Production mismatch = 0 (both A9 + E9 via 2N batch)
+      * max abs error <= 1e-12
+      * A9/E9 agreement invariant pass (RC F)
+    """
     def log(*a):
         if verbose:
             print(*a, file=sys.stderr, flush=True)
 
     t_start = time.time()
     reset_counters()
-    log("materialize frozen E9 direction state (run_chain ONCE) ...")
+    log("materialize frozen E9 (+A9 alias) direction state (run_chain ONCE) ...")
     e9 = materialize_e9_direction_state(save=True, verbose=verbose)
 
     pop = {
@@ -1109,33 +1366,59 @@ def run_kernel_checkpoint(symbols=("AG",), n_subset=150, verbose=True) -> dict:
         "short_trades": int(e9.loc[e9["oracle_direction"] == "SHORT", "gid"].nunique()),
         "e9_predicted_long_rows": int((e9["e9_direction"] == "LONG").sum()),
         "e9_predicted_short_rows": int((e9["e9_direction"] == "SHORT").sum()),
-        "direction_correct_rate": float(e9["direction_correct"].mean()),
+        "a9_predicted_long_rows": int((e9["a9_direction"] == "LONG").sum()),
+        "a9_predicted_short_rows": int((e9["a9_direction"] == "SHORT").sum()),
+        "e9_direction_correct_rate": float(e9["e9_direction_correct"].mean()),
+        "a9_direction_correct_rate": float(e9["a9_direction_correct"].mean()),
+        "a9_equals_router_te": bool(np.array_equal(
+            e9["a9_direction"].to_numpy(object),
+            e9["router_direction"].to_numpy(object))),
     }
 
     blocks = {}
+    total_candidates = 0
     for sym in symbols:
-        log(f"symbol {sym}: load canonical state ...")
+        log(f"symbol {sym}: load canonical state (materialize env if missing) ...")
         st = load_symbol_state(sym)
         if not st.env_complete:
             blocks[sym] = {"env_complete": False, "note": st.env_note}
             continue
-        anc = build_anchors_for_symbol(e9, st)
-        n = len(anc["entry_idx"])
-        t = time.perf_counter()
-        run_symbol_paths(st, anc)
-        rt_full = time.perf_counter() - t
-        sub = {k: (v[:n_subset] if isinstance(v, np.ndarray)
-                   else {kk: vv[:n_subset] for kk, vv in v.items()})
-               for k, v in anc.items() if k != "df"}
-        sub = dict(sub)
-        sub.update(high=st.high, low=st.low, close=st.close, segment=st.segment)
-        rep = diff_reference_vs_production(sub)
+        # deterministic subset: first min(n_subset, N) by canonical semantic-key order
+        sel = e9[e9["symbol"] == sym].sort_values("semantic_key")
+        k = int(min(n_subset, len(sel)))
+        base = build_base_anchors(sel.head(k), st)
+        if base is None:
+            blocks[sym] = {"env_complete": True, "n_candidates": 0}
+            continue
+        total_candidates += k
+        dual = run_symbol_paths_dual(st, base)
+        rep = diff_reference_vs_production(dual["case"])
+        agreement_mask = (np.asarray(base["a9_direction"]) == np.asarray(base["e9_direction"]))
+        agreement_pass = True
+        agr_msg = ""
+        try:
+            check_agreement_invariant(dual["A9"], dual["E9"], agreement_mask, sym)
+        except RuntimeError as e:
+            agreement_pass = False
+            agr_msg = str(e)
+        decomp = decompose_disagreement(base, sym)
+        za = st.zone_audit
+        zone_audit_max = max(za.values()) if za else 0.0
         blocks[sym] = {
-            "env_complete": True, "n_candidates": n,
-            "production_runtime_sec_full": rt_full, "t1": rep,
-            "env_provenance": st.env_provenance,
-            "zone_geometry_audit": st.zone_audit,
+            "env_complete": True,
             "frame_rows": int(st.n_bars),
+            "n_candidates": k,
+            "env_provenance": st.env_provenance,
+            "anchor_alignment_pass": True,   # build_base_anchors raised otherwise
+            "zone_audit_pass": zone_audit_max < 1e-9,
+            "zone_audit_max_dev": zone_audit_max,
+            "t1_mismatch": rep["mismatch"],
+            "t1_max_abs_error": rep["max_abs_error"],
+            "reference_vs_production_pass": (rep["mismatch"] == 0
+                                            and rep["max_abs_error"] <= 1e-12),
+            "agreement_invariant_pass": agreement_pass,
+            "agreement_invariant_msg": agr_msg,
+            "a9_e9_counts": decomp,
         }
 
     log("TP scaling benchmark ...")
@@ -1145,6 +1428,18 @@ def run_kernel_checkpoint(symbols=("AG",), n_subset=150, verbose=True) -> dict:
         rss = float(_res.getrusage(_res.RUSAGE_SELF).ru_maxrss)
     except Exception:
         rss = None
+
+    # aggregate environment provenance summary (RC9) across evaluated symbols
+    env_summary = {}
+    for sym, blk in blocks.items():
+        if blk.get("env_complete") and "env_provenance" in blk:
+            pv = blk["env_provenance"]
+            env_summary[sym] = {
+                "environment_contract_id": pv.get("environment_contract_id"),
+                "cache_schema_version": pv.get("cache_schema_version"),
+                "max_bars": pv.get("max_bars"),
+                "rows": pv.get("rows"),
+            }
 
     artifacts = {}
     for p in (E9_STATE_PARQUET, ANCHORS_PARQUET, ROW_METRICS_PARQUET):
@@ -1157,7 +1452,26 @@ def run_kernel_checkpoint(symbols=("AG",), n_subset=150, verbose=True) -> dict:
         "reviewed_parent_sha": REVIEWED_SHA,
         "population": pop,
         "symbols_evaluated": list(symbols),
+        "n_symbols_env_complete": int(sum(1 for b in blocks.values()
+                                          if b.get("env_complete"))),
         "symbol_blocks": blocks,
+        "environment_provenance_summary": env_summary,
+        "a9_comparator": {
+            "role": "PRE_REGISTERED_SECONDARY_COMPARATOR",
+            "identity": "A9 := chain['A'] (frozen direct DTP9 router)",
+            "primary_remains": "delta_PS_4h_E9",
+            "note": "A9 does NOT promote to a second primary; no A9-vs-E9 verdict here.",
+        },
+        "agreement_disagreement_total": {
+            "agreement": int(sum(b["a9_e9_counts"]["agreement"] for b in blocks.values()
+                                 if "a9_e9_counts" in b)),
+            "disagreement": int(sum(b["a9_e9_counts"]["disagreement"] for b in blocks.values()
+                                    if "a9_e9_counts" in b)),
+            "e9_fix": int(sum(b["a9_e9_counts"]["e9_fix"] for b in blocks.values()
+                              if "a9_e9_counts" in b)),
+            "e9_break": int(sum(b["a9_e9_counts"]["e9_break"] for b in blocks.values()
+                                if "a9_e9_counts" in b)),
+        },
         "zone_semantics": {
             "long_backstop": "support: touch=low<=support_top, "
                              "pierce=low<support_bottom, reclaim=close>=support_bottom",
@@ -1169,13 +1483,25 @@ def run_kernel_checkpoint(symbols=("AG",), n_subset=150, verbose=True) -> dict:
             "nan_filled": True,
             "truncated_candidate_checkpoints": "unavailable (NaN), never inherited",
         },
-        "tp": {"counters": dict(COUNTERS), "scaling": scaling, "peak_rss_bytes": rss},
+        "tp": {
+            "counters": dict(COUNTERS),
+            "scaling": scaling,
+            "peak_rss_bytes": rss,
+            "performance": {
+                "total_environment_loads": int(COUNTERS["raw_exec_load_count"]),
+                "direction_chain_runs": int(COUNTERS["direction_chain_run_count"]),
+                "path_scans": int(COUNTERS["path_scan_count"]),
+                "candidate_views_processed": int(2 * total_candidates),
+                "runtime_sec": time.time() - t_start,
+            },
+        },
         "artifacts": artifacts,
         "runtime_sec": time.time() - t_start,
         "unverified_items": [
-            "Full 15-symbol canonical environment materialization DEFERRED to T1.5.",
-            "Primary endpoint delta_PS_4h is NOT estimated (full experiment not authorized).",
-            "L2 row metrics parquet is not produced at kernel stage.",
+            "Full primary endpoint delta_PS_4h (E9 and A9) is NOT estimated at T1.5.",
+            "L2 row metrics parquet (semantic_key x direction_system) not produced.",
+            "Stop-Loss / Take-Profit experiments NOT run (frozen later).",
+            "FUTURE-RX-DIRECTION-LAYER-ABLATION-V1 pre-registered; NOT run here.",
         ],
     }
     return write_manifest(extra=extra)

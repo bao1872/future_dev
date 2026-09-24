@@ -15,6 +15,7 @@ The full path experiment (T1.5/T2) is NOT run here.
 """
 
 import inspect
+import json
 import resource
 import time
 
@@ -475,9 +476,14 @@ def test_t1_multi_candidate_mixed_horizons():
 
 
 def test_t1_real_ag_subset(ag_state, ag_anchors):
-    sub = {k: (v[:150] if isinstance(v, np.ndarray)
-               else {kk: vv[:150] for kk, vv in v.items()})
-           for k, v in ag_anchors.items() if k != "df"}
+    def _slice_val(v, n):
+        if isinstance(v, np.ndarray):
+            return v[:n]
+        if isinstance(v, dict):
+            return {kk: (vv[:n] if isinstance(vv, np.ndarray) else vv)
+                    for kk, vv in v.items()}
+        return v
+    sub = {k: _slice_val(v, 150) for k, v in ag_anchors.items() if k != "df"}
     sub.update(high=ag_state.high, low=ag_state.low, close=ag_state.close,
                segment=ag_state.segment)
     rep = diff_report(sub)
@@ -680,3 +686,70 @@ def test_cluster_bootstrap_opportunity_weighted():
     m, lo, hi = M.cluster_bootstrap_gid(v, gid, B=200, seed=1)
     assert abs(m - 0.5) < 1e-12
     assert lo <= m <= hi
+
+
+# =========================================================================== #
+# A9 comparator framework (frozen alias of chain["A"])                         #
+# =========================================================================== #
+def test_a9_frozen_identity(e9_state):
+    df = e9_state
+    assert "a9_direction" in df.columns
+    assert "a9_p_long" in df.columns
+    assert "a9_direction_correct" in df.columns
+    assert "a9_teacher_exit_return_atr" in df.columns
+    # A9 is the frozen direct DTP9 router == router_te (hard invariant upstream)
+    assert np.array_equal(df["a9_direction"].to_numpy(object),
+                          df["router_direction"].to_numpy(object))
+    # A9 and E9 are distinct systems: not identically labeled in general
+    assert "e9_direction" in df.columns
+
+
+def test_a9_e9_agreement_invariant(ag_state, e9_state):
+    sel = e9_state[e9_state["symbol"] == "AG"].sort_values("semantic_key").head(80)
+    base = M.build_base_anchors(sel, ag_state)
+    dual = M.run_symbol_paths_dual(ag_state, base)
+    agreement = (np.asarray(base["a9_direction"]) == np.asarray(base["e9_direction"]))
+    # Hard gate: for agreement rows A9 and E9 path outputs must be identical.
+    M.check_agreement_invariant(dual["A9"], dual["E9"], agreement, "AG")
+    # sanity: the gate actually inspects a non-empty agreement set here
+    assert agreement.any()
+
+
+def test_a9_e9_disagreement_decomposition(ag_state, e9_state):
+    sel = e9_state[e9_state["symbol"] == "AG"].sort_values("semantic_key")
+    base = M.build_base_anchors(sel, ag_state)
+    d = M.decompose_disagreement(base, "AG")
+    assert d["agreement"] + d["disagreement"] == d["n"]
+    assert d["e9_fix"] + d["e9_break"] == d["disagreement"]
+    a9_c = np.asarray(base["a9_direction_correct"], dtype=np.uint8)
+    e9_c = np.asarray(base["e9_direction_correct"], dtype=np.uint8)
+    disag = (a9_c != e9_c)
+    # binary oracle => exactly one of {A9, E9} correct on every disagreement row
+    assert np.array_equal(a9_c[disag] + e9_c[disag], np.ones(int(disag.sum()), dtype=np.uint8))
+
+
+# =========================================================================== #
+# RC9 environment provenance (canonical keys, fail-closed)                      #
+# =========================================================================== #
+def test_rc9_provenance_canonical_keys(ag_state):
+    pv = M.load_env_provenance("AG")
+    for k in ("environment_contract_id", "cache_schema_version", "identity",
+              "code_identity", "raw_sha256", "execution_frame_sha256", "max_bars"):
+        assert k in pv, f"missing canonical provenance key: {k}"
+    assert pv["max_bars"] is None, "full cache must report max_bars=None"
+    assert pv["rows"] is not None
+
+
+def test_rc9_provenance_smoke_cache_fails_closed(monkeypatch, tmp_path):
+    fake = tmp_path / "r4_env_manifest.json"
+    fake.write_text(json.dumps({
+        "ZZ": {
+            "environment_contract_id": "env-c", "cache_schema_version": 1,
+            "identity": "id", "code_identity": "ci", "raw_sha256": "r",
+            "execution_frame_sha256": "e", "max_bars": "2000",
+            "sha256": "s", "rows": 10,
+        }
+    }))
+    monkeypatch.setattr(M, "R4_ENV_MANIFEST", str(fake))
+    with pytest.raises(RuntimeError):
+        M.load_env_provenance("ZZ")
