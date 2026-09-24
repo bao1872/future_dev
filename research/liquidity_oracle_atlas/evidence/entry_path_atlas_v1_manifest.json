@@ -1,7 +1,7 @@
 {
   "task_id": "FUTURE-R5-M15-ENTRY-PATH-ATLAS-V1",
   "base_sha": "cb9261d4498d328e6dd8edca5d655eaf609b0611",
-  "reviewed_parent_sha": "2b7d6bb61a42122e9106b8b36228736c8273655a",
+  "reviewed_parent_sha": "e9498f9e6ed9bcdaf084639ce34510fb4dfac79e",
   "stage": "pre_t2_implementation",
   "primary_endpoint": {
     "name": "delta_PS_curve_E9_15m",
@@ -75,7 +75,7 @@
     "never_stops_at_oracle_exit": true
   },
   "branch": "entry-path-atlas-v1",
-  "code_sha": "9fdd7ea62736e90e088dc3dbb122c7e8b52b4a52",
+  "code_sha": "001a0403ab5374be9221e4476438e9fa22de344d",
   "curve_kernel_differential": {
     "synthetic_rows": 40,
     "synthetic_final_mismatch": 0,
@@ -132,14 +132,16 @@
       "candidate_python_loop_count": 0,
       "hotloop_dataframe_concat_count": 0,
       "candidate_views_processed": 80,
-      "runtime_sec": 7.656047821044922
+      "runtime_sec": 7.313615083694458
     },
     "evidence_temp": {
-      "path_curves": "entry_path_atlas_v1_path_curves.csv",
-      "event_curves": "entry_path_atlas_v1_event_curves.csv",
-      "group_stats": "entry_path_atlas_v1_group_stats.csv",
-      "disagreement": "entry_path_atlas_v1_a9_e9_disagreement.csv",
-      "summary": "entry_path_atlas_v1_summary.json"
+      "row_metrics_parquet": "entry_path_row_metrics_v1.parquet",
+      "curve_parquet": "entry_path_curve_v1.parquet",
+      "path_curves_csv": "entry_path_atlas_v1_path_curves.csv",
+      "event_curves_csv": "entry_path_atlas_v1_event_curves.csv",
+      "group_stats_csv": "entry_path_atlas_v1_group_stats.csv",
+      "disagreement_csv": "entry_path_atlas_v1_a9_e9_disagreement.csv",
+      "summary_json": "entry_path_atlas_v1_summary.json"
     }
   },
   "artifact_schemas": {
@@ -323,5 +325,5 @@
     "Stop-Loss / Take-Profit experiments NOT run.",
     "A9-vs-E9 final system verdict reserved for downstream frozen ablation."
   ],
-  "runtime_sec": 17.015471696853638
+  "runtime_sec": 15.990553855895996
 }
