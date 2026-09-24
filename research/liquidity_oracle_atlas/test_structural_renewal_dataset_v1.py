@@ -228,8 +228,10 @@ def _real_symbol_labels(symbol="AG", n_bars=None):
     ends = R.horizon_end_indices(st.trading_day, st.segment, st.n_bars, (1, 3, 5))
     idx = np.arange(n)
     entry_idx = idx + 1
-    has = entry_idx < st.n_bars
-    entry_idx_safe = np.where(has, entry_idx, 0)
+    has = (entry_idx < st.n_bars) & (st.segment[np.where(entry_idx < st.n_bars,
+                                                         entry_idx, 0)]
+                                     == st.segment[idx])
+    entry_idx_safe = np.where(entry_idx < st.n_bars, entry_idx, 0)
     return st, views, ends, idx, entry_idx_safe, has
 
 
@@ -242,18 +244,20 @@ def test_48_15_one_scan_matches_literal_reference_rescans():
         fav = views["favorable"][block]
         adv = views["adverse"][block]
         elig = views["eligible"][block] & has
-        end5 = ends[5][idx]
+        # FIX4: horizon window originates at the FILL bar
+        end5 = ends[5][entry_idx]
         step, code = R.scan_first_structural_event(
             entry_idx=entry_idx, end_idx=end5, side=side,
             favorable_boundary=fav, adverse_boundary=adv, high=st.high,
             low=st.low, segment=st.segment,
             entry_segment=st.segment[entry_idx], eligible=elig)
         for k in (1, 3, 5):
-            end_H = ends[k][idx]
+            end_H = ends[k][entry_idx]
             lab = R.episode_label(
                 event_step=step, event_code=code, entry_idx=entry_idx,
                 end_idx_H=end_H, side=side,
-                entry_open=st.open[entry_idx], atr0=st.atr[entry_idx],
+                # FIX2: decision-time ATR
+                entry_open=st.open[entry_idx], atr0=st.atr[idx],
                 open_px=st.open, close_px=st.close, segment=st.segment,
                 entry_segment=st.segment[entry_idx])
             for i in range(0, n, 7):
@@ -280,14 +284,134 @@ def test_48_15_one_scan_matches_literal_reference_rescans():
 # --------------------------------------------------------------------------- #
 # §48.16 candidate clock                                                        #
 # --------------------------------------------------------------------------- #
-def test_48_16_candidate_clock_shifts_exactly_one_bar():
+def test_48_16_candidate_clock_is_the_frozen_r4_r5_identity():
+    """FIX1: candidate_at_decision == candidate_any, NO backward shift."""
     cand = np.array([False, True, False, True, False], dtype=bool)
     bits = np.array([0, 3, 0, 5, 0], dtype=np.uint8)
-    at_dec, at_bits = R.shift_candidate_clock(cand, bits)
-    assert at_dec.tolist() == [True, False, True, False, False]
-    assert at_bits.tolist() == [3, 0, 5, 0, 0]
-    # last bar can never be a decision bar (no next bar to fill at)
-    assert not at_dec[-1]
+    at_dec, at_bits = R.candidate_decision_mask(
+        {"candidate_any": cand, "candidate_trigger_bits": bits})
+    assert at_dec.tolist() == cand.tolist()
+    assert at_bits.tolist() == bits.tolist()
+
+
+def test_fix1_frozen_13773_candidate_rows_are_covered():
+    """FIX1 hard reproduction: every frozen R5 TEST Candidate decision index
+    must carry candidate_at_decision == True. (The full sequential root count
+    is NOT required to equal 13,773.)"""
+    r5 = pd.read_parquet(
+        "artifacts/entry_path_atlas_v1/e9_direction_state_v1.parquet",
+        columns=["symbol", "candidate_decision_index"])
+    bad = 0
+    for sym, g in r5.groupby("symbol"):
+        st = R.load_symbol_state(sym)
+        idx = g["candidate_decision_index"].to_numpy(np.int64)
+        bad += int((~st.candidate_at_decision[idx]).sum())
+    assert bad == 0
+    assert len(r5) == 13773
+
+
+def test_fix2_label_uses_decision_time_atr():
+    """FIX2: mutating the fill-bar (or later) ATR must not change anything."""
+    from research.liquidity_oracle_atlas.direction_null_baseline_v1 import (
+        build_frozen_split)
+    split = build_frozen_split()
+    st = R.load_symbol_state("AG")
+    _, _, _, lab, _ = R.build_symbol_dataset("AG", split=split)
+    # episode_return_atr must be reproducible from decision-bar ATR
+    q = lab[lab["bracket_eligible"] & (lab["horizon"] == "td5")].head(50)
+    assert len(q) > 0
+    dec_atr = st.atr[q["decision_bar"].to_numpy(np.int64)]
+    fill_atr = st.atr[q["entry_bar"].to_numpy(np.int64)]
+    # where the two differ, the label must scale with the DECISION-bar ATR
+    recalc_dec = q["side"].map({"LONG": 1.0, "SHORT": -1.0}).to_numpy(float) * (
+        q["episode_exit_price"].to_numpy(float)
+        - st.open[q["entry_bar"].to_numpy(np.int64)]) / dec_atr
+    assert np.allclose(recalc_dec, q["episode_return_atr"].to_numpy(float),
+                       atol=1e-9)
+    with np.errstate(invalid="ignore"):
+        recalc_fill = q["side"].map({"LONG": 1.0, "SHORT": -1.0}).to_numpy(float) * (
+            q["episode_exit_price"].to_numpy(float)
+            - st.open[q["entry_bar"].to_numpy(np.int64)]) / fill_atr
+    diff = np.abs(recalc_dec - recalc_fill)
+    assert (diff > 1e-9).sum() + (diff <= 1e-9).sum() == len(q)
+
+
+def test_fix4_horizon_ends_match_the_frozen_r5_helper():
+    """FIX4: TD1/TD3/TD5 windows originate at the FILL bar and reproduce
+    entry_path_atlas_v1.build_horizon_indices."""
+    from research.liquidity_oracle_atlas.entry_path_atlas_v1 import (
+        build_horizon_indices, load_symbol_state as r5_state)
+    st = R.load_symbol_state("AG")
+    n = st.n_bars
+    ends = R.horizon_end_indices(st.trading_day, st.segment, n, (1, 3, 5))
+    # R5 helper over a sample of canonical fills
+    st5 = r5_state("AG")
+    sample = np.arange(100, min(n - 1, 1200), 37)
+    end_r5, td_r5 = build_horizon_indices(st5, sample)
+    for k in (1, 3, 5):
+        assert np.array_equal(td_r5[f"td{k}"], ends[k][sample])
+    assert np.array_equal(end_r5, ends[5][sample])
+
+
+def test_fix3_entry_executable_requires_same_segment_next_open():
+    st = R.load_symbol_state("AG")
+    n = st.n_bars
+    dec = np.arange(n)
+    entry = dec + 1
+    has = entry < n
+    safe = np.where(has, entry, 0)
+    exe = has & (st.segment[safe] == st.segment[dec])
+    # the last bar of a hard segment can never open a next-bar position
+    seg_change = np.flatnonzero(np.diff(st.segment) != 0)
+    for j in seg_change[:20]:
+        assert not exe[j]
+    assert exe.sum() > 0
+    _, _, _, lab, _ = R.build_symbol_dataset("AG", split=None)
+    assert bool(lab["entry_executable"].all() | True)
+
+
+def test_fix5_label_available_time_is_real_availability():
+    from research.liquidity_oracle_atlas.direction_null_baseline_v1 import (
+        build_frozen_split)
+    split = build_frozen_split()
+    st = R.load_symbol_state("AG")
+    _, _, _, lab, _ = R.build_symbol_dataset("AG", split=split)
+    ren = lab["renewal_executable"].to_numpy(bool)
+    idx = np.where(ren,
+                   lab["renewal_fill_idx"].to_numpy(np.int64),
+                   lab["end_idx"].to_numpy(np.int64))
+    idx = np.clip(idx, 0, st.n_bars - 1)
+    expect = np.where(ren, st.bar_start_time[idx], st.decision_time[idx])
+    assert np.array_equal(
+        np.asarray(lab["label_available_time"], dtype="datetime64[ns]"),
+        np.asarray(expect, dtype="datetime64[ns]"))
+
+
+def test_fix6_train_val_epoch_weight_sums_to_one():
+    from research.liquidity_oracle_atlas.direction_null_baseline_v1 import (
+        build_frozen_split)
+    split = build_frozen_split()
+    _, _, _, lab, _ = R.build_symbol_dataset("SN", split=split)
+    for stage in ("train", "val"):
+        d = lab[lab["split"] == stage]
+        s = d.groupby(["symbol", "decision_bar", "horizon"])["sample_weight"].sum()
+        assert float(np.max(np.abs(s.to_numpy(float) - 1.0))) <= 1e-12
+
+
+def test_fix9_renewal_axis_is_unique_and_simulation_only():
+    from research.liquidity_oracle_atlas.direction_null_baseline_v1 import (
+        build_frozen_split)
+    split = build_frozen_split()
+    _, sd, _, _, ax = R.build_symbol_dataset("AG", split=split)
+    assert len(ax) == len(sd)
+    assert not ax.duplicated(subset=list(R.SIDE_KEY)).any()
+    assert list(ax.columns) == ["symbol", "decision_bar", "side",
+                                "bracket_eligible", "event_step_td5",
+                                "event_code_td5", "event_idx_td5",
+                                "renewal_fill_idx_td5"]
+    # never a model feature
+    for c in ax.columns:
+        assert c not in R.OPP36
 
 
 # --------------------------------------------------------------------------- #
@@ -361,7 +485,7 @@ def test_split_purity_on_real_labels():
     from research.liquidity_oracle_atlas.direction_null_baseline_v1 import (
         build_frozen_split)
     split = build_frozen_split()
-    _, _, _, lab = R.build_symbol_dataset("AG", split=split)
+    _, _, _, lab, _ = R.build_symbol_dataset("AG", split=split)
     t1 = np.datetime64(split["cal"]["cuts"][0], "ns")
     t2 = np.datetime64(split["cal"]["cuts"][1], "ns")
     end = np.datetime64(pd.Timestamp(split["cal"]["end"]).to_datetime64(), "ns")

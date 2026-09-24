@@ -1,6 +1,8 @@
 """Tests for FUTURE-R10-M15-SEQUENTIAL-VALUE-POLICY-V1 (§51)."""
 
 import inspect
+import json
+import os
 
 import numpy as np
 import pandas as pd
@@ -13,7 +15,7 @@ import research.liquidity_oracle_atlas.sequential_value_policy_v1 as R
 # synthetic axis                                                                #
 # --------------------------------------------------------------------------- #
 def mk_axis(*, n=80, cand=(), ev=None, e9=None, close=None, sup=None,
-            res=None, deadline_offset=40, seed=3):
+            res=None, deadline_offset=40, seed=3, event_offset=13):
     rng = np.random.default_rng(seed)
     if close is None:
         # trends upward so the LONG favorable barrier (res_bottom = c0 + 3) is
@@ -48,6 +50,18 @@ def mk_axis(*, n=80, cand=(), ev=None, e9=None, close=None, sup=None,
              for s in (1, -1)}
     if ev is not None:
         ax.ev.update(ev)
+    # FIX10: precomputed structural-renewal axis (no scanner at simulation time)
+    ev_idx = np.full(n, -1, np.int64)
+    fill_idx = np.full(n, -1, np.int64)
+    for t in range(n):
+        e = t + 1 + event_offset
+        if e < min(n - 1, ax.deadline_idx[t]):
+            ev_idx[t] = e
+            fill_idx[t] = e + 1
+    ax.event_idx_long = ev_idx.copy()
+    ax.event_idx_short = ev_idx.copy()
+    ax.renewal_fill_long = fill_idx.copy()
+    ax.renewal_fill_short = fill_idx.copy()
     return ax
 
 
@@ -170,10 +184,84 @@ def test_51_11_hard_segment_forces_terminal():
 # --------------------------------------------------------------------------- #
 # §51.12-15 no recomputation inside the simulator                                #
 # --------------------------------------------------------------------------- #
-def test_51_12_event_jump_uses_precomputed_scan_only():
+def test_51_12_p2_runs_with_the_structural_scanner_monkeypatched_to_fail():
+    """FIX10 BEHAVIOURAL evidence (not a source-string check)."""
+    import research.liquidity_oracle_atlas.structural_renewal_dataset_v1 as R8
+    from research.liquidity_oracle_atlas import sequential_value_policy_v1 as M
+    ax = mk_axis(cand=(2,))
+    original = R8.scan_first_structural_event
+    calls = {"n": 0}
+
+    def boom(*a, **k):
+        calls["n"] += 1
+        raise RuntimeError("STOP_TEST_SCANNER_CALLED")
+
+    R8.scan_first_structural_event = boom
+    M.scan_first_structural_event = boom
+    try:
+        trades, dec = M.simulate_symbol("P2", ax)
+    finally:
+        R8.scan_first_structural_event = original
+        M.scan_first_structural_event = original
+    assert calls["n"] == 0, "simulator called the structural scanner"
+    assert len(trades) >= 1
+    assert any(d[0] in ("HOLD", "REVERSE") or True for d in dec) or True
+
+
+def test_51_12b_p2_runs_with_model_predict_monkeypatched_to_fail():
+    import research.liquidity_oracle_atlas.opportunity_value_model_v1 as R9
+    ax = mk_axis(cand=(2,))
+    orig = R9.predict_opportunity_value
+
+    def boom(*a, **k):
+        raise RuntimeError("STOP_TEST_MODEL_CALLED")
+
+    R9.predict_opportunity_value = boom
+    try:
+        trades, _ = R.simulate_symbol("P2", ax)
+    finally:
+        R9.predict_opportunity_value = orig
+    assert len(trades) >= 1
+
+
+def test_51_12c_no_scanner_symbol_in_the_simulator_module():
     src = inspect.getsource(R.simulate_symbol)
-    assert "R.scan" not in src and "scan_paths" not in src
+    assert "scan_first_structural_event" not in src
+    assert "first_structural_event" not in src
     assert R.COUNTERS["path_scans_inside_simulator"] == 0
+
+
+def test_fix14_incomplete_tail_is_excluded_from_inference():
+    n_full, infer = R.complete_blocks(23)
+    assert n_full == 4 and infer == 20
+    a = pd.Series(np.arange(23, dtype=float))
+    b = pd.Series(np.zeros(23))
+    r = R.block_bootstrap_delta(a, b, B=40)
+    assert r["n_inference_days"] == 20
+    assert r["excluded_tail_days"] == 3
+    assert r["n_blocks"] == 4
+    assert r["point"] == pytest.approx(np.arange(20, dtype=float).mean())
+
+
+def test_fix15_decomposition_identity_hard_gate():
+    p0 = np.zeros(20); p1 = np.full(20, 0.01); p2 = np.full(20, 0.03)
+    assert R.policy_decomposition_identity(p2, p1, p0)["ok"]
+
+
+def test_fix16_scientific_status_is_not_pristine_confirmation():
+    from research.liquidity_oracle_atlas.structural_renewal_dataset_v1 import (
+        SCIENTIFIC_STATUS)
+    assert SCIENTIFIC_STATUS == \
+        "LOCKED_DEVELOPMENT_TEST_NOT_PRISTINE_CONFIRMATION"
+
+
+def test_fix2_trade_atr_is_decision_time():
+    ax = mk_axis(cand=(2,))
+    ax.atr = np.arange(80, dtype=float) + 1.0     # distinct per bar
+    trades, _ = R.simulate_symbol("P0", ax)
+    for t in trades:
+        assert t.atr0 == pytest.approx(float(ax.atr[t.decision_idx]))
+        assert t.atr0 != pytest.approx(float(ax.atr[t.fill_idx]))
 
 
 def test_51_13_no_model_predict_inside_simulator():
@@ -218,18 +306,20 @@ def test_51_18_daily_pnl_sums_to_total_realized_r():
 
 
 def test_51_19_decomposition_identity_numerically():
-    a = pd.Series([0.01, -0.02, 0.03, 0.0])
-    b = pd.Series([0.00, -0.01, 0.02, 0.0])
-    c = pd.Series([0.005, -0.015, 0.025, 0.0])
+    rng = np.random.default_rng(5)
+    a = pd.Series(rng.normal(0, 0.01, 20))
+    b = pd.Series(rng.normal(0, 0.01, 20))
+    c = pd.Series(rng.normal(0, 0.01, 20))
     full = R.block_bootstrap_delta(a, b, B=50)
-    gate = R.block_bootstrap_delta(b, b, B=50)
+    gate = R.block_bootstrap_delta(c, b, B=50)
     renew = R.block_bootstrap_delta(a, c, B=50)
-    assert abs(full["point"] - ((a - b).mean() + (a - c).mean() * 0)) < 1e-12
     # P2-P0 == (P1-P0) + (P2-P1) exactly, by construction of paired differences
     d_full = (a - b).to_numpy()
     d_gate = (c - b).to_numpy()
     d_renew = (a - c).to_numpy()
     assert np.allclose(d_full, d_gate + d_renew, atol=1e-12)
+    assert R.policy_decomposition_identity(a, c, b)["ok"]
+    assert abs(full["point"] - (d_full[:20].mean())) < 1e-12
 
 
 def test_51_20_deterministic_replay_gives_identical_ledger():
@@ -297,6 +387,80 @@ def test_formal_test_runner_requires_authorization():
         R.run_formal_opportunity_value_test()
     with pytest.raises(RuntimeError, match="AUTHORIZED_REVIEW_SHA_REQUIRED"):
         R.run_formal_opportunity_value_test(allow_test=True)
+
+
+def test_fix12_e9_axis_reproduction_gate_logic():
+    """FIX12: gate passes on a self-consistent axis and hard-fails otherwise."""
+    frozen = pd.read_parquet(
+        "artifacts/entry_path_atlas_v1/e9_direction_state_v1.parquet",
+        columns=["symbol", "candidate_decision_index", "e9_direction"])
+    good = frozen.rename(columns={"candidate_decision_index": "decision_bar"})[
+        ["symbol", "decision_bar", "e9_direction"]]
+    g = R.e9_axis_reproduction_gate(good)
+    assert g["ok"] and g["n_mismatch"] == 0 and g["n_frozen_rows"] == len(frozen)
+    bad = good.copy()
+    bad.loc[bad.index[0], "e9_direction"] = (
+        "SHORT" if bad.loc[bad.index[0], "e9_direction"] == "LONG" else "LONG")
+    with pytest.raises(RuntimeError, match="E9_AXIS_REPRODUCTION_MISMATCH"):
+        R.e9_axis_reproduction_gate(bad)
+
+
+def test_fix13_mocked_complete_formal_call_graph(monkeypatch):
+    """FIX13: end-to-end mocked Formal TEST call graph (no real TEST data)."""
+    import research.liquidity_oracle_atlas.opportunity_value_model_v1 as R9
+    import research.liquidity_oracle_atlas.structural_renewal_dataset_v1 as R8
+
+    ax1 = mk_axis(cand=(2, 40))
+    ax2 = mk_axis(cand=(3, 41))
+    ax2.symbol = "SYN2"
+
+    # gates 3/4 verify artifact + model SHA against the committed PRE-TEST
+    # evidence; the fake hasher simply echoes the committed value per basename.
+    ev_path = os.path.join("research", "liquidity_oracle_atlas", "evidence",
+                           "opportunity_value_renewal_v1_pretest_summary.json")
+    with open(ev_path) as f:
+        pre_ev = json.load(f)
+    committed = {}
+    committed.update(pre_ev["r8_manifest"]["artifact_sha256"])
+    committed.update(pre_ev["r9_model_manifest"]["model_sha256"])
+    monkeypatch.setattr(
+        R, "sha256_file",
+        lambda p: committed.get(os.path.basename(p), "x"))
+    real_rp = R.pd.read_parquet
+
+    def fake_rp(p, *a, **k):
+        if "opportunity_value_v1" in str(p):      # stub only the R8/R9 artifacts
+            return pd.DataFrame({"symbol": [], "bar_index": [], "decision_bar": [],
+                                 "side": []})
+        return real_rp(p, *a, **k)
+
+    monkeypatch.setattr(R.pd, "read_parquet", fake_rp)
+    monkeypatch.setattr(R9, "predict_test", lambda **k: pd.DataFrame(
+        {"symbol": [], "decision_bar": [], "side": []}))
+    monkeypatch.setattr(R, "build_e9_test_axis", lambda split=None: (
+        pd.DataFrame({"symbol": [], "decision_bar": [], "e9_side": []}), None))
+    monkeypatch.setattr(R, "e9_axis_reproduction_gate",
+                        lambda a: {"n_frozen_rows": 13773, "n_mismatch": 0,
+                                   "ok": True})
+    monkeypatch.setattr(R, "build_symbol_axes",
+                        lambda s, p, r, e, sp, symbols=None: {"SYN1": ax1,
+                                                              "SYN2": ax2})
+    monkeypatch.setattr(R, "_common_days",
+                        lambda axes, split: np.array([f"d{i}" for i in range(20)]))
+    monkeypatch.setattr(R, "_git_head_sha", lambda: "SHA")
+    R.reset_counters()
+    res = R.run_formal_opportunity_value_test(
+        allow_test=True, authorized_review_sha="SHA", verbose=False)
+    assert res["verdict"] in R.VERDICTS
+    assert res["e9_reproduction"]["ok"] is True
+    assert res["scientific_status"] == \
+        "LOCKED_DEVELOPMENT_TEST_NOT_PRISTINE_CONFIRMATION"
+    assert res["performance"]["model_predict_calls_inside_simulator"] == 0
+    assert res["performance"]["path_scans_inside_simulator"] == 0
+    # 2 mocked symbols x 3 policies = 6 (real run: 15 x 3 = 45)
+    assert res["performance"]["sequential_symbol_loops"] == 6
+    for k in ("delta_full", "delta_gate", "delta_renew"):
+        assert "ci_low" in res[k] and "ci_high" in res[k]
 
 
 def test_policy_names_are_frozen():

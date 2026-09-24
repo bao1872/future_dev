@@ -264,15 +264,35 @@ def val_diagnostics(bundles, frames):
             ww = w[m]
             yy = y[m]
             win = yy > 0
-            pos = float(np.average(ww[win], weights=ww[win])) if win.any() else np.nan
-            neg = float(np.average((-yy)[~win], weights=ww[~win])) if (~win).any() else np.nan
+            # FIX7: the previous code averaged the WEIGHTS themselves.
+            avg_win = (float(np.average(yy[win], weights=ww[win]))
+                       if win.any() else np.nan)
+            avg_loss = (float(np.average((-yy)[~win], weights=ww[~win]))
+                        if (~win).any() else np.nan)
+            p_act = float(np.average(win.astype(float), weights=ww))
+            mean_ret = float(np.average(yy, weights=ww))
+            ev_ident = (p_act * avg_win - (1.0 - p_act) * avg_loss)
+            dev = abs(ev_ident - mean_ret)
+            if np.isfinite(dev) and dev > 1e-12:
+                raise RuntimeError(
+                    f"STOP_R9_EV_DECILE_IDENTITY horizon={H} decile={d + 1} "
+                    f"dev={dev}")
+            denom = avg_win + avg_loss
             rows.append({
                 "decile": d + 1,
                 "n_rows": int(m.sum()),
-                "mean_predicted_ev": float(pr["predicted_ev"][m].mean()),
-                "actual_mean_return_atr": float(np.average(yy, weights=ww)),
-                "actual_win_rate": float(np.average(win.astype(float), weights=ww)),
-                "actual_payoff_ratio": float(pos / neg) if (neg and neg > 0) else np.nan,
+                "mean_predicted_ev": float(
+                    np.average(pr["predicted_ev"][m], weights=ww)),
+                "actual_mean_return_atr": mean_ret,
+                "actual_win_rate": p_act,
+                "actual_avg_win": avg_win,
+                "actual_avg_loss": avg_loss,
+                "actual_payoff_ratio": (float(avg_win / avg_loss)
+                                        if (avg_loss and avg_loss > 0) else np.nan),
+                "actual_break_even_win_rate": (float(avg_loss / denom)
+                                               if denom > 0 else np.nan),
+                "actual_ev_identity": float(ev_ident),
+                "actual_ev_identity_abs_dev": float(dev),
             })
         out[H] = {
             "n_val_rows": int(len(X)),

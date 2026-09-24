@@ -56,7 +56,14 @@ LABEL_PARQUETS = {
     "val": os.path.join(ARTIFACT_DIR, "labels_val_v1.parquet"),
     "test": os.path.join(ARTIFACT_DIR, "labels_test_v1.parquet"),
 }
+# FIX9: precomputed structural-renewal axis. SIMULATION-ONLY outcome data;
+# it must never enter OPP36 or any R9 fit feature.
+RENEWAL_AXIS_PARQUET = os.path.join(ARTIFACT_DIR,
+                                    "renewal_event_axis_v1.parquet")
 MANIFEST_JSON = os.path.join(ARTIFACT_DIR, "manifest_v1.json")
+
+# FIX16: this common TEST period already informed R5/R6/R7 research design.
+SCIENTIFIC_STATUS = "LOCKED_DEVELOPMENT_TEST_NOT_PRISTINE_CONFIRMATION"
 
 HORIZONS = ("td1", "td3", "td5")
 HORIZON_DAYS = {"td1": 1, "td3": 3, "td5": 5}
@@ -162,22 +169,23 @@ class OpportunityState:
     candidate_trigger_bits: np.ndarray
 
 
-def shift_candidate_clock(candidate_any: np.ndarray, trigger_bits: np.ndarray):
-    """§12: canonical R4 Candidate is defined on the NEXT bar.
+def candidate_decision_mask(gate: dict):
+    """FIX1: canonical R4/R5 Candidate clock, restored verbatim.
 
-    `derive_m15_candidate_gate` sets candidate_any[i] from the touch state of bar
-    i-1, i.e. the causal decision is made at the CLOSE of bar i-1 and the
-    Candidate fill occurs at Open_i. Therefore the decision-bar mask is the
-    candidate mask shifted BACK by exactly one bar.
+    The frozen builder (`build_struct33_dataset_v1.py`) uses
+        candidate_idx = flatnonzero(candidate_any)
+        decision_idx  = candidate_idx
+        fill_idx      = decision_idx + 1
+    so the decision-bar mask IS `candidate_any`, unshifted:
 
-    Returns (candidate_at_decision, candidate_trigger_bits_at_decision).
+        bar t-1 touch -> bar t = canonical Candidate / decision bar
+                      -> bar t+1 open = fill
+
+    No backward shift. All of R4 Direction / R5 Path Atlas / R6 / R7 sit on this
+    clock, and P0 must not become a different entry system.
     """
-    n = len(candidate_any)
-    at_decision = np.zeros(n, dtype=bool)
-    at_decision[:-1] = np.asarray(candidate_any, bool)[1:]
-    bits = np.zeros(n, dtype=np.uint8)
-    bits[:-1] = np.asarray(trigger_bits, np.uint8)[1:]
-    return at_decision, bits
+    return (np.asarray(gate["candidate_any"], bool),
+            np.asarray(gate["candidate_trigger_bits"], np.uint8))
 
 
 def horizon_end_indices(trading_day, segment, n_bars, days):
@@ -239,8 +247,7 @@ def load_symbol_state(symbol: str) -> OpportunityState:
 
     gate = derive_m15_candidate_gate(touch_bits, seg, day)
     _bump("candidate_gate_derivations")
-    cand_at_dec, cand_bits = shift_candidate_clock(
-        gate["candidate_any"], gate["candidate_trigger_bits"])
+    cand_at_dec, cand_bits = candidate_decision_mask(gate)
 
     return OpportunityState(
         symbol=symbol, n_bars=n,
@@ -444,18 +451,26 @@ def build_symbol_dataset(symbol: str, split=None, verbose: bool = False):
     n = st.n_bars
     views = build_side_views(st)
 
-    entry_idx_all = np.concatenate([np.arange(n), np.arange(n)]) + 1
+    dec_bar = np.concatenate([np.arange(n), np.arange(n)])
+    entry_idx_all = dec_bar + 1
     has_entry = entry_idx_all < n
     entry_idx = np.where(has_entry, entry_idx_all, 0)
-    entry_open = st.open[entry_idx]
-    atr0 = st.atr[entry_idx]
-    entry_segment = st.segment[entry_idx]
-    eligible = views["eligible"] & has_entry
+    safe_dec = np.where(has_entry, dec_bar, 0)
 
-    # §7: ONE scan only, through the maximum (TD5) horizon. TD1/TD3 come from
-    # censoring the same first-event result -- never a rescan (§17).
+    # FIX3: a side view is actionable only if the next-bar OPEN exists AND is
+    # still inside the same hard segment. No cross-segment synthetic entry.
+    entry_executable = has_entry & (st.segment[entry_idx] == st.segment[safe_dec])
+    eligible = views["eligible"] & entry_executable
+
+    # FIX2: decision-time ATR only. ATR_{t+1} is not known at Open_{t+1}.
+    atr0 = views["atr"]
+    entry_open = st.open[entry_idx]
+    entry_segment = st.segment[entry_idx]
+
+    # §7 + FIX4: ONE scan only, through the maximum (TD5) horizon, and the
+    # horizon window originates at the FILL bar (R5 build_horizon_indices).
     ends = horizon_end_indices(st.trading_day, st.segment, n, (1, 3, 5))
-    end_td5 = np.concatenate([ends[5], ends[5]])
+    end_td5 = ends[5][entry_idx]
 
     event_step, event_code = scan_first_structural_event(
         entry_idx=entry_idx, end_idx=end_td5, side=views["side"],
@@ -464,14 +479,31 @@ def build_symbol_dataset(symbol: str, split=None, verbose: bool = False):
         entry_segment=entry_segment, eligible=eligible)
     _bump("structural_stream_scans")
 
-    w_long, w_short = _epoch_weights(
-        eligible[:n] & (np.arange(n) + 1 < n),
-        eligible[n:] & (np.arange(n) + 1 < n))
+    # FIX9: precomputed structural-renewal axis, derived from THIS scan (never
+    # a second scan). One row per (symbol, decision_bar, side).
+    ev_idx_td5 = np.where(event_step >= 0, entry_idx + event_step, -1)
+    lab_td5 = episode_label(
+        event_step=event_step, event_code=event_code, entry_idx=entry_idx,
+        end_idx_H=end_td5, side=views["side"], entry_open=entry_open,
+        atr0=atr0, open_px=st.open, close_px=st.close, segment=st.segment,
+        entry_segment=entry_segment)
+    renewal_axis = pd.DataFrame({
+        "symbol": symbol,
+        "decision_bar": dec_bar,
+        "side": np.where(views["is_long"], "LONG", "SHORT"),
+        "bracket_eligible": views["eligible"] & has_entry,
+        "event_step_td5": event_step,
+        "event_code_td5": event_code,
+        "event_idx_td5": ev_idx_td5.astype(np.int64),
+        "renewal_fill_idx_td5": lab_td5["renewal_fill_idx"].astype(np.int64)})
+
+    w_long, w_short = _epoch_weights(eligible[:n], eligible[n:])
 
     label_rows = []
     for H in HORIZONS:
         k = HORIZON_DAYS[H]
-        end_H = np.concatenate([ends[k], ends[k]])
+        # FIX4: horizon window originates at the FILL bar.
+        end_H = ends[k][entry_idx]
         lab = episode_label(
             event_step=event_step, event_code=event_code, entry_idx=entry_idx,
             end_idx_H=end_H, side=views["side"], entry_open=entry_open,
@@ -487,7 +519,10 @@ def build_symbol_dataset(symbol: str, split=None, verbose: bool = False):
         "side": np.where(views["is_long"], "LONG", "SHORT"),
         "candidate_at_decision": np.concatenate([st.candidate_at_decision,
                                                  st.candidate_at_decision]),
-        "bracket_eligible": eligible,
+        # ex-ante structural bracket eligibility (barriers only)
+        "bracket_eligible": views["eligible"] & has_entry,
+        # FIX3: a next-open entry must exist and stay in the same hard segment
+        "entry_executable": entry_executable,
         "G": views["G"], "L": views["L"]})
     # §21: side_features carries the OPP36 matrix ONCE (not once per horizon).
     # The three leading columns are JOIN KEYS only; the OPP36 schema SHA is
@@ -513,14 +548,16 @@ def build_symbol_dataset(symbol: str, split=None, verbose: bool = False):
         "candidate_trigger_bits": st.candidate_trigger_bits})
 
     label_df = _assemble_labels(symbol, st, views, label_rows, eligible,
-                                entry_idx, w_long, w_short, split)
+                                entry_idx, w_long, w_short, split,
+                                entry_executable, views["eligible"] & has_entry)
     if verbose:
         print(f"{symbol}: bars={n} labels={len(label_df)}", flush=True)
-    return state_df, side_df, side_feat, label_df
+    return state_df, side_df, side_feat, label_df, renewal_axis
 
 
 def _assemble_labels(symbol, st, views, label_rows, eligible, entry_idx,
-                     w_long, w_short, split):
+                     w_long, w_short, split, entry_executable=None,
+                     bracket_eligible=None):
     n = st.n_bars
     frames = []
     decision_bar = np.concatenate([np.arange(n), np.arange(n)])
@@ -528,6 +565,13 @@ def _assemble_labels(symbol, st, views, label_rows, eligible, entry_idx,
     weight = np.concatenate([w_long, w_short])
     for lab in label_rows:
         H = lab["horizon"]
+        # FIX5: real availability. A next-OPEN renewal is fully known at the
+        # START of the fill bar; a horizon-close termination at its DECISION time.
+        idx = np.where(lab["renewal_executable"], lab["renewal_fill_idx"],
+                       lab["end_idx"])
+        idx = np.clip(idx, 0, n - 1)
+        lav = np.where(lab["renewal_executable"], st.bar_start_time[idx],
+                       st.decision_time[idx])
         frames.append(pd.DataFrame({
             "symbol": symbol,
             "decision_bar": decision_bar,
@@ -535,12 +579,11 @@ def _assemble_labels(symbol, st, views, label_rows, eligible, entry_idx,
             "side": side_name,
             "horizon": H,
             "decision_time": st.decision_time[decision_bar],
-            "label_available_time": st.decision_time[np.clip(
-                np.where(lab["renewal_executable"], lab["renewal_fill_idx"],
-                         lab["end_idx"]), 0, n - 1)],
+            "label_available_time": lav,
             "bracket_eligible": eligible,
             "G": views["G"], "L": views["L"],
             "log_structural_rr": _log_rr(views["G"], views["L"]),
+            "end_idx": lab["end_idx"],
             "event_step": lab["event_step"],
             "event_class": lab["event_class"],
             "event_observed": lab["event_observed"],
@@ -555,8 +598,15 @@ def _assemble_labels(symbol, st, views, label_rows, eligible, entry_idx,
             "sample_weight": weight,
         }))
     out = pd.concat(frames, ignore_index=True)
+    if entry_executable is not None:
+        out["entry_executable"] = np.tile(np.asarray(entry_executable, bool),
+                                          len(label_rows))
+    if bracket_eligible is not None:
+        out["bracket_eligible"] = np.tile(np.asarray(bracket_eligible, bool),
+                                          len(label_rows))
     if split is not None:
         out = assign_split(out, split)
+        out = apply_split_retention(out)
     return out
 
 
@@ -581,6 +631,34 @@ def assign_split(df: pd.DataFrame, split: dict) -> pd.DataFrame:
     return df[stage != ""]
 
 
+def apply_split_retention(df: pd.DataFrame) -> pd.DataFrame:
+    """FIX6: split-pure COUNTERFACTUAL epoch retention.
+
+    Operate by (symbol, decision_bar, horizon):
+      * exactly one side structurally usable -> keep it if its label resolved
+        in-split, weight 1.0;
+      * both sides usable -> keep the epoch ONLY if BOTH side labels fully
+        resolve inside the same split, weights 0.5 / 0.5.
+    This prevents a "only the faster-resolving side survives" selection bias
+    near split boundaries and guarantees sum(weight) == 1 per retained epoch.
+    """
+    if len(df) == 0:
+        return df
+    usable = (df["bracket_eligible"].to_numpy(bool)
+              & df["entry_executable"].to_numpy(bool))
+    resolved = (df["split"].to_numpy(object) != "")
+    key = (df["symbol"].astype(str) + "|"
+           + df["decision_bar"].astype(str) + "|"
+           + df["horizon"].astype(str))
+    tmp = pd.DataFrame({"k": key, "u": usable,
+                        "ru": usable & resolved})
+    n_usable = tmp.groupby("k")["u"].transform("sum").to_numpy()
+    n_res = tmp.groupby("k")["ru"].transform("sum").to_numpy()
+    keep_single = usable & resolved & (n_usable == 1)
+    keep_both = usable & (n_usable == 2) & (n_res == 2)
+    return df[keep_single | keep_both].reset_index(drop=True)
+
+
 # --------------------------------------------------------------------------- #
 # 6. Full 15-symbol materialization (§21 / §22)                                 #
 # --------------------------------------------------------------------------- #
@@ -593,26 +671,45 @@ def materialize(symbols=SYMBOLS, split=None, verbose: bool = True,
             build_frozen_split)
         split = build_frozen_split()
 
-    states, sides, side_feats, labels = [], [], [], []
+    states, sides, side_feats, labels, axes = [], [], [], [], []
     for sym in symbols:
-        s_df, sd_df, sf_df, l_df = build_symbol_dataset(sym, split=split)
+        s_df, sd_df, sf_df, l_df, ax_df = build_symbol_dataset(sym, split=split)
         states.append(s_df)
         sides.append(sd_df)
         side_feats.append(sf_df)
         labels.append(l_df)
+        axes.append(ax_df)
     state_df = pd.concat(states, ignore_index=True)
     side_df = pd.concat(sides, ignore_index=True)
     side_feat_df = pd.concat(side_feats, ignore_index=True)
     label_df = pd.concat(labels, ignore_index=True)
+    renewal_axis_df = pd.concat(axes, ignore_index=True)
 
     parts = {}
     for stage in ("train", "val", "test"):
         parts[stage] = label_df[label_df["split"] == stage].reset_index(drop=True)
 
+    # FIX6 hard gate: every retained TRAIN/VAL epoch+horizon must sum to 1.
+    weight_gate = {}
+    for stage in ("train", "val"):
+        d = parts[stage]
+        if len(d) == 0:
+            weight_gate[stage] = {"ok": True, "max_abs_dev": 0.0, "n_epochs": 0}
+            continue
+        s = (d.groupby(["symbol", "decision_bar", "horizon"])["sample_weight"]
+             .sum())
+        dev = float(np.max(np.abs(s.to_numpy(float) - 1.0)))
+        weight_gate[stage] = {"ok": bool(dev <= 1e-12), "max_abs_dev": dev,
+                              "n_epochs": int(len(s))}
+        if dev > 1e-12:
+            raise RuntimeError(
+                f"STOP_R8_EPOCH_WEIGHT_GATE split={stage} max_abs_dev={dev}")
+
     os.makedirs(ARTIFACT_DIR, exist_ok=True)
     if save:
         state_df.to_parquet(STATE_PARQUET, index=False)
         side_feat_df.to_parquet(SIDE_FEATURES_PARQUET, index=False)
+        renewal_axis_df.to_parquet(RENEWAL_AXIS_PARQUET, index=False)
         for stage, df in parts.items():
             df.to_parquet(LABEL_PARQUETS[stage], index=False)
 
@@ -633,6 +730,10 @@ def materialize(symbols=SYMBOLS, split=None, verbose: bool = True,
         "event_class_counts": {k: int(v) for k, v in
                                label_df["event_class"].value_counts().items()},
         "bracket_coverage": float(side_df["bracket_eligible"].mean()),
+        "entry_executable_coverage": float(side_df["entry_executable"].mean()),
+        "renewal_axis_rows": int(len(renewal_axis_df)),
+        "epoch_weight_gate": weight_gate,
+        "scientific_status": SCIENTIFIC_STATUS,
         "cost_governance": {
             "cost_metadata_status": COST_METADATA_STATUS,
             "realistic_net_pnl_status": REALISTIC_NET_PNL_STATUS,
@@ -645,7 +746,9 @@ def materialize(symbols=SYMBOLS, split=None, verbose: bool = True,
         manifest["artifact_sha256"] = {
             os.path.basename(STATE_PARQUET): sha256_file(STATE_PARQUET),
             os.path.basename(SIDE_FEATURES_PARQUET):
-                sha256_file(SIDE_FEATURES_PARQUET)}
+                sha256_file(SIDE_FEATURES_PARQUET),
+            os.path.basename(RENEWAL_AXIS_PARQUET):
+                sha256_file(RENEWAL_AXIS_PARQUET)}
         for stage, p in LABEL_PARQUETS.items():
             manifest["artifact_sha256"][os.path.basename(p)] = sha256_file(p)
         with open(MANIFEST_JSON, "w") as f:

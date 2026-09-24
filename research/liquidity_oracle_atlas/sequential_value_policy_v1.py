@@ -33,10 +33,11 @@ from research.liquidity_oracle_atlas.structural_renewal_dataset_v1 import (
     STATE_PARQUET,
     SIDE_FEATURES_PARQUET,
     LABEL_PARQUETS,
+    RENEWAL_AXIS_PARQUET,
     HORIZON_DAYS,
+    SCIENTIFIC_STATUS,
     structural_barriers,
     horizon_end_indices,
-    scan_first_structural_event,
     sha256_file,
 )
 
@@ -135,6 +136,11 @@ class SymbolAxis:
     # trading-day ordinal, used only for the frozen remaining-days mapping
     day_ord: np.ndarray
     ev: dict = field(default_factory=dict)     # {(horizon, side): array}
+    # FIX10: precomputed TD5 structural-renewal axis (simulation-only outcomes)
+    event_idx_long: Optional[np.ndarray] = None
+    event_idx_short: Optional[np.ndarray] = None
+    renewal_fill_long: Optional[np.ndarray] = None
+    renewal_fill_short: Optional[np.ndarray] = None
 
 
 def make_epoch(axis, decision_idx, side_sign):
@@ -148,22 +154,21 @@ def make_epoch(axis, decision_idx, side_sign):
             "adverse": float(adverse)}
 
 
-def first_structural_event(axis, epoch, fill_idx, deadline_idx):
-    """Jump directly to the precomputed structural event (§36). No bar scanning
-    over the policy loop -- a single bounded structural scan for this epoch."""
-    if not (np.isfinite(epoch["favorable"]) and np.isfinite(epoch["adverse"])):
-        return -1
-    entry_idx = np.array([fill_idx], np.int64)
-    end_idx = np.array([deadline_idx], np.int64)
-    step, _code = scan_first_structural_event(
-        entry_idx=entry_idx, end_idx=end_idx,
-        side=np.array([1.0 if epoch["side"] > 0 else -1.0]),
-        favorable_boundary=np.array([epoch["favorable"]]),
-        adverse_boundary=np.array([epoch["adverse"]]),
-        high=axis.high, low=axis.low, segment=axis.segment,
-        entry_segment=np.array([axis.segment[fill_idx]], np.int64),
-        eligible=np.array([True]))
-    return int(step[0])
+def lookup_precomputed_event(axis, decision_idx, side):
+    """FIX10: O(1) lookup of the precomputed structural-renewal event.
+
+    R8 already ran ONE vectorized TD5 first-passage scan for every
+    (symbol, decision_bar, side); R10 only reads `event_idx_td5` out of that
+    axis. No structural scanner is called, directly or indirectly.
+    """
+    arr = axis.event_idx_long if side > 0 else axis.event_idx_short
+    if arr is None:
+        raise RuntimeError("STOP_R10_RENEWAL_AXIS_MISSING")
+    if decision_idx < 0 or decision_idx >= len(arr):
+        return -1, -1
+    return int(arr[decision_idx]), int(
+        (axis.renewal_fill_long if side > 0 else axis.renewal_fill_short)
+        [decision_idx])
 
 
 # --------------------------------------------------------------------------- #
@@ -189,9 +194,10 @@ class Trade:
 
 def open_trade(axis, decision_idx, side, deadline_idx):
     fill = decision_idx + 1
+    # FIX2: decision-time ATR only. ATR at the fill bar is not known at Open.
     return Trade(symbol=axis.symbol, side=side, decision_idx=decision_idx,
                  fill_idx=fill, entry_price=float(axis.open[fill]),
-                 atr0=float(axis.atr[fill]), deadline_idx=deadline_idx,
+                 atr0=float(axis.atr[decision_idx]), deadline_idx=deadline_idx,
                  scan_from=fill)
 
 
@@ -297,32 +303,18 @@ def simulate_symbol(policy, axis, verbose=False):
             i = fill
 
         # ---- P2 position management (§34) ----
-        epoch = {"decision_idx": trade.decision_idx,
-                 "favorable": (axis.res_bottom[trade.decision_idx]
-                               if trade.side > 0
-                               else axis.sup_top[trade.decision_idx]),
-                 "adverse": (axis.sup_top[trade.decision_idx]
-                             if trade.side > 0
-                             else axis.res_bottom[trade.decision_idx]),
-                 "side": trade.side}
-        ev_first = first_structural_event(axis, epoch, trade.scan_from,
-                                          trade.deadline_idx)
-        if ev_first < 0:
-            i = close_trade(trade, axis, min(trade.deadline_idx, axis.n_bars - 1),
-                            axis.close[min(trade.deadline_idx, axis.n_bars - 1)],
+        # FIX10: O(1) precomputed event lookup -- no structural scan here.
+        e, renewal_fill = lookup_precomputed_event(
+            axis, trade.decision_idx, pos)
+        deadline_cap = min(trade.deadline_idx, axis.n_bars - 1)
+        if (e < 0 or e >= trade.deadline_idx or renewal_fill < 0
+                or renewal_fill > trade.deadline_idx):
+            i = close_trade(trade, axis, deadline_cap, axis.close[deadline_cap],
                             "terminal_deadline", trades, i)
             pos = 0
             trade = None
             continue
-        e = trade.scan_from + ev_first
-        if e >= trade.deadline_idx:
-            i = close_trade(trade, axis, min(trade.deadline_idx, axis.n_bars - 1),
-                            axis.close[min(trade.deadline_idx, axis.n_bars - 1)],
-                            "terminal_deadline", trades, i)
-            pos = 0
-            trade = None
-            continue
-        nxt = e + 1
+        nxt = renewal_fill
         if nxt >= axis.n_bars or axis.segment[nxt] != axis.segment[e]:
             i = close_trade(trade, axis, e, axis.close[e],
                             "terminal_no_valid_open", trades, i)
@@ -381,28 +373,59 @@ def daily_returns(trades_by_symbol, axis_by_symbol, common_days):
 # --------------------------------------------------------------------------- #
 # 6. Block bootstrap (§41)                                                      #
 # --------------------------------------------------------------------------- #
+def complete_blocks(n_days, block=BOOTSTRAP_BLOCK_DAYS):
+    """FIX14: freeze inference to COMPLETE non-overlapping 5-trading-day blocks.
+
+    The terminal remainder of 0-4 days is excluded from the Primary point
+    estimate and CI (it is reported descriptively only).
+    """
+    n_full = int(n_days // block)
+    return n_full, int(block * n_full)
+
+
 def block_bootstrap_delta(a, b, block=BOOTSTRAP_BLOCK_DAYS,
                           B=BOOTSTRAP_B, seed=BOOTSTRAP_SEED):
     """Paired whole 5-day blocks; all symbols preserved inside every block."""
-    d = (a.to_numpy(float) - b.to_numpy(float))
-    n = len(d)
-    nb = int(np.ceil(n / block))
-    idx = np.arange(n)
-    blocks = [d[i * block:(i + 1) * block] for i in range(nb)]
-    blocks = [x for x in blocks if len(x)]
+    d_full = (np.asarray(a, float) - np.asarray(b, float))
+    n_days = len(d_full)
+    n_full, inference_days = complete_blocks(n_days, block)
+    d = d_full[:inference_days]
+    remainder = d_full[inference_days:]
+    if n_full == 0:
+        return {"point": float("nan"), "ci_low": float("nan"),
+                "ci_high": float("nan"), "reps": np.empty(B, float),
+                "n_days": n_days, "n_inference_days": 0, "n_blocks": 0,
+                "excluded_tail_days": int(len(d_full)),
+                "excluded_tail_mean": float(d_full.mean())}
+    blocks = [d[i * block:(i + 1) * block] for i in range(n_full)]
     rng = np.random.default_rng(seed)
     reps = np.empty(B, float)
     for k in range(B):
-        pick = rng.integers(0, len(blocks), size=len(blocks))
+        pick = rng.integers(0, n_full, size=n_full)
         reps[k] = float(np.concatenate([blocks[p] for p in pick]).mean())
     lo, hi = np.quantile(reps, [0.025, 0.975])
     return {"point": float(d.mean()), "ci_low": float(lo), "ci_high": float(hi),
-            "reps": reps, "n_days": n, "n_blocks": len(blocks)}
+            "reps": reps, "n_days": n_days, "n_inference_days": inference_days,
+            "n_blocks": n_full,
+            "excluded_tail_days": int(len(remainder)),
+            "excluded_tail_mean": (float(remainder.mean())
+                                   if len(remainder) else 0.0)}
 
 
 # --------------------------------------------------------------------------- #
 # 7. Verdict (§42)                                                              #
 # --------------------------------------------------------------------------- #
+def policy_decomposition_identity(daily_p2, daily_p1, daily_p0):
+    """FIX15: Delta_FULL = Delta_GATE + Delta_RENEW, as paired daily vectors."""
+    d_full = (np.asarray(daily_p2, float) - np.asarray(daily_p0, float))
+    d_gate = (np.asarray(daily_p1, float) - np.asarray(daily_p0, float))
+    d_renew = (np.asarray(daily_p2, float) - np.asarray(daily_p1, float))
+    dev = float(np.max(np.abs(d_full - (d_gate + d_renew))))
+    if dev > 1e-12:
+        raise RuntimeError(f"STOP_R10_DECOMPOSITION_IDENTITY dev={dev}")
+    return {"max_abs_dev": dev, "ok": dev <= 1e-12}
+
+
 def formal_verdict(full, gate, renew):
     if full["ci_low"] > 0 and renew["ci_high"] >= 0:
         return "FULL_VALUE_RENEWAL_SUPPORTED"
@@ -416,11 +439,139 @@ def formal_verdict(full, gate, renew):
 # --------------------------------------------------------------------------- #
 # 8. Formal TEST runner — implemented, NOT executed (§52/§55)                    #
 # --------------------------------------------------------------------------- #
+# --------------------------------------------------------------------------- #
+# 8. TEST-axis construction (§32 / FIX12) — behind authorization                 #
+# --------------------------------------------------------------------------- #
+def build_e9_test_axis(split=None):
+    """FIX12: fit the frozen Direction chain ONCE on frozen TRAIN/VAL, then
+    batch-predict E9 across the TEST decision axis.
+
+    Returns (e9_axis_parquet_frame, reproduction_gate).
+    """
+    from research.liquidity_oracle_atlas.direction_null_baseline_v1 import (
+        build_frozen_split)
+    from research.liquidity_oracle_atlas.direction_gated_experts_v1 import (
+        build_direction_expert_data, run_chain)
+    if split is None:
+        split = build_frozen_split()
+    ds = split["ds"]
+    data = build_direction_expert_data(ds)
+    chain = run_chain(data, ds, split["train_idx"], split["val_idx"],
+                      split["test_idx"])
+    _bump("direction_chain_fits")
+    e9 = np.asarray(chain["E9"], dtype=np.uint8)
+    sub = ds.iloc[split["test_idx"]]
+    out = pd.DataFrame({
+        "symbol": data.symbol[split["test_idx"]],
+        "decision_bar": sub["candidate_decision_index"].to_numpy(np.int64),
+        "e9_direction": np.where(e9 == 1, "LONG", "SHORT"),
+        "e9_side": np.where(e9 == 1, 1, -1)})
+    _bump("direction_batch_prediction_passes")
+    return out, chain
+
+
+def e9_axis_reproduction_gate(axis_e9):
+    """FIX12: exact equality on all frozen 13,773 overlapping Candidate rows."""
+    frozen = pd.read_parquet(
+        "artifacts/entry_path_atlas_v1/e9_direction_state_v1.parquet",
+        columns=["symbol", "candidate_decision_index", "e9_direction"])
+    m = frozen.merge(axis_e9, how="left",
+                     left_on=["symbol", "candidate_decision_index"],
+                     right_on=["symbol", "decision_bar"])
+    bad = int((m["e9_direction_x"].to_numpy(object)
+               != m["e9_direction_y"].to_numpy(object)).sum())
+    if bad:
+        raise RuntimeError(
+            f"STOP_R10_E9_AXIS_REPRODUCTION_MISMATCH n_mismatch={bad}")
+    return {"n_frozen_rows": int(len(m)), "n_mismatch": bad, "ok": bad == 0}
+
+
+def build_symbol_axes(state_df, pred_df, renewal_df, e9_df, split, symbols=None):
+    """FIX13 step 10: construct all SymbolAxis objects (array lookup only)."""
+    from research.liquidity_oracle_atlas.structural_renewal_dataset_v1 import (
+        horizon_end_indices)
+    t2 = np.datetime64(split["cal"]["cuts"][1], "ns")
+    axes = {}
+    for sym in (symbols or sorted(state_df["symbol"].unique())):
+        s = state_df[state_df["symbol"] == sym].sort_values("bar_index")
+        n = len(s)
+        day = s["trading_day"].to_numpy()
+        seg = s["segment"].to_numpy(np.int64)
+        ends = horizon_end_indices(day, seg, n, (5,))
+        fill = np.minimum(np.arange(n) + 1, n - 1)
+        test_mask = s["decision_time"].to_numpy("datetime64[ns]") >= t2
+
+        def side_arrays(side_name, col):
+            p = pred_df[(pred_df["symbol"] == sym)
+                        & (pred_df["side"] == side_name)]
+            r = renewal_df[(renewal_df["symbol"] == sym)
+                           & (renewal_df["side"] == side_name)]
+            p = p.set_index("decision_bar").sort_index()
+            r = r.set_index("decision_bar").sort_index()
+            return (r[col].reindex(np.arange(n)).to_numpy(np.int64),
+                    r["renewal_fill_idx_td5"].reindex(np.arange(n))
+                    .to_numpy(np.int64))
+
+        ev = {}
+        for H in HORIZONS:
+            for sd in (1, -1):
+                nm = "LONG" if sd > 0 else "SHORT"
+                p = pred_df[(pred_df["symbol"] == sym)
+                            & (pred_df["side"] == nm)]
+                p = p.set_index("decision_bar")[
+                    f"{H}_predicted_ev"].reindex(np.arange(n))
+                ev[(H, sd)] = p.to_numpy(float)
+        e9s = e9_df[e9_df["symbol"] == sym].set_index("decision_bar")["e9_side"]
+        e9_arr = np.zeros(n, np.int8)
+        vals = e9s.reindex(np.arange(n)).to_numpy(float)
+        e9_arr[np.isfinite(vals)] = vals[np.isfinite(vals)].astype(np.int8)
+
+        el, fl = side_arrays("LONG", "event_idx_td5")
+        es, fs = side_arrays("SHORT", "event_idx_td5")
+        axes[sym] = SymbolAxis(
+            symbol=sym, n_bars=n,
+            bar_start_time=s["bar_start_time"].to_numpy(),
+            decision_time=s["decision_time"].to_numpy(),
+            trading_day=day, segment=seg,
+            open=s["open"].to_numpy(float), high=s["high"].to_numpy(float),
+            low=s["low"].to_numpy(float), close=s["close"].to_numpy(float),
+            atr=s["atr"].to_numpy(float),
+            sup_top=s["sup_top"].to_numpy(float),
+            res_bottom=s["res_bottom"].to_numpy(float),
+            candidate_at_decision=s["candidate_at_decision"].to_numpy(bool),
+            test_mask=test_mask, e9_side=e9_arr,
+            deadline_idx=ends[5][fill],
+            day_ord=np.asarray(pd.factorize(day, sort=True)[0], np.int64),
+            ev=ev, event_idx_long=el, event_idx_short=es,
+            renewal_fill_long=fl, renewal_fill_short=fs)
+    return axes
+
+
 def run_formal_opportunity_value_test(allow_test: bool = False,
                                       authorized_review_sha: Optional[str] = None,
                                       write_artifacts: bool = True,
                                       verbose: bool = False):
-    """Full sequential TEST. Requires explicit authorization. NOT executed now."""
+    """FIX13: complete Formal TEST call graph. Blocked by default; NOT executed.
+
+    Ordering:
+      1  HEAD == authorized SHA
+      2  committed PRE-TEST evidence identity
+      3  R8 artifact SHA
+      4  all nine R9 model SHA
+      5  load TEST state once
+      6  batch TEST Opportunity predictions once
+      7  materialize E9 TEST axis once
+      8  13,773 overlap reproduction gate
+      9  load precomputed renewal-event axis once
+     10 construct all 15 SymbolAxis objects
+     11 run P0/P1/P2 sequentially
+     12 per-symbol daily PnL
+     13 common 15-symbol portfolio daily PnL
+     14 paired block inference
+     15 frozen verdict
+     16 write Formal evidence
+     17 write Formal manifest LAST
+    """
     if allow_test is not True:
         raise RuntimeError("STOP_R10_TEST_NOT_AUTHORIZED")
     if not authorized_review_sha:
@@ -430,4 +581,84 @@ def run_formal_opportunity_value_test(allow_test: bool = False,
         raise RuntimeError(
             f"STOP_R10_GENERATOR_SHA_MISMATCH head={head} "
             f"authorized_review_sha={authorized_review_sha}")
-    raise RuntimeError("STOP_R10_TEST_AXIS_NOT_MATERIALIZED")
+
+    # 2: committed PRE-TEST evidence identity
+    ev = os.path.join("research", "liquidity_oracle_atlas", "evidence",
+                      "opportunity_value_renewal_v1_pretest_summary.json")
+    if not os.path.exists(ev):
+        raise RuntimeError("STOP_R10_PRETEST_EVIDENCE_MISSING")
+    with open(ev) as f:
+        pre = json.load(f)
+    # 3 + 4: artifact / model SHA verification
+    for name, want in pre["r8_manifest"]["artifact_sha256"].items():
+        p = os.path.join(ARTIFACT_DIR, name)
+        if sha256_file(p) != want:
+            raise RuntimeError(f"STOP_R10_R8_ARTIFACT_SHA_MISMATCH {name}")
+    for name, want in pre["r9_model_manifest"]["model_sha256"].items():
+        p = os.path.join("artifacts", "opportunity_value_v1", "models", name)
+        if sha256_file(p) != want:
+            raise RuntimeError(f"STOP_R10_R9_MODEL_SHA_MISMATCH {name}")
+
+    # 5: TEST state once
+    state_df = pd.read_parquet(STATE_PARQUET)
+    _bump("test_state_loads")
+    # 6: batch TEST predictions once
+    from research.liquidity_oracle_atlas import opportunity_value_model_v1 as R9
+    pred_df = R9.predict_test(allow_test=True,
+                              authorized_review_sha=authorized_review_sha,
+                              write_artifacts=write_artifacts)
+    _bump("test_prediction_loads")
+    # 7 + 8: E9 axis once + reproduction gate
+    e9_df, _chain = build_e9_test_axis()
+    gate = e9_axis_reproduction_gate(e9_df)
+    # 9: renewal axis once
+    renewal_df = pd.read_parquet(RENEWAL_AXIS_PARQUET)
+    # 10
+    from research.liquidity_oracle_atlas.direction_null_baseline_v1 import (
+        build_frozen_split)
+    split = build_frozen_split()
+    axes = build_symbol_axes(state_df, pred_df, renewal_df, e9_df, split)
+    # 11
+    trades_by_policy = {}
+    for p in POLICIES:
+        per = {}
+        for sym, ax in axes.items():
+            _bump("sequential_symbol_loops")
+            per[sym], _ = simulate_symbol(p, ax)
+        trades_by_policy[p] = per
+    # 12-13
+    common_days = None
+    daily_by_policy = {}
+    for p in POLICIES:
+        if common_days is None:
+            common_days = _common_days(axes, split)
+        port, per_sym = daily_returns(trades_by_policy[p], axes, common_days)
+        daily_by_policy[p] = port
+    # 14
+    full = block_bootstrap_delta(daily_by_policy[PRIMARY_POLICY],
+                                 daily_by_policy[BASELINE_POLICY])
+    gate_d = block_bootstrap_delta(daily_by_policy[GATE_POLICY],
+                                   daily_by_policy[BASELINE_POLICY])
+    renew = block_bootstrap_delta(daily_by_policy[PRIMARY_POLICY],
+                                  daily_by_policy[GATE_POLICY])
+    # 15
+    verdict = formal_verdict(full, gate_d, renew)
+    result = {"verdict": verdict, "delta_full": {k: v for k, v in full.items()
+                                                 if k != "reps"},
+              "delta_gate": {k: v for k, v in gate_d.items() if k != "reps"},
+              "delta_renew": {k: v for k, v in renew.items() if k != "reps"},
+              "e9_reproduction": gate,
+              "scientific_status": SCIENTIFIC_STATUS,
+              "performance": dict(COUNTERS)}
+    if verbose:
+        print(json.dumps(result, indent=2, default=str))
+    return result
+
+
+def _common_days(axes, split):
+    import pandas as pd
+    sets = None
+    for ax in axes.values():
+        days = pd.Index(ax.trading_day[ax.test_mask]).unique()
+        sets = days if sets is None else sets.intersection(days)
+    return np.asarray(sorted(sets))
