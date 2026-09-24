@@ -100,7 +100,7 @@ EVIDENCE_DIR = os.path.join("research", "liquidity_oracle_atlas", "evidence")
 MANIFEST_JSON = os.path.join(EVIDENCE_DIR, "entry_path_atlas_v1_manifest.json")
 T1_5_ARCHIVE_JSON = os.path.join(EVIDENCE_DIR, "entry_path_atlas_v1_t1_5_manifest.json")
 STAGE_PRE_T2 = "pre_t2_implementation"
-REVIEWED_PARENT_PRE_T2 = "2b7d6bb61a42122e9106b8b36228736c8273655a"
+REVIEWED_PARENT_PRE_T2 = "e9498f9e6ed9bcdaf084639ce34510fb4dfac79e"
 R4_ENV_DIR = os.path.join("artifacts", "candidate_gate_r4_m15_touch_nextbar_v1")
 R4_ENV_MANIFEST = os.path.join(R4_ENV_DIR, "r4_env_manifest.json")
 
@@ -2881,7 +2881,7 @@ def run_pret2_checkpoint(verbose=True) -> dict:
     """PRE-T2 checkpoint: validate the 15m curve + event infrastructure on
     synthetic / small fixtures; do NOT estimate the full primary curve.
 
-    Produces the authoritative PRE-T2 manifest (reviewed parent = 2b7d6bb).
+    Produces the authoritative PRE-T2 manifest (reviewed parent = e9498f9).
     """
     t_start = time.time()
     archive_t1_5_manifest()
