@@ -49,7 +49,9 @@ import inspect
 import json
 import os
 import sys
+import tempfile
 import time
+import warnings
 from dataclasses import dataclass
 
 import numpy as np
@@ -97,7 +99,7 @@ EVIDENCE_DIR = os.path.join("research", "liquidity_oracle_atlas", "evidence")
 MANIFEST_JSON = os.path.join(EVIDENCE_DIR, "entry_path_atlas_v1_manifest.json")
 T1_5_ARCHIVE_JSON = os.path.join(EVIDENCE_DIR, "entry_path_atlas_v1_t1_5_manifest.json")
 STAGE_PRE_T2 = "pre_t2_implementation"
-REVIEWED_PARENT_PRE_T2 = "893ca1632631f3862c2e17c482b6d90b9c541805"
+REVIEWED_PARENT_PRE_T2 = "2b7d6bb61a42122e9106b8b36228736c8273655a"
 R4_ENV_DIR = os.path.join("artifacts", "candidate_gate_r4_m15_touch_nextbar_v1")
 R4_ENV_MANIFEST = os.path.join(R4_ENV_DIR, "r4_env_manifest.json")
 
@@ -671,6 +673,7 @@ def build_base_anchors(e9_df_symbol: pd.DataFrame, state: SymbolState) -> dict:
         "oracle_direction": sel["oracle_direction"].to_numpy(object),
         "semantic_key": sel["semantic_key"].to_numpy(object),
         "gid": sel["gid"].to_numpy(object),
+        "fill_trading_day": state.trading_day[fill],
         # raw canonical identities preserved (never collapsed)
         "raw_sup_top": state.sup_top[dec], "raw_sup_bottom": state.sup_bottom[dec],
         "raw_res_top": state.res_top[dec], "raw_res_bottom": state.res_bottom[dec],
@@ -1601,6 +1604,8 @@ def run_kernel_checkpoint(symbols=SYMBOLS, n_subset=50, verbose=True) -> dict:
 # completed valid 15m bars observed after Candidate fill. The previous scalar
 # "delta_PS_4h" is retired; the primary is the FULL curve over h.
 
+# _EVENT_FIELDS is the FULL L2 column list (real event times + booleans +
+# durations + amplitudes). It is used ONLY to materialize the L2 row metrics.
 _EVENT_FIELDS = (
     "sr_first_touch", "sr_first_pierce", "sr_same_bar_reclaim", "sr_first_reclaim",
     "sr_bars_to_reclaim", "sr_first_failed_reclaim", "sr_break_continue",
@@ -1611,19 +1616,52 @@ _EVENT_FIELDS = (
     "mfe_at_first_ahead_sr", "mae_before_first_ahead_sr",
     "mfe_at_first_ahead_liq", "mae_before_first_ahead_liq",
 )
-# adverse: wrong-direction experiences MORE of these -> Wrong - Correct
-_ADVERSE_EVENTS = ("sr_first_pierce", "sr_first_failed_reclaim", "sr_break_continue",
-                   "lb_first_pierce", "lb_first_failed_reclaim", "lb_break_continue")
-# favorable / ahead: correct-direction experiences MORE -> Correct - Wrong
-_FAVORABLE_EVENTS = ("sr_first_reclaim", "lb_first_reclaim",
-                     "first_ahead_sr_touch", "first_ahead_sr_cross",
-                     "first_ahead_liq_touch", "first_ahead_liq_cross")
+
+# ---- Event taxonomy for the STRUCTURAL-EVENT ATLAS (RC-T2-5) ----
+# A. First-passage event times: a genuine first-event step (>=0) or -1 (never).
+FIRST_PASSAGE_EVENTS = (
+    "sr_first_touch", "sr_first_pierce", "sr_first_reclaim", "sr_first_failed_reclaim",
+    "lb_first_touch", "lb_first_pierce", "lb_first_reclaim", "lb_first_failed_reclaim",
+    "first_ahead_sr_touch", "first_ahead_sr_cross",
+    "first_ahead_liq_touch", "first_ahead_liq_cross",
+)
+# A'. Derived reclaim first-passage events (computed from first_reclaim + same_bar).
+DERIVED_RECLAIM_EVENTS = (
+    "sr_same_bar_reclaim_time", "sr_late_reclaim_time",
+    "lb_same_bar_reclaim_time", "lb_late_reclaim_time",
+)
+# C. NOT event times (must NEVER be cast to first_step):
+#    booleans (same_bar_reclaim), durations (bars_to_reclaim), terminal (break_continue).
+NON_EVENT_FIELDS = (
+    "sr_same_bar_reclaim", "sr_bars_to_reclaim", "sr_break_continue",
+    "lb_same_bar_reclaim", "lb_bars_to_reclaim", "lb_break_continue",
+)
+# Contrast orientation: adverse -> Wrong - Correct; favorable/ahead -> Correct - Wrong.
+_EVENT_ADVERSE = ("sr_first_pierce", "sr_first_failed_reclaim",
+                  "lb_first_pierce", "lb_first_failed_reclaim")
+def _event_orientation(name: str) -> str:
+    if name in _EVENT_ADVERSE:
+        return "wrong_minus_correct"
+    return "correct_minus_wrong"
+
+
+# Full-population hard-gate constants (RC-T2-14). Verified by the frozen
+# 13773-Candidate population; used only when Formal T2 is later authorized.
+FROZEN_FULL_SYMBOLS = 15
+FROZEN_FULL_CANDIDATE_ROWS = 13773
+FROZEN_FULL_ORACLE_GIDS = 638
+FROZEN_FULL_A9_L2_ROWS = 13773
+FROZEN_FULL_E9_L2_ROWS = 13773
+FROZEN_FULL_L2_ROWS = 27546
 
 
 def build_group_curve_sufficient_stats(value_matrix, correct, gid, weight):
     """gid x h weighted numerator/denominator for correct and wrong.
 
-    Returns (ug, num_c, den_c, num_w, den_w). Within each gid the Candidate
+    RC-T2-1: a Candidate contributes denominator weight ONLY if its value at h is
+    finite. For every h we use the h-specific availability mask for BOTH the
+    numerator and the denominator (a NaN/unavailable observation must never be
+    treated as a numeric 0 in the denominator). Within each gid the Candidate
     weights sum to 1 (verified separately); the total is therefore a mean over
     gids, preserving whole-gid cluster dependence.
     """
@@ -1639,25 +1677,32 @@ def build_group_curve_sufficient_stats(value_matrix, correct, gid, weight):
     den_c = np.zeros((G, H))
     num_w = np.zeros((G, H))
     den_w = np.zeros((G, H))
-    cc = correct.astype(np.float64)
-    wc = np.where(correct, weight, 0.0)
-    wz = np.where(~correct, weight, 0.0)
     for h in range(H):
         v = value_matrix[:, h]
         ok = np.isfinite(v)
-        wv_c = np.where(ok, v * wc, 0.0)
-        wv_z = np.where(ok, v * wz, 0.0)
-        num_c[:, h] = np.bincount(inv, weights=wv_c, minlength=G)
-        den_c[:, h] = np.bincount(inv, weights=wc, minlength=G)
-        num_w[:, h] = np.bincount(inv, weights=wv_z, minlength=G)
-        den_w[:, h] = np.bincount(inv, weights=wz, minlength=G)
+        num_c[:, h] = np.bincount(
+            inv, weights=np.where(ok & correct, v * weight, 0.0), minlength=G)
+        den_c[:, h] = np.bincount(
+            inv, weights=np.where(ok & correct, weight, 0.0), minlength=G)
+        num_w[:, h] = np.bincount(
+            inv, weights=np.where(ok & ~correct, v * weight, 0.0), minlength=G)
+        den_w[:, h] = np.bincount(
+            inv, weights=np.where(ok & ~correct, weight, 0.0), minlength=G)
     return ug, num_c, den_c, num_w, den_w
 
 
 def _safe_div(num, den):
-    den = np.where(den == 0, 1.0, den)
-    out = num / den
-    return np.where(np.isfinite(out), out, np.nan)
+    """RC-T2-2: zero / negative denominator means the group has NO estimate at that h.
+
+    Return NaN (never 0) so a missing correct/wrong mass is not silently turned
+    into a difference of zero.
+    """
+    num = np.asarray(num, dtype=np.float64)
+    den = np.asarray(den, dtype=np.float64)
+    out = np.full(np.broadcast_shapes(num.shape, den.shape), np.nan, dtype=np.float64)
+    ok = den > 0
+    out[ok] = num[ok] / den[ok]
+    return out
 
 
 def bootstrap_delta_curve(num_c, den_c, num_w, den_w, B=2000, seed=20260924,
@@ -1666,11 +1711,18 @@ def bootstrap_delta_curve(num_c, den_c, num_w, den_w, B=2000, seed=20260924,
 
     Every replicate resamples whole gids and returns the full curve, so the
     simultaneous band reflects joint across-h variation (no best-h selection).
+
+    Returns (point, reps, valid_c, valid_w):
+      - point: analytic whole-gid aggregated curve (uses ALL data, not bootstrap)
+      - reps: (B, H) per-replicate curve; NaN where that replicate lacks mass
+      - valid_c / valid_w: (B, H) boolean, whether correct / wrong mass > 0
     """
     G, H = num_c.shape
     rng = np.random.default_rng(seed)
     point = _safe_div(num_c.sum(0), den_c.sum(0)) - _safe_div(num_w.sum(0), den_w.sum(0))
     reps = np.full((B, H), np.nan, dtype=np.float64)
+    valid_c = np.zeros((B, H), dtype=bool)
+    valid_w = np.zeros((B, H), dtype=bool)
     for b0 in range(0, B, batch_size):
         b1 = min(B, b0 + batch_size)
         idx = rng.integers(0, G, size=(b1 - b0, G))
@@ -1678,50 +1730,228 @@ def bootstrap_delta_curve(num_c, den_c, num_w, den_w, B=2000, seed=20260924,
         dc = den_c[idx].sum(1)
         nw = num_w[idx].sum(1)
         dw = den_w[idx].sum(1)
-        reps[b0:b1] = _safe_div(nc, dc) - _safe_div(nw, dw)
-    return point, reps
+        dc_pos = dc > 0
+        dw_pos = dw > 0
+        both = dc_pos & dw_pos
+        reps[b0:b1] = np.where(
+            both, _safe_div(nc, dc) - _safe_div(nw, dw), np.nan)
+        valid_c[b0:b1] = dc_pos
+        valid_w[b0:b1] = dw_pos
+    return point, reps, valid_c, valid_w
 
 
 def pointwise_ci(reps, alpha=0.05):
-    lo = np.nanquantile(reps, alpha / 2.0, axis=0)
-    hi = np.nanquantile(reps, 1.0 - alpha / 2.0, axis=0)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        lo = np.nanquantile(reps, alpha / 2.0, axis=0)
+        hi = np.nanquantile(reps, 1.0 - alpha / 2.0, axis=0)
     return lo, hi
 
 
-def simultaneous_band(point, reps, alpha=0.05):
-    """Studentized max-|t| simultaneous band.
+# RC-T2-3: frozen contrast orientation per metric. PS/MFE/signed-return are
+# Correct - Wrong (favourable); MAE is Wrong - Correct (adverse).
+CURVE_ORIENTATIONS = {
+    "PS": "correct_minus_wrong",
+    "MFE": "correct_minus_wrong",
+    "R": "correct_minus_wrong",
+    "MAE": "wrong_minus_correct",
+}
 
-    The band width q*se is shared across all h, so it accounts for looking at
-    many 15m landmarks simultaneously (no pointwise selective inference).
+
+def oriented_delta_curve(value_matrix, correct, gid, weight, orientation,
+                         B=2000, seed=20260924):
+    """Whole-gid contrast curve with an explicit, stored contrast orientation."""
+    ug, nc, dc, nw, dw = build_group_curve_sufficient_stats(
+        value_matrix, correct, gid, weight)
+    point, reps, vc, vw = bootstrap_delta_curve(nc, dc, nw, dw, B=B, seed=seed)
+    lo, hi = pointwise_ci(reps)
+    band = simultaneous_band(point, reps, vc, vw)
+    res = {"point": point, "reps": reps, "pointwise_lo": lo, "pointwise_hi": hi,
+           "simul_lower": band["lower"], "simul_upper": band["upper"],
+           "se": band["se"], "q": band["q"],
+           "inferential_support": band["inferential_support"],
+           "n_valid_correct": band["n_valid_correct"],
+           "n_valid_wrong": band["n_valid_wrong"],
+           "excludes_zero_at_some_h": band["excludes_zero_at_some_h"],
+           "contrast_orientation": orientation}
+    if orientation == "wrong_minus_correct":
+        for k in ("point", "reps", "pointwise_lo", "pointwise_hi",
+                  "simul_lower", "simul_upper", "se"):
+            res[k] = -res[k]
+    return res
+
+
+def build_system_curves(matrices, correct, gid, weight, B=2000, seed=20260924):
+    """RC-T2-3: build the PS/MFE/MAE/R curves with their frozen orientations."""
+    return {metric: oriented_delta_curve(matrices[metric], correct, gid, weight,
+                                         CURVE_ORIENTATIONS[metric], B=B, seed=seed)
+            for metric in ("PS", "MFE", "MAE", "R")}
+
+
+def simultaneous_band(point, reps, valid_c, valid_w, alpha=0.05):
+    """Studentized max-|t| simultaneous band (RC-T2-4).
+
+    The max-|t| critical value is computed ONLY over the pre-registered h columns
+    that have full inferential support (every bootstrap replicate has both correct
+    and wrong mass). Unsupported h columns receive NaN band endpoints and are
+    excluded from the critical value, so they cannot influence the joint
+    inference and a best-h is never implicitly selected.
     """
-    se = np.nanstd(reps, axis=0, ddof=1)
-    se_safe = np.where(se > 0, se, np.nan)
-    z = (reps - point[None, :]) / se_safe[None, :]
-    max_t = np.nanmax(np.abs(z), axis=1)
-    q = float(np.nanquantile(max_t, 1.0 - alpha))
-    lower = point - q * se
-    upper = point + q * se
-    return {"lower": lower, "upper": upper, "se": se, "q": q}
+    B, H = reps.shape
+    support = valid_c.all(axis=0) & valid_w.all(axis=0)   # (H,)
+    se = np.full(H, np.nan)
+    se[support] = np.nanstd(reps[:, support], axis=0, ddof=1)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        z = np.where(support[None, :], (reps - point[None, :]) / se[None, :], np.nan)
+    if support.any():
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            max_t = np.nanmax(np.abs(z), axis=1)   # NaNs (unsupported h) ignored
+            q = float(np.nanquantile(max_t, 1.0 - alpha))
+    else:
+        q = float("nan")
+    lower = np.where(support, point - q * se, np.nan)
+    upper = np.where(support, point + q * se, np.nan)
+    return {
+        "lower": lower, "upper": upper, "se": se, "q": q,
+        "inferential_support": support,
+        "valid_bootstrap_replicates": int(B),
+        "n_valid_correct": valid_c.sum(axis=0).astype(np.int64),
+        "n_valid_wrong": valid_w.sum(axis=0).astype(np.int64),
+        "excludes_zero_at_some_h": bool(np.any((lower > 0) | (upper < 0))),
+    }
 
 
-def _cumulative_incidence(first_step, mask, weight, max_step):
-    weight = np.asarray(weight, np.float64)
-    # denominator = total at-risk weight (all candidates in the group, including
-    # those that never experience the event = censored), NOT only experiencers.
-    total = float(np.where(mask, weight, 0.0).sum())
-    if total <= 0:
-        return np.zeros(max_step + 1)
-    experienced = np.where(mask & (first_step >= 0), weight, 0.0)
-    counts = np.bincount(np.clip(first_step, 0, max_step), weights=experienced,
-                        minlength=max_step + 1)
-    return np.cumsum(counts) / total
+def weighted_quantile(values, weights, qs):
+    """Weighted quantiles. values/weights 1-D; qs scalar or array of q in [0,1]."""
+    values = np.asarray(values, dtype=np.float64)
+    weights = np.asarray(weights, dtype=np.float64)
+    fin = np.isfinite(values) & np.isfinite(weights) & (weights > 0)
+    if not fin.any():
+        return np.full(np.shape(np.asarray(qs)), np.nan, dtype=np.float64)
+    v = values[fin]; w = weights[fin]
+    order = np.argsort(v)
+    v = v[order]; w = w[order]
+    cw = np.cumsum(w)
+    # midpoint convention: equal weights reproduce the unweighted numpy quantile
+    pos = (cw - 0.5 * w) / cw[-1]
+    return np.interp(np.asarray(qs, dtype=np.float64), pos, v, left=v[0], right=v[-1])
 
 
-def event_cumulative_incidence(first_step, correct, weight, max_step):
-    """Weighted cumulative incidence F_e(h) = P(T_e <= h) for correct and wrong."""
-    fc = _cumulative_incidence(first_step, correct, weight, max_step)
-    fz = _cumulative_incidence(first_step, ~np.asarray(correct, bool), weight, max_step)
-    return fc, fz
+def weighted_km_first_event(event_step, censor_step, weight, max_step):
+    """RC-T2-6: weighted Kaplan-Meier first-event curve.
+
+    F(h) = P(T_e <= h) under right-censoring at ``censor_step`` (the last observed
+    15m step for each Candidate). An event at step e is only counted if e <= censor
+    (it was actually observed); otherwise the Candidate is right-censored. This
+    distinguishes "event not happened yet" from "no longer observed".
+
+    Returns (F, risk_mass, event_mass), each length max_step+1.
+    """
+    event_step = np.asarray(event_step, dtype=np.int64)
+    censor_step = np.asarray(censor_step, dtype=np.int64)
+    weight = np.asarray(weight, dtype=np.float64)
+    H = int(max_step)
+    idx = np.arange(H + 1)
+    observed = np.where(event_step >= 0, event_step, -1)
+    # an event only counts if observed before/at censor
+    observed = np.where(observed > censor_step, -1, observed)
+    at_risk = (censor_step[:, None] >= idx[None, :])            # (N, H+1)
+    R = (at_risk * weight[:, None]).sum(0)                       # (H+1,) risk mass
+    happened = (observed[:, None] == idx[None, :])              # (N, H+1)
+    D = (happened * weight[:, None]).sum(0)                      # (H+1,) event mass
+    with np.errstate(divide="ignore", invalid="ignore"):
+        haz = np.where(R > 0, np.clip(D / R, 0.0, 1.0), 0.0)
+    S = np.cumprod(1.0 - haz)                                   # survival
+    F = 1.0 - S
+    return F, R, D
+
+
+def km_event_delta(first_step, name, correct, weight, censor_step, max_step):
+    """Weighted KM first-event delta curve with the frozen contrast orientation.
+
+    Returns dict {F_correct, F_wrong, delta, orientation}. ``delta`` uses
+    Wrong - Correct for adverse events, Correct - Wrong otherwise.
+    """
+    corr = np.asarray(correct, dtype=bool)
+    fc, _, _ = weighted_km_first_event(
+        np.where(corr, first_step, -1), censor_step, weight, max_step)
+    fz, _, _ = weighted_km_first_event(
+        np.where(~corr, first_step, -1), censor_step, weight, max_step)
+    orient = _event_orientation(name)
+    delta = (fz - fc) if orient == "wrong_minus_correct" else (fc - fz)
+    return {"F_correct": fc, "F_wrong": fz, "delta": delta, "orientation": orient}
+
+
+def broken_unreclaimed_state(first_pierce, first_reclaim, h):
+    """RC-T2-7: state at step h = pierced by h AND not yet reclaimed by h.
+
+    This is a STATE (prevalence) curve; it can rise and then fall after reclaim.
+    """
+    pierced = (first_pierce >= 0) & (first_pierce <= h)
+    reclaimed = (first_reclaim >= 0) & (first_reclaim <= h)
+    return pierced & ~reclaimed
+
+
+def broken_unreclaimed_prevalence(first_pierce, first_reclaim, correct, weight,
+                                 max_step):
+    """Weighted prevalence of broken-unreclaimed at each h, for correct and wrong."""
+    H = int(max_step) + 1
+    corr = np.asarray(correct, dtype=bool)
+    w_c = np.where(corr, weight, 0.0)
+    w_w = np.where(~corr, weight, 0.0)
+    tot_c = w_c.sum(); tot_w = w_w.sum()
+    pc = np.full(H, np.nan); pw = np.full(H, np.nan)
+    if tot_c > 0:
+        for hh in range(H):
+            st = broken_unreclaimed_state(first_pierce, first_reclaim, hh)
+            pc[hh] = (st * w_c).sum() / tot_c
+    if tot_w > 0:
+        for hh in range(H):
+            st = broken_unreclaimed_state(first_pierce, first_reclaim, hh)
+            pw[hh] = (st * w_w).sum() / tot_w
+    return pc, pw
+
+
+def _group_reclaim_stats(fp, fr, sb, ffail, btr, w):
+    pierced = fp >= 0
+    wp = w[pierced]
+    if wp.sum() <= 0:
+        return {"n_pierced": 0, "any_reclaim_rate": np.nan,
+                "same_bar_reclaim_rate": np.nan, "late_reclaim_rate": np.nan,
+                "failed_reclaim_rate": np.nan,
+                "bars_to_reclaim_p25": np.nan, "bars_to_reclaim_median": np.nan,
+                "bars_to_reclaim_p75": np.nan}
+    reclaimed = fr >= 0
+    pr = pierced & reclaimed
+    any_rate = w[pr].sum() / wp.sum()
+    sb_rate = w[pierced & sb].sum() / wp.sum()
+    late_rate = w[pierced & reclaimed & ~sb].sum() / wp.sum()
+    fr_mask = reclaimed & (ffail >= 0)
+    failed_rate = (w[fr_mask].sum() / w[pr].sum()) if w[pr].sum() > 0 else np.nan
+    btr_vals = btr[pr]; btr_w = w[pr]
+    if btr_vals.size and np.isfinite(btr_vals).any():
+        q = weighted_quantile(btr_vals, btr_w, [0.25, 0.5, 0.75])
+    else:
+        q = (np.nan, np.nan, np.nan)
+    return {"n_pierced": int(pierced.sum()), "any_reclaim_rate": float(any_rate),
+            "same_bar_reclaim_rate": float(sb_rate),
+            "late_reclaim_rate": float(late_rate),
+            "failed_reclaim_rate": float(failed_rate),
+            "bars_to_reclaim_p25": float(q[0]),
+            "bars_to_reclaim_median": float(q[1]),
+            "bars_to_reclaim_p75": float(q[2])}
+
+
+def conditional_reclaim_diagnostics(fp, fr, sb, ffail, btr, correct, weight):
+    """RC-T2-8: conditional reclaim diagnostics, separate for correct / wrong."""
+    corr = np.asarray(correct, dtype=bool)
+    return {
+        "correct": _group_reclaim_stats(fp[corr], fr[corr], sb[corr], ffail[corr],
+                                       btr[corr], weight[corr]),
+        "wrong": _group_reclaim_stats(fp[~corr], fr[~corr], sb[~corr], ffail[~corr],
+                                     btr[~corr], weight[~corr]),
+    }
 
 
 def verify_disagreement_arithmetic(a9_correct, e9_correct):
@@ -1759,7 +1989,7 @@ ROW_METRICS_COLUMNS = [
     "td3_mfe", "td3_mae", "td3_r", "td5_mfe", "td5_mae", "td5_r",
 ]
 CURVE_COLUMNS = ["semantic_key", "direction_system", "symbol", "gid", "h_bar",
-                 "elapsed_minutes", "MFE", "MAE", "PS", "signed_return"]
+                 "observed_bar_minutes", "MFE", "MAE", "PS", "signed_return"]
 
 
 def _pad_to(curve, H_global):
@@ -1785,7 +2015,8 @@ def curve_chunk_from_dual(base, dual, symbol):
         parts.append(pd.DataFrame({
             "semantic_key": sk[i_idx], "direction_system": sys_name,
             "symbol": symbol, "gid": gid[i_idx],
-            "h_bar": step_idx + 1, "elapsed_minutes": (step_idx + 1) * 15,
+            "h_bar": step_idx + 1,
+            "observed_bar_minutes": (step_idx + 1) * 15,
             "MFE": mfe[i_idx, step_idx], "MAE": mae[i_idx, step_idx],
             "PS": ps[i_idx, step_idx], "signed_return": r[i_idx, step_idx],
         }))
@@ -1828,7 +2059,7 @@ def assemble_row_metrics(base, dual, symbol):
             "direction_system": sys_name, "direction": direction,
             "sample_weight_raw": w, "decision_time": dec_t, "fill_time": fill_t,
             "entry_price": entry_price, "ATR0": atr0, "segment": seg,
-            "trading_day": np.nan,
+            "trading_day": base["fill_trading_day"],
             "oracle_direction": oracle_dir, "direction_correct": d_correct,
             "oracle_entry_quality_atr": oeq, "teacher_exit_return_atr": ter,
             "oracle_exit_fill_time": oexit, "agreement_class": cls,
@@ -1868,9 +2099,144 @@ def write_curve_parquet(path, chunks):
 # --------------------------------------------------------------------------- #
 # 10c. Formal T2 runner (PRE-T2: full population NOT authorized yet)            #
 # --------------------------------------------------------------------------- #
+def availability_curves(value_matrix, weight, correct, side, gid, max_step):
+    """RC-T2-9: per-h availability for overall/correct/wrong/LONG/SHORT."""
+    N, H = value_matrix.shape
+    avail = np.isfinite(value_matrix)
+    total = {
+        "overall": float(weight.sum()),
+        "correct": float(weight[correct].sum()),
+        "wrong": float(weight[~np.asarray(correct, bool)].sum()),
+        "LONG": float(weight[side > 0].sum()),
+        "SHORT": float(weight[side < 0].sum()),
+    }
+    masks = (("overall", np.ones(N, dtype=bool)), ("correct", correct),
+             ("wrong", ~np.asarray(correct, bool)), ("LONG", side > 0),
+             ("SHORT", side < 0))
+    out = {}
+    for name, m in masks:
+        m2 = m[:, None] & avail
+        rows = m2.sum(0).astype(np.int64)
+        mass = (m2 * weight[:, None]).sum(0)
+        frac = np.where(total[name] > 0, mass / total[name], np.nan)
+        gids = np.empty(H, dtype=np.int64)
+        for h in range(H):
+            gids[h] = int(len(np.unique(gid[m2[:, h]]))) if m2[:, h].any() else 0
+        out[name] = {"available_rows": rows, "available_gids": gids,
+                     "available_weight_mass": mass,
+                     "availability_fraction": frac}
+    return out
+
+
+def _build_landmark_steps(td_list, entry_list):
+    entry_all = np.concatenate(entry_list)
+    N = len(entry_all)
+    lm = {
+        "m15": np.ones(N, dtype=np.int64),
+        "h1": np.full(N, 4, dtype=np.int64),
+        "h4": np.full(N, 16, dtype=np.int64),
+    }
+    for nm in ("td1", "td3", "td5"):
+        td = np.concatenate([t[nm] for t in td_list])
+        lm[nm] = np.clip(td - entry_all, 0, None).astype(np.int64)
+    return lm
+
+
+def _side_landmark_rows(curves, correct, side, gid, lm_steps, weight, direction_system):
+    """RC-T2-10: per-landmark per-stratum distribution of MFE/MAE/PS/R."""
+    N = len(correct)
+    metrics = ["MFE", "MAE", "PS", "R"]
+    strata = (("overall", np.ones(N, dtype=bool)),
+              ("LONG", side > 0), ("SHORT", side < 0),
+              ("correct_LONG", correct & (side > 0)),
+              ("wrong_LONG", (~np.asarray(correct, bool)) & (side > 0)),
+              ("correct_SHORT", correct & (side < 0)),
+              ("wrong_SHORT", (~np.asarray(correct, bool)) & (side < 0)))
+    rows = []
+    idx = np.arange(N)
+    for lm in lm_steps:
+        step = lm_steps[lm]
+        for st_name, st_mask in strata:
+            for met in metrics:
+                v = curves[met][idx, step]
+                ok = np.isfinite(v) & st_mask
+                if not ok.any():
+                    continue
+                w = weight[ok]; vals = v[ok]
+                q = weighted_quantile(vals, w, [0.25, 0.5, 0.75])
+                rows.append({
+                    "direction_system": direction_system, "landmark": lm,
+                    "stratum": st_name, "metric": met,
+                    "weighted_mean": float((vals * w).sum() / w.sum()),
+                    "p25": float(q[0]), "median": float(q[1]), "p75": float(q[2]),
+                    "n_rows": int(ok.sum()),
+                    "n_gids": int(len(np.unique(gid[ok]))),
+                    "weight_mass": float(w.sum()),
+                })
+    return rows
+
+
+def write_path_curves_csv(path, rows):
+    cols = ["direction_system", "metric", "contrast_orientation", "h_bar",
+            "observed_bar_minutes", "point", "pointwise_lo", "pointwise_hi",
+            "simul_lower", "simul_upper", "inferential_support",
+            "n_valid_correct", "n_valid_wrong",
+            "avail_overall_rows", "avail_overall_mass", "avail_overall_fraction",
+            "avail_correct_rows", "avail_wrong_rows", "flag"]
+    pd.DataFrame(rows, columns=cols).to_csv(path, index=False)
+
+
+def write_event_curves_csv(path, rows):
+    cols = ["event_type", "name", "backstop", "direction_system", "h_bar",
+            "observed_bar_minutes", "value_correct", "value_wrong", "delta",
+            "orientation"]
+    pd.DataFrame(rows, columns=cols).to_csv(path, index=False)
+
+
+def write_group_stats_csv(path, rows):
+    cols = ["direction_system", "landmark", "stratum", "metric", "weighted_mean",
+            "p25", "median", "p75", "n_rows", "n_gids", "weight_mass"]
+    pd.DataFrame(rows, columns=cols).to_csv(path, index=False)
+
+
+def write_a9_e9_disagreement_csv(path, rows):
+    cols = ["symbol", "agreement", "disagreement", "e9_fix", "e9_break"]
+    pd.DataFrame(rows, columns=cols).to_csv(path, index=False)
+
+
+def write_summary_json(path, summary):
+    with open(path, "w") as f:
+        json.dump(_clean(summary), f, indent=2)
+
+
+def check_full_population_gates(*, n_symbols, n_candidates, n_gids, a9_l2, e9_l2,
+                                availability_masks_identical, inferential_support_all):
+    """RC-T2-14: hard gates enforced only when the full 13773 population runs.
+
+    Implemented NOW; invoked by the authorized full run (not in PRE-T2).
+    """
+    mism = {}
+    if n_symbols != FROZEN_FULL_SYMBOLS:
+        mism["symbols"] = (n_symbols, FROZEN_FULL_SYMBOLS)
+    if n_candidates != FROZEN_FULL_CANDIDATE_ROWS:
+        mism["candidates"] = (n_candidates, FROZEN_FULL_CANDIDATE_ROWS)
+    if n_gids != FROZEN_FULL_ORACLE_GIDS:
+        mism["oracle_gids"] = (n_gids, FROZEN_FULL_ORACLE_GIDS)
+    if a9_l2 != FROZEN_FULL_A9_L2_ROWS:
+        mism["a9_l2"] = a9_l2
+    if e9_l2 != FROZEN_FULL_E9_L2_ROWS:
+        mism["e9_l2"] = e9_l2
+    if not availability_masks_identical:
+        mism["availability_masks"] = True
+    if not inferential_support_all:
+        mism["inference_support"] = True
+    if mism:
+        raise RuntimeError(f"STOP_PATH_CURVE_FULL_POP_GATE {mism}")
+
+
 def run_formal_t2(symbols=SYMBOLS, n_subset=None, write_artifacts=False,
                   population="small", verbose=True):
-    """Formal T2 production call graph.
+    """Formal T2 production call graph (RC-T2-1..RC-T2-16).
 
     Per symbol: load canonical environment ONCE, build BaseAnchor ONCE, build A9
     and E9 views, stack to 2N, ONE streaming scan with curve capture. Never calls
@@ -1878,7 +2244,8 @@ def run_formal_t2(symbols=SYMBOLS, n_subset=None, write_artifacts=False,
     selects a single best-h.
 
     Full 13773-Candidate population is BLOCKED at PRE-T2 (governance): pass
-    population="full" only after explicit authorization.
+    population="full" only after explicit authorization (raises
+    STOP_FORMAL_T2_FULL_POPULATION_NOT_AUTHORIZED).
     """
     if population == "full":
         raise RuntimeError("STOP_FORMAL_T2_FULL_POPULATION_NOT_AUTHORIZED")
@@ -1910,7 +2277,6 @@ def run_formal_t2(symbols=SYMBOLS, n_subset=None, write_artifacts=False,
         check_agreement_invariant(dual["A9"], dual["E9"], agreement_mask, sym)
         check_disagreement_mirror(dual["A9"], dual["E9"], disagreement_mask, sym)
         decomp = decompose_disagreement(base, sym)
-        # RC section 16 arithmetic identity
         arith = verify_disagreement_arithmetic(
             base["a9_direction_correct"], base["e9_direction_correct"])
         if not arith["identity_holds"]:
@@ -1919,6 +2285,7 @@ def run_formal_t2(symbols=SYMBOLS, n_subset=None, write_artifacts=False,
         a9 = dual["A9"]; e9o = dual["E9"]
         sym_acc.append({
             "symbol": sym, "base": base, "dual": dual,
+            "a9_ev": a9, "e9_ev": e9o,
             "a9_ps": a9["curve_ps"], "e9_ps": e9o["curve_ps"],
             "a9_mfe": a9["curve_mfe"], "e9_mfe": e9o["curve_mfe"],
             "a9_mae": a9["curve_mae"], "e9_mae": e9o["curve_mae"],
@@ -1953,72 +2320,205 @@ def run_formal_t2(symbols=SYMBOLS, n_subset=None, write_artifacts=False,
     a9_side = np.concatenate([s["a9_side"] for s in sym_acc])
     e9_side = np.concatenate([s["e9_side"] for s in sym_acc])
     N_total = a9_ps.shape[0]
+    entry_list = [s["base"]["entry_idx"] for s in sym_acc]
+    td_list = [s["base"]["td_ends"] for s in sym_acc]
+    censor_list = [s["base"]["end_idx"] - s["base"]["entry_idx"] for s in sym_acc]
+    censor_all = np.concatenate(censor_list)
 
-    # ---- per-system gid weight remains 1 (RC section 7): within each direction
-    # system the Candidate weights inside a gid must still sum to 1; duplicating
-    # A9/E9 views must NOT halve the weight. This is a FULL-population property
-    # (a truncated subset legitimately splits gids), so verify on the whole
-    # materialized Candidate population, which A9 and E9 share identically. ----
+    # ---- per-system gid weight remains 1 (full-population property) ----
     def gid_weight_all_one(e9_df):
         g = e9_df.groupby("gid")["sample_weight_raw"].sum().to_numpy(np.float64)
         return bool(np.allclose(g, 1.0, atol=1e-9))
     per_system_gid_weight_ok = gid_weight_all_one(e9)
 
     # ---- availability masks identical between A9 and E9 (RC section 17) ----
-    a9_avail = np.isfinite(a9_ps)
-    e9_avail = np.isfinite(e9_ps)
-    availability_masks_identical = bool(np.array_equal(a9_avail, e9_avail))
+    availability_masks_identical = bool(np.array_equal(
+        np.isfinite(a9_ps), np.isfinite(e9_ps)))
 
-    # ---- curve statistics for E9 (primary) and A9 (secondary) ----
-    def delta_curves(value_matrix, correct):
-        ug, nc, dc, nw, dw = build_group_curve_sufficient_stats(
-            value_matrix, correct, gid_all, w_all)
-        point, reps = bootstrap_delta_curve(nc, dc, nw, dw, B=2000, seed=20260924)
-        lo, hi = pointwise_ci(reps)
-        band = simultaneous_band(point, reps)
-        return {"point": point, "reps": reps, "pointwise_lo": lo, "pointwise_hi": hi,
-                "simul_lower": band["lower"], "simul_upper": band["upper"],
-                "q": band["q"],
-                "band_excludes_zero_at_some_h": bool(
-                    np.any((band["lower"] > 0) | (band["upper"] < 0)))}
-    e9_curves = {
-        "PS": delta_curves(e9_ps, e9_correct),
-        "MAE": delta_curves(e9_mae, e9_correct),
-        "MFE": delta_curves(e9_mfe, e9_correct),
-        "R": delta_curves(e9_r, e9_correct),
-    }
-    a9_curves = {
-        "PS": delta_curves(a9_ps, a9_correct),
-        "MAE": delta_curves(a9_mae, a9_correct),
-        "MFE": delta_curves(a9_mfe, a9_correct),
-        "R": delta_curves(a9_r, a9_correct),
-    }
+    # ---- curve statistics for E9 (primary) and A9 (secondary), with orientation ----
+    # RC-T2-3: orientation is frozen in CURVE_ORIENTATIONS and applied by
+    # build_system_curves (PS/MFE/R = Correct-Wrong, MAE = Wrong-Correct).
+    e9_curves = build_system_curves(
+        {"PS": e9_ps, "MFE": e9_mfe, "MAE": e9_mae, "R": e9_r},
+        e9_correct, gid_all, w_all)
+    a9_curves = build_system_curves(
+        {"PS": a9_ps, "MFE": a9_mfe, "MAE": a9_mae, "R": a9_r},
+        a9_correct, gid_all, w_all)
 
-    # ---- structural event curves (E9 primary) ----
+    # ---- availability curves (RC-T2-9) ----
+    avail_e9 = availability_curves(e9_mfe, w_all, e9_correct, e9_side, gid_all, H_global)
+    avail_a9 = availability_curves(a9_mfe, w_all, a9_correct, a9_side, gid_all, H_global)
+    # hard invariant: A9 and E9 availability MASK (finite curve pattern) identical
+    # every h / semantic_key. System-specific subgroups (correct/wrong/LONG/SHORT)
+    # legitimately differ, so the invariant is on the overall mask.
+    if not np.array_equal(avail_e9["overall"]["available_rows"],
+                          avail_a9["overall"]["available_rows"]):
+        raise RuntimeError("STOP_A9_E9_AVAILABILITY_MASK_MISMATCH")
+
+    # ---- structural-event atlas (RC-T2-5/6/7/8) ----
+    def _cat(sys_name, field):
+        return np.concatenate([s[sys_name + "_ev"][field].astype(np.int64)
+                              for s in sym_acc])
+    e9_sr_fp = _cat("e9", "sr_first_pierce")
+    e9_sr_fr = _cat("e9", "sr_first_reclaim")
+    e9_sr_sb = _cat("e9", "sr_same_bar_reclaim").astype(bool)
+    e9_sr_ff = _cat("e9", "sr_first_failed_reclaim")
+    e9_sr_btr = _cat("e9", "sr_bars_to_reclaim").astype(np.float64)
+    e9_sr_brk = _cat("e9", "sr_break_continue").astype(bool)
+    e9_lb_fp = _cat("e9", "lb_first_pierce")
+    e9_lb_fr = _cat("e9", "lb_first_reclaim")
+    e9_lb_sb = _cat("e9", "lb_same_bar_reclaim").astype(bool)
+    e9_lb_ff = _cat("e9", "lb_first_failed_reclaim")
+    e9_lb_btr = _cat("e9", "lb_bars_to_reclaim").astype(np.float64)
+    e9_lb_brk = _cat("e9", "lb_break_continue").astype(bool)
+    e9_ahead = {ev: _cat("e9", ev) for ev in
+                ("first_ahead_sr_touch", "first_ahead_sr_cross",
+                 "first_ahead_liq_touch", "first_ahead_liq_cross")}
+
+    def _event_step_map(backstop):
+        if backstop == "SR":
+            return {"sr_first_touch": _cat("e9", "sr_first_touch"),
+                    "sr_first_pierce": e9_sr_fp,
+                    "sr_first_reclaim": e9_sr_fr,
+                    "sr_first_failed_reclaim": e9_sr_ff}
+        if backstop == "LB":
+            return {"lb_first_touch": _cat("e9", "lb_first_touch"),
+                    "lb_first_pierce": e9_lb_fp,
+                    "lb_first_reclaim": e9_lb_fr,
+                    "lb_first_failed_reclaim": e9_lb_ff}
+        # AHEAD
+        return {ev: e9_ahead[ev] for ev in e9_ahead}
+
     event_curves = {}
-    for ev in _EVENT_FIELDS:
-        if ev in ("mfe_at_first_ahead_sr", "mae_before_first_ahead_sr",
-                  "mfe_at_first_ahead_liq", "mae_before_first_ahead_liq"):
-            continue
-        e9_first = np.concatenate([s["dual"]["E9"][ev].astype(np.int32)
-                                  for s in sym_acc])
-        fc, fz = event_cumulative_incidence(e9_first, e9_correct, w_all, H_global - 1)
-        if ev in _ADVERSE_EVENTS:
-            delta = fz - fc          # Wrong - Correct
-        else:
-            delta = fc - fz          # Correct - Wrong
-        event_curves[ev] = {"F_correct": fc, "F_wrong": fz, "delta": delta}
+    for backstop in ("SR", "LB", "AHEAD_SR", "AHEAD_LIQ"):
+        for name, arr in _event_step_map(backstop).items():
+            res = km_event_delta(arr, name, e9_correct, w_all, censor_all, H_global - 1)
+            event_curves[name] = res
+    # derived reclaim first-passage events (RC-T2-5)
+    sr_same_time = np.where((e9_sr_fr >= 0) & e9_sr_sb, e9_sr_fr, -1)
+    sr_late_time = np.where((e9_sr_fr >= 0) & (~e9_sr_sb), e9_sr_fr, -1)
+    lb_same_time = np.where((e9_lb_fr >= 0) & e9_lb_sb, e9_lb_fr, -1)
+    lb_late_time = np.where((e9_lb_fr >= 0) & (~e9_lb_sb), e9_lb_fr, -1)
+    for name, arr in (("sr_same_bar_reclaim_time", sr_same_time),
+                      ("sr_late_reclaim_time", sr_late_time),
+                      ("lb_same_bar_reclaim_time", lb_same_time),
+                      ("lb_late_reclaim_time", lb_late_time)):
+        event_curves[name] = km_event_delta(arr, name, e9_correct, w_all,
+                                            censor_all, H_global - 1)
+    # broken-unreclaimed state prevalence (RC-T2-7)
+    sr_bu_c, sr_bu_w = broken_unreclaimed_prevalence(
+        e9_sr_fp, e9_sr_fr, e9_correct, w_all, H_global - 1)
+    lb_bu_c, lb_bu_w = broken_unreclaimed_prevalence(
+        e9_lb_fp, e9_lb_fr, e9_correct, w_all, H_global - 1)
+    # conditional reclaim diagnostics (RC-T2-8)
+    sr_reclaim = conditional_reclaim_diagnostics(
+        e9_sr_fp, e9_sr_fr, e9_sr_sb, e9_sr_ff, e9_sr_btr, e9_correct, w_all)
+    lb_reclaim = conditional_reclaim_diagnostics(
+        e9_lb_fp, e9_lb_fr, e9_lb_sb, e9_lb_ff, e9_lb_btr, e9_correct, w_all)
+    break_terminal = {
+        "SR": {"correct": float(w_all[e9_correct & e9_sr_brk].sum() / w_all[e9_correct].sum())
+               if w_all[e9_correct].sum() > 0 else np.nan,
+               "wrong": float(w_all[(~e9_correct) & e9_sr_brk].sum() / w_all[~e9_correct].sum())
+               if w_all[~e9_correct].sum() > 0 else np.nan},
+        "LB": {"correct": float(w_all[e9_correct & e9_lb_brk].sum() / w_all[e9_correct].sum())
+               if w_all[e9_correct].sum() > 0 else np.nan,
+               "wrong": float(w_all[(~e9_correct) & e9_lb_brk].sum() / w_all[~e9_correct].sum())
+               if w_all[~e9_correct].sum() > 0 else np.nan},
+    }
 
-    # ---- descriptive verdict (no best-h selection) ----
-    verdict_e9 = ("PATH_SEPARATION_DETECTED"
-                  if e9_curves["PS"]["band_excludes_zero_at_some_h"]
-                  else "NO_GLOBAL_IDENTIFIABLE_PATH_SEPARATION")
+    # ---- side landmark diagnostics (RC-T2-10) ----
+    lm_steps = _build_landmark_steps(td_list, entry_list)
+    e9_side_rows = _side_landmark_rows(
+        {"MFE": e9_mfe, "MAE": e9_mae, "PS": e9_ps, "R": e9_r},
+        e9_correct, e9_side, gid_all, lm_steps, w_all, "E9")
+    a9_side_rows = _side_landmark_rows(
+        {"MFE": a9_mfe, "MAE": a9_mae, "PS": a9_ps, "R": a9_r},
+        a9_correct, a9_side, gid_all, lm_steps, w_all, "A9")
 
-    # ---- aggregate disagreement arithmetic ----
+    # ---- disagreement arithmetic + counts ----
     agg = {"agreement": 0, "disagreement": 0, "e9_fix": 0, "e9_break": 0}
     for s in sym_acc:
         for k in agg:
             agg[k] += s["decomp"][k]
+    disagreement_rows = [{
+        "symbol": s["symbol"], **{k: int(s["decomp"][k]) for k in
+                                  ("agreement", "disagreement", "e9_fix", "e9_break")}
+    } for s in sym_acc]
+
+    # ---- path-curve evidence rows (RC-T2-13) ----
+    def _path_rows(curves, avail, ds):
+        rows = []
+        for metric in ("PS", "MFE", "MAE", "R"):
+            c = curves[metric]
+            for h in range(H_global):
+                rows.append({
+                    "direction_system": ds, "metric": metric,
+                    "contrast_orientation": c["contrast_orientation"],
+                    "h_bar": h + 1, "observed_bar_minutes": (h + 1) * 15,
+                    "point": float(c["point"][h]),
+                    "pointwise_lo": float(c["pointwise_lo"][h]),
+                    "pointwise_hi": float(c["pointwise_hi"][h]),
+                    "simul_lower": float(c["simul_lower"][h]),
+                    "simul_upper": float(c["simul_upper"][h]),
+                    "inferential_support": bool(c["inferential_support"][h]),
+                    "n_valid_correct": int(c["n_valid_correct"][h]),
+                    "n_valid_wrong": int(c["n_valid_wrong"][h]),
+                    "avail_overall_rows": int(avail["overall"]["available_rows"][h]),
+                    "avail_overall_mass": float(avail["overall"]["available_weight_mass"][h]),
+                    "avail_overall_fraction": float(avail["overall"]["availability_fraction"][h]),
+                    "avail_correct_rows": int(avail["correct"]["available_rows"][h]),
+                    "avail_wrong_rows": int(avail["wrong"]["available_rows"][h]),
+                    "flag": "NON_SCIENTIFIC_SMOKE_ONLY" if population != "full" else "",
+                })
+        return rows
+    path_rows = _path_rows(e9_curves, avail_e9, "E9") + _path_rows(a9_curves, avail_a9, "A9")
+
+    # ---- event-curve evidence rows (RC-T2-13) ----
+    event_rows = []
+    for name, res in event_curves.items():
+        backstop = ("SR" if name.startswith("sr") else
+                    "LB" if name.startswith("lb") else "AHEAD")
+        for h in range(H_global):
+            event_rows.append({
+                "event_type": "first_event_curve", "name": name, "backstop": backstop,
+                "direction_system": "E9", "h_bar": h + 1,
+                "observed_bar_minutes": (h + 1) * 15,
+                "value_correct": float(res["F_correct"][h]),
+                "value_wrong": float(res["F_wrong"][h]),
+                "delta": float(res["delta"][h]),
+                "orientation": res["orientation"],
+            })
+    for backstop, pc, pw, tag in (("SR", sr_bu_c, sr_bu_w, "sr_broken_unreclaimed"),
+                                   ("LB", lb_bu_c, lb_bu_w, "lb_broken_unreclaimed")):
+        for h in range(H_global):
+            event_rows.append({
+                "event_type": "state_prevalence", "name": tag, "backstop": backstop,
+                "direction_system": "E9", "h_bar": h + 1,
+                "observed_bar_minutes": (h + 1) * 15,
+                "value_correct": float(pc[h]), "value_wrong": float(pw[h]),
+                "delta": float(pw[h] - pc[h]), "orientation": "wrong_minus_correct",
+            })
+    for backstop, rcd in (("SR", sr_reclaim), ("LB", lb_reclaim)):
+        for grp in ("correct", "wrong"):
+            g = rcd[grp]
+            event_rows.append({
+                "event_type": "conditional_reclaim_stat", "name": f"{backstop}_{grp}",
+                "backstop": backstop, "direction_system": "E9", "h_bar": 0,
+                "observed_bar_minutes": 0,
+                "value_correct": float(g.get("any_reclaim_rate", np.nan)),
+                "value_wrong": float(g.get("same_bar_reclaim_rate", np.nan)),
+                "delta": float(g.get("late_reclaim_rate", np.nan)),
+                "orientation": "rate",
+            })
+    for backstop, bt in break_terminal.items():
+        event_rows.append({
+            "event_type": "terminal_rate", "name": f"{backstop}_break_continue",
+            "backstop": backstop, "direction_system": "E9", "h_bar": 0,
+            "observed_bar_minutes": 0,
+            "value_correct": float(bt["correct"]), "value_wrong": float(bt["wrong"]),
+            "delta": float(bt["wrong"] - bt["correct"]),
+            "orientation": "wrong_minus_correct",
+        })
 
     perf = {
         "total_environment_loads": int(COUNTERS["raw_exec_load_count"]),
@@ -2032,6 +2532,7 @@ def run_formal_t2(symbols=SYMBOLS, n_subset=None, write_artifacts=False,
         "runtime_sec": time.time() - t_start,
     }
 
+    smoke = (population != "full")
     result = {
         "population": population, "n_symbols": len(sym_acc),
         "n_candidates_total": int(N_total),
@@ -2040,47 +2541,99 @@ def run_formal_t2(symbols=SYMBOLS, n_subset=None, write_artifacts=False,
         "availability_masks_identical": availability_masks_identical,
         "e9_curves": e9_curves, "a9_curves": a9_curves,
         "event_curves": event_curves,
-        "verdict_e9": verdict_e9,
+        "broken_unreclaimed": {"SR": {"correct": sr_bu_c, "wrong": sr_bu_w},
+                               "LB": {"correct": lb_bu_c, "wrong": lb_bu_w}},
+        "conditional_reclaim": {"SR": sr_reclaim, "LB": lb_reclaim},
+        "break_continue_terminal": break_terminal,
+        "side_landmark_rows": e9_side_rows + a9_side_rows,
+        "availability_curves": {"E9": avail_e9, "A9": avail_a9},
         "disagreement_counts": agg,
         "performance": perf,
+        "pipeline_smoke_completed": smoke,
+        "evidence_flag": "NON_SCIENTIFIC_SMOKE_ONLY" if smoke else "SCIENTIFIC",
     }
+    if not smoke:
+        # RC-T2-15 verdict (only on the full authorized run)
+        ps = e9_curves["PS"]
+        pos = bool(np.any(ps["simul_lower"] > 0))
+        neg = bool(np.any(ps["simul_upper"] < 0))
+        if pos and not neg:
+            result["verdict_e9"] = "EXPECTED_DIRECTION_PATH_SEPARATION"
+        elif neg and not pos:
+            result["verdict_e9"] = "REVERSE_PATH_SEPARATION"
+        elif pos and neg:
+            result["verdict_e9"] = "MIXED_SIGN_PATH_SEPARATION"
+        else:
+            result["verdict_e9"] = "NO_GLOBAL_IDENTIFIABLE_PATH_SEPARATION"
 
     if write_artifacts:
-        row_frames = [assemble_row_metrics(s["base"], s["dual"], s["symbol"])
-                      for s in sym_acc]
-        write_row_metrics_parquet(ROW_METRICS_PARQUET, row_frames)
-        curve_chunks = [curve_chunk_from_dual(s["base"], s["dual"], s["symbol"])
-                        for s in sym_acc]
-        write_curve_parquet(CURVE_PARQUET, curve_chunks)
-        result["artifacts"] = {
-            "row_metrics": _sha256_file(ROW_METRICS_PARQUET) if os.path.exists(ROW_METRICS_PARQUET) else None,
-            "curve": _sha256_file(CURVE_PARQUET) if os.path.exists(CURVE_PARQUET) else None,
+        # RC-T2-13: PRE-T2 smoke writes to a TEMPORARY directory only; the full
+        # formal evidence is intentionally NOT generated at PRE-T2.
+        tmp = tempfile.mkdtemp(prefix="entry_path_pret2_")
+        p_csv = os.path.join(tmp, "entry_path_atlas_v1_path_curves.csv")
+        e_csv = os.path.join(tmp, "entry_path_atlas_v1_event_curves.csv")
+        g_csv = os.path.join(tmp, "entry_path_atlas_v1_group_stats.csv")
+        d_csv = os.path.join(tmp, "entry_path_atlas_v1_a9_e9_disagreement.csv")
+        s_json = os.path.join(tmp, "entry_path_atlas_v1_summary.json")
+        write_path_curves_csv(p_csv, path_rows)
+        write_event_curves_csv(e_csv, event_rows)
+        write_group_stats_csv(g_csv, e9_side_rows + a9_side_rows)
+        write_a9_e9_disagreement_csv(d_csv, disagreement_rows)
+        summary = {
+            "population": result["population"],
+            "n_symbols": result["n_symbols"],
+            "n_candidates_total": result["n_candidates_total"],
+            "H_global": result["H_global"],
+            "per_system_gid_weight_ok": result["per_system_gid_weight_ok"],
+            "availability_masks_identical": result["availability_masks_identical"],
+            "pipeline_smoke_completed": result["pipeline_smoke_completed"],
+            "evidence_flag": result["evidence_flag"],
+            "disagreement_counts": _clean(result["disagreement_counts"]),
+            "performance": _clean(result["performance"]),
+            "n_path_curve_rows": len(path_rows),
+            "n_event_curve_rows": len(event_rows),
+            "n_group_stats_rows": len(e9_side_rows + a9_side_rows),
+            "n_disagreement_rows": len(disagreement_rows),
         }
+        write_summary_json(s_json, summary)
+        result["evidence_temp"] = {"path_curves": p_csv, "event_curves": e_csv,
+                                   "group_stats": g_csv, "disagreement": d_csv,
+                                   "summary": s_json}
     return result
 
 
 def archive_t1_5_manifest():
-    """Archive the already-reviewed T1.5 evidence once (preserve historical result)."""
-    if os.path.exists(T1_5_ARCHIVE_JSON):
-        return T1_5_ARCHIVE_JSON
-    if not os.path.exists(MANIFEST_JSON):
-        return None
-    with open(MANIFEST_JSON) as f:
-        data = json.load(f)
-    data["stage"] = "t1_5_integration"
-    data["immediate_reviewed_parent_sha"] = "9be36d3f91410ee6be416cdf9025b1858b4b86eb"
-    data["archived_for"] = "ENTRY-PATH-ATLAS-V1 PRE-T2 (15m full-curve redesign)"
+    """Archive the already-reviewed T1.5 evidence (RC-T2-17 provenance fix).
+
+    The canonical ``reviewed_parent_sha`` MUST point at the immediate T1.5
+    reviewed parent ``9be36d3``; the earlier kernel-review SHA ``6376c63`` is
+    preserved separately and must not shadow the canonical field. Historical
+    T1.5 scientific/evidence values are never altered.
+    """
     os.makedirs(EVIDENCE_DIR, exist_ok=True)
+    if os.path.exists(T1_5_ARCHIVE_JSON):
+        with open(T1_5_ARCHIVE_JSON) as f:
+            data = json.load(f)
+    elif os.path.exists(MANIFEST_JSON):
+        with open(MANIFEST_JSON) as f:
+            data = json.load(f)
+        data["stage"] = "t1_5_integration"
+    else:
+        return None
+    data["reviewed_parent_sha"] = "9be36d3f91410ee6be416cdf9025b1858b4b86eb"
+    data["earlier_kernel_review_sha"] = "6376c63f973d8c5f6705ccaf421abc8740c7b0ef"
+    if "immediate_reviewed_parent_sha" not in data:
+        data["immediate_reviewed_parent_sha"] = "9be36d3f91410ee6be416cdf9025b1858b4b86eb"
     with open(T1_5_ARCHIVE_JSON, "w") as f:
         json.dump(_clean(data), f, indent=2)
     return T1_5_ARCHIVE_JSON
 
 
 def run_pret2_checkpoint(verbose=True) -> dict:
-    """PRE-T2 checkpoint: validate the 15m curve infrastructure on synthetic /
-    small fixtures; do NOT estimate the full primary curve.
+    """PRE-T2 checkpoint: validate the 15m curve + event infrastructure on
+    synthetic / small fixtures; do NOT estimate the full primary curve.
 
-    Produces the authoritative PRE-T2 manifest (reviewed parent = 893ca16).
+    Produces the authoritative PRE-T2 manifest (reviewed parent = 2b7d6bb).
     """
     t_start = time.time()
     archive_t1_5_manifest()
@@ -2100,25 +2653,29 @@ def run_pret2_checkpoint(verbose=True) -> dict:
         np.random.default_rng(2).integers(0, 2, 50).astype(bool),
         np.array([f"g{i//3}" for i in range(50)]),
         np.ones(50))
-    _, reps1 = bootstrap_delta_curve(nc, dc, nw, dw, B=200, seed=20260924)
-    _, reps2 = bootstrap_delta_curve(nc, dc, nw, dw, B=200, seed=20260924)
-    band_deterministic = bool(np.array_equal(reps1, reps2))
+    _, reps1, _, _ = bootstrap_delta_curve(nc, dc, nw, dw, B=200, seed=20260924)
+    _, reps2, _, _ = bootstrap_delta_curve(nc, dc, nw, dw, B=200, seed=20260924)
+    band_deterministic = bool(np.array_equal(reps1, reps2, equal_nan=True))
 
-    # (c) event cumulative-incidence math on synthetic oracle
-    fs = np.array([-1, 0, 2, 4, -1, 1], dtype=np.int32)
-    corr = np.array([True, True, False, False, True, False])
-    wt = np.array([1.0, 1.0, 2.0, 2.0, 1.0, 1.0])
-    # correct gids weights: idx0,1,4 -> 1,1,1 (total 3); experienced by step<=2: idx1 only -> 1
-    # wrong gids weights: idx2,3,5 -> 2,2,1 (total 5); experienced by step<=2: idx2 (2) + idx5 (1) -> 3
-    fc, fz = event_cumulative_incidence(fs, corr, wt, 5)
-    inc_ok = (abs(fc[2] - 1.0 / 3.0) < 1e-12) and (abs(fz[2] - 3.0 / 5.0) < 1e-12)
+    # (c) weighted Kaplan-Meier first-event math (RC-T2-6 synthetic oracle)
+    km_ev = np.array([-1, 2, -1], dtype=np.int64)
+    km_censor = np.array([4, 4, 4], dtype=np.int64)
+    km_w = np.ones(3)
+    Fk, _, _ = weighted_km_first_event(km_ev, km_censor, km_w, 4)
+    # only cand 1 has event at step 2, all observed to 4 -> F(2)=1/3, stays 1/3
+    km_ok = (abs(Fk[2] - 1.0 / 3.0) < 1e-12) and (abs(Fk[4] - 1.0 / 3.0) < 1e-12)
+    # censoring: cand 2 event at 3 but censored at 2 -> must NOT be counted
+    km_ev2 = np.array([-1, 2, 3], dtype=np.int64)
+    km_censor2 = np.array([4, 4, 2], dtype=np.int64)
+    Fk2, _, _ = weighted_km_first_event(km_ev2, km_censor2, km_w, 4)
+    km_censor_ok = (abs(Fk2[2] - 1.0 / 3.0) < 1e-12) and (abs(Fk2[4] - 1.0 / 3.0) < 1e-12)
 
     # (d) disagreement arithmetic identity
     arith = verify_disagreement_arithmetic(
         np.array([1, 1, 0, 0, 1, 0]), np.array([1, 0, 1, 0, 1, 1]))
 
     # (e) full production call graph on small AG subset (no Reference, no full pop)
-    ft2 = run_formal_t2(symbols=("AG",), n_subset=40, write_artifacts=False,
+    ft2 = run_formal_t2(symbols=("AG",), n_subset=40, write_artifacts=True,
                         population="small", verbose=verbose)
 
     extra = {
@@ -2130,7 +2687,9 @@ def run_pret2_checkpoint(verbose=True) -> dict:
             "definition": "Delta_PS_E9(h) for ALL h (completed 15m bars); "
                           "full-curve simultaneous band; no single best-h selection",
             "observation_axis": "15m",
-            "landmark_4h": "h4 = 16 bars = descriptive landmark only",
+            "landmark_4h": "h4 = 16 observed m15 bars (NOT necessarily four wall-clock hours)",
+            "note": "elapsed_bar_time = 15 * h_bar is bar-time, not wall-clock; "
+                    "wall_clock requires timestamp difference (recorded separately).",
         },
         "curve_kernel_differential": {
             "synthetic_rows": syn_rep["rows"],
@@ -2143,16 +2702,29 @@ def run_pret2_checkpoint(verbose=True) -> dict:
         },
         "simultaneous_band_synthetic": {
             "deterministic_under_frozen_seed": band_deterministic, "seed": 20260924,
+            "computed_over_inference_support_only": True,
         },
-        "event_incidence_synthetic": {"math_ok": bool(inc_ok)},
+        "kaplan_meier_synthetic": {"math_ok": bool(km_ok), "censoring_ok": bool(km_censor_ok)},
         "disagreement_arithmetic": arith,
+        "full_population_gates": {
+            "frozen_symbols": FROZEN_FULL_SYMBOLS,
+            "frozen_candidate_rows": FROZEN_FULL_CANDIDATE_ROWS,
+            "frozen_oracle_gids": FROZEN_FULL_ORACLE_GIDS,
+            "frozen_a9_l2_rows": FROZEN_FULL_A9_L2_ROWS,
+            "frozen_e9_l2_rows": FROZEN_FULL_E9_L2_ROWS,
+            "frozen_total_l2_rows": FROZEN_FULL_L2_ROWS,
+            "enforced_on": "authorized full run only (not PRE-T2)",
+        },
         "formal_t2_small_ag": {
+            "pipeline_smoke_completed": ft2["pipeline_smoke_completed"],
+            "evidence_flag": ft2["evidence_flag"],
             "n_candidates": ft2["n_candidates_total"],
             "per_system_gid_weight_ok": ft2["per_system_gid_weight_ok"],
             "availability_masks_identical": ft2["availability_masks_identical"],
-            "verdict_e9_small": ft2["verdict_e9"],
+            "n_path_curve_rows": 2 * 4 * ft2["H_global"],
             "disagreement_counts": ft2["disagreement_counts"],
             "performance": ft2["performance"],
+            "evidence_temp": {k: os.path.basename(v) for k, v in ft2.get("evidence_temp", {}).items()},
         },
         "artifact_schemas": {
             "entry_path_row_metrics_v1.parquet": {
@@ -2164,7 +2736,30 @@ def run_pret2_checkpoint(verbose=True) -> dict:
                 "key": ["semantic_key", "direction_system", "h_bar"],
                 "format": "long",
                 "columns": CURVE_COLUMNS,
+                "observed_bar_minutes": "15 * h_bar (bar-time, not wall-clock)",
             },
+            "entry_path_atlas_v1_path_curves.csv": {
+                "key": ["direction_system", "metric", "h_bar"],
+                "includes": ["inferential_support", "n_valid_correct", "n_valid_wrong",
+                             "avail_overall_rows", "avail_overall_fraction",
+                             "avail_correct_rows", "avail_wrong_rows", "flag"],
+            },
+            "entry_path_atlas_v1_event_curves.csv": {
+                "key": ["event_type", "name", "direction_system", "h_bar"],
+                "event_types": ["first_event_curve", "state_prevalence",
+                                "conditional_reclaim_stat", "terminal_rate"],
+            },
+            "entry_path_atlas_v1_group_stats.csv": {
+                "key": ["direction_system", "landmark", "stratum", "metric"],
+                "landmarks": ["m15", "h1", "h4", "td1", "td3", "td5"],
+                "strata": ["overall", "LONG", "SHORT", "correct_LONG", "wrong_LONG",
+                           "correct_SHORT", "wrong_SHORT"],
+            },
+            "entry_path_atlas_v1_a9_e9_disagreement.csv": {
+                "key": ["symbol"],
+                "columns": ["agreement", "disagreement", "e9_fix", "e9_break"],
+            },
+            "entry_path_atlas_v1_summary.json": {"schema": "full summary dict"},
         },
         "governance": {
             "full_13773_formal_t2": "NOT RUN (not authorized at PRE-T2)",
@@ -2174,12 +2769,14 @@ def run_pret2_checkpoint(verbose=True) -> dict:
             "one_dual_production_scan_per_symbol": True,
             "a9_secondary_comparator_only": True,
             "a9_vs_e9_final_verdict": "reserved for FUTURE-RX-DIRECTION-LAYER-ABLATION-V1",
+            "scientific_verdict_removed_from_smoke": True,
         },
         "unverified_items": [
             "Full 13773-Candidate Formal T2 primary curve (E9 and A9) NOT estimated.",
             "Full L2 row-metrics parquet (27546 rows) NOT generated.",
             "Full long-format 15m curve parquet NOT generated.",
-            "Formal scientific verdict (PATH_SEPARATION_DETECTED / NO...) NOT issued.",
+            "Full formal evidence CSV/JSON NOT generated (smoke to temp only).",
+            "Formal scientific verdict NOT issued (smoke only: pipeline_smoke_completed).",
             "Stop-Loss / Take-Profit experiments NOT run.",
             "A9-vs-E9 final system verdict reserved for downstream frozen ablation.",
         ],

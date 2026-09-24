@@ -891,12 +891,12 @@ def test_whole_gid_curve_bootstrap_cluster_dependence():
     value = np.repeat(value, 10, axis=1)
     ug, nc, dc, nw, dw = M.build_group_curve_sufficient_stats(
         value, correct, gid, np.ones(n))
-    point, reps1 = M.bootstrap_delta_curve(nc, dc, nw, dw, B=300, seed=20260924)
-    _, reps2 = M.bootstrap_delta_curve(nc, dc, nw, dw, B=300, seed=20260924)
-    assert np.array_equal(reps1, reps2)  # deterministic under frozen seed
+    point, reps1, _, _ = M.bootstrap_delta_curve(nc, dc, nw, dw, B=300, seed=20260924)
+    _, reps2, _, _ = M.bootstrap_delta_curve(nc, dc, nw, dw, B=300, seed=20260924)
+    assert np.array_equal(reps1, reps2, equal_nan=True)  # deterministic under frozen seed
     # point matches the analytic whole-gid aggregation (cluster-respecting)
-    analytic = nc.sum(0) / dc.sum(0) - nw.sum(0) / dw.sum(0)
-    assert np.allclose(point, analytic, atol=1e-12)
+    analytic = M._safe_div(nc.sum(0), dc.sum(0)) - M._safe_div(nw.sum(0), dw.sum(0))
+    assert np.allclose(point, analytic, atol=1e-12, equal_nan=True)
 
 
 def test_simultaneous_band_deterministic_frozen_seed():
@@ -906,12 +906,13 @@ def test_simultaneous_band_deterministic_frozen_seed():
     gid = np.array([f"g{i // 3}" for i in range(50)])
     ug, nc, dc, nw, dw = M.build_group_curve_sufficient_stats(
         val, correct, gid, np.ones(50))
-    _, r1 = M.bootstrap_delta_curve(nc, dc, nw, dw, B=200, seed=20260924)
-    _, r2 = M.bootstrap_delta_curve(nc, dc, nw, dw, B=200, seed=20260924)
-    assert np.array_equal(r1, r2)
-    band = M.simultaneous_band(np.nanmean(r1, axis=0), r1)
+    _, r1, vc1, vw1 = M.bootstrap_delta_curve(nc, dc, nw, dw, B=200, seed=20260924)
+    _, r2, _, _ = M.bootstrap_delta_curve(nc, dc, nw, dw, B=200, seed=20260924)
+    assert np.array_equal(r1, r2, equal_nan=True)
+    band = M.simultaneous_band(np.nanmean(r1, axis=0), r1, vc1, vw1)
     assert band["lower"].shape[0] == 30
-    assert np.all(band["upper"] >= band["lower"] - 1e-12)
+    finite = np.isfinite(band["lower"])
+    assert np.all(band["upper"][finite] >= band["lower"][finite] - 1e-12)
 
 
 def test_formal_runner_has_no_best_h_selection():
@@ -967,15 +968,20 @@ def test_l2_row_metrics_key_uniqueness(ag_dual):
     assert keys.drop_duplicates().shape[0] == frame.shape[0]
 
 
-def test_event_cumulative_incidence_synthetic_oracle():
-    fs = np.array([-1, 0, 2, 4, -1, 1], dtype=np.int32)
-    corr = np.array([True, True, False, False, True, False])
-    wt = np.array([1.0, 1.0, 2.0, 2.0, 1.0, 1.0])
-    fc, fz = M.event_cumulative_incidence(fs, corr, wt, 5)
-    assert abs(fc[2] - 1.0 / 3.0) < 1e-12
-    assert abs(fz[2] - 3.0 / 5.0) < 1e-12
-    assert np.all(np.diff(fc) >= -1e-12)
-    assert np.all((fc >= -1e-12) & (fc <= 1 + 1e-12))
+def test_weighted_km_first_event_synthetic_oracle():
+    ev = np.array([-1, 2, -1], dtype=np.int64)
+    cs = np.array([4, 4, 4], dtype=np.int64)
+    wt = np.ones(3)
+    F, R, D = M.weighted_km_first_event(ev, cs, wt, 4)
+    assert abs(F[2] - 1.0 / 3.0) < 1e-12
+    assert abs(F[4] - 1.0 / 3.0) < 1e-12
+    assert np.all(F >= -1e-12) and np.all(F <= 1 + 1e-12)
+    assert R[2] == 3.0 and D[2] == 1.0
+    # adverse orientation: delta = Wrong - Correct
+    corr = np.array([False, True, True])
+    d = M.km_event_delta(ev, "sr_first_pierce", corr, wt, cs, 4)
+    assert d["orientation"] == "wrong_minus_correct"
+    assert np.allclose(d["delta"], d["F_wrong"] - d["F_correct"], equal_nan=True)
 
 
 def test_e9_fix_break_arithmetic_identity():
@@ -984,3 +990,334 @@ def test_e9_fix_break_arithmetic_identity():
     res = M.verify_disagreement_arithmetic(a9, e9)
     assert res["identity_holds"]
     assert (res["e9_fix"] - res["e9_break"]) == (res["n_correct_e9"] - res["n_correct_a9"])
+
+
+# =========================================================================== #
+# RC-T2 revision: availability / orientation / support / events / evidence     #
+# (reviewer RC-T2-18 required regression tests)                                #
+# =========================================================================== #
+@pytest.fixture(scope="session")
+def small_t2():
+    return M.run_formal_t2(symbols=("AG",), n_subset=25, population="small",
+                           write_artifacts=False, verbose=False)
+
+
+def test_rc_t2_1_unavailable_row_contributes_neither_num_nor_den():
+    value = np.array([[1.0, 1.0, 1.0, 1.0],
+                      [3.0, 3.0, np.nan, np.nan]])
+    correct = np.array([True, False])
+    gid = np.array(["g1", "g2"])
+    w = np.array([1.0, 1.0])
+    ug, nc, dc, nw, dw = M.build_group_curve_sufficient_stats(value, correct, gid, w)
+    # h index 2: correct available, wrong unavailable -> wrong den must be 0
+    assert dc.sum(0)[2] == 1.0
+    assert dw.sum(0)[2] == 0.0
+    pc = M._safe_div(nc.sum(0), dc.sum(0))
+    pw = M._safe_div(nw.sum(0), dw.sum(0))
+    assert pc[2] == 1.0
+    assert np.isnan(pw[2])
+    # an unavailable row wrongly placed in the denominator would give 0.0 here
+    assert not np.isclose(pw[2], 0.0)
+
+
+def test_rc_t2_2_zero_group_denominator_returns_nan_not_zero():
+    out = M._safe_div(np.array([2.0, 4.0]), np.array([1.0, 0.0]))
+    assert out[0] == 2.0
+    assert np.isnan(out[1])
+
+
+def test_rc_t2_3_incomplete_bootstrap_support_fails_closed():
+    with pytest.raises(RuntimeError):
+        M.check_full_population_gates(
+            n_symbols=M.FROZEN_FULL_SYMBOLS, n_candidates=M.FROZEN_FULL_CANDIDATE_ROWS,
+            n_gids=M.FROZEN_FULL_ORACLE_GIDS, a9_l2=M.FROZEN_FULL_A9_L2_ROWS,
+            e9_l2=M.FROZEN_FULL_E9_L2_ROWS, availability_masks_identical=True,
+            inferential_support_all=False)
+    # passes when everything is complete
+    M.check_full_population_gates(
+        n_symbols=M.FROZEN_FULL_SYMBOLS, n_candidates=M.FROZEN_FULL_CANDIDATE_ROWS,
+        n_gids=M.FROZEN_FULL_ORACLE_GIDS, a9_l2=M.FROZEN_FULL_A9_L2_ROWS,
+        e9_l2=M.FROZEN_FULL_E9_L2_ROWS, availability_masks_identical=True,
+        inferential_support_all=True)
+
+
+def _orient_fixture():
+    matrices = {"PS": np.array([[3.0], [1.0]]), "MFE": np.array([[3.0], [1.0]]),
+                "MAE": np.array([[1.0], [3.0]]), "R": np.array([[3.0], [1.0]])}
+    return matrices, np.array([True, False]), np.array(["a", "b"]), np.ones(2)
+
+
+def test_rc_t2_4_ps_orientation_correct_minus_wrong():
+    matrices, correct, gid, w = _orient_fixture()
+    c = M.build_system_curves(matrices, correct, gid, w, B=50)
+    assert M.CURVE_ORIENTATIONS["PS"] == "correct_minus_wrong"
+    assert c["PS"]["contrast_orientation"] == "correct_minus_wrong"
+    assert c["PS"]["point"][0] > 0    # correct(3) - wrong(1)
+
+
+def test_rc_t2_5_mfe_orientation_correct_minus_wrong():
+    matrices, correct, gid, w = _orient_fixture()
+    c = M.build_system_curves(matrices, correct, gid, w, B=50)
+    assert M.CURVE_ORIENTATIONS["MFE"] == "correct_minus_wrong"
+    assert c["MFE"]["contrast_orientation"] == "correct_minus_wrong"
+    assert c["MFE"]["point"][0] > 0
+
+
+def test_rc_t2_6_signed_return_orientation_correct_minus_wrong():
+    matrices, correct, gid, w = _orient_fixture()
+    c = M.build_system_curves(matrices, correct, gid, w, B=50)
+    assert M.CURVE_ORIENTATIONS["R"] == "correct_minus_wrong"
+    assert c["R"]["contrast_orientation"] == "correct_minus_wrong"
+    assert c["R"]["point"][0] > 0
+
+
+def test_rc_t2_7_mae_orientation_wrong_minus_correct():
+    matrices, correct, gid, w = _orient_fixture()
+    c = M.build_system_curves(matrices, correct, gid, w, B=50)
+    assert M.CURVE_ORIENTATIONS["MAE"] == "wrong_minus_correct"
+    assert c["MAE"]["contrast_orientation"] == "wrong_minus_correct"
+    assert c["MAE"]["point"][0] > 0    # wrong MAE(3) - correct MAE(1)
+    raw = M.oriented_delta_curve(matrices["MAE"], correct, gid, w,
+                                 "correct_minus_wrong", B=50)
+    assert raw["point"][0] < 0         # opposite sign
+
+
+def test_rc_t2_8_simultaneous_band_excludes_unsupported_h():
+    n = 50
+    correct = np.array([True] * n + [False] * n)
+    gid = np.array([f"c{i}" for i in range(n)] + [f"w{i}" for i in range(n)])
+    value = np.empty((2 * n, 2), dtype=np.float64)
+    value[:, 0] = 1.0                              # all available at h=1
+    value[:n, 1] = 1.0                             # correct available at h=2
+    value[n:, 1] = np.nan                          # wrong unavailable at h=2
+    c = M.oriented_delta_curve(value, correct, gid, np.ones(2 * n),
+                               "correct_minus_wrong", B=100)
+    assert bool(c["inferential_support"][0]) is True
+    assert bool(c["inferential_support"][1]) is False
+    assert c["n_valid_wrong"][1] == 0
+    assert np.isnan(c["simul_lower"][1]) and np.isnan(c["simul_upper"][1])
+    assert np.isnan(c["se"][1])
+
+
+def test_rc_t2_9_same_bar_boolean_never_event_step(small_t2):
+    keys = set(small_t2["event_curves"].keys())
+    assert "sr_same_bar_reclaim" not in keys
+    assert "lb_same_bar_reclaim" not in keys
+    assert "sr_same_bar_reclaim" in M.NON_EVENT_FIELDS
+    assert "sr_same_bar_reclaim" not in M.FIRST_PASSAGE_EVENTS
+    assert "sr_same_bar_reclaim_time" in keys    # derived event time instead
+
+
+def test_rc_t2_10_bars_to_reclaim_never_event_step(small_t2):
+    keys = set(small_t2["event_curves"].keys())
+    assert "sr_bars_to_reclaim" not in keys
+    assert "lb_bars_to_reclaim" not in keys
+    assert "sr_bars_to_reclaim" in M.NON_EVENT_FIELDS
+
+
+def test_rc_t2_11_break_continue_is_terminal_only(small_t2):
+    keys = set(small_t2["event_curves"].keys())
+    assert "sr_break_continue" not in keys
+    assert "lb_break_continue" not in keys
+    assert "sr_break_continue" in M.NON_EVENT_FIELDS
+    term = small_t2["break_continue_terminal"]
+    for bs in ("SR", "LB"):
+        assert set(term[bs].keys()) == {"correct", "wrong"}
+
+
+def test_rc_t2_12_weighted_km_censoring_oracle():
+    # event before censor
+    F, _, _ = M.weighted_km_first_event(
+        np.array([2, -1, -1]), np.array([4, 4, 4]), np.ones(3), 4)
+    assert abs(F[2] - 1 / 3) < 1e-12 and abs(F[4] - 1 / 3) < 1e-12
+    # censor before event -> not counted
+    F2, _, _ = M.weighted_km_first_event(
+        np.array([-1, 2, 3]), np.array([4, 4, 2]), np.ones(3), 4)
+    assert abs(F2[2] - 1 / 3) < 1e-12 and abs(F2[4] - 1 / 3) < 1e-12
+    # never-event -> F stays 0
+    F3, _, _ = M.weighted_km_first_event(
+        np.array([-1, -1]), np.array([3, 3]), np.ones(2), 3)
+    assert np.allclose(F3, 0.0)
+    # different weights: event weight 3 of total 4 -> hazard 0.75
+    F4, _, _ = M.weighted_km_first_event(
+        np.array([1, -1]), np.array([2, 2]), np.array([3.0, 1.0]), 2)
+    assert abs(F4[1] - 0.75) < 1e-12
+
+
+def test_rc_t2_13_broken_unreclaimed_can_rise_then_fall():
+    fp = np.array([1]); fr = np.array([3])     # pierce at 1, reclaim at 3
+    state = [bool(M.broken_unreclaimed_state(fp, fr, h)[0]) for h in range(6)]
+    assert state == [False, True, True, False, False, False]
+    pc, _ = M.broken_unreclaimed_prevalence(fp, fr, np.array([True]),
+                                            np.array([1.0]), 5)
+    assert pc[1] == 1.0 and pc[2] == 1.0 and pc[3] == 0.0
+
+
+def test_rc_t2_14_conditional_reclaim_rates_oracle():
+    fp = np.array([1, 1, 1])
+    fr = np.array([1, 4, -1])
+    sb = np.array([True, False, False])
+    ff = np.array([-1, -1, 2])
+    btr = np.array([0.0, 3.0, np.nan])
+    correct = np.array([True, True, True])
+    d = M.conditional_reclaim_diagnostics(fp, fr, sb, ff, btr, correct, np.ones(3))
+    c = d["correct"]
+    assert abs(c["any_reclaim_rate"] - 2 / 3) < 1e-12
+    assert abs(c["same_bar_reclaim_rate"] - 1 / 3) < 1e-12
+    assert abs(c["late_reclaim_rate"] - 1 / 3) < 1e-12
+    assert abs(c["bars_to_reclaim_median"] - 1.5) < 1e-12
+    assert abs(c["failed_reclaim_rate"] - 0.0) < 1e-12
+
+
+def test_rc_t2_15_availability_oracle():
+    value = np.array([[1.0, 1.0], [2.0, np.nan], [3.0, 3.0]])
+    w = np.ones(3)
+    correct = np.array([True, False, True])
+    side = np.array([1.0, -1.0, 1.0])
+    gid = np.array(["g0", "g1", "g2"])
+    av = M.availability_curves(value, w, correct, side, gid, 2)
+    assert list(av["overall"]["available_rows"]) == [3, 2]
+    assert abs(av["overall"]["availability_fraction"][1] - 2 / 3) < 1e-12
+    assert list(av["wrong"]["available_rows"]) == [1, 0]
+    assert list(av["LONG"]["available_rows"]) == [2, 2]
+    assert abs(av["overall"]["available_weight_mass"][1] - 2.0) < 1e-12
+
+
+def test_rc_t2_16_a9_e9_availability_equality_all_h(ag_dual, small_t2):
+    base, dual = ag_dual
+    a9, e9 = dual["A9"], dual["E9"]
+    assert np.array_equal(np.isfinite(a9["curve_ps"]), np.isfinite(e9["curve_ps"]))
+    assert small_t2["availability_masks_identical"] is True
+    assert small_t2["per_system_gid_weight_ok"] is True
+
+
+def test_rc_t2_17_side_landmark_diagnostics_schema(small_t2):
+    rows = small_t2["side_landmark_rows"]
+    assert rows
+    required = {"direction_system", "landmark", "stratum", "metric", "weighted_mean",
+                "p25", "median", "p75", "n_rows", "n_gids", "weight_mass"}
+    for r in rows:
+        assert required.issubset(r.keys())
+        assert r["landmark"] in {"m15", "h1", "h4", "td1", "td3", "td5"}
+        assert r["metric"] in {"MFE", "MAE", "PS", "R"}
+        assert r["direction_system"] in {"E9", "A9"}
+    assert {"overall", "LONG", "SHORT"}.issubset({r["stratum"] for r in rows})
+
+
+def test_rc_t2_18_observed_bar_minutes_semantics(ag_dual):
+    base, dual = ag_dual
+    assert "observed_bar_minutes" in M.CURVE_COLUMNS
+    assert "elapsed_minutes" not in M.CURVE_COLUMNS
+    chunk = M.curve_chunk_from_dual(base, dual, "AG")
+    assert np.all(chunk["observed_bar_minutes"].to_numpy()
+                  == 15 * chunk["h_bar"].to_numpy())
+
+
+def test_rc_t2_19_real_trading_day_preserved(ag_dual, ag_state):
+    base, dual = ag_dual
+    frame = M.assemble_row_metrics(base, dual, "AG")
+    assert frame["trading_day"].notna().all()
+    exp = np.asarray(ag_state.trading_day[base["entry_idx"]])
+    got = np.unique(frame["trading_day"].to_numpy())
+    assert set(got.tolist()).issubset(set(np.unique(exp).tolist()))
+
+
+def test_rc_t2_20_formal_evidence_writer_schema_round_trip(tmp_path):
+    p = tmp_path / "pc.csv"
+    M.write_path_curves_csv(p, [{
+        "direction_system": "E9", "metric": "PS",
+        "contrast_orientation": "correct_minus_wrong", "h_bar": 1,
+        "observed_bar_minutes": 15, "point": 0.1, "pointwise_lo": 0.0,
+        "pointwise_hi": 0.2, "simul_lower": -0.1, "simul_upper": 0.3,
+        "inferential_support": True, "n_valid_correct": 5, "n_valid_wrong": 5,
+        "avail_overall_rows": 10, "avail_overall_mass": 10.0,
+        "avail_overall_fraction": 1.0, "avail_correct_rows": 5,
+        "avail_wrong_rows": 5, "flag": ""}])
+    df = pd.read_csv(p)
+    assert list(df.columns) == _expected_path_curve_cols()
+    assert bool(df["inferential_support"].iloc[0]) is True
+
+    e = tmp_path / "ec.csv"
+    M.write_event_curves_csv(e, [{
+        "event_type": "first_event_curve", "name": "sr_first_pierce", "backstop": "SR",
+        "direction_system": "E9", "h_bar": 1, "observed_bar_minutes": 15,
+        "value_correct": 0.1, "value_wrong": 0.2, "delta": 0.1,
+        "orientation": "wrong_minus_correct"}])
+    assert {"event_type", "orientation"}.issubset(pd.read_csv(e).columns)
+
+    g = tmp_path / "gs.csv"
+    M.write_group_stats_csv(g, [{
+        "direction_system": "E9", "landmark": "h1", "stratum": "overall", "metric": "PS",
+        "weighted_mean": 0.1, "p25": 0.0, "median": 0.1, "p75": 0.2, "n_rows": 5,
+        "n_gids": 3, "weight_mass": 5.0}])
+    assert list(pd.read_csv(g).columns)[:4] == ["direction_system", "landmark",
+                                                "stratum", "metric"]
+
+    d = tmp_path / "dd.csv"
+    M.write_a9_e9_disagreement_csv(d, [{"symbol": "AG", "agreement": 3,
+                                        "disagreement": 2, "e9_fix": 1, "e9_break": 1}])
+    assert list(pd.read_csv(d).columns) == ["symbol", "agreement", "disagreement",
+                                            "e9_fix", "e9_break"]
+
+    s = tmp_path / "s.json"
+    M.write_summary_json(s, {"pipeline_smoke_completed": True, "n": 1})
+    with open(s) as f:
+        assert json.load(f)["pipeline_smoke_completed"] is True
+
+
+def _expected_path_curve_cols():
+    return ["direction_system", "metric", "contrast_orientation", "h_bar",
+            "observed_bar_minutes", "point", "pointwise_lo", "pointwise_hi",
+            "simul_lower", "simul_upper", "inferential_support", "n_valid_correct",
+            "n_valid_wrong", "avail_overall_rows", "avail_overall_mass",
+            "avail_overall_fraction", "avail_correct_rows", "avail_wrong_rows", "flag"]
+
+
+def test_rc_t2_21_full_population_gate_constants():
+    assert M.FROZEN_FULL_SYMBOLS == 15
+    assert M.FROZEN_FULL_CANDIDATE_ROWS == 13773
+    assert M.FROZEN_FULL_ORACLE_GIDS == 638
+    assert M.FROZEN_FULL_A9_L2_ROWS == 13773
+    assert M.FROZEN_FULL_E9_L2_ROWS == 13773
+    assert M.FROZEN_FULL_L2_ROWS == 27546
+
+
+def test_rc_t2_22_formal_runner_has_no_reference_call():
+    assert "scan_paths_reference" not in inspect.getsource(M.run_formal_t2)
+    orig_ref = M.scan_paths_reference
+    calls = {"n": 0}
+
+    def boom(*a, **k):
+        calls["n"] += 1
+        raise RuntimeError("REFERENCE_CALLED")
+    M.scan_paths_reference = boom
+    try:
+        M.reset_counters()
+        M.run_formal_t2(symbols=("AG",), n_subset=25, population="small", verbose=False)
+    finally:
+        M.scan_paths_reference = orig_ref
+    assert calls["n"] == 0, "formal runner must not call the Reference kernel"
+
+
+def test_rc_t2_23_one_dual_scan_per_symbol():
+    M.reset_counters()
+    M.run_formal_t2(symbols=("AG",), n_subset=25, population="small", verbose=False)
+    assert M.COUNTERS["path_scan_count"] == 1
+    assert M.COUNTERS["direction_chain_run_count"] == 1
+    assert M.COUNTERS["candidate_python_loop_count"] == 0
+    assert M.COUNTERS["hotloop_dataframe_concat_count"] == 0
+    assert M.COUNTERS["full_history_recompute_count"] == 0
+
+
+def test_rc_t2_24_no_best_h_selection():
+    src = inspect.getsource(M.run_formal_t2)
+    for tok in ("argmax", "argmin", "best_h", "select_primary", "optimal_h", "best bar"):
+        assert tok not in src, f"forbidden token present in formal runner: {tok}"
+
+
+def test_rc_t2_25_audit_only_labels_absent_from_production_signature():
+    sig = inspect.signature(M.scan_paths_streaming)
+    for p in sig.parameters:
+        assert "oracle" not in p
+    for f in M.AUDIT_ONLY_FIELDS:
+        assert f not in sig.parameters
