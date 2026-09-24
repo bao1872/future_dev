@@ -1,13 +1,14 @@
 {
   "task_id": "FUTURE-R5-M15-ENTRY-PATH-ATLAS-V1",
   "base_sha": "cb9261d4498d328e6dd8edca5d655eaf609b0611",
-  "reviewed_parent_sha": "893ca1632631f3862c2e17c482b6d90b9c541805",
+  "reviewed_parent_sha": "2b7d6bb61a42122e9106b8b36228736c8273655a",
   "stage": "pre_t2_implementation",
   "primary_endpoint": {
     "name": "delta_PS_curve_E9_15m",
     "definition": "Delta_PS_E9(h) for ALL h (completed 15m bars); full-curve simultaneous band; no single best-h selection",
     "observation_axis": "15m",
-    "landmark_4h": "h4 = 16 bars = descriptive landmark only"
+    "landmark_4h": "h4 = 16 observed m15 bars (NOT necessarily four wall-clock hours)",
+    "note": "elapsed_bar_time = 15 * h_bar is bar-time, not wall-clock; wall_clock requires timestamp difference (recorded separately)."
   },
   "audit_only_fields": [
     "direction_correct",
@@ -74,7 +75,7 @@
     "never_stops_at_oracle_exit": true
   },
   "branch": "entry-path-atlas-v1",
-  "code_sha": "1eaf76ba0dfdbe000677349544d08a19c10007e2",
+  "code_sha": "9fdd7ea62736e90e088dc3dbb122c7e8b52b4a52",
   "curve_kernel_differential": {
     "synthetic_rows": 40,
     "synthetic_final_mismatch": 0,
@@ -86,10 +87,12 @@
   },
   "simultaneous_band_synthetic": {
     "deterministic_under_frozen_seed": true,
-    "seed": 20260924
+    "seed": 20260924,
+    "computed_over_inference_support_only": true
   },
-  "event_incidence_synthetic": {
-    "math_ok": true
+  "kaplan_meier_synthetic": {
+    "math_ok": true,
+    "censoring_ok": true
   },
   "disagreement_arithmetic": {
     "e9_fix": 2,
@@ -98,11 +101,22 @@
     "n_correct_a9": 3,
     "identity_holds": true
   },
+  "full_population_gates": {
+    "frozen_symbols": 15,
+    "frozen_candidate_rows": 13773,
+    "frozen_oracle_gids": 638,
+    "frozen_a9_l2_rows": 13773,
+    "frozen_e9_l2_rows": 13773,
+    "frozen_total_l2_rows": 27546,
+    "enforced_on": "authorized full run only (not PRE-T2)"
+  },
   "formal_t2_small_ag": {
+    "pipeline_smoke_completed": true,
+    "evidence_flag": "NON_SCIENTIFIC_SMOKE_ONLY",
     "n_candidates": 40,
     "per_system_gid_weight_ok": true,
     "availability_masks_identical": true,
-    "verdict_e9_small": "PATH_SEPARATION_DETECTED",
+    "n_path_curve_rows": 1480,
     "disagreement_counts": {
       "agreement": 39,
       "disagreement": 1,
@@ -118,7 +132,14 @@
       "candidate_python_loop_count": 0,
       "hotloop_dataframe_concat_count": 0,
       "candidate_views_processed": 80,
-      "runtime_sec": 12.458102941513062
+      "runtime_sec": 7.656047821044922
+    },
+    "evidence_temp": {
+      "path_curves": "entry_path_atlas_v1_path_curves.csv",
+      "event_curves": "entry_path_atlas_v1_event_curves.csv",
+      "group_stats": "entry_path_atlas_v1_group_stats.csv",
+      "disagreement": "entry_path_atlas_v1_a9_e9_disagreement.csv",
+      "summary": "entry_path_atlas_v1_summary.json"
     }
   },
   "artifact_schemas": {
@@ -204,12 +225,83 @@
         "symbol",
         "gid",
         "h_bar",
-        "elapsed_minutes",
+        "observed_bar_minutes",
         "MFE",
         "MAE",
         "PS",
         "signed_return"
+      ],
+      "observed_bar_minutes": "15 * h_bar (bar-time, not wall-clock)"
+    },
+    "entry_path_atlas_v1_path_curves.csv": {
+      "key": [
+        "direction_system",
+        "metric",
+        "h_bar"
+      ],
+      "includes": [
+        "inferential_support",
+        "n_valid_correct",
+        "n_valid_wrong",
+        "avail_overall_rows",
+        "avail_overall_fraction",
+        "avail_correct_rows",
+        "avail_wrong_rows",
+        "flag"
       ]
+    },
+    "entry_path_atlas_v1_event_curves.csv": {
+      "key": [
+        "event_type",
+        "name",
+        "direction_system",
+        "h_bar"
+      ],
+      "event_types": [
+        "first_event_curve",
+        "state_prevalence",
+        "conditional_reclaim_stat",
+        "terminal_rate"
+      ]
+    },
+    "entry_path_atlas_v1_group_stats.csv": {
+      "key": [
+        "direction_system",
+        "landmark",
+        "stratum",
+        "metric"
+      ],
+      "landmarks": [
+        "m15",
+        "h1",
+        "h4",
+        "td1",
+        "td3",
+        "td5"
+      ],
+      "strata": [
+        "overall",
+        "LONG",
+        "SHORT",
+        "correct_LONG",
+        "wrong_LONG",
+        "correct_SHORT",
+        "wrong_SHORT"
+      ]
+    },
+    "entry_path_atlas_v1_a9_e9_disagreement.csv": {
+      "key": [
+        "symbol"
+      ],
+      "columns": [
+        "agreement",
+        "disagreement",
+        "e9_fix",
+        "e9_break"
+      ]
+    },
+    "entry_path_atlas_v1_summary.json": {
+      "schema": "full summary dict"
     }
   },
   "governance": {
@@ -219,15 +311,17 @@
     "reference_kernel_never_called_in_formal_runner": true,
     "one_dual_production_scan_per_symbol": true,
     "a9_secondary_comparator_only": true,
-    "a9_vs_e9_final_verdict": "reserved for FUTURE-RX-DIRECTION-LAYER-ABLATION-V1"
+    "a9_vs_e9_final_verdict": "reserved for FUTURE-RX-DIRECTION-LAYER-ABLATION-V1",
+    "scientific_verdict_removed_from_smoke": true
   },
   "unverified_items": [
     "Full 13773-Candidate Formal T2 primary curve (E9 and A9) NOT estimated.",
     "Full L2 row-metrics parquet (27546 rows) NOT generated.",
     "Full long-format 15m curve parquet NOT generated.",
-    "Formal scientific verdict (PATH_SEPARATION_DETECTED / NO...) NOT issued.",
+    "Full formal evidence CSV/JSON NOT generated (smoke to temp only).",
+    "Formal scientific verdict NOT issued (smoke only: pipeline_smoke_completed).",
     "Stop-Loss / Take-Profit experiments NOT run.",
     "A9-vs-E9 final system verdict reserved for downstream frozen ablation."
   ],
-  "runtime_sec": 24.755695819854736
+  "runtime_sec": 17.015471696853638
 }

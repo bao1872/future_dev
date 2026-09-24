@@ -1,7 +1,7 @@
 {
   "task_id": "FUTURE-R5-M15-ENTRY-PATH-ATLAS-V1",
   "base_sha": "cb9261d4498d328e6dd8edca5d655eaf609b0611",
-  "reviewed_parent_sha": "6376c63f973d8c5f6705ccaf421abc8740c7b0ef",
+  "reviewed_parent_sha": "9be36d3f91410ee6be416cdf9025b1858b4b86eb",
   "stage": "t1_5_integration",
   "primary_endpoint": {
     "name": "delta_PS_4h",
@@ -772,5 +772,6 @@
     "FUTURE-RX-DIRECTION-LAYER-ABLATION-V1 pre-registered; NOT run here."
   ],
   "immediate_reviewed_parent_sha": "9be36d3f91410ee6be416cdf9025b1858b4b86eb",
-  "archived_for": "ENTRY-PATH-ATLAS-V1 PRE-T2 (15m full-curve redesign)"
+  "archived_for": "ENTRY-PATH-ATLAS-V1 PRE-T2 (15m full-curve redesign)",
+  "earlier_kernel_review_sha": "6376c63f973d8c5f6705ccaf421abc8740c7b0ef"
 }
