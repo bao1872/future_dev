@@ -1,0 +1,66 @@
+{
+  "task_id": "FUTURE-R7-M15-AHEAD-SR-NONACCEPTANCE-TP-V1",
+  "stage": "t1_5_integration",
+  "base_sha": "273be9d514259d2a7a585cc27b0531f6f51476d7",
+  "reviewed_parent_sha": "273be9d514259d2a7a585cc27b0531f6f51476d7",
+  "generator_code_sha": "4a179abeaf63204294adefde824941c652de1356",
+  "frozen_inputs_sha256": {
+    "artifacts/entry_path_atlas_v1/entry_path_row_metrics_v1.parquet": "110d5990fd9b3bc17aca65a92eb172e0de088635e89c364428b8c9bfccf94d04",
+    "research/liquidity_oracle_atlas/evidence/structural_stop_v1_manifest.json": "85c60fa975bb7cf77ce1613f716b0652a751b8d659a352bfcf2ca63e5147179c",
+    "research/liquidity_oracle_atlas/evidence/structural_stop_v1_summary.json": "6776ffd056f084f7186b7f3734d551644d9cfd5f2216cd9f43d01835bcedf85e"
+  },
+  "downstream_policy": {
+    "downstream_stop_policy": "NO_STRUCTURAL_STOP",
+    "apply_r6_structural_stop": false,
+    "r6_manifest_path": "research/liquidity_oracle_atlas/evidence/structural_stop_v1_manifest.json",
+    "r6_stage": "formal_r6",
+    "r6_all_pass": true,
+    "r6_verdict": "NO_IDENTIFIABLE_GROSS_STOP_EDGE",
+    "r6_authorized_review_sha": "e02af7d12498e3b4565b654963d82e621e38106f",
+    "r6_artifact_sha256": {
+      "structural_stop_row_metrics_v1.parquet": "0154b0804f662d654da51ec0135f5ee70c5c7775b68c45ff4db1dc5deacc3b55",
+      "structural_stop_v1_primary.csv": "d69ee32865598575f8404992f707d58261b593a6cbc5241960d24d33e41b1c8f",
+      "structural_stop_v1_side_stats.csv": "e5ff40053dcd48dbc5074a4ce9f9e4e313230de8117219471d5483d1b24b9050",
+      "structural_stop_v1_group_stats.csv": "464c0b1146dee9afef3b98baa446615578e4a1fff35b01a3737872f7f945d634",
+      "structural_stop_v1_stop_events.csv": "7d31b31476b5d55b132b69af63ab4f6d8c39e0cbd7a95263f83a36b12232dc35",
+      "structural_stop_v1_summary.json": "6776ffd056f084f7186b7f3734d551644d9cfd5f2216cd9f43d01835bcedf85e"
+    }
+  },
+  "cost_governance": {
+    "cost_metadata_status": "UNAVAILABLE_COST_METADATA",
+    "realistic_net_pnl_status": "NOT_ESTIMATED",
+    "formal_primary_basis": "GROSS_PAIRED_POLICY_EFFECT",
+    "friction_proxy_used_for_verdict": false,
+    "entry_cost_estimated": false,
+    "exit_cost_estimated": false
+  },
+  "differential": {
+    "n_symbols_with_reference": 15,
+    "n_mismatch": 0,
+    "max_abs_error": 0.0
+  },
+  "horizon_causality": {
+    "ok": true
+  },
+  "performance": {
+    "r5_l2_loads": 1,
+    "execution_frame_loads": 15,
+    "direction_reruns": 0,
+    "sr_recompute_count": 0,
+    "path_atlas_rescans": 0,
+    "full_history_recompute_count": 0,
+    "reference_calls": 30,
+    "r6_policy_verifications": 1,
+    "production_candidate_views": 3000,
+    "runtime_sec": 33.341025829315186
+  },
+  "artifact_sha256": {
+    "ahead_sr_take_profit_v1_t1_5_primary.csv": "97e4249d9d07fea895f0ac45a2cc7a20aa2529c33c5288e3f425eb93ea2f6a02",
+    "ahead_sr_take_profit_v1_t1_5_side_stats.csv": "da3db967be1d886a0268a1a1bd766ea4e9c870ab4a05e4f30c298bc3e0c7ad8d",
+    "ahead_sr_take_profit_v1_t1_5_group_stats.csv": "9badb7ec64f39081f696b07e0a41330060ba4b91520f7088d7cab84ee107c4dd",
+    "ahead_sr_take_profit_v1_t1_5_events.csv": "24e94b2f113212732f400eb7890278794f4861e75da098664444808eb389154e",
+    "ahead_sr_take_profit_v1_t1_5_summary.json": "bb36acc6993ac18dc4bddcd9c0931e9390d8afd6c03b4b7dfd2014229d13fc50"
+  },
+  "serialization_manifest_last": true,
+  "authorized_review_sha_note": "R7 PRE-T2 authorized under FUTURE-R6/R7 Amendment A1 (GROSS primary, NO_STRUCTURAL_STOP downstream)."
+}
