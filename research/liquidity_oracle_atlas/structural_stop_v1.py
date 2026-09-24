@@ -79,7 +79,7 @@ ENTRY_COST_ESTIMATED = False
 EXIT_COST_ESTIMATED = False
 
 COUNTERS = {"r5_artifact_loads": 0, "execution_frame_loads": 0,
-            "direction_artifact_loads": 0, "sr_recompute_count": 0,
+            "direction_artifact_sha_verifications": 0, "sr_recompute_count": 0,
             "full_history_recompute_count": 0, "reference_calls": 0,
             "production_candidate_views": 0}
 
@@ -122,7 +122,8 @@ def verify_frozen_inputs():
 # --------------------------------------------------------------------------- #
 L2_COLUMNS = [
     "semantic_key", "symbol", "gid", "direction_system", "direction",
-    "sample_weight_raw", "direction_correct", "entry_price", "ATR0", "fill_time",
+    "sample_weight_raw", "direction_correct", "oracle_direction",
+    "entry_price", "ATR0", "fill_time",
     "raw_sup_bottom", "raw_sup_top", "raw_sup_strength",
     "raw_res_bottom", "raw_res_top", "raw_res_strength",
     "raw_liq_dn_bottom", "raw_liq_up_top",
@@ -191,7 +192,12 @@ def resolve_treatment(*, inv_step, side, entry_idx, entry_price, atr0,
     stop_reason, and the resulting stop gross return is derived by caller.
     """
     N = len(inv_step)
-    signal_observed = eligible & (inv_step >= 0)
+    inv_step = np.asarray(inv_step, np.int64)
+    exit_step_H = np.asarray(exit_step_H, np.int64)
+    # RC-R6-1: horizon-causal. A signal is OBSERVED for horizon H only if the
+    # invalidation occurs at/before that horizon's baseline exit bar. An
+    # invalidation after the exit must never appear in the H-specific row.
+    signal_observed = eligible & (inv_step >= 0) & (inv_step <= exit_step_H)
     signal_idx = np.where(signal_observed, entry_idx + inv_step, -1)
     next_idx = np.where(signal_observed, signal_idx + 1, -1)
     in_range = signal_observed & (next_idx >= 0) & (next_idx < n_bars)
@@ -203,6 +209,8 @@ def resolve_treatment(*, inv_step, side, entry_idx, entry_price, atr0,
     reason = np.full(N, "", dtype=object)
     reason[~eligible] = "not_eligible"
     reason[eligible & (inv_step < 0)] = "no_signal"
+    reason[eligible & (inv_step >= 0) & (inv_step > exit_step_H)] = \
+        "no_signal_before_baseline_exit"
     reason[signal_observed & ~in_range] = "no_next_bar"
     reason[in_range & ~same_seg] = "segment_change"
     reason[same_seg & ~before_exit] = "beyond_baseline_exit"
@@ -216,7 +224,8 @@ def resolve_treatment(*, inv_step, side, entry_idx, entry_price, atr0,
                      side * (fill_open - entry_price) / atr0, np.nan)
     return {
         "stop_signal_observed": signal_observed,
-        "stop_signal_step": inv_step.astype(np.int64),
+        # RC-R6-1: the horizon row must never expose a future invalidation step.
+        "stop_signal_step": np.where(signal_observed, inv_step, -1).astype(np.int64),
         "stop_signal_idx": signal_idx,
         "stop_executable": executable,
         "stop_fill_step": fill_step.astype(np.int64),
@@ -290,6 +299,10 @@ def scan_structural_stop_reference(case):
             if inv < 0:
                 m["stop_reason"][i] = ("not_eligible" if not out["stop_eligible"][i]
                                        else "no_signal")
+                continue
+            if inv > ex:
+                # RC-R6-1: invalidation happens after this horizon's baseline exit.
+                m["stop_reason"][i] = "no_signal_before_baseline_exit"
                 continue
             m["stop_signal_observed"][i] = True
             m["stop_signal_step"][i] = inv
@@ -376,31 +389,52 @@ def paired_gid_bootstrap(delta, gid, weight, B=BOOTSTRAP_B, seed=BOOTSTRAP_SEED,
             "n_gids": int(G), "n_rows": int(len(delta)), "reps": reps}
 
 
-def decomposition(baseline, stop, correct):
-    """GROSS mechanism decomposition (correctness AUDIT_ONLY, never feeds the rule)."""
+def weighted_mean(x, w):
+    """RC-R6-2: weighted mean over rows with finite x and positive weight."""
+    x = np.asarray(x, float)
+    w = np.asarray(w, float)
+    ok = np.isfinite(x) & np.isfinite(w) & (w > 0)
+    if not ok.any():
+        return float("nan")
+    return float((x[ok] * w[ok]).sum() / w[ok].sum())
+
+
+def weighted_quantile(x, w, q):
+    x = np.asarray(x, float)
+    w = np.asarray(w, float)
+    ok = np.isfinite(x) & np.isfinite(w) & (w > 0)
+    if not ok.any():
+        return float("nan")
+    x = x[ok]; w = w[ok]
+    o = np.argsort(x); x = x[o]; w = w[o]
+    cw = np.cumsum(w)
+    pos = (cw - 0.5 * w) / cw[-1]
+    return float(np.interp(q, pos, x, left=x[0], right=x[-1]))
+
+
+def decomposition_weighted(baseline, stop, correct, weight):
+    """RC-R6-2: weighted GROSS mechanism decomposition (correctness AUDIT_ONLY).
+
+    Weights are the frozen `sample_weight_raw`; they are used as-is on the
+    subgroup (never globally renormalized before filtering).
+    """
     base = np.asarray(baseline, float)
     stp = np.asarray(stop, float)
-    correct = np.asarray(correct, bool)
-    ok = np.isfinite(base) & np.isfinite(stp)
-    d = (stp - base)[ok]
-    c = correct[ok]
-    out = {"n_rows": int(ok.sum()), "n_wrong": int((~c).sum()),
-           "n_correct": int(c.sum())}
-    out["delta_ev_gross"] = float(np.mean(d)) if d.size else float("nan")
-    out["delta_wrong_gross"] = (float(np.mean(d[~c])) if (~c).any() else float("nan"))
-    out["delta_correct_gross"] = (float(np.mean(d[c])) if c.any() else float("nan"))
-    # wrong-loss reduction: Loss(baseline) - Loss(stop) among wrong
-    if (~c).any():
-        out["wlr_gross"] = float(np.mean(
-            np.maximum(-base[ok][~c], 0.0) - np.maximum(-stp[ok][~c], 0.0)))
-    else:
-        out["wlr_gross"] = float("nan")
-    # correct-profit erosion: Profit(baseline) - Profit(stop) among correct
-    if c.any():
-        out["cpe_gross"] = float(np.mean(
-            np.maximum(base[ok][c], 0.0) - np.maximum(stp[ok][c], 0.0)))
-    else:
-        out["cpe_gross"] = float("nan")
+    w = np.asarray(weight, float)
+    corr = np.asarray(correct, bool)
+    ok = np.isfinite(base) & np.isfinite(stp) & np.isfinite(w)
+    d = stp - base
+    mw = (~corr) & ok
+    mc = corr & ok
+    out = {"n_rows": int(ok.sum()), "n_wrong": int(mw.sum()),
+           "n_correct": int(mc.sum())}
+    out["delta_ev_gross"] = weighted_mean(d[ok], w[ok])
+    out["delta_wrong_gross"] = weighted_mean(d[mw], w[mw])
+    out["delta_correct_gross"] = weighted_mean(d[mc], w[mc])
+    wlr = np.maximum(-base, 0.0) - np.maximum(-stp, 0.0)
+    out["wlr_gross"] = weighted_mean(wlr[mw], w[mw])
+    cpe = np.maximum(base, 0.0) - np.maximum(stp, 0.0)
+    out["cpe_gross"] = weighted_mean(cpe[mc], w[mc])
     return out
 
 
@@ -415,6 +449,7 @@ ROW_COLUMNS = [
     "baseline_exit_time", "baseline_exit_price",
     "baseline_gross_return_atr", "stop_gross_return_atr", "paired_delta_gross_atr",
     "stop_eligible", "stop_signal_observed", "stop_signal_step", "stop_signal_time",
+    "stop_signal_bar_close",
     "stop_executable", "stop_fill_step", "stop_fill_time", "stop_fill_open",
     "stop_reason",
     "frozen_sr_bottom", "frozen_sr_top", "frozen_sr_strength",
@@ -486,17 +521,23 @@ def treatment_rows_for_symbol(df_l2, st, direction_system):
         base_r = sub[f"{H}_r"].to_numpy(float)
         exit_idx = case["entry_idx"] + m["exit_step"]
         safe_exit = np.clip(exit_idx, 0, case["n_bars"] - 1)
+        # RC-R6-5: baseline exit price is the ACTUAL canonical frame close; assert it
+        # reproduces the frozen R5 checkpoint return within 1e-12.
+        base_close = case["close"][safe_exit]
+        recon = case["side"] * (base_close - case["entry_price"]) / case["atr0"]
+        if not np.allclose(recon, base_r, atol=1e-12, equal_nan=True):
+            raise RuntimeError("STOP_R6_BASELINE_EXIT_ALIGNMENT_MISMATCH")
         base_time = bst[safe_exit] + pd.Timedelta(minutes=15)
         stop_r = np.where(m["stop_executable"], m["stop_gross"], base_r)
         sig_idx = np.where(m["stop_signal_observed"], m["stop_signal_idx"], -1)
         safe_sig = np.clip(sig_idx, 0, case["n_bars"] - 1)
         sig_time = np.where(m["stop_signal_observed"],
                             decision_time[safe_sig].to_numpy("datetime64[ns]"),
-                            np.datetime64("NaT"))
+                            np.datetime64("NaT", "ns"))
         fill_idx = np.where(m["stop_executable"], m["stop_fill_idx"], -1)
         safe_fill = np.clip(fill_idx, 0, case["n_bars"] - 1)
         fill_time = np.where(m["stop_executable"],
-                             bst[safe_fill].to_numpy(), np.datetime64("NaT"))
+                             bst[safe_fill].to_numpy(), np.datetime64("NaT", "ns"))
         rec = pd.DataFrame({
             "semantic_key": sub["semantic_key"].to_numpy(object),
             "symbol": sub["symbol"].to_numpy(object),
@@ -509,8 +550,7 @@ def treatment_rows_for_symbol(df_l2, st, direction_system):
             "entry_price": case["entry_price"], "ATR0": case["atr0"],
             "evaluation_horizon": H,
             "baseline_exit_time": base_time.to_numpy("datetime64[ns]"),
-            "baseline_exit_price": case["entry_price"]
-                + case["side"] * base_r * case["atr0"],
+            "baseline_exit_price": base_close,
             "baseline_gross_return_atr": base_r,
             "stop_gross_return_atr": stop_r,
             "paired_delta_gross_atr": stop_r - base_r,
@@ -518,6 +558,8 @@ def treatment_rows_for_symbol(df_l2, st, direction_system):
             "stop_signal_observed": m["stop_signal_observed"],
             "stop_signal_step": m["stop_signal_step"].astype(np.int64),
             "stop_signal_time": sig_time,
+            "stop_signal_bar_close": np.where(m["stop_signal_observed"],
+                                              case["close"][safe_sig], np.nan),
             "stop_executable": m["stop_executable"],
             "stop_fill_step": m["stop_fill_step"].astype(np.int64),
             "stop_fill_time": fill_time.astype("datetime64[ns]"),
@@ -615,27 +657,148 @@ def differential_symbol(case, system="E9"):
 T1_5_PER_SYMBOL = 50
 
 
+def _boot_sub(vals, gid, w, mask, name):
+    """RC-R6-3: whole-gid paired bootstrap restricted to a subgroup mask."""
+    if not np.asarray(mask, bool).any():
+        return {name: float("nan"), f"{name}_ci_low": float("nan"),
+                f"{name}_ci_high": float("nan")}
+    b = paired_gid_bootstrap(vals[mask], np.asarray(gid, object)[mask],
+                             w[mask])
+    return {name: b["point"], f"{name}_ci_low": b["ci_low"],
+            f"{name}_ci_high": b["ci_high"]}
+
+
 def _effect(big, system, horizon, side=None):
+    """RC-R6-2/3/4/6: weighted, whole-gid-bootstrapped GROSS effect row."""
     q = big[(big.direction_system == system) & (big.evaluation_horizon == horizon)]
     if side is not None:
         q = q[q.direction == side]
     if len(q) == 0:
         return None
-    boot = paired_gid_bootstrap(
-        q["paired_delta_gross_atr"].to_numpy(float),
-        q["gid"].to_numpy(object), q["sample_weight_raw"].to_numpy(float))
-    dec = decomposition(q["baseline_gross_return_atr"].to_numpy(float),
-                        q["stop_gross_return_atr"].to_numpy(float),
-                        q["direction_correct"].to_numpy(bool))
-    return {"system": system, "horizon": horizon, "side": side or "ALL",
-            "n_rows": int(len(q)), "n_gids": boot["n_gids"],
-            "delta_ev_gross": boot["point"],
-            "ci_low": boot["ci_low"], "ci_high": boot["ci_high"],
-            **{k: dec[k] for k in ("delta_wrong_gross", "wlr_gross",
-                                   "delta_correct_gross", "cpe_gross")},
-            "stop_eligible_rate": float(q["stop_eligible"].mean()),
-            "stop_signal_rate": float(q["stop_signal_observed"].mean()),
-            "stop_executable_rate": float(q["stop_executable"].mean())}
+    base = q["baseline_gross_return_atr"].to_numpy(float)
+    stp = q["stop_gross_return_atr"].to_numpy(float)
+    w = q["sample_weight_raw"].to_numpy(float)
+    gid = q["gid"].to_numpy(object)
+    corr = q["direction_correct"].to_numpy(bool)
+    delta = stp - base
+    wlr = np.maximum(-base, 0.0) - np.maximum(-stp, 0.0)
+    cpe = np.maximum(base, 0.0) - np.maximum(stp, 0.0)
+    dm = ~corr
+    cm = corr
+    ev = paired_gid_bootstrap(delta, gid, w)
+    row = {
+        "system": system, "horizon": horizon, "side": side or "ALL",
+        "n_rows": int(len(q)), "n_gids": int(ev["n_gids"]),
+        "delta_ev_gross": ev["point"],
+        "delta_ev_ci_low": ev["ci_low"], "delta_ev_ci_high": ev["ci_high"],
+        "break_even_incremental_exit_cost_atr": ev["point"],
+        "break_even_incremental_exit_cost_ci_low": ev["ci_low"],
+        "break_even_incremental_exit_cost_ci_high": ev["ci_high"],
+        "has_positive_gross_cost_capacity": bool(ev["point"] > 0),
+        **_boot_sub(delta, gid, w, dm, "delta_wrong_gross"),
+        **_boot_sub(delta, gid, w, cm, "delta_correct_gross"),
+        **_boot_sub(wlr, gid, w, dm, "wlr_gross"),
+        **_boot_sub(cpe, gid, w, cm, "cpe_gross"),
+        "stop_eligible_rate": weighted_mean(q["stop_eligible"].to_numpy(float), w),
+        "stop_signal_rate": weighted_mean(q["stop_signal_observed"].to_numpy(float), w),
+        "stop_executable_rate": weighted_mean(q["stop_executable"].to_numpy(float), w),
+        "stop_hit_rate_correct": weighted_mean(
+            q["stop_executable"].to_numpy(float)[cm], w[cm]) if cm.any() else float("nan"),
+        "stop_hit_rate_wrong": weighted_mean(
+            q["stop_executable"].to_numpy(float)[dm], w[dm]) if dm.any() else float("nan"),
+        "raw_n_correct": int(cm.sum()), "raw_n_wrong": int(dm.sum()),
+    }
+    return row
+
+
+def formal_stop_diagnostics(big, system="E9", horizon="td5"):
+    """RC-R6-7: weighted stop diagnostics for the primary cell."""
+    q = big[(big.direction_system == system) & (big.evaluation_horizon == horizon)]
+    w = q["sample_weight_raw"].to_numpy(float)
+    corr = q["direction_correct"].to_numpy(bool)
+    ex = q["stop_executable"].to_numpy(bool)
+    sig = q["stop_signal_observed"].to_numpy(bool)
+    stopped = ex
+    base = q["baseline_gross_return_atr"].to_numpy(float)
+    stp = q["stop_gross_return_atr"].to_numpy(float)
+    d = stp - base
+    ss = q["stop_signal_step"].to_numpy(float)
+    fs = q["stop_fill_step"].to_numpy(float)
+    out = {
+        "system": system, "horizon": horizon,
+        "stop_eligible_rate": weighted_mean(q["stop_eligible"].to_numpy(float), w),
+        "stop_signal_rate": weighted_mean(sig.astype(float), w),
+        "stop_executable_rate": weighted_mean(ex.astype(float), w),
+        "stop_hit_rate_correct": weighted_mean(ex.astype(float)[corr], w[corr]) if corr.any() else float("nan"),
+        "stop_hit_rate_wrong": weighted_mean(ex.astype(float)[~corr], w[~corr]) if (~corr).any() else float("nan"),
+        "signal_step_p25": weighted_quantile(ss[sig], w[sig], 0.25),
+        "signal_step_median": weighted_quantile(ss[sig], w[sig], 0.50),
+        "signal_step_p75": weighted_quantile(ss[sig], w[sig], 0.75),
+        "fill_step_p25": weighted_quantile(fs[stopped], w[stopped], 0.25),
+        "fill_step_median": weighted_quantile(fs[stopped], w[stopped], 0.50),
+        "fill_step_p75": weighted_quantile(fs[stopped], w[stopped], 0.75),
+    }
+    # signal-bar close -> next-open execution gap, in ATR0 units (executed stops)
+    side_arr = np.where(q["direction"].to_numpy(object) == "LONG", 1.0, -1.0)
+    sbc = q["stop_signal_bar_close"].to_numpy(float)
+    gap_atr = side_arr * (q["stop_fill_open"].to_numpy(float) - sbc) \
+        / q["ATR0"].to_numpy(float)
+    out["signal_close_to_next_open_gap_atr_p25"] = weighted_quantile(
+        gap_atr[stopped], w[stopped], 0.25)
+    out["signal_close_to_next_open_gap_atr_median"] = weighted_quantile(
+        gap_atr[stopped], w[stopped], 0.50)
+    out["signal_close_to_next_open_gap_atr_p75"] = weighted_quantile(
+        gap_atr[stopped], w[stopped], 0.75)
+    out["baseline_gross_mean_stopped"] = weighted_mean(base[stopped], w[stopped])
+    out["stop_gross_mean_stopped"] = weighted_mean(stp[stopped], w[stopped])
+    out["paired_gross_improvement_stopped"] = weighted_mean(d[stopped], w[stopped])
+    if (stopped & corr).any():
+        out["frac_stopped_correct_baseline_td5_profitable"] = weighted_mean(
+            (base[stopped & corr] > 0).astype(float), w[stopped & corr])
+    else:
+        out["frac_stopped_correct_baseline_td5_profitable"] = float("nan")
+    if (stopped & ~corr).any():
+        out["frac_stopped_wrong_loss_reduced"] = weighted_mean(
+            (np.maximum(-stp, 0.0) < np.maximum(-base, 0.0)).astype(float)[stopped & ~corr],
+            w[stopped & ~corr])
+    else:
+        out["frac_stopped_wrong_loss_reduced"] = float("nan")
+    st = q["frozen_sr_strength"].to_numpy(float)
+    out["frozen_sr_strength_p25"] = weighted_quantile(st, w, 0.25)
+    out["frozen_sr_strength_median"] = weighted_quantile(st, w, 0.50)
+    out["frozen_sr_strength_p75"] = weighted_quantile(st, w, 0.75)
+    out["lb_touched_by_signal_rate"] = weighted_mean(
+        q["lb_touched_by_signal"].to_numpy(float), w)
+    out["lb_pierced_by_signal_rate"] = weighted_mean(
+        q["lb_pierced_by_signal"].to_numpy(float), w)
+    out["lb_broken_unreclaimed_at_signal_rate"] = weighted_mean(
+        q["lb_broken_unreclaimed_at_signal"].to_numpy(float), w)
+    return out
+
+
+GROSS_VERDICTS = ("GROSS_STOP_EDGE_SUPPORTED_UNIVERSAL", "GROSS_STOP_HARMFUL",
+                  "GROSS_SIDE_HETEROGENEITY_REQUIRES_FOLLOWUP",
+                  "NO_IDENTIFIABLE_GROSS_STOP_EDGE")
+
+
+def formal_verdict(primary_row, side_rows):
+    """RC-R6-12: Amendment-A1 frozen GROSS verdict categories."""
+    long_row = next(r for r in side_rows if r["side"] == "LONG")
+    short_row = next(r for r in side_rows if r["side"] == "SHORT")
+    long_neg = long_row["delta_ev_ci_high"] < 0
+    short_neg = short_row["delta_ev_ci_high"] < 0
+    long_pos = long_row["delta_ev_ci_low"] > 0
+    short_pos = short_row["delta_ev_ci_low"] > 0
+    if (primary_row["delta_ev_ci_low"] > 0
+            and primary_row["delta_wrong_gross_ci_low"] > 0
+            and primary_row["wlr_gross"] > 0
+            and not long_neg and not short_neg):
+        return "GROSS_STOP_EDGE_SUPPORTED_UNIVERSAL"
+    if primary_row["delta_ev_ci_high"] < 0:
+        return "GROSS_STOP_HARMFUL"
+    if (long_pos and short_neg) or (short_pos and long_neg):
+        return "GROSS_SIDE_HETEROGENEITY_REQUIRES_FOLLOWUP"
+    return "NO_IDENTIFIABLE_GROSS_STOP_EDGE"
 
 
 def run_t1_5(verbose=True):
@@ -643,7 +806,7 @@ def run_t1_5(verbose=True):
     reset_counters()
     frozen = verify_frozen_inputs()
     l2 = load_r5_l2()
-    _bump("direction_artifact_loads")
+    _bump("direction_artifact_sha_verifications")
 
     all_rows = []
     diffs = []
@@ -668,6 +831,18 @@ def run_t1_5(verbose=True):
                            "n_A9": int((sub.direction_system == "A9").sum()),
                            "n_E9": int((sub.direction_system == "E9").sum())})
     big = pd.concat(all_rows, ignore_index=True)
+
+    # RC-R6-13: horizon causality — TD1 signal count <= TD3 <= TD5 (non-strict)
+    causality = []
+    caus_ok = True
+    for sym in sorted(big.symbol.unique()):
+        for ds in ("A9", "E9"):
+            c = {H: int(big[(big.symbol == sym) & (big.direction_system == ds)
+                            & (big.evaluation_horizon == H)]["stop_signal_observed"].sum())
+                 for H in HORIZONS}
+            ok = c["td1"] <= c["td3"] <= c["td5"]
+            caus_ok = caus_ok and ok
+            causality.append({"symbol": sym, "system": ds, **c, "ok": bool(ok)})
 
     primary = []
     for ds in ("A9", "E9"):
@@ -733,7 +908,8 @@ def run_t1_5(verbose=True):
     perf = {
         "r5_artifact_loads": int(COUNTERS["r5_artifact_loads"]),
         "execution_frame_loads": int(COUNTERS["execution_frame_loads"]),
-        "direction_artifact_loads": int(COUNTERS["direction_artifact_loads"]),
+        "direction_artifact_sha_verifications":
+            int(COUNTERS["direction_artifact_sha_verifications"]),
         "sr_recompute_count": int(COUNTERS["sr_recompute_count"]),
         "full_history_recompute_count": int(COUNTERS["full_history_recompute_count"]),
         "reference_calls": int(COUNTERS["reference_calls"]),
@@ -749,6 +925,7 @@ def run_t1_5(verbose=True):
                          "n_mismatch": int(n_mismatch),
                          "max_abs_error": float(max_abs)},
         "per_symbol_differential": diffs,
+        "horizon_causality": {"ok": bool(caus_ok), "per_symbol_system": causality},
         "primary_table": primary,
         "performance": perf,
         "cost_governance": {
@@ -787,6 +964,197 @@ def run_t1_5(verbose=True):
     if verbose:
         print(json.dumps({"summary": summary["differential"],
                           "performance": perf}, indent=2))
+    return summary
+
+
+FORMAL_ARTIFACT = os.path.join(ARTIFACT_DIR, "structural_stop_row_metrics_v1.parquet")
+FORMAL_MANIFEST = os.path.join(EVIDENCE_DIR,
+                               "structural_stop_v1_formal_manifest.json")
+FORMAL_SUMMARY = os.path.join(EVIDENCE_DIR, "structural_stop_v1_formal_summary.json")
+
+FROZEN_FORMAL = {"symbols": 15, "semantic_keys": 13773, "gids": 638,
+                 "long_gids": 319, "short_gids": 319,
+                 "base_per_system": 13773, "rows_per_system": 41319,
+                 "total_rows": 82638}
+
+
+def _formal_population_gates(l2, big):
+    """RC-R6-9: frozen Formal population hard gates."""
+    mism = {}
+    syms = sorted(str(s) for s in l2.symbol.unique())
+    if syms != sorted(SYMBOLS):
+        mism["symbols"] = syms
+    nk = int(l2.semantic_key.nunique())
+    if nk != FROZEN_FORMAL["semantic_keys"]:
+        mism["semantic_keys"] = nk
+    gid_df = l2.drop_duplicates("gid")
+    if len(gid_df) != FROZEN_FORMAL["gids"]:
+        mism["gids"] = int(len(gid_df))
+    long_g = int((gid_df.oracle_direction == "LONG").sum())
+    short_g = int((gid_df.oracle_direction == "SHORT").sum())
+    if long_g != FROZEN_FORMAL["long_gids"]:
+        mism["long_gids"] = long_g
+    if short_g != FROZEN_FORMAL["short_gids"]:
+        mism["short_gids"] = short_g
+    for ds in ("A9", "E9"):
+        n = int((l2.direction_system == ds).sum())
+        if n != FROZEN_FORMAL["base_per_system"]:
+            mism[f"base_{ds}"] = n
+    gw = l2.groupby("gid")["sample_weight_raw"].sum().to_numpy(float)
+    if not np.allclose(gw, 1.0, atol=1e-9):
+        mism["gid_weight"] = float(np.max(np.abs(gw - 1.0)))
+    return mism
+
+
+def _verify_formal_artifact(path, frozen_keys):
+    """RC-R6-11: post-write key verification (reads key columns only)."""
+    t = pd.read_parquet(path, columns=["semantic_key", "direction_system",
+                                       "evaluation_horizon"])
+    n = int(len(t))
+    uniq = int(t.drop_duplicates().shape[0])
+    rep = {
+        "rows": n, "unique_keys": uniq, "duplicate_keys": int(n - uniq),
+        "a9_rows": int((t.direction_system == "A9").sum()),
+        "e9_rows": int((t.direction_system == "E9").sum()),
+        "invalid_system_rows": int((~t.direction_system.isin(["A9", "E9"])).sum()),
+        "invalid_horizon_rows": int((~t.evaluation_horizon.isin(list(HORIZONS))).sum()),
+        "unknown_semantic_key_rows": int((~t.semantic_key.astype(str).isin(frozen_keys)).sum()),
+        "rows_per_semantic_key_max": int(t.groupby("semantic_key").size().max())
+        if n else 0,
+        "rows_per_semantic_key_min": int(t.groupby("semantic_key").size().min())
+        if n else 0,
+    }
+    rep["pass"] = bool(
+        rep["rows"] == FROZEN_FORMAL["total_rows"]
+        and rep["unique_keys"] == FROZEN_FORMAL["total_rows"]
+        and rep["duplicate_keys"] == 0
+        and rep["a9_rows"] == FROZEN_FORMAL["rows_per_system"]
+        and rep["e9_rows"] == FROZEN_FORMAL["rows_per_system"]
+        and rep["invalid_system_rows"] == 0 and rep["invalid_horizon_rows"] == 0
+        and rep["unknown_semantic_key_rows"] == 0
+        and rep["rows_per_semantic_key_max"] == 6
+        and rep["rows_per_semantic_key_min"] == 6)
+    return rep
+
+
+def run_formal_r6(*, allow_full=False, authorized_review_sha=None,
+                  write_artifacts=True, verbose=False):
+    """RC-R6-8: frozen Formal R6 path behind an explicit authorization gate."""
+    if allow_full is not True:
+        raise RuntimeError("STOP_R6_FULL_POPULATION_NOT_AUTHORIZED")
+    if not authorized_review_sha:
+        raise RuntimeError("STOP_R6_AUTHORIZED_REVIEW_SHA_REQUIRED")
+    head = _git_head_sha()
+    if head != authorized_review_sha:
+        raise RuntimeError(
+            f"STOP_R6_GENERATOR_SHA_MISMATCH head={head} "
+            f"authorized_review_sha={authorized_review_sha}")
+    t_start = time.time()
+    reset_counters()
+    frozen = verify_frozen_inputs()
+    l2 = load_r5_l2()
+    _bump("direction_artifact_sha_verifications")
+
+    all_rows = []
+    for sym in SYMBOLS:
+        sub = l2[l2.symbol == sym]
+        if len(sub) == 0:
+            continue
+        st = load_symbol_state(sym)
+        _bump("execution_frame_loads")
+        for ds in ("A9", "E9"):
+            rows, _ = treatment_rows_for_symbol(sub, st, ds)
+            all_rows.append(rows)
+    big = pd.concat(all_rows, ignore_index=True)
+    frozen_keys = set(l2.semantic_key.astype(str).unique())
+
+    # ---- RC-R6-9 population gates (pre-write) ----
+    pop_mismatch = _formal_population_gates(l2, big)
+    # ---- RC-R6-10 performance gates ----
+    perf = {
+        "r5_artifact_loads": int(COUNTERS["r5_artifact_loads"]),
+        "execution_frame_loads": int(COUNTERS["execution_frame_loads"]),
+        "direction_artifact_sha_verifications":
+            int(COUNTERS["direction_artifact_sha_verifications"]),
+        "sr_recompute_count": int(COUNTERS["sr_recompute_count"]),
+        "full_history_recompute_count": int(COUNTERS["full_history_recompute_count"]),
+        "reference_calls": int(COUNTERS["reference_calls"]),
+        "production_candidate_views": int(COUNTERS["production_candidate_views"]),
+        "runtime_sec": time.time() - t_start,
+    }
+    perf_mismatch = {}
+    for k, v in {"r5_artifact_loads": 1, "execution_frame_loads": 15,
+                 "sr_recompute_count": 0, "full_history_recompute_count": 0,
+                 "reference_calls": 0}.items():
+        if perf[k] != v:
+            perf_mismatch[k] = (perf[k], v)
+
+    artifact_report = {}
+    if write_artifacts:
+        os.makedirs(ARTIFACT_DIR, exist_ok=True)
+        big.to_parquet(FORMAL_ARTIFACT, index=False)
+        artifact_report = _verify_formal_artifact(FORMAL_ARTIFACT, frozen_keys)
+        if not artifact_report.get("pass"):
+            raise RuntimeError(
+                f"STOP_R6_FORMAL_ARTIFACT_KEY_MISMATCH {artifact_report}")
+
+    if pop_mismatch:
+        raise RuntimeError(f"STOP_R6_FORMAL_POPULATION_GATE {pop_mismatch}")
+    if perf_mismatch:
+        raise RuntimeError(f"STOP_R6_FORMAL_PERFORMANCE_GATE {perf_mismatch}")
+
+    # ---- RC-R6-12 verdict + RC-R6-7 diagnostics ----
+    primary_row = _effect(big, "E9", PRIMARY_HORIZON)
+    side_rows = [_effect(big, "E9", PRIMARY_HORIZON, side=s) for s in ("LONG", "SHORT")]
+    verdict = formal_verdict(primary_row, side_rows)
+    diag = formal_stop_diagnostics(big, "E9", PRIMARY_HORIZON)
+    horizon_table = [_effect(big, ds, H) for ds in ("A9", "E9") for H in HORIZONS]
+
+    summary = {
+        "task_id": TASK_ID, "stage": "formal_r6",
+        "authorized_review_sha": authorized_review_sha,
+        "generator_code_sha": head,
+        "formal_verdict": verdict,
+        "primary_row": primary_row, "side_rows": side_rows,
+        "horizon_table": horizon_table, "stop_diagnostics": diag,
+        "population_gates": {"pass": not pop_mismatch, "mismatch": pop_mismatch},
+        "performance": perf, "artifact_report": artifact_report,
+        "cost_governance": {
+            "cost_metadata_status": COST_METADATA_STATUS,
+            "realistic_net_pnl_status": REALISTIC_NET_PNL_STATUS,
+            "formal_primary_basis": FORMAL_PRIMARY_BASIS,
+            "friction_proxy_used_for_verdict": FRICTION_PROXY_USED_FOR_VERDICT,
+            "entry_cost_estimated": ENTRY_COST_ESTIMATED,
+            "exit_cost_estimated": EXIT_COST_ESTIMATED,
+        },
+        "unverified_items": [
+            "Real transaction cost / slippage metadata still unavailable.",
+            "Verdict is GROSS policy effect, NOT a NET-profitability claim.",
+            "A9-vs-E9 system comparison reserved for a later frozen ablation.",
+        ],
+    }
+    write_json(FORMAL_SUMMARY, summary)
+
+    art_shas = {}
+    if write_artifacts and os.path.exists(FORMAL_ARTIFACT):
+        art_shas["structural_stop_row_metrics_v1.parquet"] = sha256_file(FORMAL_ARTIFACT)
+    if os.path.exists(FORMAL_SUMMARY):
+        art_shas[os.path.basename(FORMAL_SUMMARY)] = sha256_file(FORMAL_SUMMARY)
+    manifest = {
+        "task_id": TASK_ID, "stage": "formal_r6",
+        "base_sha": BASE_SHA, "authorized_review_sha": authorized_review_sha,
+        "generator_code_sha": head, "reviewed_parent_sha": authorized_review_sha,
+        "frozen_inputs_sha256": frozen,
+        "population_gates": summary["population_gates"],
+        "artifact_integrity_gates": artifact_report,
+        "performance": perf, "formal_verdict": verdict,
+        "cost_governance": summary["cost_governance"],
+        "artifact_sha256": art_shas,
+    }
+    write_json(FORMAL_MANIFEST, manifest)   # written LAST
+    if verbose:
+        print(json.dumps({"verdict": verdict, "artifact": artifact_report,
+                          "perf": perf}, indent=2))
     return summary
 
 
