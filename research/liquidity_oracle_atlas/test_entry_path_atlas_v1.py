@@ -16,7 +16,9 @@ The full path experiment (T1.5/T2) is NOT run here.
 
 import inspect
 import json
+import os
 import resource
+import tempfile
 import time
 
 import numpy as np
@@ -1026,19 +1028,18 @@ def test_rc_t2_2_zero_group_denominator_returns_nan_not_zero():
     assert np.isnan(out[1])
 
 
-def test_rc_t2_3_incomplete_bootstrap_support_fails_closed():
+def test_rc_t2_3_full_gate_fails_closed_on_incomplete_support():
+    ok = dict(n_symbols=M.FROZEN_FULL_SYMBOLS, n_candidates=M.FROZEN_FULL_CANDIDATE_ROWS,
+              n_gids=M.FROZEN_FULL_ORACLE_GIDS, a9_l2=M.FROZEN_FULL_A9_L2_ROWS,
+              e9_l2=M.FROZEN_FULL_E9_L2_ROWS, availability_masks_identical=True,
+              inferential_support_any=True, inferential_support_complete=True)
+    M.check_full_population_gates(**ok)
+    bad_complete = dict(ok); bad_complete["inferential_support_complete"] = False
     with pytest.raises(RuntimeError):
-        M.check_full_population_gates(
-            n_symbols=M.FROZEN_FULL_SYMBOLS, n_candidates=M.FROZEN_FULL_CANDIDATE_ROWS,
-            n_gids=M.FROZEN_FULL_ORACLE_GIDS, a9_l2=M.FROZEN_FULL_A9_L2_ROWS,
-            e9_l2=M.FROZEN_FULL_E9_L2_ROWS, availability_masks_identical=True,
-            inferential_support_all=False)
-    # passes when everything is complete
-    M.check_full_population_gates(
-        n_symbols=M.FROZEN_FULL_SYMBOLS, n_candidates=M.FROZEN_FULL_CANDIDATE_ROWS,
-        n_gids=M.FROZEN_FULL_ORACLE_GIDS, a9_l2=M.FROZEN_FULL_A9_L2_ROWS,
-        e9_l2=M.FROZEN_FULL_E9_L2_ROWS, availability_masks_identical=True,
-        inferential_support_all=True)
+        M.check_full_population_gates(**bad_complete)
+    bad_any = dict(ok); bad_any["inferential_support_any"] = False
+    with pytest.raises(RuntimeError):
+        M.check_full_population_gates(**bad_any)
 
 
 def _orient_fixture():
@@ -1222,28 +1223,35 @@ def test_rc_t2_19_real_trading_day_preserved(ag_dual, ag_state):
     assert set(got.tolist()).issubset(set(np.unique(exp).tolist()))
 
 
+def _path_curve_row():
+    row = {"direction_system": "E9", "metric": "PS",
+           "contrast_orientation": "correct_minus_wrong", "h_bar": 1,
+           "observed_bar_minutes": 15, "point": 0.1, "pointwise_lo": 0.0,
+           "pointwise_hi": 0.2, "simul_lower": -0.1, "simul_upper": 0.3,
+           "inferential_support": True, "n_valid_correct": 5, "n_valid_wrong": 5,
+           "flag": ""}
+    for s in ("overall", "correct", "wrong", "LONG", "SHORT"):
+        row[f"{s}_rows"] = 10
+        row[f"{s}_gids"] = 4
+        row[f"{s}_mass"] = 10.0
+        row[f"{s}_fraction"] = 1.0
+    return row
+
+
 def test_rc_t2_20_formal_evidence_writer_schema_round_trip(tmp_path):
     p = tmp_path / "pc.csv"
-    M.write_path_curves_csv(p, [{
-        "direction_system": "E9", "metric": "PS",
-        "contrast_orientation": "correct_minus_wrong", "h_bar": 1,
-        "observed_bar_minutes": 15, "point": 0.1, "pointwise_lo": 0.0,
-        "pointwise_hi": 0.2, "simul_lower": -0.1, "simul_upper": 0.3,
-        "inferential_support": True, "n_valid_correct": 5, "n_valid_wrong": 5,
-        "avail_overall_rows": 10, "avail_overall_mass": 10.0,
-        "avail_overall_fraction": 1.0, "avail_correct_rows": 5,
-        "avail_wrong_rows": 5, "flag": ""}])
+    M.write_path_curves_csv(p, [_path_curve_row()])
     df = pd.read_csv(p)
-    assert list(df.columns) == _expected_path_curve_cols()
+    assert list(df.columns) == M.PATH_CURVE_COLUMNS
     assert bool(df["inferential_support"].iloc[0]) is True
 
     e = tmp_path / "ec.csv"
     M.write_event_curves_csv(e, [{
         "event_type": "first_event_curve", "name": "sr_first_pierce", "backstop": "SR",
-        "direction_system": "E9", "h_bar": 1, "observed_bar_minutes": 15,
-        "value_correct": 0.1, "value_wrong": 0.2, "delta": 0.1,
-        "orientation": "wrong_minus_correct"}])
-    assert {"event_type", "orientation"}.issubset(pd.read_csv(e).columns)
+        "direction_system": "E9", "group": "", "stat_name": "F", "h_bar": 1,
+        "observed_bar_minutes": 15, "value_correct": 0.1, "value_wrong": 0.2,
+        "delta": 0.1, "orientation": "wrong_minus_correct", "value": np.nan}])
+    assert list(pd.read_csv(e).columns) == M.EVENT_CURVE_COLUMNS
 
     g = tmp_path / "gs.csv"
     M.write_group_stats_csv(g, [{
@@ -1254,23 +1262,17 @@ def test_rc_t2_20_formal_evidence_writer_schema_round_trip(tmp_path):
                                                 "stratum", "metric"]
 
     d = tmp_path / "dd.csv"
-    M.write_a9_e9_disagreement_csv(d, [{"symbol": "AG", "agreement": 3,
-                                        "disagreement": 2, "e9_fix": 1, "e9_break": 1}])
-    assert list(pd.read_csv(d).columns) == ["symbol", "agreement", "disagreement",
-                                            "e9_fix", "e9_break"]
+    M.write_a9_e9_disagreement_csv(d, [{"scope": "overall", "scope_value": "ALL",
+                                        "agreement": 3, "disagreement": 2, "e9_fix": 1,
+                                        "e9_break": 1, "n_rows": 5, "weight_mass": 5.0}])
+    assert list(pd.read_csv(d).columns) == ["scope", "scope_value", "agreement",
+                                            "disagreement", "e9_fix", "e9_break",
+                                            "n_rows", "weight_mass"]
 
     s = tmp_path / "s.json"
     M.write_summary_json(s, {"pipeline_smoke_completed": True, "n": 1})
     with open(s) as f:
         assert json.load(f)["pipeline_smoke_completed"] is True
-
-
-def _expected_path_curve_cols():
-    return ["direction_system", "metric", "contrast_orientation", "h_bar",
-            "observed_bar_minutes", "point", "pointwise_lo", "pointwise_hi",
-            "simul_lower", "simul_upper", "inferential_support", "n_valid_correct",
-            "n_valid_wrong", "avail_overall_rows", "avail_overall_mass",
-            "avail_overall_fraction", "avail_correct_rows", "avail_wrong_rows", "flag"]
 
 
 def test_rc_t2_21_full_population_gate_constants():
@@ -1321,3 +1323,244 @@ def test_rc_t2_25_audit_only_labels_absent_from_production_signature():
         assert "oracle" not in p
     for f in M.AUDIT_ONLY_FIELDS:
         assert f not in sig.parameters
+
+
+# =========================================================================== #
+# FC1..FC16 revision regressions                                               #
+# =========================================================================== #
+def _mae_fixture():
+    # correct MAE small (1), wrong MAE large (5): raw correct-wrong = -4.
+    # 50 gids per group so bootstrap support is stable.
+    n = 50
+    value = np.concatenate([np.full((n, 1), 1.0), np.full((n, 1), 5.0)])
+    correct = np.array([True] * n + [False] * n)
+    gid = np.array([f"c{i}" for i in range(n)] + [f"w{i}" for i in range(n)])
+    return value, correct, gid, np.ones(2 * n)
+
+
+def test_fc16_1_mae_pointwise_interval_order_after_flip():
+    value, correct, gid, w = _mae_fixture()
+    c = M.oriented_delta_curve(value, correct, gid, w, "wrong_minus_correct", B=200)
+    assert c["contrast_orientation"] == "wrong_minus_correct"
+    assert c["point"][0] > 0
+    assert c["pointwise_lo"][0] <= c["point"][0] <= c["pointwise_hi"][0]
+
+
+def test_fc16_2_mae_simultaneous_interval_order_after_flip():
+    value, correct, gid, w = _mae_fixture()
+    c = M.oriented_delta_curve(value, correct, gid, w, "wrong_minus_correct", B=200)
+    ok = np.isfinite(c["simul_lower"]) & np.isfinite(c["simul_upper"])
+    assert ok.any()
+    assert np.all(c["simul_lower"][ok] <= c["point"][ok] + 1e-12)
+    assert np.all(c["point"][ok] <= c["simul_upper"][ok] + 1e-12)
+    assert np.all(c["simul_lower"][ok] <= c["simul_upper"][ok] + 1e-12)
+
+
+def test_fc16_3_mae_se_remains_nonnegative():
+    value, correct, gid, w = _mae_fixture()
+    c = M.oriented_delta_curve(value, correct, gid, w, "wrong_minus_correct", B=200)
+    ok = np.isfinite(c["se"])
+    assert np.all(c["se"][ok] >= 0.0)
+
+
+def test_fc16_4_km_correct_group_excludes_wrong_rows():
+    first_step = np.array([1] + [-1] * 9)
+    censor = np.full(10, 5)
+    weight = np.ones(10)
+    correct = np.array([True] + [False] * 9)
+    d = M.km_event_delta(first_step, "sr_first_pierce", correct, weight, censor, 5)
+    assert abs(d["F_correct"][1] - 1.0) < 1e-12   # must be 1.0, NOT 0.1
+    assert abs(d["F_wrong"][1] - 0.0) < 1e-12
+
+
+def test_fc16_5_km_wrong_group_excludes_correct_rows():
+    first_step = np.array([-1] + [1] * 9)
+    censor = np.full(10, 5)
+    weight = np.ones(10)
+    correct = np.array([True] + [False] * 9)
+    d = M.km_event_delta(first_step, "sr_first_pierce", correct, weight, censor, 5)
+    assert abs(d["F_wrong"][1] - 1.0) < 1e-12
+    assert abs(d["F_correct"][1] - 0.0) < 1e-12   # correct risk set must be pure
+
+
+def test_fc16_6_backstop_touch_orientation_wrong_minus_correct():
+    for nm in ("sr_first_touch", "sr_first_pierce", "sr_first_failed_reclaim",
+               "lb_first_touch", "lb_first_pierce", "lb_first_failed_reclaim"):
+        assert M._event_orientation(nm) == "wrong_minus_correct"
+    for nm in ("sr_first_reclaim", "lb_first_reclaim", "sr_same_bar_reclaim_time",
+               "lb_late_reclaim_time", "first_ahead_sr_cross",
+               "first_ahead_liq_touch"):
+        assert M._event_orientation(nm) == "correct_minus_wrong"
+
+
+def test_fc16_7_censor_aware_broken_unreclaimed_denominator():
+    # A: pierce 1, reclaim 3, censor 5 ; B: pierce 1, never reclaim, censor 2
+    fp = np.array([1, 1]); fr = np.array([3, -1])
+    correct = np.array([True, True]); w = np.ones(2)
+    censor = np.array([5, 2])
+    pc, _ = M.broken_unreclaimed_prevalence(fp, fr, correct, w, 5, censor)
+    assert abs(pc[1] - 1.0) < 1e-12        # both available and broken
+    assert abs(pc[4] - 0.0) < 1e-12        # A reclaimed, B censored -> excluded (not 0.5)
+
+
+def _landmark_curve(n_steps=25):
+    ps = np.zeros((1, n_steps)); ps[0, 0] = 7.0; ps[0, 3] = 5.0; ps[0, 15] = 9.0
+    z = np.zeros((1, n_steps))
+    return {"PS": ps, "MFE": z.copy(), "MAE": z.copy(), "R": z.copy()}
+
+
+def _landmark_rows():
+    lm = M._build_landmark_steps(
+        [{"td1": np.array([18]), "td3": np.array([20]), "td5": np.array([24])}],
+        [np.array([0])])
+    return M._side_landmark_rows(_landmark_curve(), np.array([True]), np.array([1.0]),
+                                 np.array(["g0"]), lm, np.array([1.0]), "E9")
+
+
+def _land_val(rows, landmark, metric="PS", stratum="overall"):
+    for r in rows:
+        if r["landmark"] == landmark and r["metric"] == metric and r["stratum"] == stratum:
+            return r["weighted_mean"]
+    raise KeyError((landmark, metric, stratum))
+
+
+def test_fc16_8_m15_side_landmark_equals_curve_step0():
+    assert _land_val(_landmark_rows(), "m15") == 7.0
+
+
+def test_fc16_9_h1_side_landmark_equals_curve_step3():
+    assert _land_val(_landmark_rows(), "h1") == 5.0
+
+
+def test_fc16_10_16bar_side_landmark_equals_curve_step15():
+    assert _land_val(_landmark_rows(), "h4") == 9.0
+
+
+def test_fc16_11_zero_se_supported_band_collapses_to_point():
+    rng = np.random.default_rng(3)
+    reps = np.stack([rng.normal(size=8), np.full(8, 5.0)], axis=1)
+    point = np.array([0.0, 5.0])
+    band = M.simultaneous_band(point, reps, np.ones((8, 2), bool), np.ones((8, 2), bool))
+    assert band["inferential_support"].all()
+    assert band["se"][1] == 0.0
+    assert band["lower"][1] == 5.0 and band["upper"][1] == 5.0
+    assert band["se"][0] > 0.0
+    assert np.isfinite(band["lower"][0]) and np.isfinite(band["upper"][0])
+
+
+def test_fc16_12_all_zero_se_supported_band_q_is_zero():
+    reps = np.full((6, 3), 2.0)
+    point = np.full(3, 2.0)
+    band = M.simultaneous_band(point, reps, np.ones((6, 3), bool), np.ones((6, 3), bool))
+    assert band["q"] == 0.0
+    assert np.all(band["lower"] == 2.0) and np.all(band["upper"] == 2.0)
+
+
+def test_fc16_13_unsupported_late_h_does_not_fail_full_gate():
+    M.check_full_population_gates(
+        n_symbols=M.FROZEN_FULL_SYMBOLS, n_candidates=M.FROZEN_FULL_CANDIDATE_ROWS,
+        n_gids=M.FROZEN_FULL_ORACLE_GIDS, a9_l2=M.FROZEN_FULL_A9_L2_ROWS,
+        e9_l2=M.FROZEN_FULL_E9_L2_ROWS, availability_masks_identical=True,
+        inferential_support_any=True, inferential_support_complete=True,
+        counters={"direction_chain_run_count": 1, "raw_exec_load_count": 15,
+                  "path_scan_count": 15, "reference_call_count_production": 0,
+                  "full_history_recompute_count": 0, "candidate_python_loop_count": 0,
+                  "hotloop_dataframe_concat_count": 0})
+    with pytest.raises(RuntimeError):
+        M.check_full_population_gates(
+            n_symbols=M.FROZEN_FULL_SYMBOLS, n_candidates=M.FROZEN_FULL_CANDIDATE_ROWS,
+            n_gids=M.FROZEN_FULL_ORACLE_GIDS, a9_l2=M.FROZEN_FULL_A9_L2_ROWS,
+            e9_l2=M.FROZEN_FULL_E9_L2_ROWS, availability_masks_identical=True,
+            inferential_support_any=False, inferential_support_complete=True)
+
+
+def test_fc16_14_conditional_reclaim_evidence_long_schema(tmp_path):
+    p = tmp_path / "ec.csv"
+    M.write_event_curves_csv(p, [{
+        "event_type": "conditional_reclaim_stat", "name": "sr", "backstop": "SR",
+        "direction_system": "E9", "group": "correct", "stat_name": "any_reclaim_rate",
+        "h_bar": 0, "observed_bar_minutes": 0, "value_correct": np.nan,
+        "value_wrong": np.nan, "delta": np.nan, "orientation": "rate", "value": 0.5}])
+    df = pd.read_csv(p)
+    assert list(df.columns) == M.EVENT_CURVE_COLUMNS
+    assert df["stat_name"].iloc[0] == "any_reclaim_rate"
+    assert df["group"].iloc[0] == "correct"
+    assert df["value"].iloc[0] == 0.5
+
+
+def test_fc16_15_path_curve_availability_all_strata():
+    for s in ("overall", "correct", "wrong", "LONG", "SHORT"):
+        for f in ("rows", "gids", "mass", "fraction"):
+            assert f"{s}_{f}" in M.PATH_CURVE_COLUMNS
+
+
+def test_fc16_16_a9_event_atlas_without_extra_path_scan():
+    M.reset_counters()
+    res = M.run_formal_t2(symbols=("AG",), n_subset=20, population="small",
+                          verbose=False)
+    assert res["a9_event_curves"]
+    assert res["a9_broken_unreclaimed"] and res["a9_conditional_reclaim"]
+    assert res["a9_break_continue_terminal"]
+    assert M.COUNTERS["path_scan_count"] == 1
+
+
+def test_fc16_17_full_disagreement_decomposition_scopes(small_t2):
+    rows = small_t2["disagreement_decomposition"]
+    scopes = {r["scope"] for r in rows}
+    assert {"overall", "symbol", "oracle_direction", "a9_predicted_direction",
+            "e9_predicted_direction"}.issubset(scopes)
+    for r in rows:
+        assert {"agreement", "disagreement", "e9_fix", "e9_break", "n_rows",
+                "weight_mass"}.issubset(r.keys())
+
+
+def test_fc16_18_full_runner_guard_requires_allow_full():
+    with pytest.raises(RuntimeError):
+        M.run_formal_t2(symbols=("AG",), population="full")
+
+
+def test_fc16_19_mocked_full_path_invokes_hard_gates(monkeypatch, tmp_path):
+    seen = {}
+    monkeypatch.setattr(M, "check_full_population_gates",
+                        lambda **kw: seen.update(kw))
+    monkeypatch.setattr(M, "ARTIFACT_DIR", str(tmp_path / "art"))
+    monkeypatch.setattr(M, "EVIDENCE_DIR", str(tmp_path / "ev"))
+    M.run_formal_t2(symbols=("AG",), n_subset=20, population="full",
+                    allow_full=True, write_artifacts=False, verbose=False)
+    assert seen, "full path must invoke the hard gates"
+    assert "n_candidates" in seen and "inferential_support_any" in seen
+
+
+def test_fc16_20_mocked_full_evidence_uses_canonical_dirs(monkeypatch, tmp_path):
+    monkeypatch.setattr(M, "check_full_population_gates", lambda **kw: None)
+    art = tmp_path / "art"; ev = tmp_path / "ev"
+    monkeypatch.setattr(M, "ARTIFACT_DIR", str(art))
+    monkeypatch.setattr(M, "EVIDENCE_DIR", str(ev))
+    res = M.run_formal_t2(symbols=("AG",), n_subset=20, population="full",
+                          allow_full=True, write_artifacts=True, verbose=False)
+    assert res["artifacts"]["directory"] == str(art)
+    assert os.path.isfile(art / "entry_path_row_metrics_v1.parquet")
+    assert os.path.isfile(art / "entry_path_curve_v1.parquet")
+    assert os.path.isfile(ev / "entry_path_atlas_v1_path_curves.csv")
+    assert os.path.isfile(ev / "entry_path_atlas_v1_manifest.json")
+    assert not str(res["artifacts"]["directory"]).startswith(tempfile.gettempdir())
+
+
+def test_fc16_21_full_evidence_manifest_contains_artifact_sha(monkeypatch, tmp_path):
+    monkeypatch.setattr(M, "check_full_population_gates", lambda **kw: None)
+    art = tmp_path / "art"; ev = tmp_path / "ev"
+    monkeypatch.setattr(M, "ARTIFACT_DIR", str(art))
+    monkeypatch.setattr(M, "EVIDENCE_DIR", str(ev))
+    M.run_formal_t2(symbols=("AG",), n_subset=20, population="full",
+                    allow_full=True, write_artifacts=True, verbose=False)
+    with open(ev / "entry_path_atlas_v1_manifest.json") as f:
+        man = json.load(f)
+    shas = man["artifact_sha256"]
+    for k in ("row_metrics_parquet", "curve_parquet", "path_curves_csv",
+              "event_curves_csv", "group_stats_csv", "disagreement_csv",
+              "summary_json"):
+        assert shas.get(k) and len(shas[k]) == 64
+    for k in ("generator_code_sha", "reviewed_parent_sha", "bootstrap_seed",
+              "bootstrap_B", "direction_artifact", "environment_identities",
+              "peak_rss", "counters", "verdict_e9", "unsupported_h"):
+        assert k in man
