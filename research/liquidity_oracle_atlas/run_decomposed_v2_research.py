@@ -204,7 +204,7 @@ def selection_is_committed(path: Optional[str] = None) -> dict:
     return checks
 
 
-def assert_selection_committed(path: str = SELECTION_JSON) -> dict:
+def assert_selection_committed(path: Optional[str] = None) -> dict:
     checks = selection_is_committed(path)
     if not checks["committed_clean"]:
         raise StopV2SelectionNotCommitted(
