@@ -39,11 +39,28 @@ from research.liquidity_oracle_atlas.entry_path_atlas_v1 import (
 # 0. Constants / governance                                                    #
 # --------------------------------------------------------------------------- #
 TASK_ID = "FUTURE-R6-M15-STRUCTURAL-STOP-V1"
+# FG-R6-13: keep BOTH lineage levels explicit. BASE_SHA is the original R6 base;
+# REVIEWED_PARENT is the immediate reviewed R6 parent of this PRE-T2 evidence.
 BASE_SHA = "c0126551040f3e758ba5352ecb693bcbff0ad8b0"
-REVIEWED_PARENT = "c0126551040f3e758ba5352ecb693bcbff0ad8b0"
+REVIEWED_PARENT = "9700d0c629274000f67ce3ecbacca753f668f2a8"
 
 ARTIFACT_DIR = os.path.join("artifacts", "structural_stop_v1")
 EVIDENCE_DIR = os.path.join("research", "liquidity_oracle_atlas", "evidence")
+
+# FG-R6-5: stage identity must be UNAMBIGUOUS. The PRE-T2 (T1.5) integration stage
+# owns stage-explicit `*_t1_5_*` names; the canonical (un-prefixed) names below
+# belong to the Formal FULL-population stage only.
+T1_5_PRIMARY_CSV = os.path.join(EVIDENCE_DIR, "structural_stop_v1_t1_5_primary.csv")
+T1_5_SIDE_STATS_CSV = os.path.join(EVIDENCE_DIR,
+                                   "structural_stop_v1_t1_5_side_stats.csv")
+T1_5_GROUP_STATS_CSV = os.path.join(EVIDENCE_DIR,
+                                    "structural_stop_v1_t1_5_group_stats.csv")
+T1_5_STOP_EVENTS_CSV = os.path.join(EVIDENCE_DIR,
+                                    "structural_stop_v1_t1_5_stop_events.csv")
+T1_5_SUMMARY_JSON = os.path.join(EVIDENCE_DIR, "structural_stop_v1_t1_5_summary.json")
+T1_5_MANIFEST_JSON = os.path.join(EVIDENCE_DIR, "structural_stop_v1_t1_5_manifest.json")
+
+# Canonical Formal evidence (FULL 13773-Candidate population ONLY).
 MANIFEST_JSON = os.path.join(EVIDENCE_DIR, "structural_stop_v1_manifest.json")
 SUMMARY_JSON = os.path.join(EVIDENCE_DIR, "structural_stop_v1_summary.json")
 PRIMARY_CSV = os.path.join(EVIDENCE_DIR, "structural_stop_v1_primary.csv")
@@ -52,6 +69,8 @@ STOP_EVENTS_CSV = os.path.join(EVIDENCE_DIR, "structural_stop_v1_stop_events.csv
 SIDE_STATS_CSV = os.path.join(EVIDENCE_DIR, "structural_stop_v1_side_stats.csv")
 
 STAGE_T1_5 = "t1_5_integration"
+STAGE_FORMAL = "formal_r6"
+ENV_CONTRACT_ID = "FUTURE-R4-M15-ENVIRONMENT-V1"
 
 FROZEN_INPUTS = {
     os.path.join("artifacts", "entry_path_atlas_v1", "entry_path_row_metrics_v1.parquet"):
@@ -711,8 +730,71 @@ def _effect(big, system, horizon, side=None):
     return row
 
 
+GROUP_STAT_COLUMNS = [
+    "symbol", "direction_system", "evaluation_horizon", "n_rows", "n_gids",
+    "delta_ev_gross", "baseline_gross_mean", "stop_gross_mean",
+    "stop_eligible_rate", "stop_signal_rate", "stop_executable_rate",
+    "raw_n_rows", "raw_delta_ev_gross", "raw_baseline_gross_mean",
+    "raw_stop_gross_mean",
+]
+
+
+def group_stat_rows(big):
+    """FG-R6-7: per-symbol/group evidence under the FORMAL (weighted) estimator.
+
+    Every effect / rate column is the frozen `sample_weight_raw`-weighted mean.
+    Raw (unweighted) row means are reported ONLY as additionally-named columns.
+    """
+    rows = []
+    for sym in sorted(big.symbol.unique()):
+        for ds in ("A9", "E9"):
+            for H in HORIZONS:
+                q = big[(big.symbol == sym) & (big.direction_system == ds)
+                        & (big.evaluation_horizon == H)]
+                if len(q) == 0:
+                    continue
+                w = q["sample_weight_raw"].to_numpy(float)
+                delta = q["paired_delta_gross_atr"].to_numpy(float)
+                base = q["baseline_gross_return_atr"].to_numpy(float)
+                stp = q["stop_gross_return_atr"].to_numpy(float)
+                rows.append({
+                    "symbol": sym, "direction_system": ds, "evaluation_horizon": H,
+                    "n_rows": int(len(q)), "n_gids": int(q["gid"].nunique()),
+                    "delta_ev_gross": weighted_mean(delta, w),
+                    "baseline_gross_mean": weighted_mean(base, w),
+                    "stop_gross_mean": weighted_mean(stp, w),
+                    "stop_eligible_rate": weighted_mean(
+                        q["stop_eligible"].to_numpy(float), w),
+                    "stop_signal_rate": weighted_mean(
+                        q["stop_signal_observed"].to_numpy(float), w),
+                    "stop_executable_rate": weighted_mean(
+                        q["stop_executable"].to_numpy(float), w),
+                    "raw_n_rows": int(len(q)),
+                    "raw_delta_ev_gross": float(delta.mean()) if len(q) else float("nan"),
+                    "raw_baseline_gross_mean": float(base.mean()) if len(q) else float("nan"),
+                    "raw_stop_gross_mean": float(stp.mean()) if len(q) else float("nan"),
+                })
+    return rows
+
+
+EVENT_COLUMNS = ["semantic_key", "symbol", "gid", "direction_system", "direction",
+                 "evaluation_horizon", "direction_correct", "stop_signal_step",
+                 "stop_signal_time", "stop_executable", "stop_fill_step",
+                 "stop_fill_time", "stop_fill_open", "stop_reason",
+                 "baseline_gross_return_atr", "stop_gross_return_atr",
+                 "paired_delta_gross_atr", "frozen_sr_bottom", "frozen_sr_top",
+                 "frozen_sr_strength", "lb_available", "lb_touched_by_signal",
+                 "lb_pierced_by_signal", "lb_broken_unreclaimed_at_signal"]
+
+
+def stop_events_frame(big):
+    """Observed-stop event table (shared by the T1.5 and Formal stages)."""
+    ev = big[big["stop_signal_observed"]]
+    return ev[EVENT_COLUMNS] if len(ev) else pd.DataFrame(columns=EVENT_COLUMNS)
+
+
 def formal_stop_diagnostics(big, system="E9", horizon="td5"):
-    """RC-R6-7: weighted stop diagnostics for the primary cell."""
+    """RC-R6-7 / FG-R6-8: weighted stop diagnostics for the primary cell."""
     q = big[(big.direction_system == system) & (big.evaluation_horizon == horizon)]
     w = q["sample_weight_raw"].to_numpy(float)
     corr = q["direction_correct"].to_numpy(bool)
@@ -749,6 +831,16 @@ def formal_stop_diagnostics(big, system="E9", horizon="td5"):
         gap_atr[stopped], w[stopped], 0.50)
     out["signal_close_to_next_open_gap_atr_p75"] = weighted_quantile(
         gap_atr[stopped], w[stopped], 0.75)
+    # FG-R6-8: signal -> fill WALL-CLOCK elapsed time, for executable stops.
+    sig_t = pd.to_datetime(q["stop_signal_time"])
+    fil_t = pd.to_datetime(q["stop_fill_time"])
+    wc_min = ((fil_t - sig_t).dt.total_seconds() / 60.0).to_numpy(float)
+    out["signal_to_fill_wall_clock_minutes_p25"] = weighted_quantile(
+        wc_min[stopped], w[stopped], 0.25)
+    out["signal_to_fill_wall_clock_minutes_median"] = weighted_quantile(
+        wc_min[stopped], w[stopped], 0.50)
+    out["signal_to_fill_wall_clock_minutes_p75"] = weighted_quantile(
+        wc_min[stopped], w[stopped], 0.75)
     out["baseline_gross_mean_stopped"] = weighted_mean(base[stopped], w[stopped])
     out["stop_gross_mean_stopped"] = weighted_mean(stp[stopped], w[stopped])
     out["paired_gross_improvement_stopped"] = weighted_mean(d[stopped], w[stopped])
@@ -767,11 +859,27 @@ def formal_stop_diagnostics(big, system="E9", horizon="td5"):
     out["frozen_sr_strength_p25"] = weighted_quantile(st, w, 0.25)
     out["frozen_sr_strength_median"] = weighted_quantile(st, w, 0.50)
     out["frozen_sr_strength_p75"] = weighted_quantile(st, w, 0.75)
-    out["lb_touched_by_signal_rate"] = weighted_mean(
+    # FG-R6-8: the Liquidity-behind question is "when the SR stop signal fires,
+    # is LB simultaneously touched / pierced / broken-unreclaimed?". That is a
+    # rate CONDITIONAL ON an observed SR stop signal, NOT a population incidence.
+    out["lb_*_denominator"] = "observed_sr_stop_signal"
+    cond = sig
+    for col, name in (("lb_available", "lb_available"),
+                      ("lb_touched_by_signal", "lb_touched_by_signal"),
+                      ("lb_pierced_by_signal", "lb_pierced_by_signal"),
+                      ("lb_broken_unreclaimed_at_signal",
+                       "lb_broken_unreclaimed_at_signal")):
+        v = q[col].to_numpy(float)
+        out[f"{name}_given_signal"] = (
+            weighted_mean(v[cond], w[cond]) if cond.any() else float("nan"))
+    # Optional, explicitly-named population incidence (NOT the primary question).
+    out["lb_available_population_incidence"] = weighted_mean(
+        q["lb_available"].to_numpy(float), w)
+    out["lb_touched_by_signal_population_incidence"] = weighted_mean(
         q["lb_touched_by_signal"].to_numpy(float), w)
-    out["lb_pierced_by_signal_rate"] = weighted_mean(
+    out["lb_pierced_by_signal_population_incidence"] = weighted_mean(
         q["lb_pierced_by_signal"].to_numpy(float), w)
-    out["lb_broken_unreclaimed_at_signal_rate"] = weighted_mean(
+    out["lb_broken_unreclaimed_at_signal_population_incidence"] = weighted_mean(
         q["lb_broken_unreclaimed_at_signal"].to_numpy(float), w)
     return out
 
@@ -863,35 +971,9 @@ def run_t1_5(verbose=True):
                     side_rows.append(e)
     side_df = pd.DataFrame(side_rows)
 
-    group_rows = []
-    for sym in sorted(big.symbol.unique()):
-        for ds in ("A9", "E9"):
-            for H in HORIZONS:
-                q = big[(big.symbol == sym) & (big.direction_system == ds)
-                        & (big.evaluation_horizon == H)]
-                if len(q) == 0:
-                    continue
-                group_rows.append({
-                    "symbol": sym, "direction_system": ds, "evaluation_horizon": H,
-                    "n_rows": int(len(q)),
-                    "stop_eligible_rate": float(q.stop_eligible.mean()),
-                    "stop_signal_rate": float(q.stop_signal_observed.mean()),
-                    "stop_executable_rate": float(q.stop_executable.mean()),
-                    "delta_ev_gross": float(q.paired_delta_gross_atr.mean()),
-                    "baseline_gross_mean": float(q.baseline_gross_return_atr.mean()),
-                    "stop_gross_mean": float(q.stop_gross_return_atr.mean())})
-    group_df = pd.DataFrame(group_rows)
-
-    ev = big[big.stop_signal_observed].copy()
-    ev_cols = ["semantic_key", "symbol", "gid", "direction_system", "direction",
-               "evaluation_horizon", "direction_correct", "stop_signal_step",
-               "stop_signal_time", "stop_executable", "stop_fill_step",
-               "stop_fill_time", "stop_fill_open", "stop_reason",
-               "baseline_gross_return_atr", "stop_gross_return_atr",
-               "paired_delta_gross_atr", "frozen_sr_bottom", "frozen_sr_top",
-               "frozen_sr_strength", "lb_available", "lb_touched_by_signal",
-               "lb_pierced_by_signal", "lb_broken_unreclaimed_at_signal"]
-    events_df = ev[ev_cols] if len(ev) else pd.DataFrame(columns=ev_cols)
+    # FG-R6-7: the SAME weighted group implementation is used by BOTH stages.
+    group_df = pd.DataFrame(group_stat_rows(big), columns=GROUP_STAT_COLUMNS)
+    events_df = stop_events_frame(big)
 
     max_abs = 0.0
     for d in diffs:
@@ -900,10 +982,10 @@ def run_t1_5(verbose=True):
                 max_abs = max(max_abs, d[ds]["max_abs_error"])
     n_mismatch = sum(d[ds]["mismatch"] for d in diffs for ds in ("A9", "E9") if ds in d)
 
-    write_csv(PRIMARY_CSV, primary_df, list(primary_df.columns))
-    write_csv(SIDE_STATS_CSV, side_df, list(side_df.columns))
-    write_csv(GROUP_STATS_CSV, group_df, list(group_df.columns))
-    write_csv(STOP_EVENTS_CSV, events_df, ev_cols)
+    write_csv(T1_5_PRIMARY_CSV, primary_df, list(primary_df.columns))
+    write_csv(T1_5_SIDE_STATS_CSV, side_df, list(side_df.columns))
+    write_csv(T1_5_GROUP_STATS_CSV, group_df, list(group_df.columns))
+    write_csv(T1_5_STOP_EVENTS_CSV, events_df, EVENT_COLUMNS)
 
     perf = {
         "r5_artifact_loads": int(COUNTERS["r5_artifact_loads"]),
@@ -943,11 +1025,12 @@ def run_t1_5(verbose=True):
             "T1.5 numbers are integration validation only, not a research result.",
         ],
     }
-    write_json(SUMMARY_JSON, summary)
+    write_json(T1_5_SUMMARY_JSON, summary)
 
     artifact_shas = {os.path.basename(p): sha256_file(p)
-                     for p in (PRIMARY_CSV, SIDE_STATS_CSV, GROUP_STATS_CSV,
-                               STOP_EVENTS_CSV, SUMMARY_JSON)}
+                     for p in (T1_5_PRIMARY_CSV, T1_5_SIDE_STATS_CSV,
+                               T1_5_GROUP_STATS_CSV, T1_5_STOP_EVENTS_CSV,
+                               T1_5_SUMMARY_JSON)}
     manifest = {
         "task_id": TASK_ID, "stage": STAGE_T1_5,
         "base_sha": BASE_SHA, "reviewed_parent_sha": REVIEWED_PARENT,
@@ -957,10 +1040,11 @@ def run_t1_5(verbose=True):
         "differential": summary["differential"],
         "performance": perf,
         "artifact_sha256": artifact_shas,
+        "serialization_manifest_last": True,
         "authorized_review_sha_note":
             "R6 PRE-T2 authorized under FUTURE-R6 Amendment A1 (GROSS primary).",
     }
-    write_json(MANIFEST_JSON, manifest)
+    write_json(T1_5_MANIFEST_JSON, manifest)
     if verbose:
         print(json.dumps({"summary": summary["differential"],
                           "performance": perf}, indent=2))
@@ -968,50 +1052,138 @@ def run_t1_5(verbose=True):
 
 
 FORMAL_ARTIFACT = os.path.join(ARTIFACT_DIR, "structural_stop_row_metrics_v1.parquet")
-FORMAL_MANIFEST = os.path.join(EVIDENCE_DIR,
-                               "structural_stop_v1_formal_manifest.json")
-FORMAL_SUMMARY = os.path.join(EVIDENCE_DIR, "structural_stop_v1_formal_summary.json")
+# FG-R6-5: Formal writes the CANONICAL un-prefixed evidence names.
+FORMAL_MANIFEST = MANIFEST_JSON
+FORMAL_SUMMARY = SUMMARY_JSON
 
 FROZEN_FORMAL = {"symbols": 15, "semantic_keys": 13773, "gids": 638,
                  "long_gids": 319, "short_gids": 319,
-                 "base_per_system": 13773, "rows_per_system": 41319,
-                 "total_rows": 82638}
+                 "base_rows": 27546, "base_per_system": 13773,
+                 "rows_per_system": 41319, "total_rows": 82638}
+
+# FG-R6-9: exact frozen Formal performance budget.
+PERF_EXPECTED = {"r5_artifact_loads": 1, "execution_frame_loads": 15,
+                 "direction_artifact_sha_verifications": 1,
+                 "sr_recompute_count": 0, "full_history_recompute_count": 0,
+                 "reference_calls": 0,
+                 "production_candidate_views":
+                     FROZEN_FORMAL["base_rows"]}
 
 
-def _formal_population_gates(l2, big):
-    """RC-R6-9: frozen Formal population hard gates."""
+def _per_system_gid_weight_gate(l2, atol=1e-9):
+    """FG-R6-1: per-SYSTEM gid weight identity.
+
+    A9 and E9 each carry the frozen Candidate weight INDEPENDENTLY, and the A9/E9
+    duplication is NOT halved. The correct identity is therefore PER SYSTEM:
+
+        within A9: every gid weight sum == 1
+        within E9: every gid weight sum == 1
+
+    The MERGED (A9 + E9) per-gid weight legitimately sums to ~2 and is NEVER gated.
+    Both per-system flags are persisted and required by the Formal population gate.
+    """
+    rep = {}
+    for ds, key in (("A9", "a9"), ("E9", "e9")):
+        g = l2[l2.direction_system == ds]
+        gw = g.groupby("gid")["sample_weight_raw"].sum().to_numpy(float)
+        ok = bool(len(gw) == FROZEN_FORMAL["gids"]
+                  and np.allclose(gw, 1.0, atol=atol))
+        rep[f"{key}_gid_weight_ok"] = ok
+        rep[f"{key}_n_gids"] = int(len(gw))
+        rep[f"{key}_gid_weight_max_abs_dev"] = (
+            float(np.max(np.abs(gw - 1.0))) if len(gw) else float("inf"))
+    merged = l2.groupby("gid")["sample_weight_raw"].sum().to_numpy(float)
+    rep["merged_gid_weight_sum_mean"] = (
+        float(np.mean(merged)) if len(merged) else float("nan"))
+    rep["merged_gid_weight_is_not_gated"] = True
+    return rep
+
+
+def _per_system_gid_weight_mismatches(l2, atol=1e-9):
+    rep = _per_system_gid_weight_gate(l2, atol=atol)
+    return {f"{k}_gid_weight": rep[f"{k}_gid_weight_max_abs_dev"]
+            for k in ("a9", "e9") if not rep[f"{k}_gid_weight_ok"]}
+
+
+def _base_l2_population_gates(l2):
+    """FG-R6-2: mechanical base-L2 population identity."""
     mism = {}
     syms = sorted(str(s) for s in l2.symbol.unique())
     if syms != sorted(SYMBOLS):
         mism["symbols"] = syms
+    if int(len(l2)) != FROZEN_FORMAL["base_rows"]:
+        mism["base_l2_rows"] = int(len(l2))
     nk = int(l2.semantic_key.nunique())
     if nk != FROZEN_FORMAL["semantic_keys"]:
         mism["semantic_keys"] = nk
-    gid_df = l2.drop_duplicates("gid")
-    if len(gid_df) != FROZEN_FORMAL["gids"]:
-        mism["gids"] = int(len(gid_df))
-    long_g = int((gid_df.oracle_direction == "LONG").sum())
-    short_g = int((gid_df.oracle_direction == "SHORT").sum())
-    if long_g != FROZEN_FORMAL["long_gids"]:
-        mism["long_gids"] = long_g
-    if short_g != FROZEN_FORMAL["short_gids"]:
-        mism["short_gids"] = short_g
+    bad_sys = sorted(set(str(s) for s in l2.direction_system.unique())
+                     - {"A9", "E9"})
+    if bad_sys:
+        mism["direction_system_values"] = bad_sys
     for ds in ("A9", "E9"):
         n = int((l2.direction_system == ds).sum())
         if n != FROZEN_FORMAL["base_per_system"]:
-            mism[f"base_{ds}"] = n
-    gw = l2.groupby("gid")["sample_weight_raw"].sum().to_numpy(float)
-    if not np.allclose(gw, 1.0, atol=1e-9):
-        mism["gid_weight"] = float(np.max(np.abs(gw - 1.0)))
+            mism[f"base_{ds}_rows"] = n
+    npairs = int(l2[["semantic_key", "direction_system"]].drop_duplicates().shape[0])
+    if npairs != FROZEN_FORMAL["base_rows"]:
+        mism["semantic_key_system_pairs"] = npairs
+    per = l2.groupby(["semantic_key", "direction_system"]).size()
+    if not bool((per == 1).all()):
+        mism["semantic_key_system_duplicate_rows"] = int((per != 1).sum())
+    nsys = l2.groupby("semantic_key")["direction_system"].nunique()
+    if not bool((nsys == 2).all()):
+        mism["semantic_key_incomplete_system_pair"] = int((nsys != 2).sum())
+    # ---- gid / oracle_direction identity ----
+    ndir = l2.groupby("gid")["oracle_direction"].nunique()
+    if not bool((ndir == 1).all()):
+        mism["gid_oracle_direction_multivalued"] = int((ndir != 1).sum())
+    gid_dir = l2.drop_duplicates("gid").set_index("gid")["oracle_direction"]
+    if int(len(gid_dir)) != FROZEN_FORMAL["gids"]:
+        mism["gids"] = int(len(gid_dir))
+    bad_dir = sorted(set(str(d) for d in gid_dir.unique()) - {"LONG", "SHORT"})
+    if bad_dir:
+        mism["oracle_direction_values"] = bad_dir
+    long_g = set(gid_dir[gid_dir == "LONG"].index.tolist())
+    short_g = set(gid_dir[gid_dir == "SHORT"].index.tolist())
+    if len(long_g) != FROZEN_FORMAL["long_gids"]:
+        mism["long_gids"] = len(long_g)
+    if len(short_g) != FROZEN_FORMAL["short_gids"]:
+        mism["short_gids"] = len(short_g)
+    if long_g & short_g:
+        mism["gid_direction_overlap_n"] = len(long_g & short_g)
+    all_g = set(gid_dir.index.tolist())
+    if (long_g | short_g) != all_g:
+        mism["gid_direction_union_missing_n"] = len(all_g - (long_g | short_g))
     return mism
 
 
+def _formal_population_gates(l2, big=None):
+    """FG-R6-1/2: frozen Formal population hard gates (pre-write).
+
+    `big` is accepted for call-shape stability but the frozen R5 identity lives in
+    L2; treatment-row population is verified mechanically on the written artifact
+    (FG-R6-10) as well.
+    """
+    mism = {}
+    mism.update(_base_l2_population_gates(l2))
+    mism.update(_per_system_gid_weight_mismatches(l2))
+    return mism
+
+
+def _write_formal_artifact(df, path):
+    """FG-R6-3: the ONE canonical Formal parquet writer (monkeypatchable)."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    df.to_parquet(path, index=False)
+
+
 def _verify_formal_artifact(path, frozen_keys):
-    """RC-R6-11: post-write key verification (reads key columns only)."""
+    """RC-R6-11 / FG-R6-10: post-write key verification (key columns only)."""
     t = pd.read_parquet(path, columns=["semantic_key", "direction_system",
                                        "evaluation_horizon"])
     n = int(len(t))
     uniq = int(t.drop_duplicates().shape[0])
+    combo = (t["semantic_key"].astype(str) + "|" + t["direction_system"].astype(str)
+             + "|" + t["evaluation_horizon"].astype(str))
     rep = {
         "rows": n, "unique_keys": uniq, "duplicate_keys": int(n - uniq),
         "a9_rows": int((t.direction_system == "A9").sum()),
@@ -1019,11 +1191,15 @@ def _verify_formal_artifact(path, frozen_keys):
         "invalid_system_rows": int((~t.direction_system.isin(["A9", "E9"])).sum()),
         "invalid_horizon_rows": int((~t.evaluation_horizon.isin(list(HORIZONS))).sum()),
         "unknown_semantic_key_rows": int((~t.semantic_key.astype(str).isin(frozen_keys)).sum()),
+        "unique_system_horizon_keys": int(combo.nunique()),
         "rows_per_semantic_key_max": int(t.groupby("semantic_key").size().max())
         if n else 0,
         "rows_per_semantic_key_min": int(t.groupby("semantic_key").size().min())
         if n else 0,
     }
+    # FG-R6-10: exactly the six (system x horizon) rows per semantic_key.
+    rep["six_combos_exactly_once"] = bool(
+        rep["unique_system_horizon_keys"] == FROZEN_FORMAL["total_rows"])
     rep["pass"] = bool(
         rep["rows"] == FROZEN_FORMAL["total_rows"]
         and rep["unique_keys"] == FROZEN_FORMAL["total_rows"]
@@ -1033,17 +1209,91 @@ def _verify_formal_artifact(path, frozen_keys):
         and rep["invalid_system_rows"] == 0 and rep["invalid_horizon_rows"] == 0
         and rep["unknown_semantic_key_rows"] == 0
         and rep["rows_per_semantic_key_max"] == 6
-        and rep["rows_per_semantic_key_min"] == 6)
+        and rep["rows_per_semantic_key_min"] == 6
+        and rep["six_combos_exactly_once"])
     return rep
+
+
+# --------------------------------------------------------------------------- #
+# 12. FG-R6-11 Formal environment provenance                                    #
+# --------------------------------------------------------------------------- #
+PROVENANCE_FIELDS = ("environment_contract_id", "cache_schema_version", "identity",
+                     "code_identity", "raw_sha256", "execution_frame_sha256",
+                     "sha256", "rows", "max_bars")
+
+
+def _env_provenance_records(states):
+    """FG-R6-11: canonical SymbolState environment provenance, one record/symbol."""
+    recs = []
+    for st in states:
+        p = getattr(st, "env_provenance", None)
+        p = p if isinstance(p, dict) else {}
+        rec = {"symbol": getattr(st, "symbol", p.get("symbol"))}
+        rec.update({k: p.get(k) for k in PROVENANCE_FIELDS})
+        recs.append(rec)
+    return recs
+
+
+def _env_provenance_gate(recs):
+    """FG-R6-11: exact 15-symbol coverage + frozen environment contract."""
+    mism = {}
+    if len(recs) != FROZEN_FORMAL["symbols"]:
+        mism["n_symbols"] = len(recs)
+    syms = sorted(str(r.get("symbol")) for r in recs)
+    if syms != sorted(SYMBOLS):
+        mism["symbols"] = syms
+    for r in recs:
+        sym = r.get("symbol")
+        if r.get("environment_contract_id") != ENV_CONTRACT_ID:
+            mism.setdefault("environment_contract_id", []).append(
+                (sym, r.get("environment_contract_id")))
+        if r.get("max_bars") is not None:
+            mism.setdefault("max_bars", []).append((sym, r.get("max_bars")))
+        for k in PROVENANCE_FIELDS:
+            if k != "max_bars" and r.get(k) is None:
+                mism.setdefault(f"missing_{k}", []).append(sym)
+    return mism
+
+
+def _formal_perf_counters(t_start):
+    return {
+        "r5_artifact_loads": int(COUNTERS["r5_artifact_loads"]),
+        "execution_frame_loads": int(COUNTERS["execution_frame_loads"]),
+        "direction_artifact_sha_verifications":
+            int(COUNTERS["direction_artifact_sha_verifications"]),
+        "sr_recompute_count": int(COUNTERS["sr_recompute_count"]),
+        "full_history_recompute_count": int(COUNTERS["full_history_recompute_count"]),
+        "reference_calls": int(COUNTERS["reference_calls"]),
+        "production_candidate_views": int(COUNTERS["production_candidate_views"]),
+        "runtime_sec": time.time() - t_start,
+    }
 
 
 def run_formal_r6(*, allow_full=False, authorized_review_sha=None,
                   write_artifacts=True, verbose=False):
-    """RC-R6-8: frozen Formal R6 path behind an explicit authorization gate."""
+    """FG-R6-3: frozen Formal R6 path behind an explicit authorization gate.
+
+    Frozen ordering:
+      1. verify authorized SHA
+      2. verify frozen inputs
+      3. compute full Production rows
+      4. population gates
+      5. performance gates
+      6. ONLY if both PASS: write canonical Formal parquet
+      7. mechanically verify the written parquet
+      8. compute Formal statistics / evidence
+      9. write Formal evidence files (canonical, FULL population)
+     10. compute SHA256 of every Formal artifact
+     11. write Formal manifest LAST
+    """
     if allow_full is not True:
         raise RuntimeError("STOP_R6_FULL_POPULATION_NOT_AUTHORIZED")
     if not authorized_review_sha:
         raise RuntimeError("STOP_R6_AUTHORIZED_REVIEW_SHA_REQUIRED")
+    # FG-R6-4: a Formal manifest must never describe a run without a canonical,
+    # written and parquet-verified artifact.
+    if write_artifacts is not True:
+        raise RuntimeError("STOP_R6_FORMAL_ARTIFACT_WRITE_REQUIRED")
     head = _git_head_sha()
     if head != authorized_review_sha:
         raise RuntimeError(
@@ -1055,12 +1305,16 @@ def run_formal_r6(*, allow_full=False, authorized_review_sha=None,
     l2 = load_r5_l2()
     _bump("direction_artifact_sha_verifications")
 
+    # ---- step 3: full Production rows. ONE frame object per symbol, reused by
+    # A9 and E9 (FG-R6-9).
     all_rows = []
+    states = []
     for sym in SYMBOLS:
         sub = l2[l2.symbol == sym]
         if len(sub) == 0:
             continue
         st = load_symbol_state(sym)
+        states.append(st)
         _bump("execution_frame_loads")
         for ds in ("A9", "E9"):
             rows, _ = treatment_rows_for_symbol(sub, st, ds)
@@ -1068,57 +1322,65 @@ def run_formal_r6(*, allow_full=False, authorized_review_sha=None,
     big = pd.concat(all_rows, ignore_index=True)
     frozen_keys = set(l2.semantic_key.astype(str).unique())
 
-    # ---- RC-R6-9 population gates (pre-write) ----
+    # ---- steps 4-5: gates MUST pass before any canonical artifact is written.
     pop_mismatch = _formal_population_gates(l2, big)
-    # ---- RC-R6-10 performance gates ----
-    perf = {
-        "r5_artifact_loads": int(COUNTERS["r5_artifact_loads"]),
-        "execution_frame_loads": int(COUNTERS["execution_frame_loads"]),
-        "direction_artifact_sha_verifications":
-            int(COUNTERS["direction_artifact_sha_verifications"]),
-        "sr_recompute_count": int(COUNTERS["sr_recompute_count"]),
-        "full_history_recompute_count": int(COUNTERS["full_history_recompute_count"]),
-        "reference_calls": int(COUNTERS["reference_calls"]),
-        "production_candidate_views": int(COUNTERS["production_candidate_views"]),
-        "runtime_sec": time.time() - t_start,
-    }
-    perf_mismatch = {}
-    for k, v in {"r5_artifact_loads": 1, "execution_frame_loads": 15,
-                 "sr_recompute_count": 0, "full_history_recompute_count": 0,
-                 "reference_calls": 0}.items():
-        if perf[k] != v:
-            perf_mismatch[k] = (perf[k], v)
-
-    artifact_report = {}
-    if write_artifacts:
-        os.makedirs(ARTIFACT_DIR, exist_ok=True)
-        big.to_parquet(FORMAL_ARTIFACT, index=False)
-        artifact_report = _verify_formal_artifact(FORMAL_ARTIFACT, frozen_keys)
-        if not artifact_report.get("pass"):
-            raise RuntimeError(
-                f"STOP_R6_FORMAL_ARTIFACT_KEY_MISMATCH {artifact_report}")
-
+    gid_weight_report = _per_system_gid_weight_gate(l2)
+    env_records = _env_provenance_records(states)
+    env_mismatch = _env_provenance_gate(env_records)
+    perf = _formal_perf_counters(t_start)
+    perf_mismatch = {k: (perf[k], v) for k, v in PERF_EXPECTED.items()
+                     if perf[k] != v}
     if pop_mismatch:
         raise RuntimeError(f"STOP_R6_FORMAL_POPULATION_GATE {pop_mismatch}")
     if perf_mismatch:
         raise RuntimeError(f"STOP_R6_FORMAL_PERFORMANCE_GATE {perf_mismatch}")
+    if env_mismatch:
+        raise RuntimeError(
+            f"STOP_R6_FORMAL_ENVIRONMENT_PROVENANCE_GATE {env_mismatch}")
 
-    # ---- RC-R6-12 verdict + RC-R6-7 diagnostics ----
+    # ---- step 6-7: canonical artifact write + mechanical key verification.
+    _write_formal_artifact(big, FORMAL_ARTIFACT)
+    artifact_report = _verify_formal_artifact(FORMAL_ARTIFACT, frozen_keys)
+    if not artifact_report.get("pass"):
+        raise RuntimeError(
+            f"STOP_R6_FORMAL_ARTIFACT_KEY_MISMATCH {artifact_report}")
+
+    # ---- step 8: Formal statistics / evidence (FULL population, weighted).
     primary_row = _effect(big, "E9", PRIMARY_HORIZON)
     side_rows = [_effect(big, "E9", PRIMARY_HORIZON, side=s) for s in ("LONG", "SHORT")]
     verdict = formal_verdict(primary_row, side_rows)
     diag = formal_stop_diagnostics(big, "E9", PRIMARY_HORIZON)
-    horizon_table = [_effect(big, ds, H) for ds in ("A9", "E9") for H in HORIZONS]
+    primary_df = pd.DataFrame(
+        [e for ds in ("A9", "E9") for H in HORIZONS
+         if (e := _effect(big, ds, H)) is not None])
+    side_df = pd.DataFrame(
+        [e for ds in ("A9", "E9") for H in HORIZONS for sd in ("LONG", "SHORT")
+         if (e := _effect(big, ds, H, side=sd)) is not None])
+    group_df = pd.DataFrame(group_stat_rows(big), columns=GROUP_STAT_COLUMNS)
+    events_df = stop_events_frame(big)
+
+    # ---- step 9: canonical Formal evidence files (never the T1.5 subset).
+    write_csv(PRIMARY_CSV, primary_df, list(primary_df.columns))
+    write_csv(SIDE_STATS_CSV, side_df, list(side_df.columns))
+    write_csv(GROUP_STATS_CSV, group_df, list(GROUP_STAT_COLUMNS))
+    write_csv(STOP_EVENTS_CSV, events_df, EVENT_COLUMNS)
 
     summary = {
-        "task_id": TASK_ID, "stage": "formal_r6",
+        "task_id": TASK_ID, "stage": STAGE_FORMAL,
         "authorized_review_sha": authorized_review_sha,
-        "generator_code_sha": head,
+        "generator_code_sha": head, "reviewed_parent_sha": head,
+        "population": "full", "n_primary_rows": int(len(big)),
         "formal_verdict": verdict,
         "primary_row": primary_row, "side_rows": side_rows,
-        "horizon_table": horizon_table, "stop_diagnostics": diag,
-        "population_gates": {"pass": not pop_mismatch, "mismatch": pop_mismatch},
-        "performance": perf, "artifact_report": artifact_report,
+        "stop_diagnostics": diag,
+        "population_gates": {"pass": not pop_mismatch, "mismatch": pop_mismatch,
+                             "gid_weight": gid_weight_report},
+        "performance_gates": {"pass": not perf_mismatch,
+                              "mismatch": perf_mismatch, "expected": PERF_EXPECTED},
+        "artifact_integrity_gates": artifact_report,
+        "environment_provenance_gates": {"pass": not env_mismatch,
+                                         "mismatch": env_mismatch},
+        "performance": perf,
         "cost_governance": {
             "cost_metadata_status": COST_METADATA_STATUS,
             "realistic_net_pnl_status": REALISTIC_NET_PNL_STATUS,
@@ -1135,21 +1397,28 @@ def run_formal_r6(*, allow_full=False, authorized_review_sha=None,
     }
     write_json(FORMAL_SUMMARY, summary)
 
-    art_shas = {}
-    if write_artifacts and os.path.exists(FORMAL_ARTIFACT):
-        art_shas["structural_stop_row_metrics_v1.parquet"] = sha256_file(FORMAL_ARTIFACT)
-    if os.path.exists(FORMAL_SUMMARY):
-        art_shas[os.path.basename(FORMAL_SUMMARY)] = sha256_file(FORMAL_SUMMARY)
+    # ---- step 10-11: SHA256 of EVERY Formal artifact, then manifest LAST.
+    formal_artifacts = [FORMAL_ARTIFACT, PRIMARY_CSV, SIDE_STATS_CSV,
+                        GROUP_STATS_CSV, STOP_EVENTS_CSV, FORMAL_SUMMARY]
+    art_shas = {os.path.basename(p): sha256_file(p) for p in formal_artifacts}
     manifest = {
-        "task_id": TASK_ID, "stage": "formal_r6",
-        "base_sha": BASE_SHA, "authorized_review_sha": authorized_review_sha,
-        "generator_code_sha": head, "reviewed_parent_sha": authorized_review_sha,
+        "task_id": TASK_ID, "stage": STAGE_FORMAL,
+        "base_sha": BASE_SHA,
+        "authorized_review_sha": authorized_review_sha,
+        "generator_code_sha": head, "reviewed_parent_sha": head,
+        "population": "full", "n_primary_rows": int(len(big)),
         "frozen_inputs_sha256": frozen,
         "population_gates": summary["population_gates"],
+        "performance_gates": summary["performance_gates"],
         "artifact_integrity_gates": artifact_report,
-        "performance": perf, "formal_verdict": verdict,
+        "environment_provenance_gates": summary["environment_provenance_gates"],
+        "environment_provenance": env_records,
+        "formal_verdict": verdict,
         "cost_governance": summary["cost_governance"],
         "artifact_sha256": art_shas,
+        "serialization_manifest_last": True,
+        "all_pass": bool(not pop_mismatch and not perf_mismatch and not env_mismatch
+                         and artifact_report.get("pass")),
     }
     write_json(FORMAL_MANIFEST, manifest)   # written LAST
     if verbose:

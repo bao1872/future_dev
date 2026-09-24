@@ -5,6 +5,8 @@ differential on real frozen frames.
 """
 
 import inspect
+import json
+import os
 
 import numpy as np
 import pandas as pd
@@ -460,27 +462,11 @@ def test_rc_r6_5_baseline_exit_price_reproduces_frozen_td_r():
 
 def test_rc_r6_9_mocked_formal_path_invokes_population_gates(monkeypatch):
     seen = {}
-
-    def fake_load_state(sym):
-        return object()   # run_formal_r6 charges one frame load per symbol itself
-
-    monkeypatch.setattr(R, "_git_head_sha", lambda: "SHA")
-    monkeypatch.setattr(R, "load_symbol_state", fake_load_state)
-    monkeypatch.setattr(R, "treatment_rows_for_symbol",
-                        lambda sub, st, ds: (pd.DataFrame({"x": [1]}), None))
-    monkeypatch.setattr(R, "_formal_population_gates",
-                        lambda l2, big: seen.update({"called": True}) or {})
-    monkeypatch.setattr(R, "_effect",
-                        lambda big, s, h, side=None: {
-                            "side": side or "ALL", "delta_ev_ci_low": 0.0,
-                            "delta_ev_ci_high": 0.0, "delta_wrong_gross_ci_low": 0.0,
-                            "wlr_gross": 0.0})
-    monkeypatch.setattr(R, "formal_verdict", lambda p, s: "NO_IDENTIFIABLE_GROSS_STOP_EDGE")
-    monkeypatch.setattr(R, "formal_stop_diagnostics", lambda big, s, h: {})
-    monkeypatch.setattr(R, "write_json", lambda p, o: None)
-    R.run_formal_r6(allow_full=True, authorized_review_sha="SHA",
-                    write_artifacts=False)
+    order = []
+    install_formal_mocks(monkeypatch, order=order, seen=seen)
+    R.run_formal_r6(allow_full=True, authorized_review_sha="SHA")
     assert seen.get("called") is True
+    assert order.index("population_gate") < order.index("artifact_write")
 
 
 def test_rc_r6_8_formal_runner_rejects_allow_full_false():
@@ -539,3 +525,395 @@ def test_rc_r6_12_verdict_categories_are_frozen():
         "GROSS_STOP_EDGE_SUPPORTED_UNIVERSAL", "GROSS_STOP_HARMFUL",
         "GROSS_SIDE_HETEROGENEITY_REQUIRES_FOLLOWUP",
         "NO_IDENTIFIABLE_GROSS_STOP_EDGE")
+
+
+# =========================================================================== #
+# FG-R6-1..15 FINAL FORMAL-GATE / EVIDENCE PATCH                               #
+# =========================================================================== #
+# ---- shared mock harness --------------------------------------------------- #
+def mock_env_records():
+    """FG-R6-11: a valid 15-symbol canonical environment-provenance record set."""
+    return [{"symbol": s, "environment_contract_id": R.ENV_CONTRACT_ID,
+             "cache_schema_version": "cache_v1", "identity": f"id_{s}",
+             "code_identity": "code_sha", "raw_sha256": "raw_sha",
+             "execution_frame_sha256": "exec_sha", "sha256": "sha",
+             "rows": 1234, "max_bars": None} for s in R.SYMBOLS]
+
+
+def install_formal_mocks(monkeypatch, *, order=None, seen=None, pop_mismatch=None,
+                         perf=None, written=None):
+    """Mock every Formal side effect so `run_formal_r6` can be exercised safely.
+
+    The CANONICAL evidence paths are never touched: the writers, the parquet
+    writer, the artifact verifier and sha256 are all monkeypatched.
+    """
+    order = [] if order is None else order
+    seen = {} if seen is None else seen
+    written = {} if written is None else written
+
+    def fake_gates(l2, big=None):
+        order.append("population_gate")
+        seen["called"] = True
+        return dict(pop_mismatch or {})
+
+    def fake_write_artifact(df, path):
+        order.append("artifact_write")
+        written["artifact_rows"] = int(len(df))
+
+    def fake_treatment(sub, st, ds):
+        s = sub[sub["direction_system"] == ds]
+        parts = [pd.DataFrame({"semantic_key": list(s["semantic_key"]),
+                               "gid": list(s["gid"]),
+                               "symbol": list(s["symbol"]),
+                               "evaluation_horizon": H}) for H in R.HORIZONS]
+        return (pd.concat(parts, ignore_index=True), None)
+
+    def fake_write_csv(path, rows, columns):
+        written[path] = (rows if isinstance(rows, pd.DataFrame)
+                         else pd.DataFrame(rows, columns=columns))
+
+    monkeypatch.setattr(R, "_git_head_sha", lambda: "SHA")
+    monkeypatch.setattr(R, "verify_frozen_inputs", lambda: {})
+    monkeypatch.setattr(R, "load_symbol_state", lambda sym: object())
+    monkeypatch.setattr(R, "treatment_rows_for_symbol", fake_treatment)
+    monkeypatch.setattr(R, "_formal_population_gates", fake_gates)
+    monkeypatch.setattr(R, "_env_provenance_records",
+                        lambda states: mock_env_records())
+    monkeypatch.setattr(R, "_formal_perf_counters",
+                        lambda t0: dict(perf or R.PERF_EXPECTED, runtime_sec=0.0))
+    monkeypatch.setattr(R, "_write_formal_artifact", fake_write_artifact)
+    monkeypatch.setattr(R, "_verify_formal_artifact", lambda p, k: {"pass": True})
+    monkeypatch.setattr(R, "sha256_file", lambda p: "mocksha")
+    monkeypatch.setattr(R, "group_stat_rows", lambda big: [])
+    monkeypatch.setattr(R, "stop_events_frame",
+                        lambda big: pd.DataFrame(columns=R.EVENT_COLUMNS))
+    monkeypatch.setattr(R, "_effect",
+                        lambda big, s, h, side=None: {
+                            "system": s, "horizon": h, "side": side or "ALL",
+                            "n_rows": int(len(big)),
+                            "delta_ev_gross": 0.0, "delta_ev_ci_low": 0.0,
+                            "delta_ev_ci_high": 0.0,
+                            "delta_wrong_gross_ci_low": 0.0, "wlr_gross": 0.0})
+    monkeypatch.setattr(R, "formal_verdict",
+                        lambda p, s: "NO_IDENTIFIABLE_GROSS_STOP_EDGE")
+    monkeypatch.setattr(R, "formal_stop_diagnostics", lambda big, s, h: {})
+    monkeypatch.setattr(R, "write_csv", fake_write_csv)
+    monkeypatch.setattr(R, "write_json",
+                        lambda p, o: written.__setitem__(p, o))
+    return order, seen, written
+
+
+# ---- FG-R6-1 --------------------------------------------------------------- #
+def synth_weight_l2(*, n_gids=638, a9_shift=0.0, e9_shift=0.0):
+    """Merged L2 where EACH system's per-gid weights independently sum to 1.
+
+    Every gid carries two rows of weight 0.5 per system. A `*_shift` breaks the
+    first gid's first row so that its per-system sum becomes 1 + shift.
+    """
+    gids = [f"g{i:04d}" for i in range(n_gids)]
+    rows = []
+    for ds, shift in (("A9", a9_shift), ("E9", e9_shift)):
+        for j, g in enumerate(gids):
+            rows.append({"gid": g, "direction_system": ds,
+                         "sample_weight_raw": 0.5 + (shift if j == 0 else 0.0)})
+            rows.append({"gid": g, "direction_system": ds,
+                         "sample_weight_raw": 0.5})
+    return pd.DataFrame(rows)
+
+
+def test_fg_r6_1_merged_a9_e9_gid_weight_sum_two_is_not_a_failure():
+    l2 = synth_weight_l2()
+    rep = R._per_system_gid_weight_gate(l2)
+    assert rep["a9_gid_weight_ok"] is True
+    assert rep["e9_gid_weight_ok"] is True
+    assert rep["merged_gid_weight_sum_mean"] == pytest.approx(2.0)
+    assert rep["merged_gid_weight_is_not_gated"] is True
+    assert R._per_system_gid_weight_mismatches(l2) == {}
+    # the OLD merged check is exactly what must NOT be used
+    merged = l2.groupby("gid")["sample_weight_raw"].sum().to_numpy(float)
+    assert not np.allclose(merged, 1.0)
+
+
+def test_fg_r6_1_a9_gid_weight_violation_fails():
+    l2 = synth_weight_l2(a9_shift=0.1)
+    rep = R._per_system_gid_weight_gate(l2)
+    assert rep["a9_gid_weight_ok"] is False
+    assert rep["e9_gid_weight_ok"] is True
+    m = R._per_system_gid_weight_mismatches(l2)
+    assert "a9_gid_weight" in m and "e9_gid_weight" not in m
+
+
+def test_fg_r6_1_e9_gid_weight_violation_fails():
+    l2 = synth_weight_l2(e9_shift=-0.2)
+    rep = R._per_system_gid_weight_gate(l2)
+    assert rep["e9_gid_weight_ok"] is False
+    assert rep["a9_gid_weight_ok"] is True
+    m = R._per_system_gid_weight_mismatches(l2)
+    assert "e9_gid_weight" in m and "a9_gid_weight" not in m
+
+
+def test_fg_r6_1_real_frozen_l2_satisfies_per_system_gid_weight():
+    l2 = R.load_r5_l2()
+    rep = R._per_system_gid_weight_gate(l2)
+    assert rep["a9_gid_weight_ok"] is True, rep
+    assert rep["e9_gid_weight_ok"] is True, rep
+    assert rep["a9_n_gids"] == 638 and rep["e9_n_gids"] == 638
+
+
+# ---- FG-R6-2 --------------------------------------------------------------- #
+def base_l2_frame(*, n_keys=3, drop_system_for=None, dup_dir_gid=None):
+    rows = []
+    for k in range(n_keys):
+        for ds in ("A9", "E9"):
+            if drop_system_for == k and ds == "E9":
+                continue
+            rows.append({"semantic_key": f"sk{k}", "symbol": "AG",
+                         "direction_system": ds, "gid": f"g{k}",
+                         "oracle_direction": "LONG"})
+    if dup_dir_gid is not None:
+        src = next(x for x in rows if x["gid"] == dup_dir_gid)
+        dup = dict(src)
+        dup["oracle_direction"] = "SHORT"
+        rows.append(dup)
+    return pd.DataFrame(rows)
+
+
+def test_fg_r6_2_mixed_oracle_direction_within_gid_fails():
+    mism = R._base_l2_population_gates(base_l2_frame(dup_dir_gid="g1"))
+    assert "gid_oracle_direction_multivalued" in mism
+
+
+def test_fg_r6_2_missing_a9_e9_semantic_key_pair_fails():
+    mism = R._base_l2_population_gates(base_l2_frame(n_keys=3, drop_system_for=1))
+    assert "semantic_key_incomplete_system_pair" in mism
+
+
+def test_fg_r6_2_real_frozen_l2_passes_full_population_identity():
+    l2 = R.load_r5_l2()
+    assert int(len(l2)) == R.FROZEN_FORMAL["base_rows"] == 27546
+    assert R._base_l2_population_gates(l2) == {}
+    assert R._per_system_gid_weight_mismatches(l2) == {}
+    assert R._formal_population_gates(l2) == {}
+
+
+# ---- FG-R6-3 / FG-R6-4 ----------------------------------------------------- #
+def test_fg_r6_3_population_gate_failure_happens_before_parquet_write(monkeypatch):
+    order = []
+    install_formal_mocks(monkeypatch, order=order, pop_mismatch={"symbols": []})
+    with pytest.raises(RuntimeError, match="POPULATION_GATE"):
+        R.run_formal_r6(allow_full=True, authorized_review_sha="SHA")
+    assert "population_gate" in order and "artifact_write" not in order
+
+
+def test_fg_r6_3_gates_pass_before_canonical_write(monkeypatch):
+    order = []
+    install_formal_mocks(monkeypatch, order=order)
+    R.run_formal_r6(allow_full=True, authorized_review_sha="SHA")
+    assert order.index("population_gate") < order.index("artifact_write")
+
+
+def test_fg_r6_4_full_run_without_artifact_write_is_rejected(monkeypatch):
+    monkeypatch.setattr(R, "_git_head_sha", lambda: "SHA")
+    with pytest.raises(RuntimeError, match="ARTIFACT_WRITE_REQUIRED"):
+        R.run_formal_r6(allow_full=True, authorized_review_sha="SHA",
+                        write_artifacts=False)
+
+
+# ---- FG-R6-5 --------------------------------------------------------------- #
+def test_fg_r6_5_evidence_names_are_stage_explicit():
+    t15 = (R.T1_5_PRIMARY_CSV, R.T1_5_SIDE_STATS_CSV, R.T1_5_GROUP_STATS_CSV,
+           R.T1_5_STOP_EVENTS_CSV, R.T1_5_SUMMARY_JSON, R.T1_5_MANIFEST_JSON)
+    formal = (R.PRIMARY_CSV, R.SIDE_STATS_CSV, R.GROUP_STATS_CSV,
+              R.STOP_EVENTS_CSV, R.SUMMARY_JSON, R.MANIFEST_JSON)
+    for p in t15:
+        assert "_t1_5_" in os.path.basename(p)
+    for p in formal:
+        b = os.path.basename(p)
+        assert "_t1_5_" not in b and "_formal_" not in b
+    assert set(t15).isdisjoint(set(formal))
+
+
+def test_fg_r6_5_formal_primary_csv_carries_full_population_rows(monkeypatch):
+    _, _, written = install_formal_mocks(monkeypatch)
+    R.run_formal_r6(allow_full=True, authorized_review_sha="SHA")
+    df = written[R.PRIMARY_CSV]
+    assert int(len(df)) == 6                     # A9/E9 x td1/td3/td5 cells
+    assert set(df["n_rows"]) == {82638}          # FULL 13773x2x3, not a T1.5 subset
+    assert 3000 not in set(df["n_rows"])         # T1.5 integration = 3000 rows
+    assert R.T1_5_PRIMARY_CSV not in written
+    assert R.T1_5_SUMMARY_JSON not in written and R.T1_5_MANIFEST_JSON not in written
+
+
+# ---- FG-R6-7 --------------------------------------------------------------- #
+def test_fg_r6_7_group_weighted_mean_differs_from_raw_row_mean():
+    big = pd.DataFrame({
+        "symbol": ["AG", "AG"], "direction_system": ["E9", "E9"],
+        "evaluation_horizon": ["td5", "td5"], "gid": ["g0", "g0"],
+        "sample_weight_raw": [0.9, 0.1],
+        "paired_delta_gross_atr": [0.0, 10.0],
+        "baseline_gross_return_atr": [1.0, -1.0],
+        "stop_gross_return_atr": [1.0, 9.0],
+        "stop_eligible": [True, True], "stop_signal_observed": [True, False],
+        "stop_executable": [True, False]})
+    row = R.group_stat_rows(big)[0]
+    assert row["delta_ev_gross"] == pytest.approx(1.0)        # weighted
+    assert row["raw_delta_ev_gross"] == pytest.approx(5.0)    # raw row mean
+    assert row["delta_ev_gross"] != pytest.approx(row["raw_delta_ev_gross"])
+    assert row["baseline_gross_mean"] == pytest.approx(0.8)
+    assert row["raw_baseline_gross_mean"] == pytest.approx(0.0)
+    assert row["stop_signal_rate"] == pytest.approx(0.9)
+    assert row["raw_n_rows"] == 2 and row["n_rows"] == 2
+
+
+# ---- FG-R6-8 --------------------------------------------------------------- #
+def diag_frame(*, signal, lb_touch, wc_minutes=None, weights=None):
+    n = len(signal)
+    weights = [1.0 / n] * n if weights is None else weights
+    wc_minutes = [15.0] * n if wc_minutes is None else wc_minutes
+    t0 = pd.Timestamp("2026-01-05 09:00:00")
+    sig_t = [t0 if s else pd.NaT for s in signal]
+    fil_t = [(t0 + pd.Timedelta(minutes=m)) if s else pd.NaT
+             for s, m in zip(signal, wc_minutes)]
+    return pd.DataFrame({
+        "direction_system": ["E9"] * n, "evaluation_horizon": ["td5"] * n,
+        "direction": ["LONG"] * n, "sample_weight_raw": weights,
+        "direction_correct": [True] * n,
+        "stop_eligible": [True] * n,
+        "stop_signal_observed": np.asarray(signal, bool),
+        "stop_executable": np.asarray(signal, bool),
+        "stop_signal_step": np.where(np.asarray(signal, bool), 5, -1),
+        "stop_fill_step": np.where(np.asarray(signal, bool), 6, -1),
+        "stop_signal_time": sig_t, "stop_fill_time": fil_t,
+        "stop_signal_bar_close": [100.0] * n, "stop_fill_open": [100.5] * n,
+        "ATR0": [1.0] * n, "frozen_sr_strength": [3.0] * n,
+        "baseline_gross_return_atr": [1.0] * n,
+        "stop_gross_return_atr": [0.5] * n,
+        "lb_available": [True] * n,
+        "lb_touched_by_signal": np.asarray(lb_touch, bool),
+        "lb_pierced_by_signal": np.asarray(lb_touch, bool),
+        "lb_broken_unreclaimed_at_signal": np.asarray(lb_touch, bool)})
+
+
+def test_fg_r6_8_liquidity_rates_are_conditional_on_signal():
+    q = diag_frame(signal=[True, False, False, False],
+                   lb_touch=[True, False, False, False])
+    out = R.formal_stop_diagnostics(q, "E9", "td5")
+    assert out["lb_*_denominator"] == "observed_sr_stop_signal"
+    assert out["lb_touched_by_signal_given_signal"] == pytest.approx(1.0)
+    assert out["lb_touched_by_signal_population_incidence"] == pytest.approx(0.25)
+    assert (out["lb_touched_by_signal_given_signal"]
+            != pytest.approx(out["lb_touched_by_signal_population_incidence"]))
+    assert out["lb_available_given_signal"] == pytest.approx(1.0)
+    assert out["lb_pierced_by_signal_given_signal"] == pytest.approx(1.0)
+    assert out["lb_broken_unreclaimed_at_signal_given_signal"] == pytest.approx(1.0)
+
+
+def test_fg_r6_8_signal_to_fill_wall_clock_minutes_oracle():
+    q = diag_frame(signal=[True, True, True, True], lb_touch=[False] * 4,
+                   wc_minutes=[15.0, 15.0, 45.0, 60.0])
+    out = R.formal_stop_diagnostics(q, "E9", "td5")
+    assert out["signal_to_fill_wall_clock_minutes_p25"] == pytest.approx(15.0)
+    assert out["signal_to_fill_wall_clock_minutes_median"] == pytest.approx(30.0)
+    assert out["signal_to_fill_wall_clock_minutes_p75"] == pytest.approx(52.5)
+    # the signal-bar-close -> next-open ATR gap is retained alongside it
+    assert out["signal_close_to_next_open_gap_atr_median"] == pytest.approx(0.5)
+
+
+# ---- FG-R6-9 --------------------------------------------------------------- #
+def test_fg_r6_9_performance_gate_requires_production_candidate_views(monkeypatch):
+    assert R.PERF_EXPECTED["production_candidate_views"] == 27546
+    assert R.PERF_EXPECTED["execution_frame_loads"] == 15
+    bad = dict(R.PERF_EXPECTED, production_candidate_views=27545)
+    order = []
+    install_formal_mocks(monkeypatch, order=order, perf=bad)
+    with pytest.raises(RuntimeError, match="PERFORMANCE_GATE"):
+        R.run_formal_r6(allow_full=True, authorized_review_sha="SHA")
+    assert "artifact_write" not in order
+
+
+# ---- FG-R6-10 -------------------------------------------------------------- #
+def test_fg_r6_10_parquet_requires_exactly_six_system_horizon_rows_per_key(tmp_path):
+    sk = [f"sk{i}" for i in range(13773)]
+    base = pd.DataFrame({"semantic_key": sk * 2,
+                         "direction_system": ["A9"] * 13773 + ["E9"] * 13773})
+    rows = []
+    for H in R.HORIZONS:
+        t = base.copy()
+        t["evaluation_horizon"] = H
+        rows.append(t)
+    ok = pd.concat(rows, ignore_index=True)
+    p = tmp_path / "ok.parquet"
+    ok.to_parquet(p, index=False)
+    rep = R._verify_formal_artifact(p, set(sk))
+    assert rep["pass"] is True and rep["six_combos_exactly_once"] is True
+
+    # swap one (A9, td3) row of sk0 into a duplicate (A9, td1): still six rows per
+    # semantic_key, but one required system x horizon combination is missing.
+    bad = ok.copy()
+    m = ((bad.semantic_key == "sk0") & (bad.direction_system == "A9")
+         & (bad.evaluation_horizon == "td3"))
+    bad.loc[m, "evaluation_horizon"] = "td1"
+    p2 = tmp_path / "bad6.parquet"
+    bad.to_parquet(p2, index=False)
+    r2 = R._verify_formal_artifact(p2, set(sk))
+    assert r2["rows"] == 82638
+    assert r2["rows_per_semantic_key_min"] == 6
+    assert r2["six_combos_exactly_once"] is False
+    assert r2["pass"] is False
+
+
+# ---- FG-R6-11 -------------------------------------------------------------- #
+def test_fg_r6_11_environment_provenance_requires_exact_15_symbols():
+    recs = mock_env_records()
+    assert len(recs) == 15
+    assert R._env_provenance_gate(recs) == {}
+    assert R._env_provenance_gate(recs[:-1]) != {}
+
+    broken = [dict(r) for r in recs]
+    broken[0]["environment_contract_id"] = "OLD-CONTRACT"
+    broken[1]["max_bars"] = 5000
+    broken[2]["execution_frame_sha256"] = None
+    m = R._env_provenance_gate(broken)
+    assert "environment_contract_id" in m and "max_bars" in m
+    assert "missing_execution_frame_sha256" in m
+
+    class _St:
+        def __init__(self, sym, prov):
+            self.symbol = sym
+            self.env_provenance = prov
+
+    states = [_St(r["symbol"], dict(r)) for r in recs]
+    got = R._env_provenance_records(states)
+    assert len(got) == 15
+    assert R._env_provenance_gate(got) == {}
+
+
+# ---- FG-R6-12 -------------------------------------------------------------- #
+def test_fg_r6_12_formal_manifest_hashes_every_formal_artifact(monkeypatch):
+    _, _, written = install_formal_mocks(monkeypatch)
+    R.run_formal_r6(allow_full=True, authorized_review_sha="SHA")
+    man = written[R.FORMAL_MANIFEST]
+    expect = {os.path.basename(p) for p in
+              (R.FORMAL_ARTIFACT, R.PRIMARY_CSV, R.SIDE_STATS_CSV,
+               R.GROUP_STATS_CSV, R.STOP_EVENTS_CSV, R.FORMAL_SUMMARY)}
+    assert expect <= set(man["artifact_sha256"])
+    assert man["all_pass"] is True
+    assert man["serialization_manifest_last"] is True
+    assert man["population_gates"]["pass"] is True
+    assert man["performance_gates"]["pass"] is True
+    assert man["artifact_integrity_gates"]["pass"] is True
+    assert man["environment_provenance_gates"]["pass"] is True
+    assert len(man["environment_provenance"]) == 15
+    assert man["authorized_review_sha"] == man["generator_code_sha"] \
+        == man["reviewed_parent_sha"]
+
+
+# ---- FG-R6-13 -------------------------------------------------------------- #
+def test_fg_r6_13_pre_t2_reviewed_parent_is_the_immediate_review():
+    assert R.BASE_SHA == "c0126551040f3e758ba5352ecb693bcbff0ad8b0"
+    assert R.REVIEWED_PARENT == "9700d0c629274000f67ce3ecbacca753f668f2a8"
+    with open(R.T1_5_MANIFEST_JSON) as f:
+        man = json.load(f)
+    assert man["stage"] == R.STAGE_T1_5
+    assert man["base_sha"] == R.BASE_SHA
+    assert man["reviewed_parent_sha"] == R.REVIEWED_PARENT
