@@ -1,23 +1,43 @@
 {
   "task": "FUTURE-R13-PAYOFF-GEOMETRY-V2-TRAIN-ONLY-SELECTION",
+  "status": "NO_V2_MODEL_IMPROVEMENT",
   "basis": "TRAIN-only OOF EV MSE (no VAL outcome read)",
   "val_unlocked": false,
+  "v2_selected": false,
+  "v2_selected_architecture": null,
+  "one_se_candidate": "B0_SHARED41",
+  "one_se_candidate_aliases": [
+    "A3_SHARED_BOTH",
+    "B0_SHARED41"
+  ],
+  "one_se_candidate_shared_state": true,
+  "one_se_candidate_n_features": 41,
+  "one_se_candidate_mean_ev_mse": 5.112080701910835,
+  "one_se_candidate_se_ev_mse": 0.3827542544476934,
+  "one_se_candidate_win_schema_sha256": "ce278b9390f9af0b820c446ef9778f795dd071e22066622227f904280e7d4ce5",
+  "one_se_candidate_payoff_schema_sha256": "ce278b9390f9af0b820c446ef9778f795dd071e22066622227f904280e7d4ce5",
+  "one_se_threshold": 5.493053418175757,
+  "best_candidate": "B2_PLUS_PATH8",
+  "n_eligible": 5,
+  "secondary_pre_val_challenger": "A1_SHARE_TO_WIN",
+  "secondary_pre_val_challenger_evidence": {
+    "candidate": "A1_SHARE_TO_WIN",
+    "mean_ev_mse": 5.086014747592878,
+    "se_ev_mse": 0.3837764724150619,
+    "paired_point": -0.0168112144997646,
+    "paired_ci_low": -0.0638471305009641,
+    "paired_ci_high": 0.0231113744056978,
+    "paired_status": "PROMISING_DEV_IMPROVEMENT",
+    "ci_crosses_zero": true,
+    "source": "R12 model_comparison.csv (TRAIN OOF)"
+  },
+  "hypothesis_status": "POST_TRAIN_PRE_VAL_SECONDARY_CHALLENGER",
   "leakage": {
     "old_test_label_reads": 0,
     "old_test_policy_reads": 0
   },
   "baseline": "A0",
   "require_shared_state": true,
-  "one_se_threshold": 5.493053418175757,
-  "best_candidate": "B2_PLUS_PATH8",
-  "selected_candidate": "B0_SHARED41",
-  "selected_mean_ev_mse": 5.112080701910835,
-  "selected_se_ev_mse": 0.3827542544476934,
-  "selected_n_features": 41,
-  "selected_shared_state": true,
-  "selected_win_schema_sha256": "ce278b9390f9af0b820c446ef9778f795dd071e22066622227f904280e7d4ce5",
-  "selected_payoff_schema_sha256": "ce278b9390f9af0b820c446ef9778f795dd071e22066622227f904280e7d4ce5",
-  "n_eligible": 5,
   "candidates": [
     {
       "candidate": "A0_V1_DISJOINT",
@@ -62,6 +82,6 @@
       "shared_state": true
     }
   ],
-  "verdict": "No V2 extended-state family (SPACE18/PATH8/VOL6) improved TRAIN EV MSE within one SE of the V1 shared baseline; the one-SE selector therefore keeps the simplest shared-state candidate.",
-  "generator_code_sha": "2eb2f7243c8bc1e1d1dd24101ebd8f9dac90f302"
+  "verdict": "No V2 extended-state family (SPACE18/PATH8/VOL6) improved TRAIN EV MSE within one SE of the V1 shared baseline; the one-SE selector therefore keeps the simplest shared-state candidate (B0_SHARED41 == A3_SHARED_BOTH, SHARED41). Status is NO_V2_MODEL_IMPROVEMENT; v2_selected=False. A1_SHARE_TO_WIN is retained as the only secondary pre-VAL challenger (TRAIN OOF direction improvement but CI crosses zero).",
+  "generator_code_sha": "9a221cdc1f45b031f3f0e13f0860c6b6715391f6"
 }
