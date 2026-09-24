@@ -8,13 +8,13 @@
   ],
   "program": "FUTURE-R9AB-R10-M15-DECOMPOSED-WIN-PAYOFF-V1",
   "stage": "PRE_TEST",
-  "generator_code_sha": "836d97f2aa8e636b1cb3b15f05e94dc00354a05d",
+  "generator_code_sha": "cd9c25b9923b588e25cc3716c37951160b8a72bd",
   "base_sha": "f3ca3a04317126e8f35afe7430d7aea202a9175a",
   "scientific_status": "LOCKED_DEVELOPMENT_TEST_NOT_PRISTINE_CONFIRMATION",
   "r8_manifest": {
     "task_id": "FUTURE-R8-M15-DECOMPOSED-VALUE-DATASET-V1",
     "base_sha": "f3ca3a04317126e8f35afe7430d7aea202a9175a",
-    "generator_code_sha": "836d97f2aa8e636b1cb3b15f05e94dc00354a05d",
+    "generator_code_sha": "cd9c25b9923b588e25cc3716c37951160b8a72bd",
     "r8_upstream_manifest": "../../artifacts/opportunity_value_v1/manifest_v1.json",
     "symbols": [
       "AG",
@@ -104,14 +104,14 @@
       "test": 140972
     },
     "performance": {
-      "state_artifact_loads": 6,
+      "state_artifact_loads": 5,
       "feature_builds": 30,
       "symbol_loops": 15,
       "environment_reloads_after_r8": 0,
       "geometry_reloads_after_r8": 0,
       "load_symbol_state_calls_after_r8": 0
     },
-    "runtime_sec": 25.79005002975464,
+    "runtime_sec": 2.089015245437622,
     "artifact_sha256": {
       "state_v1.parquet": "b0ae386fa8da9f723a1f1f596495d97b8325bb24f02cc566f146a42c6fbcebe9",
       "win_features_v1.parquet": "8e4a79454c51990ebf1c21259aa4e9233f6baa74d621e5f33a8edb4bc83d8ce7",
@@ -126,7 +126,7 @@
     "model_manifest": {
       "task_id": "FUTURE-R9A-M15-WIN-PROBABILITY-MODEL-V1",
       "base_sha": "f3ca3a04317126e8f35afe7430d7aea202a9175a",
-      "generator_code_sha": "836d97f2aa8e636b1cb3b15f05e94dc00354a05d",
+      "generator_code_sha": "cd9c25b9923b588e25cc3716c37951160b8a72bd",
       "win33_schema_sha256": "f1338aeec28fb5498a804412bea3f6714196d00081f8e520b8196a5e9064b8f4",
       "horizons": [
         "td1",
@@ -460,7 +460,7 @@
     "model_manifest": {
       "task_id": "FUTURE-R9B-M15-PAYOFF-RATIO-MODEL-V1",
       "base_sha": "f3ca3a04317126e8f35afe7430d7aea202a9175a",
-      "generator_code_sha": "836d97f2aa8e636b1cb3b15f05e94dc00354a05d",
+      "generator_code_sha": "cd9c25b9923b588e25cc3716c37951160b8a72bd",
       "pay8_schema_sha256": "7bdc493e4268f8051f4e601a56b2fe608dc1600b2c044a5f84d6e3be9ad2fcf3",
       "horizons": [
         "td1",
@@ -2449,5 +2449,5 @@
       "post_verdict_test_label_reads": 0
     }
   },
-  "runtime_sec": 37.49631094932556
+  "runtime_sec": 15.155586004257202
 }
