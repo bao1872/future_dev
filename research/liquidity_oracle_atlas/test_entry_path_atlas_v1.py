@@ -1028,11 +1028,28 @@ def test_rc_t2_2_zero_group_denominator_returns_nan_not_zero():
     assert np.isnan(out[1])
 
 
+def _valid_gate_kwargs():
+    return dict(
+        symbol_universe=list(M.SYMBOLS),
+        n_candidates=M.FROZEN_FULL_CANDIDATE_ROWS,
+        n_unique_semantic_keys=M.FROZEN_FULL_CANDIDATE_ROWS,
+        semantic_key_duplicates=0,
+        n_gids=M.FROZEN_FULL_ORACLE_GIDS,
+        oracle_long_gids=M.FROZEN_FULL_ORACLE_LONG_GIDS,
+        oracle_short_gids=M.FROZEN_FULL_ORACLE_SHORT_GIDS,
+        a9_l2=M.FROZEN_FULL_A9_L2_ROWS, e9_l2=M.FROZEN_FULL_E9_L2_ROWS,
+        l2_unique_keys=M.FROZEN_FULL_L2_ROWS,
+        availability_masks_identical=True,
+        inferential_support_any=True, inferential_support_complete=True,
+        env_provenance_records=[{"symbol": s,
+                                 "environment_contract_id": M.ENV_CONTRACT_ID,
+                                 "max_bars": None, "execution_frame_sha256": "x",
+                                 "raw_sha256": "y"} for s in M.SYMBOLS],
+    )
+
+
 def test_rc_t2_3_full_gate_fails_closed_on_incomplete_support():
-    ok = dict(n_symbols=M.FROZEN_FULL_SYMBOLS, n_candidates=M.FROZEN_FULL_CANDIDATE_ROWS,
-              n_gids=M.FROZEN_FULL_ORACLE_GIDS, a9_l2=M.FROZEN_FULL_A9_L2_ROWS,
-              e9_l2=M.FROZEN_FULL_E9_L2_ROWS, availability_masks_identical=True,
-              inferential_support_any=True, inferential_support_complete=True)
+    ok = _valid_gate_kwargs()
     M.check_full_population_gates(**ok)
     bad_complete = dict(ok); bad_complete["inferential_support_complete"] = False
     with pytest.raises(RuntimeError):
@@ -1457,21 +1474,16 @@ def test_fc16_12_all_zero_se_supported_band_q_is_zero():
 
 
 def test_fc16_13_unsupported_late_h_does_not_fail_full_gate():
-    M.check_full_population_gates(
-        n_symbols=M.FROZEN_FULL_SYMBOLS, n_candidates=M.FROZEN_FULL_CANDIDATE_ROWS,
-        n_gids=M.FROZEN_FULL_ORACLE_GIDS, a9_l2=M.FROZEN_FULL_A9_L2_ROWS,
-        e9_l2=M.FROZEN_FULL_E9_L2_ROWS, availability_masks_identical=True,
-        inferential_support_any=True, inferential_support_complete=True,
-        counters={"direction_chain_run_count": 1, "raw_exec_load_count": 15,
-                  "path_scan_count": 15, "reference_call_count_production": 0,
-                  "full_history_recompute_count": 0, "candidate_python_loop_count": 0,
-                  "hotloop_dataframe_concat_count": 0})
+    ok = _valid_gate_kwargs()
+    ok["counters"] = {"direction_chain_run_count": 1, "raw_exec_load_count": 15,
+                      "path_scan_count": 15, "reference_call_count_production": 0,
+                      "full_history_recompute_count": 0,
+                      "candidate_python_loop_count": 0,
+                      "hotloop_dataframe_concat_count": 0}
+    M.check_full_population_gates(**ok)
+    bad = dict(ok); bad["inferential_support_any"] = False
     with pytest.raises(RuntimeError):
-        M.check_full_population_gates(
-            n_symbols=M.FROZEN_FULL_SYMBOLS, n_candidates=M.FROZEN_FULL_CANDIDATE_ROWS,
-            n_gids=M.FROZEN_FULL_ORACLE_GIDS, a9_l2=M.FROZEN_FULL_A9_L2_ROWS,
-            e9_l2=M.FROZEN_FULL_E9_L2_ROWS, availability_masks_identical=True,
-            inferential_support_any=False, inferential_support_complete=True)
+        M.check_full_population_gates(**bad)
 
 
 def test_fc16_14_conditional_reclaim_evidence_long_schema(tmp_path):
@@ -1526,7 +1538,8 @@ def test_fc16_19_mocked_full_path_invokes_hard_gates(monkeypatch, tmp_path):
     monkeypatch.setattr(M, "ARTIFACT_DIR", str(tmp_path / "art"))
     monkeypatch.setattr(M, "EVIDENCE_DIR", str(tmp_path / "ev"))
     M.run_formal_t2(symbols=("AG",), n_subset=20, population="full",
-                    allow_full=True, write_artifacts=False, verbose=False)
+                    allow_full=True, authorized_review_sha="TESTREVIEWSHA",
+                    write_artifacts=False, verbose=False)
     assert seen, "full path must invoke the hard gates"
     assert "n_candidates" in seen and "inferential_support_any" in seen
 
@@ -1537,7 +1550,8 @@ def test_fc16_20_mocked_full_evidence_uses_canonical_dirs(monkeypatch, tmp_path)
     monkeypatch.setattr(M, "ARTIFACT_DIR", str(art))
     monkeypatch.setattr(M, "EVIDENCE_DIR", str(ev))
     res = M.run_formal_t2(symbols=("AG",), n_subset=20, population="full",
-                          allow_full=True, write_artifacts=True, verbose=False)
+                          allow_full=True, authorized_review_sha="TESTREVIEWSHA",
+                          write_artifacts=True, verbose=False)
     assert res["artifacts"]["directory"] == str(art)
     assert os.path.isfile(art / "entry_path_row_metrics_v1.parquet")
     assert os.path.isfile(art / "entry_path_curve_v1.parquet")
@@ -1552,15 +1566,117 @@ def test_fc16_21_full_evidence_manifest_contains_artifact_sha(monkeypatch, tmp_p
     monkeypatch.setattr(M, "ARTIFACT_DIR", str(art))
     monkeypatch.setattr(M, "EVIDENCE_DIR", str(ev))
     M.run_formal_t2(symbols=("AG",), n_subset=20, population="full",
-                    allow_full=True, write_artifacts=True, verbose=False)
+                    allow_full=True, authorized_review_sha="TESTREVIEWSHA",
+                    write_artifacts=True, verbose=False)
     with open(ev / "entry_path_atlas_v1_manifest.json") as f:
         man = json.load(f)
     shas = man["artifact_sha256"]
-    for k in ("row_metrics_parquet", "curve_parquet", "path_curves_csv",
-              "event_curves_csv", "group_stats_csv", "disagreement_csv",
-              "summary_json"):
+    for k in ("entry_path_row_metrics_v1.parquet", "entry_path_curve_v1.parquet",
+              "entry_path_atlas_v1_summary.json",
+              "entry_path_atlas_v1_path_curves.csv",
+              "entry_path_atlas_v1_event_curves.csv",
+              "entry_path_atlas_v1_group_stats.csv",
+              "entry_path_atlas_v1_a9_e9_disagreement.csv"):
         assert shas.get(k) and len(shas[k]) == 64
-    for k in ("generator_code_sha", "reviewed_parent_sha", "bootstrap_seed",
-              "bootstrap_B", "direction_artifact", "environment_identities",
-              "peak_rss", "counters", "verdict_e9", "unsupported_h"):
+    for k in ("authorized_review_sha", "generator_code_sha", "reviewed_parent_sha",
+              "bootstrap_seed", "bootstrap_B", "direction_artifact",
+              "environment_provenance", "population_gates", "peak_rss", "counters",
+              "verdict_e9", "unsupported_h"):
         assert k in man
+    assert man["authorized_review_sha"] == "TESTREVIEWSHA"
+
+
+# =========================================================================== #
+# FG1..FG12 revision regressions                                               #
+# =========================================================================== #
+def test_fg1_km_sequential_first_events_remove_prior_event_from_risk_set():
+    F, R, D = M.weighted_km_first_event(
+        np.array([1, 2]), np.array([4, 4]), np.ones(2), 4)
+    assert R[1] == 2.0 and D[1] == 1.0 and abs(F[1] - 0.5) < 1e-12
+    assert R[2] == 1.0 and D[2] == 1.0 and abs(F[2] - 1.0) < 1e-12
+    # the previous (buggy) implementation produced F(2)=0.75
+    assert abs(F[2] - 0.75) > 1e-9
+
+
+def test_fg2_wrong_symbol_universe_fails():
+    bad = _valid_gate_kwargs()
+    bad["symbol_universe"] = list(M.SYMBOLS[:-1]) + ["ZZ"]
+    with pytest.raises(RuntimeError, match="SYMBOL_UNIVERSE"):
+        M.check_full_population_gates(**bad)
+    short = _valid_gate_kwargs()
+    short["symbol_universe"] = list(M.SYMBOLS[:14])
+    with pytest.raises(RuntimeError):
+        M.check_full_population_gates(**short)
+
+
+def test_fg3_semantic_key_duplicate_fails():
+    bad = _valid_gate_kwargs()
+    bad["n_unique_semantic_keys"] = M.FROZEN_FULL_CANDIDATE_ROWS - 1
+    bad["semantic_key_duplicates"] = 1
+    with pytest.raises(RuntimeError):
+        M.check_full_population_gates(**bad)
+
+
+def test_fg3_l2_unique_key_duplicate_fails():
+    bad = _valid_gate_kwargs()
+    bad["l2_unique_keys"] = M.FROZEN_FULL_L2_ROWS - 1
+    with pytest.raises(RuntimeError):
+        M.check_full_population_gates(**bad)
+
+
+def test_fg4_oracle_side_counts_fail_even_with_total_638():
+    bad = _valid_gate_kwargs()
+    bad["oracle_long_gids"] = 318
+    bad["oracle_short_gids"] = 320
+    assert bad["n_gids"] == 638
+    with pytest.raises(RuntimeError):
+        M.check_full_population_gates(**bad)
+
+
+def test_fg5_missing_execution_frame_sha_fails():
+    bad = _valid_gate_kwargs()
+    bad["env_provenance_records"][0] = {
+        "symbol": "AG", "environment_contract_id": M.ENV_CONTRACT_ID,
+        "max_bars": None, "raw_sha256": "y"}   # no execution_frame_sha256
+    with pytest.raises(RuntimeError):
+        M.check_full_population_gates(**bad)
+    wrong_contract = _valid_gate_kwargs()
+    wrong_contract["env_provenance_records"][0]["environment_contract_id"] = "WRONG-CONTRACT"
+    with pytest.raises(RuntimeError):
+        M.check_full_population_gates(**wrong_contract)
+
+
+def test_fg6_full_run_requires_authorized_review_sha():
+    with pytest.raises(RuntimeError, match="AUTHORIZED_REVIEW_SHA"):
+        M.run_formal_t2(symbols=("AG",), population="full", allow_full=True)
+
+
+def test_fg7_streaming_writer_accepts_generator(tmp_path):
+    df1 = pd.DataFrame({"a": [1, 2], "b": [3.0, 4.0]})
+    df2 = pd.DataFrame({"a": [5], "b": [6.0]})
+    p = tmp_path / "curve.parquet"
+    M.write_curve_parquet(p, (d for d in (df1, df2)))   # generator, not a list
+    assert len(pd.read_parquet(p)) == 3
+    p2 = tmp_path / "rows.parquet"
+    M.write_row_metrics_parquet(p2, [df1, df2])          # list still works
+    assert len(pd.read_parquet(p2)) == 3
+
+
+def test_fg8_raw_frozen_geometry_in_l2_matches_anchor(ag_dual):
+    base, dual = ag_dual
+    frame = M.assemble_row_metrics(base, dual, "AG")
+    for c in M.RAW_GEOMETRY_COLUMNS:
+        assert c in frame.columns
+        exp = np.concatenate([base[c], base[c]])   # A9 rows then E9 rows
+        assert np.allclose(frame[c].to_numpy(), exp, equal_nan=True)
+
+
+def test_fg9_pre_t2_schema_metadata_matches_writer_constants():
+    with open(M.MANIFEST_JSON) as f:
+        man = json.load(f)
+    sch = man["artifact_schemas"]
+    assert sch["entry_path_atlas_v1_path_curves.csv"]["columns"] == list(M.PATH_CURVE_COLUMNS)
+    assert sch["entry_path_atlas_v1_event_curves.csv"]["columns"] == list(M.EVENT_CURVE_COLUMNS)
+    assert sch["entry_path_atlas_v1_a9_e9_disagreement.csv"]["key"] == ["scope", "scope_value"]
+    assert sch["entry_path_row_metrics_v1.parquet"]["columns"] == list(M.ROW_METRICS_COLUMNS)
+    assert sch["entry_path_curve_v1.parquet"]["columns"] == list(M.CURVE_COLUMNS)

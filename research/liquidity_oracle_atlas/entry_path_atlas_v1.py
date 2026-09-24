@@ -100,7 +100,7 @@ EVIDENCE_DIR = os.path.join("research", "liquidity_oracle_atlas", "evidence")
 MANIFEST_JSON = os.path.join(EVIDENCE_DIR, "entry_path_atlas_v1_manifest.json")
 T1_5_ARCHIVE_JSON = os.path.join(EVIDENCE_DIR, "entry_path_atlas_v1_t1_5_manifest.json")
 STAGE_PRE_T2 = "pre_t2_implementation"
-REVIEWED_PARENT_PRE_T2 = "e9498f9e6ed9bcdaf084639ce34510fb4dfac79e"
+REVIEWED_PARENT_PRE_T2 = "f1f035fa0bc2ff16c92d15ff079dc0186d178baf"
 R4_ENV_DIR = os.path.join("artifacts", "candidate_gate_r4_m15_touch_nextbar_v1")
 R4_ENV_MANIFEST = os.path.join(R4_ENV_DIR, "r4_env_manifest.json")
 
@@ -478,6 +478,10 @@ def load_env_provenance(symbol):
             raise RuntimeError(
                 f"STOP_PATH_ATLAS_ENV_PROVENANCE_MISSING_KEYS symbol={symbol} "
                 f"keys={missing}")
+        if ent["environment_contract_id"] != ENV_CONTRACT_ID:
+            raise RuntimeError(
+                f"STOP_PATH_ATLAS_ENV_CONTRACT_MISMATCH symbol={symbol} "
+                f"got={ent['environment_contract_id']} expected={ENV_CONTRACT_ID}")
         mb = _normalize_max_bars(ent["max_bars"])
         if mb is not None:
             # smoke / partial cache is not acceptable for formal use
@@ -677,11 +681,15 @@ def build_base_anchors(e9_df_symbol: pd.DataFrame, state: SymbolState) -> dict:
         "fill_trading_day": state.trading_day[fill],
         # raw canonical identities preserved (never collapsed)
         "raw_sup_top": state.sup_top[dec], "raw_sup_bottom": state.sup_bottom[dec],
+        "raw_sup_strength": state.sup_strength[dec],
         "raw_res_top": state.res_top[dec], "raw_res_bottom": state.res_bottom[dec],
+        "raw_res_strength": state.res_strength[dec],
         "raw_liq_up_top": state.liq_up_top[dec],
         "raw_liq_up_bottom": state.liq_up_bottom[dec],
+        "raw_liq_up_level": state.liq_up_level[dec],
         "raw_liq_dn_top": state.liq_dn_top[dec],
         "raw_liq_dn_bottom": state.liq_dn_bottom[dec],
+        "raw_liq_dn_level": state.liq_dn_level[dec],
     }
 
 
@@ -1649,14 +1657,28 @@ def _event_orientation(name: str) -> str:
     return "correct_minus_wrong"
 
 
-# Full-population hard-gate constants (RC-T2-14). Verified by the frozen
+# Full-population hard-gate constants (RC-T2-14 / FG2-FG4). Verified by the frozen
 # 13773-Candidate population; used only when Formal T2 is later authorized.
 FROZEN_FULL_SYMBOLS = 15
 FROZEN_FULL_CANDIDATE_ROWS = 13773
 FROZEN_FULL_ORACLE_GIDS = 638
+FROZEN_FULL_ORACLE_LONG_GIDS = 319
+FROZEN_FULL_ORACLE_SHORT_GIDS = 319
 FROZEN_FULL_A9_L2_ROWS = 13773
 FROZEN_FULL_E9_L2_ROWS = 13773
 FROZEN_FULL_L2_ROWS = 27546
+
+# FG5: canonical R4 environment contract id (must match for formal provenance).
+ENV_CONTRACT_ID = "FUTURE-R4-M15-ENVIRONMENT-V1"
+
+# FG8: frozen decision-time canonical zone geometry persisted in Formal L2 so
+# later STOP-LOSS/TAKE-PROFIT experiments need not rebuild the environment.
+RAW_GEOMETRY_COLUMNS = [
+    "raw_sup_top", "raw_sup_bottom", "raw_sup_strength",
+    "raw_res_top", "raw_res_bottom", "raw_res_strength",
+    "raw_liq_up_top", "raw_liq_up_bottom", "raw_liq_up_level",
+    "raw_liq_dn_top", "raw_liq_dn_bottom", "raw_liq_dn_level",
+]
 
 
 def build_group_curve_sufficient_stats(value_matrix, correct, gid, weight):
@@ -1882,10 +1904,14 @@ def weighted_km_first_event(event_step, censor_step, weight, max_step):
     weight = np.asarray(weight, dtype=np.float64)
     H = int(max_step)
     idx = np.arange(H + 1)
-    observed = np.where(event_step >= 0, event_step, -1)
-    # an event only counts if observed before/at censor
-    observed = np.where(observed > censor_step, -1, observed)
-    at_risk = (censor_step[:, None] >= idx[None, :])            # (N, H+1)
+    # FG1: an event is observed only if it occurs at/before censoring.
+    observed = np.where((event_step >= 0) & (event_step <= censor_step),
+                        event_step, -1)
+    # FG1: a Candidate leaves the risk set immediately AFTER its first observed
+    # event. At event-time h it is STILL at risk (included in R(h) and D(h)); from
+    # h+1 onward it is removed. Without this, multi-event curves are biased low.
+    at_risk = (censor_step[:, None] >= idx[None, :]) & (
+        (observed[:, None] < 0) | (observed[:, None] >= idx[None, :]))  # (N, H+1)
     R = (at_risk * weight[:, None]).sum(0)                       # (H+1,) risk mass
     happened = (observed[:, None] == idx[None, :])              # (N, H+1)
     D = (happened * weight[:, None]).sum(0)                      # (H+1,) event mass
@@ -2102,6 +2128,7 @@ ROW_METRICS_COLUMNS = [
     "semantic_key", "symbol", "gid", "direction_system", "direction",
     "sample_weight_raw", "decision_time", "fill_time", "entry_price", "ATR0",
     "segment", "trading_day",
+] + list(RAW_GEOMETRY_COLUMNS) + [
     "oracle_direction", "direction_correct", "oracle_entry_quality_atr",
     "teacher_exit_return_atr", "oracle_exit_fill_time", "agreement_class",
 ] + list(_EVENT_FIELDS) + [
@@ -2187,6 +2214,8 @@ def assemble_row_metrics(base, dual, symbol):
             "oracle_exit_fill_time": oexit, "agreement_class": cls,
             "mfe_final": out["mfe_final"], "mae_final": out["mae_final"],
         }
+        for c in RAW_GEOMETRY_COLUMNS:
+            rec[c] = base[c]
         for f in _EVENT_FIELDS:
             rec[f] = out[f]
         for name in CHECKPOINT_NAMES:
@@ -2196,26 +2225,41 @@ def assemble_row_metrics(base, dual, symbol):
     return pd.concat(parts, ignore_index=True)[ROW_METRICS_COLUMNS]
 
 
+def _write_chunked_parquet(path, chunks, empty_msg):
+    """FG7: stream an iterable/generator of DataFrame chunks to one parquet file.
+
+    Accepts a list, iterator or generator. The schema is taken from the first
+    NON-empty chunk; empty chunks are skipped. Only one chunk is materialized at
+    a time, so the caller must NOT build the full list of long-format frames.
+    """
+    table = None
+    writer = None
+    try:
+        for ch in chunks:
+            if ch is None or len(ch) == 0:
+                continue
+            if writer is None:
+                table = pa.Table.from_pandas(ch, preserve_index=False)
+                writer = pq.ParquetWriter(path, table.schema)
+                writer.write_table(table)
+            else:
+                writer.write_table(
+                    pa.Table.from_pandas(ch, preserve_index=False, schema=table.schema))
+        if writer is None:
+            raise RuntimeError(empty_msg)
+    finally:
+        if writer is not None:
+            writer.close()
+
+
 def write_row_metrics_parquet(path, frames):
-    """Write the L2 row-metrics parquet (one table, single writer)."""
-    if not frames:
-        raise RuntimeError("STOP_EMPTY_ROW_METRICS")
-    table = pa.Table.from_pandas(frames[0], preserve_index=False)
-    with pq.ParquetWriter(path, table.schema) as w:
-        w.write_table(table)
-        for fr in frames[1:]:
-            w.write_table(pa.Table.from_pandas(fr, preserve_index=False, schema=table.schema))
+    """Write the L2 row-metrics parquet from an iterable/generator of chunks."""
+    _write_chunked_parquet(path, frames, "STOP_EMPTY_ROW_METRICS")
 
 
 def write_curve_parquet(path, chunks):
-    """Write the long-format 15m curve parquet (single writer, chunked append)."""
-    if not chunks:
-        raise RuntimeError("STOP_EMPTY_CURVE")
-    table = pa.Table.from_pandas(chunks[0], preserve_index=False)
-    with pq.ParquetWriter(path, table.schema) as w:
-        w.write_table(table)
-        for ch in chunks[1:]:
-            w.write_table(pa.Table.from_pandas(ch, preserve_index=False, schema=table.schema))
+    """Write the long-format 15m curve parquet from an iterable/generator of chunks."""
+    _write_chunked_parquet(path, chunks, "STOP_EMPTY_CURVE")
 
 
 # --------------------------------------------------------------------------- #
@@ -2363,43 +2407,77 @@ def write_summary_json(path, summary):
         json.dump(_clean(summary), f, indent=2)
 
 
-def check_full_population_gates(*, n_symbols, n_candidates, n_gids, a9_l2, e9_l2,
+def check_full_population_gates(*, symbol_universe, n_candidates,
+                                n_unique_semantic_keys, semantic_key_duplicates,
+                                n_gids, oracle_long_gids, oracle_short_gids,
+                                a9_l2, e9_l2, l2_unique_keys,
                                 availability_masks_identical,
                                 inferential_support_any,
                                 inferential_support_complete,
-                                counters=None):
-    """FC13: hard gates enforced only when the full 13773 population runs.
+                                env_provenance_records, counters=None,
+                                expected_symbols=SYMBOLS):
+    """FG10: hard gates enforced only when the full 13773 population runs.
 
     Implemented NOW; invoked by the authorized full run (not in PRE-T2).
 
     FC6: we do NOT require every h to have inferential support. We require
     (a) at least one h has inferential support, and (b) every h MARKED as
-    inferential_support=True has B/B valid correct+wrong bootstrap replicates.
+    inferential_support true has B/B valid correct+wrong bootstrap replicates.
     Unsupported (late, descriptive) h must not fail the gate by itself.
     """
+    # FG2: exact frozen symbol universe (order normalized).
+    got = sorted(str(s) for s in symbol_universe)
+    exp = sorted(str(s) for s in expected_symbols)
+    if got != exp or len(set(got)) != len(got):
+        raise RuntimeError(
+            f"STOP_PATH_CURVE_FULL_SYMBOL_UNIVERSE_MISMATCH got={got} expected={exp}")
+
     mism = {}
-    if n_symbols != FROZEN_FULL_SYMBOLS:
-        mism["symbols"] = (n_symbols, FROZEN_FULL_SYMBOLS)
     if n_candidates != FROZEN_FULL_CANDIDATE_ROWS:
         mism["candidates"] = (n_candidates, FROZEN_FULL_CANDIDATE_ROWS)
+    if n_unique_semantic_keys != FROZEN_FULL_CANDIDATE_ROWS:
+        mism["unique_semantic_keys"] = (n_unique_semantic_keys,
+                                        FROZEN_FULL_CANDIDATE_ROWS)
+    if semantic_key_duplicates != 0:
+        mism["semantic_key_duplicates"] = semantic_key_duplicates
     if n_gids != FROZEN_FULL_ORACLE_GIDS:
         mism["oracle_gids"] = (n_gids, FROZEN_FULL_ORACLE_GIDS)
+    if oracle_long_gids != FROZEN_FULL_ORACLE_LONG_GIDS:
+        mism["oracle_long_gids"] = (oracle_long_gids, FROZEN_FULL_ORACLE_LONG_GIDS)
+    if oracle_short_gids != FROZEN_FULL_ORACLE_SHORT_GIDS:
+        mism["oracle_short_gids"] = (oracle_short_gids, FROZEN_FULL_ORACLE_SHORT_GIDS)
     if a9_l2 != FROZEN_FULL_A9_L2_ROWS:
         mism["a9_l2"] = a9_l2
     if e9_l2 != FROZEN_FULL_E9_L2_ROWS:
         mism["e9_l2"] = e9_l2
+    if l2_unique_keys != FROZEN_FULL_L2_ROWS:
+        mism["l2_unique_keys"] = (l2_unique_keys, FROZEN_FULL_L2_ROWS)
     if not availability_masks_identical:
         mism["availability_masks"] = True
     if not inferential_support_any:
         mism["no_inferential_support"] = True
     if not inferential_support_complete:
         mism["incomplete_supported_h"] = True
+    # FG5: canonical environment provenance for all 15 symbols.
+    recs = list(env_provenance_records or [])
+    if len(recs) != len(expected_symbols):
+        mism["env_provenance_count"] = (len(recs), len(expected_symbols))
+    for rec in recs:
+        sym = rec.get("symbol")
+        if rec.get("environment_contract_id") != ENV_CONTRACT_ID:
+            mism[f"env_contract:{sym}"] = rec.get("environment_contract_id")
+        if rec.get("max_bars") is not None:
+            mism[f"env_max_bars:{sym}"] = rec.get("max_bars")
+        if not rec.get("execution_frame_sha256"):
+            mism[f"env_exec_frame_sha:{sym}"] = "missing"
+        if not rec.get("raw_sha256"):
+            mism[f"env_raw_sha:{sym}"] = "missing"
     if counters is not None:
-        exp = {"direction_chain_run_count": 1, "raw_exec_load_count": 15,
-               "path_scan_count": 15, "reference_call_count_production": 0,
-               "full_history_recompute_count": 0, "candidate_python_loop_count": 0,
-               "hotloop_dataframe_concat_count": 0}
-        for k, v in exp.items():
+        cexp = {"direction_chain_run_count": 1, "raw_exec_load_count": 15,
+                "path_scan_count": 15, "reference_call_count_production": 0,
+                "full_history_recompute_count": 0, "candidate_python_loop_count": 0,
+                "hotloop_dataframe_concat_count": 0}
+        for k, v in cexp.items():
             if int(counters.get(k, -1)) != v:
                 mism[f"counter:{k}"] = (counters.get(k), v)
     if mism:
@@ -2407,23 +2485,27 @@ def check_full_population_gates(*, n_symbols, n_candidates, n_gids, a9_l2, e9_l2
 
 
 def run_formal_t2(symbols=SYMBOLS, n_subset=None, write_artifacts=False,
-                  population="small", allow_full=False, verbose=True):
-    """Formal T2 production call graph (FC1..FC15).
+                  population="small", allow_full=False, authorized_review_sha=None,
+                  verbose=True):
+    """Formal T2 production call graph (FC1..FC15 / FG1..FG11).
 
     Per symbol: load canonical environment ONCE, build BaseAnchor ONCE, build A9
     and E9 views, stack to 2N, ONE streaming scan with curve capture. Never calls
     the Reference kernel, never recomputes environment/ATR/zones per system, never
     selects a single best-h.
 
-    FC12: the full 13773-Candidate Formal path is ALREADY implemented behind an
-    explicit switch. ``population="full"`` requires ``allow_full=True``; otherwise
-    it raises STOP_FORMAL_T2_FULL_POPULATION_NOT_AUTHORIZED. Once authorized, the
-    already-reviewed path executes with no code change.
+    FG6: the full Formal path is implemented behind an explicit switch.
+    ``population="full"`` requires ``allow_full=True`` AND ``authorized_review_sha``
+    (the approved PRE-T2 remote SHA). Once approved, the frozen path executes with
+    no code change; the manifest records both the approved review SHA and the
+    generator tree SHA.
     """
     if population not in ("small", "full"):
         raise ValueError(f"unknown population: {population}")
     if population == "full" and allow_full is not True:
         raise RuntimeError("STOP_FORMAL_T2_FULL_POPULATION_NOT_AUTHORIZED")
+    if population == "full" and not authorized_review_sha:
+        raise RuntimeError("STOP_FORMAL_T2_AUTHORIZED_REVIEW_SHA_REQUIRED")
     t_start = time.time()
     reset_counters()
     if verbose:
@@ -2574,8 +2656,11 @@ def run_formal_t2(symbols=SYMBOLS, n_subset=None, write_artifacts=False,
         {"MFE": a9_mfe, "MAE": a9_mae, "PS": a9_ps, "R": a9_r},
         a9_correct, a9_side, gid_all, lm_steps, w_all, "A9")
 
-    # ---- disagreement decomposition (FC11): overall + by scope ----
-    env_ids = [_env_identity(s["st"]) for s in sym_acc]
+    # ---- environment provenance (FG5): canonical R4 identity is authoritative;
+    # the derived _env_identity hash is recorded only as diagnostic evidence ----
+    env_records = [dict(s["st"].env_provenance) for s in sym_acc]
+    env_diag = [_env_identity(s["st"]) for s in sym_acc]
+    env_ids = env_records
     agreement_all = (a9_correct == e9_correct)
     a9_dir_all = np.concatenate([s["base"]["a9_direction"] for s in sym_acc])
     e9_dir_all = np.concatenate([s["base"]["e9_direction"] for s in sym_acc])
@@ -2756,19 +2841,43 @@ def run_formal_t2(symbols=SYMBOLS, n_subset=None, write_artifacts=False,
             "first_h_bar": int(np.flatnonzero(unsup)[0] + 1) if unsup.any() else None,
             "last_h_bar": int(np.flatnonzero(unsup)[-1] + 1) if unsup.any() else None,
         }
-        # ---- FC13: full hard gates (enforced only on the authorized full run) ----
+        # ---- FG10: full hard gates (enforced only on the authorized full run) ----
         B = int(np.asarray(ps["reps"]).shape[0])
         support_complete = bool(
             sup.any()
             and np.all(np.asarray(ps["n_valid_correct"])[sup] == B)
             and np.all(np.asarray(ps["n_valid_wrong"])[sup] == B))
+        sk_all = np.concatenate([s["base"]["semantic_key"] for s in sym_acc])
+        n_unique_sk = int(len(np.unique(sk_all)))
+        oracle_long = int(len(np.unique(gid_all[oracle_dir_all == "LONG"])))
+        oracle_short = int(len(np.unique(gid_all[oracle_dir_all == "SHORT"])))
+        l2_unique = int(len({(str(k), ds) for k in sk_all for ds in ("A9", "E9")}))
+        result["population_gates"] = {
+            "symbol_universe": sorted(str(s["symbol"]) for s in sym_acc),
+            "n_candidates": int(N_total),
+            "n_unique_semantic_keys": n_unique_sk,
+            "semantic_key_duplicates": int(N_total - n_unique_sk),
+            "n_gids": int(len(np.unique(gid_all))),
+            "oracle_long_gids": oracle_long,
+            "oracle_short_gids": oracle_short,
+            "a9_l2": int(N_total), "e9_l2": int(N_total),
+            "l2_unique_keys": l2_unique,
+            "availability_masks_identical": availability_masks_identical,
+            "inferential_support_any": bool(sup.any()),
+            "inferential_support_complete": support_complete,
+        }
         check_full_population_gates(
-            n_symbols=len(sym_acc), n_candidates=int(N_total),
+            symbol_universe=[s["symbol"] for s in sym_acc],
+            n_candidates=int(N_total),
+            n_unique_semantic_keys=n_unique_sk,
+            semantic_key_duplicates=int(N_total - n_unique_sk),
             n_gids=int(len(np.unique(gid_all))),
-            a9_l2=int(N_total), e9_l2=int(N_total),
+            oracle_long_gids=oracle_long, oracle_short_gids=oracle_short,
+            a9_l2=int(N_total), e9_l2=int(N_total), l2_unique_keys=l2_unique,
             availability_masks_identical=availability_masks_identical,
             inferential_support_any=bool(sup.any()),
-            inferential_support_complete=support_complete, counters=COUNTERS)
+            inferential_support_complete=support_complete,
+            env_provenance_records=env_records, counters=COUNTERS)
 
     if write_artifacts:
         # FC14: small smoke -> temporary dir only; authorized full -> canonical paths
@@ -2782,12 +2891,14 @@ def run_formal_t2(symbols=SYMBOLS, n_subset=None, write_artifacts=False,
         os.makedirs(ev_dir, exist_ok=True)
         row_parquet = os.path.join(out_dir, "entry_path_row_metrics_v1.parquet")
         curve_parquet = os.path.join(out_dir, "entry_path_curve_v1.parquet")
+        # FG7: stream chunks (generator) so all long-format frames are never held
+        # in memory simultaneously.
         write_row_metrics_parquet(
             row_parquet,
-            [assemble_row_metrics(s["base"], s["dual"], s["symbol"]) for s in sym_acc])
+            (assemble_row_metrics(s["base"], s["dual"], s["symbol"]) for s in sym_acc))
         write_curve_parquet(
             curve_parquet,
-            [curve_chunk_from_dual(s["base"], s["dual"], s["symbol"]) for s in sym_acc])
+            (curve_chunk_from_dual(s["base"], s["dual"], s["symbol"]) for s in sym_acc))
         p_csv = os.path.join(ev_dir, "entry_path_atlas_v1_path_curves.csv")
         e_csv = os.path.join(ev_dir, "entry_path_atlas_v1_event_curves.csv")
         g_csv = os.path.join(ev_dir, "entry_path_atlas_v1_group_stats.csv")
@@ -2826,18 +2937,35 @@ def run_formal_t2(symbols=SYMBOLS, n_subset=None, write_artifacts=False,
         if not smoke:
             write_manifest(extra={
                 "stage": "formal_t2",
+                "authorized_review_sha": authorized_review_sha,
                 "generator_code_sha": _git_head_sha(),
                 "reviewed_parent_sha": REVIEWED_PARENT_PRE_T2,
                 "bootstrap_seed": 20260924,
                 "bootstrap_B": int(np.asarray(e9_curves["PS"]["reps"]).shape[0]),
+                "simultaneous_band_method": "studentized max-|t| over inferential-support h",
                 "direction_artifact": {"path": E9_STATE_PARQUET,
                                        "sha256": _sha256_file(E9_STATE_PARQUET)},
-                "environment_identities": env_ids,
+                "environment_provenance": env_records,
+                "environment_derived_sha256": env_diag,
+                "population_gates": _clean(result.get("population_gates")),
                 "peak_rss": int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss),
                 "counters": dict(COUNTERS),
+                "runtime_sec": float(perf["runtime_sec"]),
                 "verdict_e9": result.get("verdict_e9"),
+                "earliest_supported_positive_h_bar":
+                    result.get("earliest_supported_positive_h_bar"),
+                "earliest_supported_negative_h_bar":
+                    result.get("earliest_supported_negative_h_bar"),
                 "unsupported_h": _clean(result.get("unsupported_h")),
-                "artifact_sha256": artifact_shas,
+                "artifact_sha256": {
+                    "entry_path_row_metrics_v1.parquet": artifact_shas["row_metrics_parquet"],
+                    "entry_path_curve_v1.parquet": artifact_shas["curve_parquet"],
+                    "entry_path_atlas_v1_summary.json": artifact_shas["summary_json"],
+                    "entry_path_atlas_v1_path_curves.csv": artifact_shas["path_curves_csv"],
+                    "entry_path_atlas_v1_event_curves.csv": artifact_shas["event_curves_csv"],
+                    "entry_path_atlas_v1_group_stats.csv": artifact_shas["group_stats_csv"],
+                    "entry_path_atlas_v1_a9_e9_disagreement.csv": artifact_shas["disagreement_csv"],
+                },
                 "unverified_items": [
                     "Stop-Loss / Take-Profit experiments NOT run.",
                     "A9-vs-E9 final system verdict reserved for downstream frozen ablation.",
@@ -2881,7 +3009,7 @@ def run_pret2_checkpoint(verbose=True) -> dict:
     """PRE-T2 checkpoint: validate the 15m curve + event infrastructure on
     synthetic / small fixtures; do NOT estimate the full primary curve.
 
-    Produces the authoritative PRE-T2 manifest (reviewed parent = e9498f9).
+    Produces the authoritative PRE-T2 manifest (reviewed parent = f1f035f).
     """
     t_start = time.time()
     archive_t1_5_manifest()
@@ -2917,6 +3045,12 @@ def run_pret2_checkpoint(verbose=True) -> dict:
     km_censor2 = np.array([4, 4, 2], dtype=np.int64)
     Fk2, _, _ = weighted_km_first_event(km_ev2, km_censor2, km_w, 4)
     km_censor_ok = (abs(Fk2[2] - 1.0 / 3.0) < 1e-12) and (abs(Fk2[4] - 1.0 / 3.0) < 1e-12)
+    # FG1: sequential first events (A@1, B@2) -> risk set shrinks after each event.
+    Fseq, Rseq, Dseq = weighted_km_first_event(
+        np.array([1, 2]), np.array([4, 4]), np.ones(2), 4)
+    km_seq_ok = (abs(Fseq[1] - 0.5) < 1e-12 and abs(Fseq[2] - 1.0) < 1e-12
+                 and Rseq[1] == 2.0 and Dseq[1] == 1.0
+                 and Rseq[2] == 1.0 and Dseq[2] == 1.0)
 
     # (d) disagreement arithmetic identity
     arith = verify_disagreement_arithmetic(
@@ -2952,15 +3086,20 @@ def run_pret2_checkpoint(verbose=True) -> dict:
             "deterministic_under_frozen_seed": band_deterministic, "seed": 20260924,
             "computed_over_inference_support_only": True,
         },
-        "kaplan_meier_synthetic": {"math_ok": bool(km_ok), "censoring_ok": bool(km_censor_ok)},
+        "kaplan_meier_synthetic": {"math_ok": bool(km_ok),
+                                   "censoring_ok": bool(km_censor_ok),
+                                   "sequential_event_ok": bool(km_seq_ok)},
         "disagreement_arithmetic": arith,
         "full_population_gates": {
-            "frozen_symbols": FROZEN_FULL_SYMBOLS,
+            "frozen_symbol_universe": list(SYMBOLS),
             "frozen_candidate_rows": FROZEN_FULL_CANDIDATE_ROWS,
             "frozen_oracle_gids": FROZEN_FULL_ORACLE_GIDS,
+            "frozen_oracle_long_gids": FROZEN_FULL_ORACLE_LONG_GIDS,
+            "frozen_oracle_short_gids": FROZEN_FULL_ORACLE_SHORT_GIDS,
             "frozen_a9_l2_rows": FROZEN_FULL_A9_L2_ROWS,
             "frozen_e9_l2_rows": FROZEN_FULL_E9_L2_ROWS,
             "frozen_total_l2_rows": FROZEN_FULL_L2_ROWS,
+            "env_contract_id": ENV_CONTRACT_ID,
             "enforced_on": "authorized full run only (not PRE-T2)",
         },
         "formal_t2_small_ag": {
@@ -2977,23 +3116,27 @@ def run_pret2_checkpoint(verbose=True) -> dict:
         "artifact_schemas": {
             "entry_path_row_metrics_v1.parquet": {
                 "key": ["semantic_key", "direction_system"],
-                "expected_rows_full": 27546,
-                "columns": ROW_METRICS_COLUMNS,
+                "expected_rows_full": FROZEN_FULL_L2_ROWS,
+                "columns": list(ROW_METRICS_COLUMNS),
+                "raw_geometry_columns": list(RAW_GEOMETRY_COLUMNS),
+                "written_streaming": True,
             },
             "entry_path_curve_v1.parquet": {
                 "key": ["semantic_key", "direction_system", "h_bar"],
                 "format": "long",
-                "columns": CURVE_COLUMNS,
+                "columns": list(CURVE_COLUMNS),
                 "observed_bar_minutes": "15 * h_bar (bar-time, not wall-clock)",
+                "written_streaming": True,
             },
             "entry_path_atlas_v1_path_curves.csv": {
                 "key": ["direction_system", "metric", "h_bar"],
-                "includes": ["inferential_support", "n_valid_correct", "n_valid_wrong",
-                             "avail_overall_rows", "avail_overall_fraction",
-                             "avail_correct_rows", "avail_wrong_rows", "flag"],
+                "columns": list(PATH_CURVE_COLUMNS),
+                "availability_strata": ["overall", "correct", "wrong", "LONG", "SHORT"],
             },
             "entry_path_atlas_v1_event_curves.csv": {
-                "key": ["event_type", "name", "direction_system", "h_bar"],
+                "key": ["event_type", "name", "direction_system", "group",
+                        "stat_name", "h_bar"],
+                "columns": list(EVENT_CURVE_COLUMNS),
                 "event_types": ["first_event_curve", "state_prevalence",
                                 "conditional_reclaim_stat", "terminal_rate"],
             },
@@ -3004,14 +3147,18 @@ def run_pret2_checkpoint(verbose=True) -> dict:
                            "correct_SHORT", "wrong_SHORT"],
             },
             "entry_path_atlas_v1_a9_e9_disagreement.csv": {
-                "key": ["symbol"],
-                "columns": ["agreement", "disagreement", "e9_fix", "e9_break"],
+                "key": ["scope", "scope_value"],
+                "columns": ["scope", "scope_value", "agreement", "disagreement",
+                            "e9_fix", "e9_break", "n_rows", "weight_mass"],
+                "scopes": ["overall", "symbol", "oracle_direction",
+                           "a9_predicted_direction", "e9_predicted_direction"],
             },
             "entry_path_atlas_v1_summary.json": {"schema": "full summary dict"},
         },
         "governance": {
             "full_13773_formal_t2": "NOT RUN (not authorized at PRE-T2)",
-            "formal_runner_guard": "population='full' raises STOP_FORMAL_T2_FULL_POPULATION_NOT_AUTHORIZED",
+            "formal_runner_guard": "population='full' requires allow_full=True AND "
+                                   "authorized_review_sha (FG6)",
             "no_best_h_selection": True,
             "reference_kernel_never_called_in_formal_runner": True,
             "one_dual_production_scan_per_symbol": True,
