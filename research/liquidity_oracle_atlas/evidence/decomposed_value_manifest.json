@@ -1,0 +1,166 @@
+{
+  "task_id": "FUTURE-R10-M15-SEQUENTIAL-DECOMPOSED-POLICY-V1",
+  "authorized_review_sha": "5f2fe34accb42268ba729fd47b20d759c4579fbc",
+  "generator_code_sha": "5f2fe34accb42268ba729fd47b20d759c4579fbc",
+  "reviewed_parent_sha": "5f2fe34accb42268ba729fd47b20d759c4579fbc",
+  "scientific_status": "LOCKED_DEVELOPMENT_TEST_NOT_PRISTINE_CONFIRMATION",
+  "verdict": "NO_IDENTIFIABLE_DECOMPOSED_VALUE_EDGE",
+  "e9_reproduction": {
+    "n_frozen_rows": 13773,
+    "n_missing": 0,
+    "n_mismatch": 0,
+    "ok": true,
+    "root_candidates_total": 14637,
+    "root_candidates_overlapping_frozen": 13773,
+    "root_candidates_outside_frozen_research_population": 864
+  },
+  "decomposition_identity": {
+    "max_abs_dev": 4.440892098500626e-16,
+    "ok": true
+  },
+  "performance_gates": {
+    "expected": {
+      "test_state_loads": 1,
+      "test_prediction_loads": 1,
+      "direction_chain_fits": 1,
+      "direction_batch_prediction_passes": 1,
+      "environment_recomputes": 0,
+      "geometry_recomputes": 0,
+      "model_predict_calls_inside_simulator": 0,
+      "path_scans_inside_simulator": 0,
+      "test_label_reads_during_strategy": 0,
+      "sequential_symbol_loops": 75
+    },
+    "actual": {
+      "test_state_loads": 1,
+      "test_prediction_loads": 1,
+      "direction_chain_fits": 1,
+      "direction_batch_prediction_passes": 1,
+      "environment_recomputes": 0,
+      "geometry_recomputes": 0,
+      "model_predict_calls_inside_simulator": 0,
+      "path_scans_inside_simulator": 0,
+      "test_label_reads_during_strategy": 0,
+      "sequential_symbol_loops": 75
+    },
+    "mismatch": {},
+    "pass": true
+  },
+  "test_label_governance": {
+    "test_label_reads_during_fit": {
+      "r9a": 0,
+      "r9b": 0
+    },
+    "test_label_reads_during_strategy": 0,
+    "post_verdict_test_label_reads": 1
+  },
+  "lineage": {
+    "pretest_evidence_sha256": "3613d334ee3731e95a5a2cec3c1a77881c22a84666c45cc7990f2ac0d29f9394",
+    "r8_generator_code_sha": "17305df8b7f5c32484605ae0b8fdeccf9a460158",
+    "r8_artifact_sha256": {
+      "state_v1.parquet": "b0ae386fa8da9f723a1f1f596495d97b8325bb24f02cc566f146a42c6fbcebe9",
+      "win_features_v1.parquet": "8e4a79454c51990ebf1c21259aa4e9233f6baa74d621e5f33a8edb4bc83d8ce7",
+      "payoff_features_v1.parquet": "7723b55405d12f54486c75fa91ac6dbea57340319701d47efdfd4b3e8beb6178",
+      "renewal_event_axis_v1.parquet": "2cf8a2c0e4409835a72934c669f28e064eff0b2b859d5e636d4cb24dad087dec",
+      "labels_train_v1.parquet": "c9cb77b82ecd9b8996c9ce064a18dbb5ccbcacbd4743ad2cd3dc58c1fae1a61e",
+      "labels_val_v1.parquet": "389b36c535dd4cd82a4581ffdb3fb5c62b7bcd2e8bcd4289ce8b368260914865",
+      "labels_test_v1.parquet": "1ae752ede0ca693e7c4bbae15414d73981f28b6b56093883513fab473cb4fc3d"
+    },
+    "win33_schema_sha256": "f1338aeec28fb5498a804412bea3f6714196d00081f8e520b8196a5e9064b8f4",
+    "pay8_schema_sha256": "7bdc493e4268f8051f4e601a56b2fe608dc1600b2c044a5f84d6e3be9ad2fcf3",
+    "r9a_generator_code_sha": "17305df8b7f5c32484605ae0b8fdeccf9a460158",
+    "r9a_model_sha256": {
+      "td1_win.txt": "6622649b7c78292bb730bee4f9723c0693c6b1de5682c4d43c1376c99d659261",
+      "td3_win.txt": "aae8571fca527540d93e04de1fbce9548e6ef5bb37d865ac45767cf43b47e98f",
+      "td5_win.txt": "f5cc1e669a10575c0c510ea26aa366b701ce2f2a88e79ea8131b705d07c95002"
+    },
+    "r9b_generator_code_sha": "17305df8b7f5c32484605ae0b8fdeccf9a460158",
+    "r9b_model_sha256": {
+      "td1_win_mag.txt": "3cf03d18dfd82a8bbcdf80e3028dab6f2d91c0355dc540acb73e2f5529b5a765",
+      "td1_loss_mag.txt": "df0d5c7173cbe7320a10198ee6c11d570e1e2d3c40f2e6eb08509d1b538c2742",
+      "td3_win_mag.txt": "c0583aa0a54178469e9360857d78b26b6888d9509253be308258a41a53999de6",
+      "td3_loss_mag.txt": "27c389ec62735206aae88abe171c1c634403a76ac0d09c2ad44417d6cb7ec855",
+      "td5_win_mag.txt": "3b2ea2118495bfcbf8b3387a6cd3525638836b03ab0c10683e79fe906d4ec2af",
+      "td5_loss_mag.txt": "bd4c74571a67f93554e08d2d408d843248c3cf7d7d3c642bfa0d5a5bb90d84c7"
+    },
+    "train_priors": {
+      "td1": {
+        "p0": 0.4825694414445548,
+        "muW0": 1.1286037097380226,
+        "muL0": 1.052565707253586,
+        "RR0": 1.0722406230418045
+      },
+      "td3": {
+        "p0": 0.487441639287567,
+        "muW0": 1.6701327986194268,
+        "muL0": 1.5882918543274445,
+        "RR0": 1.051527648441311
+      },
+      "td5": {
+        "p0": 0.4874848694449248,
+        "muW0": 1.7200546652621527,
+        "muL0": 1.6360504772323956,
+        "RR0": 1.0513457189730855
+      }
+    },
+    "r9_pretest_binding": {
+      "R9A": {
+        "model_dir": "artifacts/decomposed_value_v1/models/win",
+        "fields_verified": [
+          "best_iteration",
+          "feature_schema_sha256",
+          "generator_code_sha",
+          "labels_train_sha256",
+          "labels_val_sha256",
+          "model_count",
+          "model_sha256",
+          "task_id",
+          "upstream_feature_sha256",
+          "upstream_state_sha256"
+        ],
+        "models_verified": {
+          "td1_win.txt": "6622649b7c78292bb730bee4f9723c0693c6b1de5682c4d43c1376c99d659261",
+          "td3_win.txt": "aae8571fca527540d93e04de1fbce9548e6ef5bb37d865ac45767cf43b47e98f",
+          "td5_win.txt": "f5cc1e669a10575c0c510ea26aa366b701ce2f2a88e79ea8131b705d07c95002"
+        },
+        "model_count": 3
+      },
+      "R9B": {
+        "model_dir": "artifacts/decomposed_value_v1/models/payoff",
+        "fields_verified": [
+          "best_iteration",
+          "feature_schema_sha256",
+          "generator_code_sha",
+          "labels_train_sha256",
+          "labels_val_sha256",
+          "model_count",
+          "model_sha256",
+          "task_id",
+          "upstream_feature_sha256",
+          "upstream_state_sha256"
+        ],
+        "models_verified": {
+          "td1_loss_mag.txt": "df0d5c7173cbe7320a10198ee6c11d570e1e2d3c40f2e6eb08509d1b538c2742",
+          "td1_win_mag.txt": "3cf03d18dfd82a8bbcdf80e3028dab6f2d91c0355dc540acb73e2f5529b5a765",
+          "td3_loss_mag.txt": "27c389ec62735206aae88abe171c1c634403a76ac0d09c2ad44417d6cb7ec855",
+          "td3_win_mag.txt": "c0583aa0a54178469e9360857d78b26b6888d9509253be308258a41a53999de6",
+          "td5_loss_mag.txt": "bd4c74571a67f93554e08d2d408d843248c3cf7d7d3c642bfa0d5a5bb90d84c7",
+          "td5_win_mag.txt": "3b2ea2118495bfcbf8b3387a6cd3525638836b03ab0c10683e79fe906d4ec2af"
+        },
+        "model_count": 6
+      }
+    }
+  },
+  "artifact_sha256": {
+    "decomposed_predictions_test_v1.parquet": "c1185bcbf27bbbed7ba6e14c27fa0f769a2018ed725c4552b171640e25ae0690",
+    "e9_root_axis_v1.parquet": "d552ffe253f9b7cfa54e9e179a643442079ec029d8e7727bd1aa5496f8ec1c13",
+    "decomposed_value_policy_summary.csv": "1a7113be188d83ee8e044ae05685f9e7ee0cabf311adc1329fb8792dda9bb4cf",
+    "decomposed_value_daily_returns.csv": "1c08de1af2bf41a405bd3212a420f5d213e7f5e3d2b3deb02aa6450fb046bb8a",
+    "decomposed_value_per_symbol.csv": "614055f8b9e75b49babcc1b44e572448867c83edb1ebc12a961608415de44b9f",
+    "decomposed_value_trade_ledger.csv": "9691a0087e53d870f45cfc6d8b9c637de3c2800a777d3c76a7602546846e7cc7",
+    "decomposed_value_decision_ledger.csv": "2b60a41bf66aca9ac576ff748ba02c866c9ac676b9951c40bb191730dad3a5ae",
+    "decomposed_value_test_diagnostics.csv": "163d2944f9daf98b382e5e2c2b46c7b26df41f5a3de130bed70d8e92ad7b429c",
+    "decomposed_value_summary.json": "5cd0ce1d1f791ed2d4507f1d1bf155058363bb14f296caa3e0911922378165ae"
+  },
+  "serialization_manifest_last": true
+}
