@@ -66,6 +66,27 @@ TEST_PRED_PARQUET = os.path.join(
     DEC_ARTIFACT_DIR, "decomposed_predictions_test_v1.parquet")
 E9_ROOT_AXIS_PARQUET = os.path.join(DEC_ARTIFACT_DIR, "e9_root_axis_v1.parquet")
 FORMAL_ARTIFACT_DIR = os.path.join(DEC_ARTIFACT_DIR, "sequential_test_v1")
+PRETEST_SUMMARY_PATH = os.path.join(
+    "research", "liquidity_oracle_atlas", "evidence",
+    "decomposed_value_renewal_v1_pretest_summary.json")
+
+
+def _formal_paths(art_root: Optional[str] = None) -> dict:
+    """G21: resolve Formal artifact paths. When ``art_root`` is given, every
+    Formal artifact (TEST predictions, E9 root axis, all CSV/JSON) is redirected
+    under ``art_root`` so the canonical ``DEC_ARTIFACT_DIR`` / ``FORMAL_EVIDENCE_DIR``
+    are never touched by a mocked run."""
+    if art_root is None:
+        return {
+            "evidence_dir": FORMAL_EVIDENCE_DIR,
+            "test_pred": TEST_PRED_PARQUET,
+            "e9_root": E9_ROOT_AXIS_PARQUET,
+        }
+    return {
+        "evidence_dir": os.path.join(art_root, "evidence"),
+        "test_pred": os.path.join(art_root, os.path.basename(TEST_PRED_PARQUET)),
+        "e9_root": os.path.join(art_root, os.path.basename(E9_ROOT_AXIS_PARQUET)),
+    }
 
 BOOTSTRAP_BLOCK_DAYS = 5
 BOOTSTRAP_B = 5000
@@ -657,7 +678,7 @@ def build_symbol_axes(state_df, pred_df, renewal_df, e9_df, split, symbols=None)
 # 9. Unified TEST prediction (gated; NOT executed)                             #
 # --------------------------------------------------------------------------- #
 def predict_test(allow_test: bool = False, authorized_review_sha: Optional[str] = None,
-                 write_artifacts: bool = True):
+                 write_artifacts: bool = True, art_root: Optional[str] = None):
     """Batch-predict Pwin/mu_W/mu_L and compose EV_W/EV_R/EV_C for TEST, one
     pass per horizon. Implemented but NOT executed until authorized."""
     if allow_test is not True:
@@ -674,6 +695,7 @@ def predict_test(allow_test: bool = False, authorized_review_sha: Optional[str] 
         build_frozen_split)
     split = build_frozen_split()
     t2 = np.datetime64(split["cal"]["cuts"][1], "ns")
+    end_t = np.datetime64(pd.Timestamp(split["cal"]["end"]).to_datetime64(), "ns")
 
     win_feats = R9A.load_win_features()
     pay_feats = R9B.load_payoff_features()
@@ -681,7 +703,11 @@ def predict_test(allow_test: bool = False, authorized_review_sha: Optional[str] 
         os.path.join(DEC_ARTIFACT_DIR, "state_v1.parquet"),
         columns=["bar_index", "decision_time"])
     dt = state["decision_time"].to_numpy("datetime64[ns]")
-    test_bars = set(state["bar_index"].to_numpy(np.int64)[dt >= t2])
+    # G11: closed TEST window [T2, COMMON_END]; no prediction row after end_t.
+    in_window = (dt >= t2) & (dt <= end_t)
+    test_bars = set(state["bar_index"].to_numpy(np.int64)[in_window])
+    if in_window.any() and dt[in_window].max() > end_t:
+        raise RuntimeError("STOP_R10_TEST_WINDOW_EXCEEDS_COMMON_END")
     mask = np.fromiter(
         (b in test_bars for b in win_feats["decision_bar"].to_numpy(np.int64)),
         dtype=bool, count=len(win_feats))
@@ -708,17 +734,25 @@ def predict_test(allow_test: bool = False, authorized_review_sha: Optional[str] 
         out[f"{H}_ev_r"] = ev_r
         out[f"{H}_ev_c"] = ev_c
     if write_artifacts:
-        out.to_parquet(TEST_PRED_PARQUET, index=False)
+        # G21: redirect TEST predictions into art_root when mocking.
+        out.to_parquet(_formal_paths(art_root)["test_pred"], index=False)
     return out
 
 
 # --------------------------------------------------------------------------- #
 # 10. Formal TEST runner — implemented, NOT executed                           #
 # --------------------------------------------------------------------------- #
+# G14: the E9 frozen root-candidate universe has exactly this many rows; the
+# reproduction gate must reproduce all of them (n_missing == 0, n_mismatch == 0)
+# and the frozen universe size must match this value.
+E9_FROZEN_UNIVERSE_ROWS = 13773
+
+
 def run_formal_opportunity_value_test(allow_test: bool = False,
                                       authorized_review_sha: Optional[str] = None,
                                       write_artifacts: bool = True,
-                                      verbose: bool = False):
+                                      verbose: bool = False,
+                                      art_root: Optional[str] = None):
     """Complete Formal TEST call graph. Blocked by default; NOT executed.
 
     Hard gate (FG4): the one real TEST run MUST write evidence.
@@ -737,8 +771,7 @@ def run_formal_opportunity_value_test(allow_test: bool = False,
     reset_counters()
 
     # PRE-TEST evidence identity (lineage gate).
-    ev = os.path.join("research", "liquidity_oracle_atlas", "evidence",
-                      "decomposed_value_renewal_v1_pretest_summary.json")
+    ev = PRETEST_SUMMARY_PATH
     if not os.path.exists(ev):
         raise RuntimeError("STOP_R10_PRETEST_EVIDENCE_MISSING")
     with open(ev) as f:
@@ -751,9 +784,12 @@ def run_formal_opportunity_value_test(allow_test: bool = False,
     with open(dec_manifest_path) as f:
         dec_manifest = json.load(f)
     pre_dec = pre.get("r8_manifest", {})
+    # G12: every upstream R8 artifact MUST exist, then match exact SHA.
     for name, want in pre_dec.get("artifact_sha256", {}).items():
         p = os.path.join(DEC_ARTIFACT_DIR, name)
-        if os.path.exists(p) and sha256_file(p) != want:
+        if not os.path.exists(p):
+            raise RuntimeError(f"STOP_R10_R8_ARTIFACT_MISSING {name}")
+        if sha256_file(p) != want:
             raise RuntimeError(f"STOP_R10_R8_ARTIFACT_SHA_MISMATCH {name}")
     for mod, tag in ((R9A, "r9a_model_manifest"),
                      (R9B, "r9b_model_manifest")):
@@ -766,8 +802,16 @@ def run_formal_opportunity_value_test(allow_test: bool = False,
         for name, want in mm.get("model_sha256", {}).items():
             p = os.path.join("artifacts", "decomposed_value_v1", "models",
                              ("win" if mod is R9A else "payoff"), name)
+            # G13: every frozen R9 model MUST exist, then match SHA.
+            if not os.path.exists(p):
+                raise RuntimeError(f"STOP_R10_{tag.upper()}_MODEL_MISSING {name}")
             if sha256_file(p) != want:
                 raise RuntimeError(f"STOP_R10_{tag.upper()}_MODEL_SHA_MISMATCH {name}")
+
+    # Frozen split (used by E9 reproduction gate + downstream diagnostics).
+    from research.liquidity_oracle_atlas.direction_null_baseline_v1 import (
+        build_frozen_split)
+    split = build_frozen_split()
 
     # 5: TEST state once
     state_df = pd.read_parquet(STATE_PARQUET)
@@ -775,19 +819,27 @@ def run_formal_opportunity_value_test(allow_test: bool = False,
     # 6: unified TEST predictions once
     pred_df = predict_test(allow_test=True,
                             authorized_review_sha=authorized_review_sha,
-                            write_artifacts=write_artifacts)
+                            write_artifacts=write_artifacts,
+                            art_root=art_root)
     _bump("test_prediction_loads")
-    # 7 + 8: E9 ROOT axis once + reproduction gate (FG6)
+    # 7 + 8: E9 ROOT axis once + reproduction gate (FG6). G14: gate BEFORE write.
     e9_df, _chain = build_e9_root_axis(state_df)
+    gate = e9_axis_reproduction_gate(e9_df, state_df, split=split)
+    if not (gate.get("n_missing") == 0
+            and gate.get("n_mismatch") == 0
+            and gate.get("n_frozen_rows") == E9_FROZEN_UNIVERSE_ROWS):
+        raise RuntimeError(
+            f"STOP_R10_E9_AXIS_REPRODUCTION_FAIL "
+            f"missing={gate.get('n_missing')} "
+            f"mismatch={gate.get('n_mismatch')} "
+            f"frozen_rows={gate.get('n_frozen_rows')}")
     if write_artifacts:
-        e9_df.to_parquet(E9_ROOT_AXIS_PARQUET, index=False)
-    gate = e9_axis_reproduction_gate(e9_df, state_df, split=None)
+        # G21: redirect E9 root axis into art_root when mocking.
+        e9_path = _formal_paths(art_root)["e9_root"]
+        e9_df.to_parquet(e9_path, index=False)
     # 9: renewal axis once
     renewal_df = pd.read_parquet(RENEWAL_AXIS_PARQUET)
-    # 10
-    from research.liquidity_oracle_atlas.direction_null_baseline_v1 import (
-        build_frozen_split)
-    split = build_frozen_split()
+    # 10: split already built above (used by the E9 reproduction gate).
     axes = build_symbol_axes(state_df, pred_df, renewal_df, e9_df, split)
     # 11
     trades_by_policy, decision_by_policy = {}, {}
@@ -853,7 +905,7 @@ def run_formal_opportunity_value_test(allow_test: bool = False,
     if write_artifacts:
         write_formal_evidence(result, trades_by_policy, decision_by_policy,
                               daily_by_policy, per_sym_rows, loso_rows, deciles,
-                              full, authorized_review_sha, gate)
+                              full, authorized_review_sha, gate, art_root=art_root)
     if verbose:
         print(json.dumps({k: v for k, v in result.items()
                           if k != "post_verdict_test_diagnostics"},
@@ -962,12 +1014,16 @@ def per_symbol_deltas(per_symbol_daily, common_days):
         p0 = per_symbol_daily[BASELINE_POLICY][sym].to_numpy(float)
         p1 = per_symbol_daily[GATE_POLICY][sym].to_numpy(float)
         p2 = per_symbol_daily[PRIMARY_POLICY][sym].to_numpy(float)
+        # G17: point estimates use ONLY the complete 5-day inference blocks,
+        # exactly like the Primary bootstrap inference (not the terminal remainder).
+        n_inf = int(complete_blocks(len(p0))[1])
+        d0, d1, d2 = p0[:n_inf], p1[:n_inf], p2[:n_inf]
         rows.append({
             "symbol": sym,
-            "delta_combo_point": float((p1 - p0).mean()),
-            "delta_renew_point": float((p2 - p1).mean()),
-            "delta_full_point": float((p2 - p0).mean()),
-            "n_inference_days": int(complete_blocks(len(p0))[1]),
+            "delta_combo_point": float((d1 - d0).mean()),
+            "delta_renew_point": float((d2 - d1).mean()),
+            "delta_full_point": float((d2 - d0).mean()),
+            "n_inference_days": n_inf,
         })
     return rows
 
@@ -993,7 +1049,11 @@ def loso_deltas(per_symbol_daily, common_days):
                      "delta_full_ci_low": d_full["ci_low"],
                      "delta_full_ci_high": d_full["ci_high"],
                      "delta_combo_point": d_combo["point"],
-                     "delta_renew_point": d_ren["point"]})
+                     "delta_combo_ci_low": d_combo["ci_low"],
+                     "delta_combo_ci_high": d_combo["ci_high"],
+                     "delta_renew_point": d_ren["point"],
+                     "delta_renew_ci_low": d_ren["ci_low"],
+                     "delta_renew_ci_high": d_ren["ci_high"]})
     return rows
 
 
@@ -1135,12 +1195,33 @@ def _load_decision_ledger(trades_by_policy, decision_by_policy):
 
 def write_formal_evidence(result, trades_by_policy, decision_by_policy,
                           daily_by_policy, per_sym_rows, loso_rows, deciles,
-                          full, authorized_review_sha, gate):
-    os.makedirs(FORMAL_EVIDENCE_DIR, exist_ok=True)
+                          full, authorized_review_sha, gate, art_root=None):
+    # G21: redirect every Formal artifact into art_root when mocking.
+    paths = _formal_paths(art_root)
+    fdir = paths["evidence_dir"]
+    test_pred = paths["test_pred"]
+    e9_root = paths["e9_root"]
+    os.makedirs(fdir, exist_ok=True)
+    F = {
+        "policy": os.path.join(fdir, "decomposed_value_policy_summary.csv"),
+        "daily": os.path.join(fdir, "decomposed_value_daily_returns.csv"),
+        "persymbol": os.path.join(fdir, "decomposed_value_per_symbol.csv"),
+        "trade": os.path.join(fdir, "decomposed_value_trade_ledger.csv"),
+        "decision": os.path.join(fdir, "decomposed_value_decision_ledger.csv"),
+        "testdiag": os.path.join(fdir, "decomposed_value_test_diagnostics.csv"),
+        "summary": os.path.join(fdir, "decomposed_value_summary.json"),
+        "manifest": os.path.join(fdir, "decomposed_value_manifest.json"),
+    }
+
+    def _load_json(p):
+        if not os.path.exists(p):
+            return {}
+        with open(p) as f:
+            return json.load(f)
 
     pol = pd.DataFrame([dict(policy=p, **v)
                         for p, v in result["strategy_diagnostics"].items()])
-    _write_csv(F_POLICY_SUMMARY, pol)
+    _write_csv(F["policy"], pol)
 
     daily = pd.DataFrame({p: daily_by_policy[p].to_numpy(float)
                           for p in POLICIES})
@@ -1152,9 +1233,9 @@ def write_formal_evidence(result, trades_by_policy, decision_by_policy,
                        (WIN_POLICY, BASELINE_POLICY, "delta_win"),
                        (PAYOFF_POLICY, BASELINE_POLICY, "delta_payoff")):
         daily[name] = daily[a] - daily[b]
-    _write_csv(F_DAILY, daily)
+    _write_csv(F["daily"], daily)
 
-    _write_csv(F_PER_SYMBOL, pd.DataFrame(per_sym_rows + [
+    _write_csv(F["persymbol"], pd.DataFrame(per_sym_rows + [
         dict(symbol="LOSO:" + r["removed_symbol"],
              delta_combo_point=r["delta_combo_point"],
              delta_renew_point=r["delta_renew_point"],
@@ -1174,9 +1255,9 @@ def write_formal_evidence(result, trades_by_policy, decision_by_policy,
                             "exit_reason": t.exit_reason,
                             "holding_bars": t.holding_bars,
                             "trade_return_atr": trade_return(t)})
-    _write_csv(F_TRADE_LEDGER, pd.DataFrame(led))
+    _write_csv(F["trade"], pd.DataFrame(led))
 
-    _write_csv(F_DECISION_LEDGER,
+    _write_csv(F["decision"],
                pd.DataFrame(_load_decision_ledger(
                    trades_by_policy, decision_by_policy)))
 
@@ -1190,22 +1271,48 @@ def write_formal_evidence(result, trades_by_policy, decision_by_policy,
     for H, cells in deciles.get("map_5x5", {}).items():
         for c in cells:
             drows.append({"kind": "map_5x5", "horizon": H, **c})
-    _write_csv(F_TEST_DIAG, pd.DataFrame(drows))
+    _write_csv(F["testdiag"], pd.DataFrame(drows))
 
-    with open(F_SUMMARY, "w") as f:
+    with open(F["summary"], "w") as f:
         json.dump(result, f, indent=2, default=str)
+
+    # G20: full lineage binding.
+    pretest_path = os.path.join("research", "liquidity_oracle_atlas", "evidence",
+                                "decomposed_value_renewal_v1_pretest_summary.json")
+    r8_man = _load_json(os.path.join(DEC_ARTIFACT_DIR, "r8_manifest_v1.json"))
+    r9a_man = _load_json(os.path.join("artifacts", "decomposed_value_v1", "models",
+                                      "win", "model_manifest.json"))
+    r9b_man = _load_json(os.path.join("artifacts", "decomposed_value_v1", "models",
+                                      "payoff", "model_manifest.json"))
+
+    # G19: TEST-label governance — verified BEFORE any verdict/strategy output.
+    test_label_governance = {
+        "test_label_reads_during_fit": {
+            "r9a": int(R9A.COUNTERS.get("test_label_reads_during_fit", 0)),
+            "r9b": int(R9B.COUNTERS.get("test_label_reads_during_fit", 0)),
+        },
+        "test_label_reads_during_strategy":
+            int(COUNTERS.get("test_label_reads_during_strategy", 0)),
+        "post_verdict_test_label_reads":
+            int(COUNTERS.get("post_verdict_test_label_reads", 0)),
+    }
+    if (test_label_governance["test_label_reads_during_fit"]["r9a"] != 0
+            or test_label_governance["test_label_reads_during_fit"]["r9b"] != 0
+            or test_label_governance["test_label_reads_during_strategy"] != 0
+            or test_label_governance["post_verdict_test_label_reads"] != 1):
+        raise RuntimeError("STOP_R10_TEST_LABEL_GOVERNANCE")
 
     art = {
         "decomposed_predictions_test_v1.parquet":
-            sha256_file(TEST_PRED_PARQUET) if os.path.exists(TEST_PRED_PARQUET)
-            else None,
+            sha256_file(test_pred) if os.path.exists(test_pred) else None,
         "e9_root_axis_v1.parquet":
-            sha256_file(E9_ROOT_AXIS_PARQUET)
-            if os.path.exists(E9_ROOT_AXIS_PARQUET) else None,
+            sha256_file(e9_root) if os.path.exists(e9_root) else None,
     }
-    for p in (F_POLICY_SUMMARY, F_DAILY, F_PER_SYMBOL, F_TRADE_LEDGER,
-              F_DECISION_LEDGER, F_TEST_DIAG, F_SUMMARY):
+    for p in (F["policy"], F["daily"], F["persymbol"], F["trade"],
+              F["decision"], F["testdiag"], F["summary"]):
         art[os.path.basename(p)] = sha256_file(p)
+    if any(v is None for v in art.values()):
+        raise RuntimeError("STOP_R10_FORMAL_ARTIFACT_NULL_SHA")
     manifest = {
         "task_id": TASK_ID,
         "authorized_review_sha": authorized_review_sha,
@@ -1223,10 +1330,26 @@ def write_formal_evidence(result, trades_by_policy, decision_by_policy,
                          if dict(COUNTERS).get(k) != v},
             "pass": all(dict(COUNTERS).get(k) == v
                         for k, v in FORMAL_PERF_EXPECTED.items())},
+        "test_label_governance": test_label_governance,
+        "lineage": {
+            "pretest_evidence_sha256":
+                sha256_file(pretest_path) if os.path.exists(pretest_path) else None,
+            "r8_generator_code_sha": r8_man.get("generator_code_sha"),
+            "r8_artifact_sha256": r8_man.get("artifact_sha256"),
+            "win33_schema_sha256": R9A.win33_schema_sha256(),
+            "pay8_schema_sha256": R9B.pay8_schema_sha256(),
+            "r9a_generator_code_sha": r9a_man.get("generator_code_sha"),
+            "r9a_model_sha256": r9a_man.get("model_sha256"),
+            "r9b_generator_code_sha": r9b_man.get("generator_code_sha"),
+            "r9b_model_sha256": r9b_man.get("model_sha256"),
+            "train_priors": R9C.compute_train_priors(),
+        },
         "artifact_sha256": art,
         "serialization_manifest_last": True,
     }
-    with open(F_MANIFEST, "w") as f:
+    if manifest["lineage"]["pretest_evidence_sha256"] is None:
+        raise RuntimeError("STOP_R10_FORMAL_PRETEST_SHA_MISSING")
+    with open(F["manifest"], "w") as f:
         json.dump(manifest, f, indent=2, default=str)
     return manifest
 

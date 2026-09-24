@@ -1,0 +1,651 @@
+{
+  "task_ids": [
+    "FUTURE-R8-M15-STRUCTURAL-RENEWAL-DATASET-V1",
+    "FUTURE-R9-M15-OPPORTUNITY-VALUE-MODEL-V1",
+    "FUTURE-R10-M15-SEQUENTIAL-VALUE-POLICY-V1"
+  ],
+  "program": "FUTURE-R8-R10-M15-OPPORTUNITY-VALUE-RENEWAL-V1",
+  "stage": "PRE_TEST",
+  "reviewed_parent_sha": "bf464cece486d419f0f82a1c0217c7ebca32a569",
+  "base_sha": "f3ca3a04317126e8f35afe7430d7aea202a9175a",
+  "branch": "opportunity-value-renewal-v1",
+  "scientific_status": "LOCKED_DEVELOPMENT_TEST_NOT_PRISTINE_CONFIRMATION",
+  "r8_manifest": {
+    "task_id": "FUTURE-R8-M15-STRUCTURAL-RENEWAL-DATASET-V1",
+    "base_sha": "f3ca3a04317126e8f35afe7430d7aea202a9175a",
+    "generator_code_sha": "bf464cece486d419f0f82a1c0217c7ebca32a569",
+    "symbols": [
+      "AG",
+      "AU",
+      "CU",
+      "AL",
+      "SN",
+      "NI",
+      "RB",
+      "I",
+      "SC",
+      "RU",
+      "MA",
+      "TA",
+      "M",
+      "P",
+      "CF"
+    ],
+    "opp36_schema_sha256": "fefcd6e770deed1c34b11571606aa28bde4f4a2fd762c0454ef44b8e0676a4b2",
+    "n_opp36": 36,
+    "state_rows": 168401,
+    "side_rows": 336802,
+    "side_feature_rows": 336802,
+    "label_rows_total": 689006,
+    "label_rows": {
+      "train": 416478,
+      "val": 131556,
+      "test": 140972
+    },
+    "per_horizon_counts": {
+      "td1": 229754,
+      "td3": 229626,
+      "td5": 229626
+    },
+    "event_class_counts": {
+      "FAVORABLE_FIRST": 305796,
+      "ADVERSE_FIRST": 305796,
+      "NONE": 67180,
+      "BOTH_SAME_BAR": 10234
+    },
+    "bracket_coverage": 0.6885291655037677,
+    "entry_executable_coverage": 0.9998990504806978,
+    "renewal_axis_rows": 336802,
+    "epoch_weight_gate": {
+      "train": {
+        "ok": true,
+        "max_abs_dev": 0.0,
+        "n_epochs": 208239
+      },
+      "val": {
+        "ok": true,
+        "max_abs_dev": 0.0,
+        "n_epochs": 65778
+      }
+    },
+    "n_two_side_epochs_dropped_due_to_one_side_unresolved": {
+      "all_rows_before_retention": 6688
+    },
+    "scientific_status": "LOCKED_DEVELOPMENT_TEST_NOT_PRISTINE_CONFIRMATION",
+    "cost_governance": {
+      "cost_metadata_status": "UNAVAILABLE_COST_METADATA",
+      "realistic_net_pnl_status": "NOT_ESTIMATED",
+      "formal_primary_basis": "GROSS_PAIRED_POLICY_EFFECT"
+    },
+    "performance": {
+      "environment_loads": 15,
+      "geometry_extract_calls": 15,
+      "candidate_gate_derivations": 15,
+      "feature_matrix_builds": 15,
+      "side_feature_builds": 15,
+      "structural_stream_scans": 15,
+      "direction_reruns": 0,
+      "candidate_python_loops": 0,
+      "side_python_loops": 0,
+      "horizon_path_rescans": 0,
+      "full_history_recompute_count": 0
+    },
+    "runtime_sec": 25.135955095291138,
+    "artifact_sha256": {
+      "state_v1.parquet": "d58529a8b5b982d202dfb1df961d48ca4b58b63c3e49d62e034cd5a252c48bc9",
+      "side_features_v1.parquet": "c15bc100661bc91b7ac34331eef69a496e1e1a1f4bdb1e820948f734e943f04b",
+      "renewal_event_axis_v1.parquet": "2cf8a2c0e4409835a72934c669f28e064eff0b2b859d5e636d4cb24dad087dec",
+      "labels_train_v1.parquet": "c9cb77b82ecd9b8996c9ce064a18dbb5ccbcacbd4743ad2cd3dc58c1fae1a61e",
+      "labels_val_v1.parquet": "389b36c535dd4cd82a4581ffdb3fb5c62b7bcd2e8bcd4289ce8b368260914865",
+      "labels_test_v1.parquet": "1ae752ede0ca693e7c4bbae15414d73981f28b6b56093883513fab473cb4fc3d"
+    }
+  },
+  "r9_model_manifest": {
+    "task_id": "FUTURE-R9-M15-OPPORTUNITY-VALUE-MODEL-V1",
+    "base_sha": "f3ca3a04317126e8f35afe7430d7aea202a9175a",
+    "generator_code_sha": "3aecd43edf8abc829ab217af175eb6a9e6ccfb5a",
+    "opp36_schema_sha256": "fefcd6e770deed1c34b11571606aa28bde4f4a2fd762c0454ef44b8e0676a4b2",
+    "horizons": [
+      "td1",
+      "td3",
+      "td5"
+    ],
+    "model_count": 9,
+    "clf_params": {
+      "objective": "binary",
+      "learning_rate": 0.05,
+      "num_leaves": 31,
+      "min_child_samples": 100,
+      "subsample": 0.8,
+      "colsample_bytree": 0.8,
+      "reg_alpha": 0.1,
+      "reg_lambda": 1.0,
+      "n_estimators": 2000,
+      "random_state": 20260923,
+      "n_jobs": -1,
+      "verbosity": -1
+    },
+    "reg_params": {
+      "objective": "regression",
+      "learning_rate": 0.05,
+      "num_leaves": 31,
+      "min_child_samples": 100,
+      "subsample": 0.8,
+      "colsample_bytree": 0.8,
+      "reg_alpha": 0.1,
+      "reg_lambda": 1.0,
+      "n_estimators": 2000,
+      "random_state": 20260923,
+      "n_jobs": -1,
+      "verbosity": -1,
+      "metric": "l2"
+    },
+    "early_stopping_rounds": 100,
+    "best_iteration": {
+      "td1": {
+        "win": 39,
+        "win_mag": 41,
+        "loss_mag": 47
+      },
+      "td3": {
+        "win": 40,
+        "win_mag": 66,
+        "loss_mag": 51
+      },
+      "td5": {
+        "win": 46,
+        "win_mag": 61,
+        "loss_mag": 54
+      }
+    },
+    "train_rows": 416478,
+    "val_rows": 131556,
+    "model_sha256": {
+      "td1_win.txt": "5aac3dd880130272881c0942d310ba031b8fd1781cabf82acc789cef2a07d7e4",
+      "td1_win_mag.txt": "2d26284ec5b0f487a537f7bed2b2aa22812f0638c62c356cce04579285256cb9",
+      "td1_loss_mag.txt": "36209321656cb839b4819e67326f702c188f3f3c5c2eed9461fbe4358585e051",
+      "td3_win.txt": "5933d0774b6917e9c9bde40524e100eb0f333976a1be37e17806ce5ac79e3a95",
+      "td3_win_mag.txt": "d6bf72acffe3e51179631988b9493d1932f1492c73e195b0f6c24e1919fd5780",
+      "td3_loss_mag.txt": "aed6943765350b76c94e4baf495360c479f5f904519ef9587329a78c95376288",
+      "td5_win.txt": "5aa1735227246ed676cdc800c7e04b003d6ea96679da36f9e45b569337ce59fa",
+      "td5_win_mag.txt": "bacd977628beb844c25b99e8fd00f2476ab467c85bda140c6bb6d3a49e1e3b2d",
+      "td5_loss_mag.txt": "7918406305050d86a07a4632fc2b02dfb6883d6be30ae0270134da60f72146ba"
+    },
+    "performance": {
+      "state_artifact_loads": 0,
+      "feature_artifact_loads": 1,
+      "train_label_loads": 1,
+      "val_label_loads": 1,
+      "test_label_reads_during_fit": 0,
+      "environment_loads": 0,
+      "geometry_extract_calls": 0,
+      "model_fit_count": 9,
+      "hyperparameter_search_count": 0
+    }
+  },
+  "r9_val_diagnostics": {
+    "td1": {
+      "n_val_rows": 43852,
+      "brier": 0.2438504200270571,
+      "logloss": 0.6807328469383587,
+      "auc": 0.5897315981857694,
+      "win_magnitude_wmae": 0.7440132181649949,
+      "win_magnitude_wrmse": 1.1634431190539072,
+      "loss_magnitude_wmae": 0.7374604470363552,
+      "loss_magnitude_wrmse": 1.1545691487509138,
+      "ev_deciles": [
+        {
+          "decile": 1,
+          "n_rows": 4386,
+          "mean_predicted_ev": -0.3157049869437034,
+          "actual_mean_return_atr": -0.20115804412256863,
+          "actual_win_rate": 0.4749202006383949,
+          "actual_avg_win": 1.6317977220469704,
+          "actual_avg_loss": 1.8590159950262375,
+          "actual_payoff_ratio": 0.8777749768763768,
+          "actual_break_even_win_rate": 0.5325451730448929,
+          "actual_ev_identity": -0.20115804412256855,
+          "actual_ev_identity_abs_dev": 8.326672684688674e-17
+        },
+        {
+          "decile": 2,
+          "n_rows": 4385,
+          "mean_predicted_ev": -0.08872755638837665,
+          "actual_mean_return_atr": -0.0004986460034927438,
+          "actual_win_rate": 0.5153933865450399,
+          "actual_avg_win": 1.1413536350805884,
+          "actual_avg_loss": 1.214892130827033,
+          "actual_payoff_ratio": 0.9394691150922316,
+          "actual_break_even_win_rate": 0.5156050138764108,
+          "actual_ev_identity": -0.0004986460034928086,
+          "actual_ev_identity_abs_dev": 6.483528991463317e-17
+        },
+        {
+          "decile": 3,
+          "n_rows": 4385,
+          "mean_predicted_ev": -0.046825033214724004,
+          "actual_mean_return_atr": 0.03613174542993429,
+          "actual_win_rate": 0.5131128848346637,
+          "actual_avg_win": 1.0733625601679677,
+          "actual_avg_loss": 1.056968644809211,
+          "actual_payoff_ratio": 1.015510313800951,
+          "actual_break_even_win_rate": 0.4961522613665765,
+          "actual_ev_identity": 0.03613174542993436,
+          "actual_ev_identity_abs_dev": 6.938893903907228e-17
+        },
+        {
+          "decile": 4,
+          "n_rows": 4385,
+          "mean_predicted_ev": -0.021277376909858734,
+          "actual_mean_return_atr": -0.02195129487553078,
+          "actual_win_rate": 0.4750285062713797,
+          "actual_avg_win": 0.9799185384974384,
+          "actual_avg_loss": 0.9285085767677527,
+          "actual_payoff_ratio": 1.055368321861549,
+          "actual_break_even_win_rate": 0.48653080295326295,
+          "actual_ev_identity": -0.02195129487553077,
+          "actual_ev_identity_abs_dev": 1.0408340855860843e-17
+        },
+        {
+          "decile": 5,
+          "n_rows": 4385,
+          "mean_predicted_ev": -0.0034978850919827756,
+          "actual_mean_return_atr": 0.005797773363949377,
+          "actual_win_rate": 0.4805017103762828,
+          "actual_avg_win": 0.8610147271755819,
+          "actual_avg_loss": 0.7852215952405763,
+          "actual_payoff_ratio": 1.0965245128183008,
+          "actual_break_even_win_rate": 0.4769798749720924,
+          "actual_ev_identity": 0.005797773363949432,
+          "actual_ev_identity_abs_dev": 5.551115123125783e-17
+        },
+        {
+          "decile": 6,
+          "n_rows": 4385,
+          "mean_predicted_ev": 0.011373402039241844,
+          "actual_mean_return_atr": 0.028915626746203488,
+          "actual_win_rate": 0.49327251995439,
+          "actual_avg_win": 0.8689979250179576,
+          "actual_avg_loss": 0.7888602558648694,
+          "actual_payoff_ratio": 1.1015866480245338,
+          "actual_break_even_win_rate": 0.4758309636864071,
+          "actual_ev_identity": 0.028915626746203515,
+          "actual_ev_identity_abs_dev": 2.7755575615628914e-17
+        },
+        {
+          "decile": 7,
+          "n_rows": 4385,
+          "mean_predicted_ev": 0.026962725649820482,
+          "actual_mean_return_atr": -0.014023794028412603,
+          "actual_win_rate": 0.4729760547320411,
+          "actual_avg_win": 0.8960716870415959,
+          "actual_avg_loss": 0.8307862465334744,
+          "actual_payoff_ratio": 1.0785827170111812,
+          "actual_break_even_win_rate": 0.48109704358454003,
+          "actual_ev_identity": -0.01402379402841264,
+          "actual_ev_identity_abs_dev": 3.642919299551295e-17
+        },
+        {
+          "decile": 8,
+          "n_rows": 4385,
+          "mean_predicted_ev": 0.04897434778500247,
+          "actual_mean_return_atr": -0.02005443090852137,
+          "actual_win_rate": 0.475484606613455,
+          "actual_avg_win": 1.0238207042222793,
+          "actual_avg_loss": 0.9663499338423125,
+          "actual_payoff_ratio": 1.0594720073622366,
+          "actual_break_even_win_rate": 0.4855613460271285,
+          "actual_ev_identity": -0.02005443090852127,
+          "actual_ev_identity_abs_dev": 1.0061396160665481e-16
+        },
+        {
+          "decile": 9,
+          "n_rows": 4385,
+          "mean_predicted_ev": 0.08468013003237554,
+          "actual_mean_return_atr": -0.004897363560720598,
+          "actual_win_rate": 0.4615735461801596,
+          "actual_avg_win": 1.2188896479232931,
+          "actual_avg_loss": 1.0540057545999595,
+          "actual_payoff_ratio": 1.1564354773242336,
+          "actual_break_even_win_rate": 0.4637282267498346,
+          "actual_ev_identity": -0.004897363560720458,
+          "actual_ev_identity_abs_dev": 1.3964523981613297e-16
+        },
+        {
+          "decile": 10,
+          "n_rows": 4386,
+          "mean_predicted_ev": 0.2802354948645805,
+          "actual_mean_return_atr": 0.19174057561446362,
+          "actual_win_rate": 0.512311901504788,
+          "actual_avg_win": 1.8494376245913549,
+          "actual_avg_loss": 1.5496550620905738,
+          "actual_payoff_ratio": 1.1934511555728777,
+          "actual_break_even_win_rate": 0.45590256134006485,
+          "actual_ev_identity": 0.19174057561446367,
+          "actual_ev_identity_abs_dev": 5.551115123125783e-17
+        }
+      ],
+      "best_iteration": {
+        "win": -1,
+        "win_mag": -1,
+        "loss_mag": -1
+      }
+    },
+    "td3": {
+      "n_val_rows": 43852,
+      "brier": 0.23255626354657122,
+      "logloss": 0.6573906709040267,
+      "auc": 0.6536651900038841,
+      "win_magnitude_wmae": 0.8069303175167228,
+      "win_magnitude_wrmse": 1.3599233636394676,
+      "loss_magnitude_wmae": 0.803811130227599,
+      "loss_magnitude_wrmse": 1.353943630579993,
+      "ev_deciles": [
+        {
+          "decile": 1,
+          "n_rows": 4386,
+          "mean_predicted_ev": -0.5185155848049416,
+          "actual_mean_return_atr": -0.13301608068264878,
+          "actual_win_rate": 0.5006839945280438,
+          "actual_avg_win": 2.797560911260349,
+          "actual_avg_loss": 3.0716220506857645,
+          "actual_payoff_ratio": 0.9107764122984371,
+          "actual_break_even_win_rate": 0.5233474694180041,
+          "actual_ev_identity": -0.1330160806826488,
+          "actual_ev_identity_abs_dev": 2.7755575615628914e-17
+        },
+        {
+          "decile": 2,
+          "n_rows": 4385,
+          "mean_predicted_ev": -0.13638720784678154,
+          "actual_mean_return_atr": -0.10380471294294379,
+          "actual_win_rate": 0.5197263397947548,
+          "actual_avg_win": 1.5328261705130655,
+          "actual_avg_loss": 1.874878684166232,
+          "actual_payoff_ratio": 0.8175601885381298,
+          "actual_break_even_win_rate": 0.5501881072803997,
+          "actual_ev_identity": -0.1038047129429438,
+          "actual_ev_identity_abs_dev": 1.3877787807814457e-17
+        },
+        {
+          "decile": 3,
+          "n_rows": 4385,
+          "mean_predicted_ev": -0.07297465590953359,
+          "actual_mean_return_atr": -0.023918103358171596,
+          "actual_win_rate": 0.4896237172177879,
+          "actual_avg_win": 1.1799169966279248,
+          "actual_avg_loss": 1.1788036974913925,
+          "actual_payoff_ratio": 1.0009444313238087,
+          "actual_break_even_win_rate": 0.4997640036102392,
+          "actual_ev_identity": -0.02391810335817135,
+          "actual_ev_identity_abs_dev": 2.463307335887066e-16
+        },
+        {
+          "decile": 4,
+          "n_rows": 4385,
+          "mean_predicted_ev": -0.046214678771393174,
+          "actual_mean_return_atr": 0.026419228355765125,
+          "actual_win_rate": 0.48825541619156215,
+          "actual_avg_win": 1.0597958728900947,
+          "actual_avg_loss": 0.9595252439918281,
+          "actual_payoff_ratio": 1.1045002510628272,
+          "actual_break_even_win_rate": 0.4751721932534691,
+          "actual_ev_identity": 0.026419228355765323,
+          "actual_ev_identity_abs_dev": 1.97758476261356e-16
+        },
+        {
+          "decile": 5,
+          "n_rows": 4385,
+          "mean_predicted_ev": -0.0242543838973147,
+          "actual_mean_return_atr": 0.001099511947597344,
+          "actual_win_rate": 0.4903078677309008,
+          "actual_avg_win": 1.1081356432760774,
+          "actual_avg_loss": 1.0638345741178306,
+          "actual_payoff_ratio": 1.0416428176297832,
+          "actual_break_even_win_rate": 0.4898016398191217,
+          "actual_ev_identity": 0.001099511947597498,
+          "actual_ev_identity_abs_dev": 1.5395670849294163e-16
+        },
+        {
+          "decile": 6,
+          "n_rows": 4385,
+          "mean_predicted_ev": -0.003453499801579405,
+          "actual_mean_return_atr": -0.0006318724150373041,
+          "actual_win_rate": 0.4846066134549601,
+          "actual_avg_win": 1.0734420815177814,
+          "actual_avg_loss": 1.0105465414890373,
+          "actual_payoff_ratio": 1.0622391324362634,
+          "actual_break_even_win_rate": 0.48490981684487383,
+          "actual_ev_identity": -0.0006318724150374821,
+          "actual_ev_identity_abs_dev": 1.7802599672211983e-16
+        },
+        {
+          "decile": 7,
+          "n_rows": 4385,
+          "mean_predicted_ev": 0.02193918438428711,
+          "actual_mean_return_atr": 0.014210380822205014,
+          "actual_win_rate": 0.49236031927023943,
+          "actual_avg_win": 1.2613134854412937,
+          "actual_avg_loss": 1.1953563769822033,
+          "actual_payoff_ratio": 1.0551777777147981,
+          "actual_break_even_win_rate": 0.48657591126346467,
+          "actual_ev_identity": 0.014210380822204938,
+          "actual_ev_identity_abs_dev": 7.632783294297951e-17
+        },
+        {
+          "decile": 8,
+          "n_rows": 4385,
+          "mean_predicted_ev": 0.06257818471587695,
+          "actual_mean_return_atr": 0.026348496149293934,
+          "actual_win_rate": 0.46864310148232613,
+          "actual_avg_win": 1.643211635203864,
+          "actual_avg_loss": 1.3996831565361743,
+          "actual_payoff_ratio": 1.173988289800068,
+          "actual_break_even_win_rate": 0.4599840784294038,
+          "actual_ev_identity": 0.02634849614929413,
+          "actual_ev_identity_abs_dev": 1.97758476261356e-16
+        },
+        {
+          "decile": 9,
+          "n_rows": 4385,
+          "mean_predicted_ev": 0.1464651751668767,
+          "actual_mean_return_atr": 0.04393588783939319,
+          "actual_win_rate": 0.4732041049030787,
+          "actual_avg_win": 2.0650877665831158,
+          "actual_avg_loss": 1.7716009729368942,
+          "actual_payoff_ratio": 1.165661905886002,
+          "actual_break_even_win_rate": 0.4617525927210167,
+          "actual_ev_identity": 0.04393588783939317,
+          "actual_ev_identity_abs_dev": 1.3877787807814457e-17
+        },
+        {
+          "decile": 10,
+          "n_rows": 4386,
+          "mean_predicted_ev": 0.5551208216878429,
+          "actual_mean_return_atr": 0.14935353852449176,
+          "actual_win_rate": 0.5129958960328317,
+          "actual_avg_win": 3.066282591578286,
+          "actual_avg_loss": 2.9232543123046453,
+          "actual_payoff_ratio": 1.0489277579003653,
+          "actual_break_even_win_rate": 0.48806015543698233,
+          "actual_ev_identity": 0.1493535385244915,
+          "actual_ev_identity_abs_dev": 2.498001805406602e-16
+        }
+      ],
+      "best_iteration": {
+        "win": -1,
+        "win_mag": -1,
+        "loss_mag": -1
+      }
+    },
+    "td5": {
+      "n_val_rows": 43852,
+      "brier": 0.23127092421431306,
+      "logloss": 0.6546757895766674,
+      "auc": 0.658766535601501,
+      "win_magnitude_wmae": 0.7848529037833722,
+      "win_magnitude_wrmse": 1.3301613690369838,
+      "loss_magnitude_wmae": 0.7771144293405989,
+      "loss_magnitude_wrmse": 1.3231962749189026,
+      "ev_deciles": [
+        {
+          "decile": 1,
+          "n_rows": 4386,
+          "mean_predicted_ev": -0.5740951068702264,
+          "actual_mean_return_atr": -0.2148359236987934,
+          "actual_win_rate": 0.48221614227086185,
+          "actual_avg_win": 3.0959336836362232,
+          "actual_avg_loss": 3.298181462894549,
+          "actual_payoff_ratio": 0.938679001888262,
+          "actual_break_even_win_rate": 0.5158151499170341,
+          "actual_ev_identity": -0.21483592369879356,
+          "actual_ev_identity_abs_dev": 1.6653345369377348e-16
+        },
+        {
+          "decile": 2,
+          "n_rows": 4385,
+          "mean_predicted_ev": -0.13193385788407608,
+          "actual_mean_return_atr": -0.030530306408165356,
+          "actual_win_rate": 0.5115165336374002,
+          "actual_avg_win": 1.7173016316610286,
+          "actual_avg_loss": 1.8607763554694172,
+          "actual_payoff_ratio": 0.9228952348912483,
+          "actual_break_even_win_rate": 0.5200491331273991,
+          "actual_ev_identity": -0.03053030640816523,
+          "actual_ev_identity_abs_dev": 1.249000902703301e-16
+        },
+        {
+          "decile": 3,
+          "n_rows": 4385,
+          "mean_predicted_ev": -0.06663147494869101,
+          "actual_mean_return_atr": 2.063581890875649e-05,
+          "actual_win_rate": 0.48665906499429873,
+          "actual_avg_win": 1.3460825294091843,
+          "actual_avg_loss": 1.2760771344705841,
+          "actual_payoff_ratio": 1.054859845888269,
+          "actual_break_even_win_rate": 0.48665119521459277,
+          "actual_ev_identity": 2.063581890865418e-05,
+          "actual_ev_identity_abs_dev": 1.0231141563295243e-16
+        },
+        {
+          "decile": 4,
+          "n_rows": 4385,
+          "mean_predicted_ev": -0.03761997730293443,
+          "actual_mean_return_atr": 0.03332984231118955,
+          "actual_win_rate": 0.4862029646522235,
+          "actual_avg_win": 1.0840544584030836,
+          "actual_avg_loss": 0.960964379396719,
+          "actual_payoff_ratio": 1.1280901578096358,
+          "actual_break_even_win_rate": 0.46990490338495,
+          "actual_ev_identity": 0.03332984231118952,
+          "actual_ev_identity_abs_dev": 3.469446951953614e-17
+        },
+        {
+          "decile": 5,
+          "n_rows": 4385,
+          "mean_predicted_ev": -0.018380958687492274,
+          "actual_mean_return_atr": -0.01994471671718156,
+          "actual_win_rate": 0.4805017103762828,
+          "actual_avg_win": 1.042029777739786,
+          "actual_avg_loss": 1.0022011960063961,
+          "actual_payoff_ratio": 1.0397411037744717,
+          "actual_break_even_win_rate": 0.4902582970699242,
+          "actual_ev_identity": -0.019944716717181676,
+          "actual_ev_identity_abs_dev": 1.1796119636642288e-16
+        },
+        {
+          "decile": 6,
+          "n_rows": 4385,
+          "mean_predicted_ev": 0.0008475596093852789,
+          "actual_mean_return_atr": 0.012926318505686613,
+          "actual_win_rate": 0.4875712656784493,
+          "actual_avg_win": 1.0937406920759094,
+          "actual_avg_loss": 1.0154586973791095,
+          "actual_payoff_ratio": 1.0770902793967347,
+          "actual_break_even_win_rate": 0.48144272298575186,
+          "actual_ev_identity": 0.012926318505686485,
+          "actual_ev_identity_abs_dev": 1.2836953722228372e-16
+        },
+        {
+          "decile": 7,
+          "n_rows": 4385,
+          "mean_predicted_ev": 0.023448310022814715,
+          "actual_mean_return_atr": 0.04567593185903531,
+          "actual_win_rate": 0.49464082098061574,
+          "actual_avg_win": 1.232419357248938,
+          "actual_avg_loss": 1.1158973938046373,
+          "actual_payoff_ratio": 1.1044199619886381,
+          "actual_break_even_win_rate": 0.4751903223038325,
+          "actual_ev_identity": 0.04567593185903529,
+          "actual_ev_identity_abs_dev": 2.0816681711721685e-17
+        },
+        {
+          "decile": 8,
+          "n_rows": 4385,
+          "mean_predicted_ev": 0.059304997565935394,
+          "actual_mean_return_atr": -0.04667244839440858,
+          "actual_win_rate": 0.48027366020524515,
+          "actual_avg_win": 1.4446201205852625,
+          "actual_avg_loss": 1.4247602721202477,
+          "actual_payoff_ratio": 1.0139390807377444,
+          "actual_break_even_win_rate": 0.4965393489626711,
+          "actual_ev_identity": -0.04667244839440876,
+          "actual_ev_identity_abs_dev": 1.8041124150158794e-16
+        },
+        {
+          "decile": 9,
+          "n_rows": 4385,
+          "mean_predicted_ev": 0.13938001164775993,
+          "actual_mean_return_atr": 0.04625338778986891,
+          "actual_win_rate": 0.4905359179019384,
+          "actual_avg_win": 2.0010141591239945,
+          "actual_avg_loss": 1.8358819833559255,
+          "actual_payoff_ratio": 1.0899470539311102,
+          "actual_break_even_win_rate": 0.47848102090387334,
+          "actual_ev_identity": 0.04625338778986876,
+          "actual_ev_identity_abs_dev": 1.5265566588595902e-16
+        },
+        {
+          "decile": 10,
+          "n_rows": 4386,
+          "mean_predicted_ev": 0.6276616738454299,
+          "actual_mean_return_atr": 0.1737866402299758,
+          "actual_win_rate": 0.5214318285453716,
+          "actual_avg_win": 3.3337761519928217,
+          "actual_avg_loss": 3.269231946431115,
+          "actual_payoff_ratio": 1.0197429263568059,
+          "actual_break_even_win_rate": 0.4951125150386297,
+          "actual_ev_identity": 0.17378664022997548,
+          "actual_ev_identity_abs_dev": 3.3306690738754696e-16
+        }
+      ],
+      "best_iteration": {
+        "win": -1,
+        "win_mag": -1,
+        "loss_mag": -1
+      }
+    }
+  },
+  "root_candidate_universe": {
+    "test_window": {
+      "t2": "2026-05-07T10:45:00.000000000",
+      "common_end": "2026-09-01T14:00:00.000000000"
+    },
+    "root_candidates_total": 14637,
+    "root_candidates_overlapping_frozen_13773": 13773,
+    "root_candidates_outside_frozen_research_population": 864,
+    "frozen_13773_missing_from_root_universe": 0
+  },
+  "fp8_zero_impact": {
+    "train_rows": 416478,
+    "val_rows": 131556,
+    "n_two_side_epochs_dropped": {
+      "all_rows_before_retention": 6688
+    },
+    "retrained": false
+  },
+  "test_touched": false,
+  "test_prediction_executed": false,
+  "e9_root_axis_materialized": false,
+  "formal_test_executed": false
+}

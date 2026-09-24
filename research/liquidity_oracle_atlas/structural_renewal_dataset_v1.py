@@ -548,7 +548,13 @@ def build_symbol_dataset(symbol: str, split=None, verbose: bool = False):
     # from run_environment_m15()["features"]. These exist ONLY to deploy the
     # already-frozen E9 root Direction system on the full causal root Candidate
     # universe; they are NOT part of OPP36 and never enter the Opportunity model.
-    state_df = pd.DataFrame({
+    #
+    # G1: ALSO persist the raw STRUCT33 (33) per-bar feature matrix plus the
+    # support/resistance zone strengths. This lets the downstream decomposed
+    # builder derive WIN33 / PAY8 directly from state_v1.parquet with NO
+    # environment reload, NO geometry extraction and NO indicator recompute.
+    stx33 = pd.DataFrame(st.X33, columns=list(STRUCT33))
+    state_data = {
         "symbol": symbol,
         "bar_index": st.bar_index,
         "bar_start_time": st.bar_start_time,
@@ -558,11 +564,18 @@ def build_symbol_dataset(symbol: str, split=None, verbose: bool = False):
         "open": st.open, "high": st.high, "low": st.low, "close": st.close,
         "atr": st.atr,
         "sup_top": st.sup_top, "sup_bottom": st.sup_bottom,
+        "sup_strength": st.sup_strength,
         "res_top": st.res_top, "res_bottom": st.res_bottom,
+        "res_strength": st.res_strength,
         "candidate_at_decision": st.candidate_at_decision,
-        "candidate_trigger_bits": st.candidate_trigger_bits})
+        "candidate_trigger_bits": st.candidate_trigger_bits,
+    }
+    for c in STRUCT33:
+        state_data[c] = stx33[c].to_numpy()
+    state_df = pd.DataFrame(state_data)
+    # DTP9 is a 9-column subset of STRUCT33, already persisted above.
     for c in DTP9:
-        state_df[c] = st.dtp9[c]
+        assert c in state_df.columns, f"missing DTP9 column {c}"
 
     label_df = _assemble_labels(symbol, st, views, label_rows, eligible,
                                 entry_idx, w_long, w_short, split,
@@ -787,6 +800,9 @@ def materialize(symbols=SYMBOLS, split=None, verbose: bool = True,
         "opp36_schema_sha256": opp36_schema_sha256(),
         "n_opp36": N_OPP36,
         "state_rows": int(len(state_df)),
+        "state_persists_struct33": True,
+        "state_persists_sr_strength": True,
+        "state_struct33_columns": list(STRUCT33),
         "side_rows": int(len(side_df)),
         "side_feature_rows": int(len(side_feat_df)),
         "label_rows_total": int(len(label_df)),

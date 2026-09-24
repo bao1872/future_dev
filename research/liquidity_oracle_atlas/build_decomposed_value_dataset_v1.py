@@ -40,7 +40,6 @@ from research.liquidity_oracle_atlas.structural_renewal_dataset_v1 import (
     HORIZONS,
     STRUCT33,
     SYMBOLS,
-    load_symbol_state,
     materialize as r8_materialize,
     sha256_file,
     opp36_schema_sha256,
@@ -88,6 +87,10 @@ COUNTERS = {
     "state_artifact_loads": 0,
     "feature_builds": 0,
     "symbol_loops": 0,
+    # G2: downstream (post-R8) must never reload environment / geometry / state.
+    "environment_reloads_after_r8": 0,
+    "geometry_reloads_after_r8": 0,
+    "load_symbol_state_calls_after_r8": 0,
 }
 
 
@@ -187,6 +190,76 @@ def build_pay8_frame(st, symbol: str) -> pd.DataFrame:
 
 
 # --------------------------------------------------------------------------- #
+# 2b. State-parquet builders (G2: zero environment reload)                      #
+# --------------------------------------------------------------------------- #
+def build_win33_from_state(sdf: pd.DataFrame, symbol: str) -> pd.DataFrame:
+    """WIN33 = orient_struct33_router_side(raw STRUCT33, is_long). Exactly 33 cols.
+
+    Derived ONLY from the per-symbol state parquet columns (the raw STRUCT33
+    matrix persisted by R8). No environment / geometry reload. Numerically
+    identical to ``build_win33_frame``.
+    """
+    n = len(sdf)
+    x33 = sdf[list(STRUCT33)].to_numpy(np.float32)          # [n, 33]
+    x33 = np.concatenate([x33, x33], axis=0)                # [2n, 33]
+    is_long = np.concatenate([np.ones(n, bool), np.zeros(n, bool)])
+    win33 = orient_struct33_router_side(x33, is_long)       # [2n, 33]
+    assert win33.shape == (2 * n, WIN33_N), win33.shape
+    df = pd.DataFrame(win33.astype(np.float32), columns=list(WIN33_COLS))
+    df.insert(0, "side", np.where(is_long, "LONG", "SHORT"))
+    df.insert(0, "decision_bar", np.tile(np.arange(n), 2))
+    df.insert(0, "symbol", symbol)
+    _bump("feature_builds")
+    return df
+
+
+def build_pay8_from_state(sdf: pd.DataFrame, symbol: str) -> pd.DataFrame:
+    """PAY8 = 8 causal geometry features per (symbol, decision_bar, side).
+
+    Derived ONLY from state parquet columns: sup_top/bottom, sup_strength,
+    res_top/bottom, res_strength, atr, close. No environment / geometry reload.
+    Numerically identical to ``build_pay8_frame``.
+    """
+    n = len(sdf)
+    b = np.tile(np.arange(n), 2)
+    is_long = np.concatenate([np.ones(n, bool), np.zeros(n, bool)])
+
+    sup_top = sdf["sup_top"].to_numpy(float)[b]
+    sup_bottom = sdf["sup_bottom"].to_numpy(float)[b]
+    sup_strength = sdf["sup_strength"].to_numpy(float)[b]
+    res_top = sdf["res_top"].to_numpy(float)[b]
+    res_bottom = sdf["res_bottom"].to_numpy(float)[b]
+    res_strength = sdf["res_strength"].to_numpy(float)[b]
+    atr = sdf["atr"].to_numpy(float)[b]
+    close = sdf["close"].to_numpy(float)[b]
+
+    side = np.where(is_long, 1.0, -1.0)
+    fav, adv = structural_barriers(is_long, sup_top, res_bottom)
+    g, l, _elig = bracket_metrics(side, close, fav, adv, atr)
+    log_rr = _log_rr(g, l)
+
+    ahead_width = np.where(
+        is_long, (res_top - res_bottom) / atr, (sup_top - sup_bottom) / atr)
+    back_width = np.where(
+        is_long, (sup_top - sup_bottom) / atr, (res_top - res_bottom) / atr)
+    ahead_strength = np.where(is_long, res_strength, sup_strength)
+    back_strength = np.where(is_long, sup_strength, res_strength)
+    atr_price = np.where(np.abs(close) > 0, atr / np.abs(close), np.nan)
+
+    x = np.column_stack([
+        g, l, log_rr, ahead_width, back_width,
+        ahead_strength, back_strength, atr_price,
+    ]).astype(np.float32)
+    assert x.shape == (2 * n, PAY8_N), x.shape
+    df = pd.DataFrame(x, columns=list(PAY8_COLS))
+    df.insert(0, "side", np.where(is_long, "LONG", "SHORT"))
+    df.insert(0, "decision_bar", b)
+    df.insert(0, "symbol", symbol)
+    _bump("feature_builds")
+    return df
+
+
+# --------------------------------------------------------------------------- #
 # 3. Materialization                                                          #
 # --------------------------------------------------------------------------- #
 def materialize_decomposed(symbols=SYMBOLS, split=None, verbose: bool = True,
@@ -211,15 +284,24 @@ def materialize_decomposed(symbols=SYMBOLS, split=None, verbose: bool = True,
     label_parts = {s: pd.read_parquet(LABEL_PARQUETS[s]) for s in LABEL_PARQUETS}
     _bump("state_artifact_loads", 1 + len(label_parts) + 1)
 
-    # Derive WIN33 / PAY8 per symbol from the raw State (X33 + zone geometry).
+    # G2: derive WIN33 / PAY8 ONLY from the per-symbol state parquet rows. No
+    # environment reload, no geometry extraction, no load_symbol_state call.
     win_frames, pay_frames = [], []
     for sym in symbols:
-        st = load_symbol_state(sym)
-        win_frames.append(build_win33_frame(st, sym))
-        pay_frames.append(build_pay8_frame(st, sym))
+        sdf = state_df[state_df["symbol"] == sym]
+        win_frames.append(build_win33_from_state(sdf, sym))
+        pay_frames.append(build_pay8_from_state(sdf, sym))
         _bump("symbol_loops")
     win_df = pd.concat(win_frames, ignore_index=True)
     pay_df = pd.concat(pay_frames, ignore_index=True)
+
+    # G2 hard gate: downstream must never reload env / geometry / state.
+    if COUNTERS["environment_reloads_after_r8"] != 0:
+        raise RuntimeError("STOP_DECOMPOSED_ENV_RELOAD_AFTER_R8")
+    if COUNTERS["geometry_reloads_after_r8"] != 0:
+        raise RuntimeError("STOP_DECOMPOSED_GEOMETRY_RELOAD_AFTER_R8")
+    if COUNTERS["load_symbol_state_calls_after_r8"] != 0:
+        raise RuntimeError("STOP_DECOMPOSED_LOAD_SYMBOL_STATE_AFTER_R8")
 
     # Hard contract checks.
     if not set(WIN33_COLS).isdisjoint(set(PAY8_COLS)):

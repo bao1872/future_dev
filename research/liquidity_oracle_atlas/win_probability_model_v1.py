@@ -90,6 +90,19 @@ def win33_schema_sha256():
     return h.hexdigest()
 
 
+def test_window_mask(state: "pd.DataFrame", split: dict) -> "np.ndarray":
+    """G11: closed TEST decision window [T2, COMMON_END].
+
+    Returns a boolean mask over ``state`` rows. Any ``decision_time`` before the
+    second split cut (T2) or after the frozen calendar end (COMMON_END) is
+    excluded, so no prediction row is emitted outside the study window.
+    """
+    t2 = np.datetime64(split["cal"]["cuts"][1], "ns")
+    end_t = np.datetime64(pd.Timestamp(split["cal"]["end"]).to_datetime64(), "ns")
+    dt = state["decision_time"].to_numpy("datetime64[ns]")
+    return (dt >= t2) & (dt <= end_t)
+
+
 # --------------------------------------------------------------------------- #
 # 1. Model bundle                                                               #
 # --------------------------------------------------------------------------- #
@@ -303,13 +316,18 @@ def predict_test(allow_test: bool = False, authorized_review_sha: Optional[str] 
         build_frozen_split)
     split = build_frozen_split()
     t2 = np.datetime64(split["cal"]["cuts"][1], "ns")
+    end_t = np.datetime64(pd.Timestamp(split["cal"]["end"]).to_datetime64(), "ns")
 
     feats = load_win_features()
     state = pd.read_parquet(
         os.path.join("artifacts", "decomposed_value_v1", "state_v1.parquet"),
         columns=["bar_index", "decision_time"])
     dt = state["decision_time"].to_numpy("datetime64[ns]")
-    test_bars = set(state["bar_index"].to_numpy(np.int64)[dt >= t2])
+    # G11: closed TEST window [T2, COMMON_END]; exclude any decision_time > end_t.
+    in_window = test_window_mask(state, split)
+    test_bars = set(state["bar_index"].to_numpy(np.int64)[in_window])
+    if in_window.any() and dt[in_window].max() > end_t:
+        raise RuntimeError("STOP_R9A_TEST_WINDOW_EXCEEDS_COMMON_END")
     mask = np.fromiter(
         (b in test_bars for b in feats["decision_bar"].to_numpy(np.int64)),
         dtype=bool, count=len(feats))
