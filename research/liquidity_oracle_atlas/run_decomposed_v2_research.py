@@ -637,33 +637,66 @@ def build_train_only_selection(baseline: str = "A0",
     selected = next(c for c in candidates if c["candidate"] == sel["candidate"])
     sel_arch = F.get_arch(selected["candidate"])
 
+    # A1_SHARE_TO_WIN is the only preregistered architecture that improves EV
+    # direction on TRAIN OOF (R12), but its paired CI crosses zero, so it is a
+    # secondary challenger only — not a V2 winner, and it must not unlock VAL
+    # on its own. Numbers come from the committed R12 comparison table.
+    r12 = pd.read_csv(MODEL_COMPARISON_CSV)
+    a1 = next((r for r in r12.to_dict(orient="records")
+               if r["candidate"] == "A1_SHARE_TO_WIN"), None)
+    secondary = None
+    if a1 is not None:
+        secondary = {
+            "candidate": "A1_SHARE_TO_WIN",
+            "mean_ev_mse": float(a1["mean_ev_mse"]),
+            "se_ev_mse": float(a1["se_ev_mse"]),
+            "paired_point": float(a1["paired_point"]),
+            "paired_ci_low": float(a1["paired_ci_low"]),
+            "paired_ci_high": float(a1["paired_ci_high"]),
+            "paired_status": str(a1.get("paired_status", "")),
+            "ci_crosses_zero": bool(
+                float(a1["paired_ci_low"]) < 0 < float(a1["paired_ci_high"])),
+            "source": "R12 model_comparison.csv (TRAIN OOF)",
+        }
+
     out = {
         "task": "FUTURE-R13-PAYOFF-GEOMETRY-V2-TRAIN-ONLY-SELECTION",
+        "status": "NO_V2_MODEL_IMPROVEMENT",
         "basis": "TRAIN-only OOF EV MSE (no VAL outcome read)",
         "val_unlocked": False,
+        "v2_selected": False,
+        "v2_selected_architecture": None,
+        "one_se_candidate": sel["candidate"],
+        "one_se_candidate_aliases": sorted({sel["candidate"], "A3_SHARED_BOTH"}),
+        "one_se_candidate_shared_state": selected["shared_state"],
+        "one_se_candidate_n_features": selected["n_features"],
+        "one_se_candidate_mean_ev_mse": selected["mean_ev_mse"],
+        "one_se_candidate_se_ev_mse": selected["se_ev_mse"],
+        "one_se_candidate_win_schema_sha256": (
+            sel_arch.win_schema_sha256 if sel_arch else None),
+        "one_se_candidate_payoff_schema_sha256": (
+            sel_arch.payoff_schema_sha256 if sel_arch else None),
+        "one_se_threshold": sel["one_se_threshold"],
+        "best_candidate": sel["best_candidate"],
+        "n_eligible": sel["n_eligible"],
+        "secondary_pre_val_challenger": "A1_SHARE_TO_WIN",
+        "secondary_pre_val_challenger_evidence": secondary,
+        "hypothesis_status": "POST_TRAIN_PRE_VAL_SECONDARY_CHALLENGER",
         "leakage": {
             "old_test_label_reads": int(COUNTERS["old_test_label_reads"]),
             "old_test_policy_reads": int(COUNTERS["old_test_policy_reads"]),
         },
         "baseline": baseline,
         "require_shared_state": require_shared_state,
-        "one_se_threshold": sel["one_se_threshold"],
-        "best_candidate": sel["best_candidate"],
-        "selected_candidate": sel["candidate"],
-        "selected_mean_ev_mse": selected["mean_ev_mse"],
-        "selected_se_ev_mse": selected["se_ev_mse"],
-        "selected_n_features": selected["n_features"],
-        "selected_shared_state": selected["shared_state"],
-        "selected_win_schema_sha256": (
-            sel_arch.win_schema_sha256 if sel_arch else None),
-        "selected_payoff_schema_sha256": (
-            sel_arch.payoff_schema_sha256 if sel_arch else None),
-        "n_eligible": sel["n_eligible"],
         "candidates": candidates,
         "verdict": (
             "No V2 extended-state family (SPACE18/PATH8/VOL6) improved TRAIN "
             "EV MSE within one SE of the V1 shared baseline; the one-SE "
-            "selector therefore keeps the simplest shared-state candidate."),
+            "selector therefore keeps the simplest shared-state candidate "
+            "(B0_SHARED41 == A3_SHARED_BOTH, SHARED41). Status is "
+            "NO_V2_MODEL_IMPROVEMENT; v2_selected=False. A1_SHARE_TO_WIN is "
+            "retained as the only secondary pre-VAL challenger (TRAIN OOF "
+            "direction improvement but CI crosses zero)."),
         "generator_code_sha": _git_head_sha(),
     }
     if write:
