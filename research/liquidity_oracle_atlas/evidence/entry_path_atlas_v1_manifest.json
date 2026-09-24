@@ -13,24 +13,28 @@
   },
   "audit_only_fields": [
     "direction_correct",
+    "e9_direction_correct",
+    "a9_direction_correct",
     "oracle_direction",
     "oracle_entry_quality_atr",
     "e9_teacher_exit_return_atr",
+    "a9_teacher_exit_return_atr",
     "oracle_exit_fill_time",
     "final_mfe",
     "final_mae"
   ],
   "realtime_policy": "FORBIDDEN_REALTIME_FEATURE",
   "counters": {
-    "raw_exec_load_count": 1,
+    "raw_exec_load_count": 15,
     "direction_chain_run_count": 1,
-    "atr_precompute_count": 1,
-    "sr_liq_precompute_count": 1,
+    "atr_precompute_count": 15,
+    "sr_liq_precompute_count": 15,
     "full_history_recompute_count": 0,
     "reference_call_count_production": 0,
     "candidate_python_loop_count": 0,
     "hotloop_dataframe_concat_count": 0,
-    "path_step_count": 567
+    "path_step_count": 4379,
+    "path_scan_count": 35
   },
   "checkpoints": [
     "m15",
@@ -72,7 +76,7 @@
     "never_stops_at_oracle_exit": true
   },
   "branch": "entry-path-atlas-v1",
-  "code_sha": "95c507367d42cd064f7043032fd3bf8a4f6eb597",
+  "code_sha": "5f0f437547afdb231ad1ed65bc45fbfc22667f26",
   "population": {
     "test_rows": 13773,
     "test_trades": 638,
@@ -80,43 +84,630 @@
     "short_trades": 319,
     "e9_predicted_long_rows": 7086,
     "e9_predicted_short_rows": 6687,
-    "direction_correct_rate": 0.633703623030567
+    "a9_predicted_long_rows": 8662,
+    "a9_predicted_short_rows": 5111,
+    "e9_direction_correct_rate": 0.633703623030567,
+    "a9_direction_correct_rate": 0.6377695491178392,
+    "a9_equals_router_te": true
   },
   "symbols_evaluated": [
-    "AG"
+    "AG",
+    "AU",
+    "CU",
+    "AL",
+    "SN",
+    "NI",
+    "RB",
+    "I",
+    "SC",
+    "RU",
+    "MA",
+    "TA",
+    "M",
+    "P",
+    "CF"
   ],
+  "n_symbols_env_complete": 15,
   "symbol_blocks": {
     "AG": {
       "env_complete": true,
-      "n_candidates": 1048,
-      "production_runtime_sec_full": 0.02032137499190867,
-      "t1": {
-        "rows": 150,
-        "cells": 6300,
-        "mismatch": 0,
-        "max_abs_error": 0.0,
-        "first_mismatch": null
-      },
+      "frame_rows": 14817,
+      "n_candidates": 50,
       "env_provenance": {
         "symbol": "AG",
-        "max_bars": "None",
+        "max_bars": null,
+        "environment_contract_id": "FUTURE-R4-M15-ENVIRONMENT-V1",
+        "cache_schema_version": "r4_env_cache_v2",
         "identity": "f3fb1b654f985375751cd01000383109395cc7717204ea3869797dd7a67c3976",
-        "sha256": "6da2b0a2dd7678d9e6a11a1b10949cc5ab8a18d8debd73cf414cd2cf80d9dbf2",
-        "rows": 14817,
-        "contract_id": null,
         "code_identity": "11817563ce0f413a165d63a1c94705598d1fbbc49bce9685fddbb6ad514b2561",
-        "execution_frame_sha256": "70cc98f85b0988ec38cf3d6039f3b293e8422bf26ccebbc09fa82aa897f3f22c",
         "raw_sha256": "a80e18f12a4f56a37f9a0efacf1633089cd0d3a07752ac6155b7705a4d801ddd",
-        "cache_version": null
+        "execution_frame_sha256": "70cc98f85b0988ec38cf3d6039f3b293e8422bf26ccebbc09fa82aa897f3f22c",
+        "sha256": "6da2b0a2dd7678d9e6a11a1b10949cc5ab8a18d8debd73cf414cd2cf80d9dbf2",
+        "rows": 14817
       },
-      "zone_geometry_audit": {
-        "sr_support_price_max_dev": 0.0,
-        "sr_resistance_price_max_dev": 0.0,
-        "liq_up_level_max_dev": 0.0,
-        "liq_dn_level_max_dev": 0.0
+      "anchor_alignment_pass": true,
+      "zone_audit_pass": true,
+      "zone_audit_max_dev": 0.0,
+      "t1_mismatch": 0,
+      "t1_max_abs_error": 0.0,
+      "reference_vs_production_pass": true,
+      "agreement_invariant_pass": true,
+      "agreement_invariant_msg": "",
+      "a9_e9_counts": {
+        "n": 50,
+        "agreement": 49,
+        "disagreement": 1,
+        "e9_fix": 0,
+        "e9_break": 1,
+        "agreement_rate": 0.98
+      }
+    },
+    "AU": {
+      "env_complete": true,
+      "frame_rows": 14817,
+      "n_candidates": 50,
+      "env_provenance": {
+        "symbol": "AU",
+        "max_bars": null,
+        "environment_contract_id": "FUTURE-R4-M15-ENVIRONMENT-V1",
+        "cache_schema_version": "r4_env_cache_v2",
+        "identity": "6d9a65cbe684058a741acde3c3a885a421d1a17d8ef39cf1449b2d039618d787",
+        "code_identity": "11817563ce0f413a165d63a1c94705598d1fbbc49bce9685fddbb6ad514b2561",
+        "raw_sha256": "caa211bfb66128509dbb82ffa4e5233e871cc963b7f2c7a45e311cf60a58ff2a",
+        "execution_frame_sha256": "b342ff9a82f106ce106c07722d9f8dd5deef756c58009a476d9739b2b5b70850",
+        "sha256": "865a5e13091c97b19a108315f6415b128ba333890329b0410ecf5dbf138a5845",
+        "rows": 14817
       },
-      "frame_rows": 14817
+      "anchor_alignment_pass": true,
+      "zone_audit_pass": true,
+      "zone_audit_max_dev": 0.0,
+      "t1_mismatch": 0,
+      "t1_max_abs_error": 0.0,
+      "reference_vs_production_pass": true,
+      "agreement_invariant_pass": true,
+      "agreement_invariant_msg": "",
+      "a9_e9_counts": {
+        "n": 50,
+        "agreement": 48,
+        "disagreement": 2,
+        "e9_fix": 0,
+        "e9_break": 2,
+        "agreement_rate": 0.96
+      }
+    },
+    "CU": {
+      "env_complete": true,
+      "frame_rows": 12441,
+      "n_candidates": 50,
+      "env_provenance": {
+        "symbol": "CU",
+        "max_bars": null,
+        "environment_contract_id": "FUTURE-R4-M15-ENVIRONMENT-V1",
+        "cache_schema_version": "r4_env_cache_v2",
+        "identity": "14b4f197a7b755d0508e7f433810fe7debd03b53d2813235608d51a279e82deb",
+        "code_identity": "11817563ce0f413a165d63a1c94705598d1fbbc49bce9685fddbb6ad514b2561",
+        "raw_sha256": "30620e92fbaa59d9226acfe10eeb8968227fdd8052ef052693d3bc58e7e35ce1",
+        "execution_frame_sha256": "f3d4e630055f0d67410ee15a0a437b3e9b85b6943ae8f51fb69afc3f3e563066",
+        "sha256": "2f732cb4c4ce99fa369cc5f271ff25ad198c09c3971c29dbfc45d19c87e83e40",
+        "rows": 12441
+      },
+      "anchor_alignment_pass": true,
+      "zone_audit_pass": true,
+      "zone_audit_max_dev": 0.0,
+      "t1_mismatch": 0,
+      "t1_max_abs_error": 0.0,
+      "reference_vs_production_pass": true,
+      "agreement_invariant_pass": true,
+      "agreement_invariant_msg": "",
+      "a9_e9_counts": {
+        "n": 50,
+        "agreement": 50,
+        "disagreement": 0,
+        "e9_fix": 0,
+        "e9_break": 0,
+        "agreement_rate": 1.0
+      }
+    },
+    "AL": {
+      "env_complete": true,
+      "frame_rows": 12441,
+      "n_candidates": 50,
+      "env_provenance": {
+        "symbol": "AL",
+        "max_bars": null,
+        "environment_contract_id": "FUTURE-R4-M15-ENVIRONMENT-V1",
+        "cache_schema_version": "r4_env_cache_v2",
+        "identity": "6cfe373c8ad4221bdb4675f3df2994653cdcd9496d92d0736cfbe1dea2f5719c",
+        "code_identity": "11817563ce0f413a165d63a1c94705598d1fbbc49bce9685fddbb6ad514b2561",
+        "raw_sha256": "6da969033835720a5deb80575af10daa28c8e86942a267e9bec2cfd1e6c9e908",
+        "execution_frame_sha256": "d2da47c79a1a29ed2e0c5ec3043378a2e499122c34c164df9da7b05448416063",
+        "sha256": "d7ce4911255999c5e511cac06f2d0fcb947dbafb0ace203ea094ce49abbec8a3",
+        "rows": 12441
+      },
+      "anchor_alignment_pass": true,
+      "zone_audit_pass": true,
+      "zone_audit_max_dev": 0.0,
+      "t1_mismatch": 0,
+      "t1_max_abs_error": 0.0,
+      "reference_vs_production_pass": true,
+      "agreement_invariant_pass": true,
+      "agreement_invariant_msg": "",
+      "a9_e9_counts": {
+        "n": 50,
+        "agreement": 46,
+        "disagreement": 4,
+        "e9_fix": 0,
+        "e9_break": 4,
+        "agreement_rate": 0.92
+      }
+    },
+    "SN": {
+      "env_complete": true,
+      "frame_rows": 12441,
+      "n_candidates": 50,
+      "env_provenance": {
+        "symbol": "SN",
+        "max_bars": null,
+        "environment_contract_id": "FUTURE-R4-M15-ENVIRONMENT-V1",
+        "cache_schema_version": "r4_env_cache_v2",
+        "identity": "17375e61224cad194613d31c4ccab925fffec369ad93f5c9bce43c84b649ee3c",
+        "code_identity": "11817563ce0f413a165d63a1c94705598d1fbbc49bce9685fddbb6ad514b2561",
+        "raw_sha256": "ffeb47a143a81bf550483c82145a65e66a63c45322cf796b84cf51dab40eedc4",
+        "execution_frame_sha256": "aa0836cbbe769760bdadf2d1144569e474fcc53b5791a1d307319a94801ce4cf",
+        "sha256": "1f520525f5252b88e3629c866c986ac1d4a88ad6b98a334d4935091d5bac1dfa",
+        "rows": 12441
+      },
+      "anchor_alignment_pass": true,
+      "zone_audit_pass": true,
+      "zone_audit_max_dev": 0.0,
+      "t1_mismatch": 0,
+      "t1_max_abs_error": 0.0,
+      "reference_vs_production_pass": true,
+      "agreement_invariant_pass": true,
+      "agreement_invariant_msg": "",
+      "a9_e9_counts": {
+        "n": 50,
+        "agreement": 48,
+        "disagreement": 2,
+        "e9_fix": 0,
+        "e9_break": 2,
+        "agreement_rate": 0.96
+      }
+    },
+    "NI": {
+      "env_complete": true,
+      "frame_rows": 12441,
+      "n_candidates": 50,
+      "env_provenance": {
+        "symbol": "NI",
+        "max_bars": null,
+        "environment_contract_id": "FUTURE-R4-M15-ENVIRONMENT-V1",
+        "cache_schema_version": "r4_env_cache_v2",
+        "identity": "e37dfc05fbdcdd5d59db059d978e3ec4d1d99dacf033da7c34c569b895a7d102",
+        "code_identity": "11817563ce0f413a165d63a1c94705598d1fbbc49bce9685fddbb6ad514b2561",
+        "raw_sha256": "eb211d19b590c8fa3984a22b064d93a5bb8dc2db100588267dd30ca1c6c4ef6e",
+        "execution_frame_sha256": "e7f32a961f1950bf7ee41c7ef4a791c8e7bc5cb730dd59e5397aae56e2ff3491",
+        "sha256": "e0f1579d4b3020c79d6edec8b07feac98753ea99bc03ec8553baf11dfab7a961",
+        "rows": 12441
+      },
+      "anchor_alignment_pass": true,
+      "zone_audit_pass": true,
+      "zone_audit_max_dev": 0.0,
+      "t1_mismatch": 0,
+      "t1_max_abs_error": 0.0,
+      "reference_vs_production_pass": true,
+      "agreement_invariant_pass": true,
+      "agreement_invariant_msg": "",
+      "a9_e9_counts": {
+        "n": 50,
+        "agreement": 46,
+        "disagreement": 4,
+        "e9_fix": 0,
+        "e9_break": 4,
+        "agreement_rate": 0.92
+      }
+    },
+    "RB": {
+      "env_complete": true,
+      "frame_rows": 9273,
+      "n_candidates": 50,
+      "env_provenance": {
+        "symbol": "RB",
+        "max_bars": null,
+        "environment_contract_id": "FUTURE-R4-M15-ENVIRONMENT-V1",
+        "cache_schema_version": "r4_env_cache_v2",
+        "identity": "3b9e3a1c94402b68f3ef68fa56486644c33175fe6b00f1ece0368ab8e5ea7e36",
+        "code_identity": "11817563ce0f413a165d63a1c94705598d1fbbc49bce9685fddbb6ad514b2561",
+        "raw_sha256": "5418d0cfccb6cc7e3aadfb0d92dda9f461a2954b3b36d6e76e57634ad65a1321",
+        "execution_frame_sha256": "39906a9114be673c6039771959e388daf2abe47277ef9a766f59501a6be20bb4",
+        "sha256": "1f265cb474c1a164b063fb92d476dad7232850180e43e0f1d59c24747476aff0",
+        "rows": 9273
+      },
+      "anchor_alignment_pass": true,
+      "zone_audit_pass": true,
+      "zone_audit_max_dev": 0.0,
+      "t1_mismatch": 0,
+      "t1_max_abs_error": 0.0,
+      "reference_vs_production_pass": true,
+      "agreement_invariant_pass": true,
+      "agreement_invariant_msg": "",
+      "a9_e9_counts": {
+        "n": 50,
+        "agreement": 37,
+        "disagreement": 13,
+        "e9_fix": 1,
+        "e9_break": 12,
+        "agreement_rate": 0.74
+      }
+    },
+    "I": {
+      "env_complete": true,
+      "frame_rows": 9273,
+      "n_candidates": 50,
+      "env_provenance": {
+        "symbol": "I",
+        "max_bars": null,
+        "environment_contract_id": "FUTURE-R4-M15-ENVIRONMENT-V1",
+        "cache_schema_version": "r4_env_cache_v2",
+        "identity": "cf6abdbedcc05647d70048e087c7236b1dfed557d8a5452ce4ca0013677a231c",
+        "code_identity": "11817563ce0f413a165d63a1c94705598d1fbbc49bce9685fddbb6ad514b2561",
+        "raw_sha256": "d8fe453385ce1b9e41266924d08b28b1e130c2cf9e7b9fb98e83b357b2a059b0",
+        "execution_frame_sha256": "43cfc969d574ac1b552d5ff7cc15db98de2642c7fd464938266b55201ca431a5",
+        "sha256": "e4a359a84a19c162a077f4b5793dd702605337d348fa6f944b2976334c0e1f8b",
+        "rows": 9273
+      },
+      "anchor_alignment_pass": true,
+      "zone_audit_pass": true,
+      "zone_audit_max_dev": 0.0,
+      "t1_mismatch": 0,
+      "t1_max_abs_error": 0.0,
+      "reference_vs_production_pass": true,
+      "agreement_invariant_pass": true,
+      "agreement_invariant_msg": "",
+      "a9_e9_counts": {
+        "n": 50,
+        "agreement": 46,
+        "disagreement": 4,
+        "e9_fix": 2,
+        "e9_break": 2,
+        "agreement_rate": 0.92
+      }
+    },
+    "SC": {
+      "env_complete": true,
+      "frame_rows": 14819,
+      "n_candidates": 50,
+      "env_provenance": {
+        "symbol": "SC",
+        "max_bars": null,
+        "environment_contract_id": "FUTURE-R4-M15-ENVIRONMENT-V1",
+        "cache_schema_version": "r4_env_cache_v2",
+        "identity": "935194e3f08d3b0866557cc7bb15c4e193256f305639185ebc524e9b5abf63c7",
+        "code_identity": "11817563ce0f413a165d63a1c94705598d1fbbc49bce9685fddbb6ad514b2561",
+        "raw_sha256": "7f2731b856d3307db0bcd8b01a61ae84de430fee45bf352c4ea18bc68c8440ae",
+        "execution_frame_sha256": "047eebef988eabee46bda9972ad66ae22f3601a8babb0b35fc0474aebe1ca77f",
+        "sha256": "89539ef7357c5b8e60a768dde27ddc77c5cc409ef450405fd3457307345f179a",
+        "rows": 14819
+      },
+      "anchor_alignment_pass": true,
+      "zone_audit_pass": true,
+      "zone_audit_max_dev": 0.0,
+      "t1_mismatch": 0,
+      "t1_max_abs_error": 0.0,
+      "reference_vs_production_pass": true,
+      "agreement_invariant_pass": true,
+      "agreement_invariant_msg": "",
+      "a9_e9_counts": {
+        "n": 50,
+        "agreement": 34,
+        "disagreement": 16,
+        "e9_fix": 0,
+        "e9_break": 16,
+        "agreement_rate": 0.68
+      }
+    },
+    "RU": {
+      "env_complete": true,
+      "frame_rows": 9273,
+      "n_candidates": 50,
+      "env_provenance": {
+        "symbol": "RU",
+        "max_bars": null,
+        "environment_contract_id": "FUTURE-R4-M15-ENVIRONMENT-V1",
+        "cache_schema_version": "r4_env_cache_v2",
+        "identity": "6cc29ecaab05aca7d5202f1ec67622c89fec7080ca9abad801b6d0ce64b82438",
+        "code_identity": "11817563ce0f413a165d63a1c94705598d1fbbc49bce9685fddbb6ad514b2561",
+        "raw_sha256": "e8fa45cc44e45d7bd82c2ae53ed74bf5c4ba91e6ce606e005170ee4dc6e83a94",
+        "execution_frame_sha256": "149c9dbe707baf64520ec2de54afbcf5e0b5fd513ea0983e12c725f84bb144d2",
+        "sha256": "86f7d41a28f3072a7e9e2e559e3fffa6bf1bbb4d236f501fcb7f187094b4211c",
+        "rows": 9273
+      },
+      "anchor_alignment_pass": true,
+      "zone_audit_pass": true,
+      "zone_audit_max_dev": 0.0,
+      "t1_mismatch": 0,
+      "t1_max_abs_error": 0.0,
+      "reference_vs_production_pass": true,
+      "agreement_invariant_pass": true,
+      "agreement_invariant_msg": "",
+      "a9_e9_counts": {
+        "n": 50,
+        "agreement": 40,
+        "disagreement": 10,
+        "e9_fix": 1,
+        "e9_break": 9,
+        "agreement_rate": 0.8
+      }
+    },
+    "MA": {
+      "env_complete": true,
+      "frame_rows": 9273,
+      "n_candidates": 50,
+      "env_provenance": {
+        "symbol": "MA",
+        "max_bars": null,
+        "environment_contract_id": "FUTURE-R4-M15-ENVIRONMENT-V1",
+        "cache_schema_version": "r4_env_cache_v2",
+        "identity": "42ac0ea44b2321f649e108f98f383a267b36c6ca72c34d4427622c8fe9588b2b",
+        "code_identity": "11817563ce0f413a165d63a1c94705598d1fbbc49bce9685fddbb6ad514b2561",
+        "raw_sha256": "2cef4bc08a095d553b3d832586da13438500e9928852614dcb34ea00de2d5d13",
+        "execution_frame_sha256": "bf8975cde6603b2efffd0be9bbd45ecb6b3f74e80a68187747715746abbb369d",
+        "sha256": "bd65db65a90263975910a4dce5bc61ec299cdd9a0ece4a145ba2f3391475938b",
+        "rows": 9273
+      },
+      "anchor_alignment_pass": true,
+      "zone_audit_pass": true,
+      "zone_audit_max_dev": 0.0,
+      "t1_mismatch": 0,
+      "t1_max_abs_error": 0.0,
+      "reference_vs_production_pass": true,
+      "agreement_invariant_pass": true,
+      "agreement_invariant_msg": "",
+      "a9_e9_counts": {
+        "n": 50,
+        "agreement": 34,
+        "disagreement": 16,
+        "e9_fix": 0,
+        "e9_break": 16,
+        "agreement_rate": 0.68
+      }
+    },
+    "TA": {
+      "env_complete": true,
+      "frame_rows": 9273,
+      "n_candidates": 50,
+      "env_provenance": {
+        "symbol": "TA",
+        "max_bars": null,
+        "environment_contract_id": "FUTURE-R4-M15-ENVIRONMENT-V1",
+        "cache_schema_version": "r4_env_cache_v2",
+        "identity": "6cc9e7a5f24f357f09ff1b41ca8d69b1e357382006909493161ef80f15f99b44",
+        "code_identity": "11817563ce0f413a165d63a1c94705598d1fbbc49bce9685fddbb6ad514b2561",
+        "raw_sha256": "435b07ab2dcce2562a8913acea4071c9ccc88df7ebe81435c0a5dde9c78f44c3",
+        "execution_frame_sha256": "550f1711cf85b657b04af0078de82dc2de89eaf1f17f778f742177e71985dbc5",
+        "sha256": "ca0b750b6943d2aecb022c53aaf9a261e4807bda4853f7f67b7fa0aad170a8db",
+        "rows": 9273
+      },
+      "anchor_alignment_pass": true,
+      "zone_audit_pass": true,
+      "zone_audit_max_dev": 0.0,
+      "t1_mismatch": 0,
+      "t1_max_abs_error": 0.0,
+      "reference_vs_production_pass": true,
+      "agreement_invariant_pass": true,
+      "agreement_invariant_msg": "",
+      "a9_e9_counts": {
+        "n": 50,
+        "agreement": 46,
+        "disagreement": 4,
+        "e9_fix": 0,
+        "e9_break": 4,
+        "agreement_rate": 0.92
+      }
+    },
+    "M": {
+      "env_complete": true,
+      "frame_rows": 9273,
+      "n_candidates": 50,
+      "env_provenance": {
+        "symbol": "M",
+        "max_bars": null,
+        "environment_contract_id": "FUTURE-R4-M15-ENVIRONMENT-V1",
+        "cache_schema_version": "r4_env_cache_v2",
+        "identity": "05b0aabc3a5521a33f2cf7aa16e89a77cba122a77f5bd58704fdbf5ddae71d59",
+        "code_identity": "11817563ce0f413a165d63a1c94705598d1fbbc49bce9685fddbb6ad514b2561",
+        "raw_sha256": "11c71c57c1d9908fbb0eaac97d6bd872d6cc47b6c10eaadacdc45257e23d3a26",
+        "execution_frame_sha256": "fedead92cccd50cfa81de635e92e6d124323921cee9d67aa8d670b9b8b161931",
+        "sha256": "f5d98fde44baeb70d517ee35d90acce5d972eb4b8b9146eb918cfb8d29e1411c",
+        "rows": 9273
+      },
+      "anchor_alignment_pass": true,
+      "zone_audit_pass": true,
+      "zone_audit_max_dev": 0.0,
+      "t1_mismatch": 0,
+      "t1_max_abs_error": 0.0,
+      "reference_vs_production_pass": true,
+      "agreement_invariant_pass": true,
+      "agreement_invariant_msg": "",
+      "a9_e9_counts": {
+        "n": 50,
+        "agreement": 48,
+        "disagreement": 2,
+        "e9_fix": 0,
+        "e9_break": 2,
+        "agreement_rate": 0.96
+      }
+    },
+    "P": {
+      "env_complete": true,
+      "frame_rows": 9273,
+      "n_candidates": 50,
+      "env_provenance": {
+        "symbol": "P",
+        "max_bars": null,
+        "environment_contract_id": "FUTURE-R4-M15-ENVIRONMENT-V1",
+        "cache_schema_version": "r4_env_cache_v2",
+        "identity": "8db2418dd90184aac9e79fb68121e2bf4fd5a2475e28891961dd406c4f2daf87",
+        "code_identity": "11817563ce0f413a165d63a1c94705598d1fbbc49bce9685fddbb6ad514b2561",
+        "raw_sha256": "790d019b0eb9fab56cbdbcfd323496275e13ed0e8282d241e411068731e006de",
+        "execution_frame_sha256": "a3dcc440ed8e4ce41ebc728f098681ba17c1f2a8fa96124d6bc4e02ee48034f8",
+        "sha256": "a26c25e5e7dd3c1e5fb8a9a144080c4674a0fc768641e8c0bdba9da25f197018",
+        "rows": 9273
+      },
+      "anchor_alignment_pass": true,
+      "zone_audit_pass": true,
+      "zone_audit_max_dev": 0.0,
+      "t1_mismatch": 0,
+      "t1_max_abs_error": 0.0,
+      "reference_vs_production_pass": true,
+      "agreement_invariant_pass": true,
+      "agreement_invariant_msg": "",
+      "a9_e9_counts": {
+        "n": 50,
+        "agreement": 45,
+        "disagreement": 5,
+        "e9_fix": 0,
+        "e9_break": 5,
+        "agreement_rate": 0.9
+      }
+    },
+    "CF": {
+      "env_complete": true,
+      "frame_rows": 9273,
+      "n_candidates": 50,
+      "env_provenance": {
+        "symbol": "CF",
+        "max_bars": null,
+        "environment_contract_id": "FUTURE-R4-M15-ENVIRONMENT-V1",
+        "cache_schema_version": "r4_env_cache_v2",
+        "identity": "ea9c8fb3b070884679d1389f766ca9f0eead8624ea18c440bcd6a40b69be9334",
+        "code_identity": "11817563ce0f413a165d63a1c94705598d1fbbc49bce9685fddbb6ad514b2561",
+        "raw_sha256": "04965effc15212ed3c1c309c5dafbee36a4483edb6dee4d06ec254dc8562763d",
+        "execution_frame_sha256": "130b7901963dd87c983b8b786553fcb893b40ce87c40ab5ecd5c378ef20e81a2",
+        "sha256": "ee6e501dec323f77f061dd91be9430ba9450c3bb4c6b9d3805dfd04b1274d912",
+        "rows": 9273
+      },
+      "anchor_alignment_pass": true,
+      "zone_audit_pass": true,
+      "zone_audit_max_dev": 0.0,
+      "t1_mismatch": 0,
+      "t1_max_abs_error": 0.0,
+      "reference_vs_production_pass": true,
+      "agreement_invariant_pass": true,
+      "agreement_invariant_msg": "",
+      "a9_e9_counts": {
+        "n": 50,
+        "agreement": 43,
+        "disagreement": 7,
+        "e9_fix": 0,
+        "e9_break": 7,
+        "agreement_rate": 0.86
+      }
     }
+  },
+  "environment_provenance_summary": {
+    "AG": {
+      "environment_contract_id": "FUTURE-R4-M15-ENVIRONMENT-V1",
+      "cache_schema_version": "r4_env_cache_v2",
+      "max_bars": null,
+      "rows": 14817
+    },
+    "AU": {
+      "environment_contract_id": "FUTURE-R4-M15-ENVIRONMENT-V1",
+      "cache_schema_version": "r4_env_cache_v2",
+      "max_bars": null,
+      "rows": 14817
+    },
+    "CU": {
+      "environment_contract_id": "FUTURE-R4-M15-ENVIRONMENT-V1",
+      "cache_schema_version": "r4_env_cache_v2",
+      "max_bars": null,
+      "rows": 12441
+    },
+    "AL": {
+      "environment_contract_id": "FUTURE-R4-M15-ENVIRONMENT-V1",
+      "cache_schema_version": "r4_env_cache_v2",
+      "max_bars": null,
+      "rows": 12441
+    },
+    "SN": {
+      "environment_contract_id": "FUTURE-R4-M15-ENVIRONMENT-V1",
+      "cache_schema_version": "r4_env_cache_v2",
+      "max_bars": null,
+      "rows": 12441
+    },
+    "NI": {
+      "environment_contract_id": "FUTURE-R4-M15-ENVIRONMENT-V1",
+      "cache_schema_version": "r4_env_cache_v2",
+      "max_bars": null,
+      "rows": 12441
+    },
+    "RB": {
+      "environment_contract_id": "FUTURE-R4-M15-ENVIRONMENT-V1",
+      "cache_schema_version": "r4_env_cache_v2",
+      "max_bars": null,
+      "rows": 9273
+    },
+    "I": {
+      "environment_contract_id": "FUTURE-R4-M15-ENVIRONMENT-V1",
+      "cache_schema_version": "r4_env_cache_v2",
+      "max_bars": null,
+      "rows": 9273
+    },
+    "SC": {
+      "environment_contract_id": "FUTURE-R4-M15-ENVIRONMENT-V1",
+      "cache_schema_version": "r4_env_cache_v2",
+      "max_bars": null,
+      "rows": 14819
+    },
+    "RU": {
+      "environment_contract_id": "FUTURE-R4-M15-ENVIRONMENT-V1",
+      "cache_schema_version": "r4_env_cache_v2",
+      "max_bars": null,
+      "rows": 9273
+    },
+    "MA": {
+      "environment_contract_id": "FUTURE-R4-M15-ENVIRONMENT-V1",
+      "cache_schema_version": "r4_env_cache_v2",
+      "max_bars": null,
+      "rows": 9273
+    },
+    "TA": {
+      "environment_contract_id": "FUTURE-R4-M15-ENVIRONMENT-V1",
+      "cache_schema_version": "r4_env_cache_v2",
+      "max_bars": null,
+      "rows": 9273
+    },
+    "M": {
+      "environment_contract_id": "FUTURE-R4-M15-ENVIRONMENT-V1",
+      "cache_schema_version": "r4_env_cache_v2",
+      "max_bars": null,
+      "rows": 9273
+    },
+    "P": {
+      "environment_contract_id": "FUTURE-R4-M15-ENVIRONMENT-V1",
+      "cache_schema_version": "r4_env_cache_v2",
+      "max_bars": null,
+      "rows": 9273
+    },
+    "CF": {
+      "environment_contract_id": "FUTURE-R4-M15-ENVIRONMENT-V1",
+      "cache_schema_version": "r4_env_cache_v2",
+      "max_bars": null,
+      "rows": 9273
+    }
+  },
+  "a9_comparator": {
+    "role": "PRE_REGISTERED_SECONDARY_COMPARATOR",
+    "identity": "A9 := chain['A'] (frozen direct DTP9 router)",
+    "primary_remains": "delta_PS_4h_E9",
+    "note": "A9 does NOT promote to a second primary; no A9-vs-E9 verdict here."
+  },
+  "agreement_disagreement_total": {
+    "agreement": 660,
+    "disagreement": 90,
+    "e9_fix": 4,
+    "e9_break": 86
   },
   "zone_semantics": {
     "long_backstop": "support: touch=low<=support_top, pierce=low<support_bottom, reclaim=close>=support_bottom",
@@ -129,15 +720,16 @@
   },
   "tp": {
     "counters": {
-      "raw_exec_load_count": 1,
+      "raw_exec_load_count": 15,
       "direction_chain_run_count": 1,
-      "atr_precompute_count": 1,
-      "sr_liq_precompute_count": 1,
+      "atr_precompute_count": 15,
+      "sr_liq_precompute_count": 15,
       "full_history_recompute_count": 0,
       "reference_call_count_production": 0,
       "candidate_python_loop_count": 0,
       "hotloop_dataframe_concat_count": 0,
-      "path_step_count": 567
+      "path_step_count": 4379,
+      "path_scan_count": 35
     },
     "scaling": {
       "candidate_scaling": {
@@ -145,30 +737,38 @@
         "2N": 400,
         "4N": 800,
         "H": 32,
-        "t_N": 0.001684832968749106,
-        "t_2N": 0.001877125003375113,
-        "t_4N": 0.003177875012625009,
-        "ratio_2N": 1.1141312154929952,
-        "ratio_4N": 1.8861662085022013
+        "t_N": 0.0017675830167718232,
+        "t_2N": 0.0018532919930294156,
+        "t_4N": 0.002417834009975195,
+        "ratio_2N": 1.048489363975744,
+        "ratio_4N": 1.3678757868985072
       },
       "horizon_scaling": {
         "H": 32,
         "2H": 64,
         "N": 200,
-        "t_H": 0.0019000000320374966,
-        "t_2H": 0.003154959005769342,
-        "ratio_2H": 1.6605047118794358
+        "t_H": 0.001615875051356852,
+        "t_2H": 0.0031273330096155405,
+        "ratio_2H": 1.9353804658284164
       }
     },
-    "peak_rss_bytes": 754712576.0
+    "peak_rss_bytes": 804814848.0,
+    "performance": {
+      "total_environment_loads": 15,
+      "direction_chain_runs": 1,
+      "path_scans": 35,
+      "candidate_views_processed": 1500,
+      "runtime_sec": 28.37621283531189
+    }
   },
   "artifacts": {
-    "artifacts/entry_path_atlas_v1/e9_direction_state_v1.parquet": "67a2311a4907a2acc2684219f25f5478768244cc5cd63a8856d76f69fa55edf4"
+    "artifacts/entry_path_atlas_v1/e9_direction_state_v1.parquet": "1778eeeaf97c0f6b9496fa785d730bc7c23f2e910ddbdc5cfb4772b121e5f2fd"
   },
-  "runtime_sec": 9.431034803390503,
+  "runtime_sec": 28.37623381614685,
   "unverified_items": [
-    "Full 15-symbol canonical environment materialization DEFERRED to T1.5.",
-    "Primary endpoint delta_PS_4h is NOT estimated (full experiment not authorized).",
-    "L2 row metrics parquet is not produced at kernel stage."
+    "Full primary endpoint delta_PS_4h (E9 and A9) is NOT estimated at T1.5.",
+    "L2 row metrics parquet (semantic_key x direction_system) not produced.",
+    "Stop-Loss / Take-Profit experiments NOT run (frozen later).",
+    "FUTURE-RX-DIRECTION-LAYER-ABLATION-V1 pre-registered; NOT run here."
   ]
 }
