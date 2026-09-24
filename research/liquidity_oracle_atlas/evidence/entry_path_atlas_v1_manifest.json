@@ -1,7 +1,7 @@
 {
   "task_id": "FUTURE-R5-M15-ENTRY-PATH-ATLAS-V1",
   "base_sha": "cb9261d4498d328e6dd8edca5d655eaf609b0611",
-  "reviewed_parent_sha": "e9498f9e6ed9bcdaf084639ce34510fb4dfac79e",
+  "reviewed_parent_sha": "f1f035fa0bc2ff16c92d15ff079dc0186d178baf",
   "stage": "pre_t2_implementation",
   "primary_endpoint": {
     "name": "delta_PS_curve_E9_15m",
@@ -75,7 +75,7 @@
     "never_stops_at_oracle_exit": true
   },
   "branch": "entry-path-atlas-v1",
-  "code_sha": "001a0403ab5374be9221e4476438e9fa22de344d",
+  "code_sha": "9653167fa249d01b4ae637d1a2905d1f9f9a884f",
   "curve_kernel_differential": {
     "synthetic_rows": 40,
     "synthetic_final_mismatch": 0,
@@ -92,7 +92,8 @@
   },
   "kaplan_meier_synthetic": {
     "math_ok": true,
-    "censoring_ok": true
+    "censoring_ok": true,
+    "sequential_event_ok": true
   },
   "disagreement_arithmetic": {
     "e9_fix": 2,
@@ -102,12 +103,31 @@
     "identity_holds": true
   },
   "full_population_gates": {
-    "frozen_symbols": 15,
+    "frozen_symbol_universe": [
+      "AG",
+      "AU",
+      "CU",
+      "AL",
+      "SN",
+      "NI",
+      "RB",
+      "I",
+      "SC",
+      "RU",
+      "MA",
+      "TA",
+      "M",
+      "P",
+      "CF"
+    ],
     "frozen_candidate_rows": 13773,
     "frozen_oracle_gids": 638,
+    "frozen_oracle_long_gids": 319,
+    "frozen_oracle_short_gids": 319,
     "frozen_a9_l2_rows": 13773,
     "frozen_e9_l2_rows": 13773,
     "frozen_total_l2_rows": 27546,
+    "env_contract_id": "FUTURE-R4-M15-ENVIRONMENT-V1",
     "enforced_on": "authorized full run only (not PRE-T2)"
   },
   "formal_t2_small_ag": {
@@ -132,7 +152,7 @@
       "candidate_python_loop_count": 0,
       "hotloop_dataframe_concat_count": 0,
       "candidate_views_processed": 80,
-      "runtime_sec": 7.313615083694458
+      "runtime_sec": 11.406942129135132
     },
     "evidence_temp": {
       "row_metrics_parquet": "entry_path_row_metrics_v1.parquet",
@@ -164,6 +184,18 @@
         "ATR0",
         "segment",
         "trading_day",
+        "raw_sup_top",
+        "raw_sup_bottom",
+        "raw_sup_strength",
+        "raw_res_top",
+        "raw_res_bottom",
+        "raw_res_strength",
+        "raw_liq_up_top",
+        "raw_liq_up_bottom",
+        "raw_liq_up_level",
+        "raw_liq_dn_top",
+        "raw_liq_dn_bottom",
+        "raw_liq_dn_level",
         "oracle_direction",
         "direction_correct",
         "oracle_entry_quality_atr",
@@ -212,7 +244,22 @@
         "td5_mfe",
         "td5_mae",
         "td5_r"
-      ]
+      ],
+      "raw_geometry_columns": [
+        "raw_sup_top",
+        "raw_sup_bottom",
+        "raw_sup_strength",
+        "raw_res_top",
+        "raw_res_bottom",
+        "raw_res_strength",
+        "raw_liq_up_top",
+        "raw_liq_up_bottom",
+        "raw_liq_up_level",
+        "raw_liq_dn_top",
+        "raw_liq_dn_bottom",
+        "raw_liq_dn_level"
+      ],
+      "written_streaming": true
     },
     "entry_path_curve_v1.parquet": {
       "key": [
@@ -233,7 +280,8 @@
         "PS",
         "signed_return"
       ],
-      "observed_bar_minutes": "15 * h_bar (bar-time, not wall-clock)"
+      "observed_bar_minutes": "15 * h_bar (bar-time, not wall-clock)",
+      "written_streaming": true
     },
     "entry_path_atlas_v1_path_curves.csv": {
       "key": [
@@ -241,15 +289,48 @@
         "metric",
         "h_bar"
       ],
-      "includes": [
+      "columns": [
+        "direction_system",
+        "metric",
+        "contrast_orientation",
+        "h_bar",
+        "observed_bar_minutes",
+        "point",
+        "pointwise_lo",
+        "pointwise_hi",
+        "simul_lower",
+        "simul_upper",
         "inferential_support",
         "n_valid_correct",
         "n_valid_wrong",
-        "avail_overall_rows",
-        "avail_overall_fraction",
-        "avail_correct_rows",
-        "avail_wrong_rows",
+        "overall_rows",
+        "overall_gids",
+        "overall_mass",
+        "overall_fraction",
+        "correct_rows",
+        "correct_gids",
+        "correct_mass",
+        "correct_fraction",
+        "wrong_rows",
+        "wrong_gids",
+        "wrong_mass",
+        "wrong_fraction",
+        "LONG_rows",
+        "LONG_gids",
+        "LONG_mass",
+        "LONG_fraction",
+        "SHORT_rows",
+        "SHORT_gids",
+        "SHORT_mass",
+        "SHORT_fraction",
         "flag"
+      ],
+      "availability_strata": [
+        "overall",
+        "correct",
+        "wrong",
+        "LONG",
+        "SHORT"
       ]
     },
     "entry_path_atlas_v1_event_curves.csv": {
@@ -257,7 +338,24 @@
         "event_type",
         "name",
         "direction_system",
+        "group",
+        "stat_name",
         "h_bar"
+      ],
+      "columns": [
+        "event_type",
+        "name",
+        "backstop",
+        "direction_system",
+        "group",
+        "stat_name",
+        "h_bar",
+        "observed_bar_minutes",
+        "value_correct",
+        "value_wrong",
+        "delta",
+        "orientation",
+        "value"
       ],
       "event_types": [
         "first_event_curve",
@@ -293,13 +391,25 @@
     },
     "entry_path_atlas_v1_a9_e9_disagreement.csv": {
       "key": [
-        "symbol"
+        "scope",
+        "scope_value"
       ],
       "columns": [
+        "scope",
+        "scope_value",
         "agreement",
         "disagreement",
         "e9_fix",
-        "e9_break"
+        "e9_break",
+        "n_rows",
+        "weight_mass"
+      ],
+      "scopes": [
+        "overall",
+        "symbol",
+        "oracle_direction",
+        "a9_predicted_direction",
+        "e9_predicted_direction"
       ]
     },
     "entry_path_atlas_v1_summary.json": {
@@ -308,7 +418,7 @@
   },
   "governance": {
     "full_13773_formal_t2": "NOT RUN (not authorized at PRE-T2)",
-    "formal_runner_guard": "population='full' raises STOP_FORMAL_T2_FULL_POPULATION_NOT_AUTHORIZED",
+    "formal_runner_guard": "population='full' requires allow_full=True AND authorized_review_sha (FG6)",
     "no_best_h_selection": true,
     "reference_kernel_never_called_in_formal_runner": true,
     "one_dual_production_scan_per_symbol": true,
@@ -325,5 +435,5 @@
     "Stop-Loss / Take-Profit experiments NOT run.",
     "A9-vs-E9 final system verdict reserved for downstream frozen ablation."
   ],
-  "runtime_sec": 15.990553855895996
+  "runtime_sec": 22.504155158996582
 }
