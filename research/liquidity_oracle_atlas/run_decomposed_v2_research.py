@@ -23,6 +23,7 @@ helpers only.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import time
@@ -54,6 +55,16 @@ EXTENDED_STATE_PARQUET = os.path.join(
 EVIDENCE_DIR = os.path.join("research", "liquidity_oracle_atlas", "evidence")
 SELECTION_JSON = os.path.join(
     EVIDENCE_DIR, "model_selection_train_only_v2.json")
+PHASE4_MANIFEST_JSON = os.path.join(
+    EVIDENCE_DIR, "decomposed_v2_phase4_manifest.json")
+
+# Historical generator identities — recorded in the Phase-4 evidence manifest
+# but NEVER rewritten here. These are the code commits that produced the
+# extended-state artifact and the train-only selection respectively.
+EXTENDED_STATE_GENERATOR_CODE_SHA = (
+    "2eb2f7243c8bc1e1d1dd24101ebd8f9dac90f302")
+SELECTION_GENERATOR_CODE_SHA = (
+    "9a221cdc1f45b031f3f0e13f0860c6b6715391f6")
 
 STABILITY_ATLAS_CSV = os.path.join(EVIDENCE_DIR, "decomposed_v2_stability_atlas.csv")
 MODEL_COMPARISON_CSV = os.path.join(EVIDENCE_DIR, "decomposed_v2_model_comparison.csv")
@@ -354,6 +365,145 @@ def _git_head_sha() -> str:
     return subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=os.getcwd(),
         capture_output=True, text=True).stdout.strip()
+
+
+# --------------------------------------------------------------------------- #
+# Phase-4 final evidence closure (C4-C8)                                       #
+# --------------------------------------------------------------------------- #
+def _sha256_path(path: str) -> Optional[str]:
+    if not os.path.exists(path):
+        return None
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _unit_identity_records() -> list:
+    """C6: ordered canonical unit-metadata identities for a stable SHA.
+
+    No fit rerun — reads the already-committed unit JSON metadata only.
+    """
+    from research.liquidity_oracle_atlas import (
+        decomposed_value_features_v2 as F)
+    plan = build_plan_from_devframe()
+    records = []
+    for short in R12_ARCH_NAMES + R13_ARCH_NAMES:
+        arch = F.get_arch(short)
+        for k in range(plan.n_outer):
+            for h in HORIZONS:
+                _, meta_p = _unit_paths(arch.name, k, h)
+                if not os.path.exists(meta_p):
+                    continue
+                with open(meta_p) as f:
+                    meta = json.load(f)
+                bi = meta.get("best_iteration", {}) or {}
+                records.append({
+                    "arch": meta.get("arch"),
+                    "fold": int(meta.get("fold")),
+                    "horizon": meta.get("horizon"),
+                    "best_iteration_win": bi.get("win"),
+                    "best_iteration_win_mag": bi.get("win_mag"),
+                    "best_iteration_loss_mag": bi.get("loss_mag"),
+                    "ev_mse": meta.get("ev_mse"),
+                })
+    records.sort(key=lambda r: (r["arch"], r["fold"], r["horizon"]))
+    return records
+
+
+def _unit_identity_sha(records: list) -> str:
+    canon = json.dumps(records, sort_keys=True, default=str)
+    return hashlib.sha256(canon.encode()).hexdigest()
+
+
+def build_phase4_manifest(write: bool = True) -> dict:
+    """C4-C8: bind the full Phase-4 lineage into one committed evidence file.
+
+    Pure evidence assembly — reads committed artifacts only, performs NO model
+    fit and changes NO scientific result. Leakage counters must be zero.
+    """
+    assert_clean_efficiency()
+    from research.liquidity_oracle_atlas import (
+        decomposed_value_features_v2 as F)
+
+    r12 = pd.read_csv(MODEL_COMPARISON_CSV)
+    a0 = next(r for r in r12.to_dict(orient="records")
+              if r["candidate"] == "A0_V1_DISJOINT")
+    a1 = next(r for r in r12.to_dict(orient="records")
+              if r["candidate"] == "A1_SHARE_TO_WIN")
+
+    agg = aggregate_unit_evidence()
+    sel = json.load(open(SELECTION_JSON))
+    sel_checks = selection_is_committed()
+    unit_records = _unit_identity_records()
+
+    manifest = {
+        "task": "FUTURE-R11-R14-V2-PHASE4-EVIDENCE-CLOSURE",
+        "stage": "TRAIN_ONLY_PHASE4_FROZEN",
+        "scientific_status": "NO_V2_MODEL_IMPROVEMENT",
+        "reviewed_parent_sha": "612294a5d32d5f02a34857cff966b4202c763e23",
+        "generator_code_sha": _git_head_sha(),
+
+        "artifact_sha256": {
+            "extended_state_manifest_v2.json":
+                _sha256_path(EXTENDED_MANIFEST_JSON),
+            "extended_causal_state_v2.parquet":
+                _sha256_path(EXTENDED_STATE_PARQUET),
+            "dev_frame_v2.parquet": _sha256_path(DEV_FRAME_PARQUET),
+            "decomposed_v2_stability_atlas.csv":
+                _sha256_path(STABILITY_ATLAS_CSV),
+            "decomposed_v2_model_comparison.csv":
+                _sha256_path(MODEL_COMPARISON_CSV),
+            "decomposed_v2_feature_ablation.csv":
+                _sha256_path(FEATURE_ABLATION_CSV),
+            "model_selection_train_only_v2.json":
+                _sha256_path(SELECTION_JSON),
+        },
+        "extended_state_generator_code_sha":
+            EXTENDED_STATE_GENERATOR_CODE_SHA,
+        "selection_generator_code_sha": SELECTION_GENERATOR_CODE_SHA,
+
+        "unit_evidence": {
+            "r12_units": agg["r12_units"],
+            "r13_units": agg["r13_units"],
+            "total_units": agg["total_units"],
+            "fits_per_unit": FITS_PER_UNIT,
+            "total_model_fits": agg["total_model_fits"],
+            "missing_units": agg["missing_units"],
+            "duplicate_units": agg["duplicate_units"],
+            "inconsistent_units": agg["inconsistent_units"],
+            "units_per_architecture": agg["units_per_architecture"],
+            "unit_identity_sha256": _unit_identity_sha(unit_records),
+        },
+
+        "leakage": {
+            "old_test_label_reads": int(COUNTERS["old_test_label_reads"]),
+            "old_test_policy_reads": int(COUNTERS["old_test_policy_reads"]),
+            "val_outcomes_read": False,
+            "selection_committed_clean": bool(sel_checks["committed_clean"]),
+        },
+
+        "scientific_interpretation": {
+            "primary_status": "NO_V2_MODEL_IMPROVEMENT",
+            "v2_selected": False,
+            "one_se_candidate": sel["one_se_candidate"],
+            "secondary_pre_val_challenger": "A1_SHARE_TO_WIN",
+            "a1_evidence": {
+                "a0_mean_ev_mse": round(float(a0["mean_ev_mse"]), 10),
+                "a1_mean_ev_mse": round(float(a1["mean_ev_mse"]), 10),
+                "paired_point": round(float(a1["paired_point"]), 10),
+                "paired_ci_95_low": round(float(a1["paired_ci_low"]), 10),
+                "paired_ci_95_high": round(float(a1["paired_ci_high"]), 10),
+                "status": str(a1.get("paired_status", "")),
+            },
+            "note": ("A1 retained as secondary pre-VAL challenger; NOT "
+                     "promoted to SUPPORTED (paired 95% CI crosses zero)."),
+        },
+    }
+    if write:
+        write_json_evidence(manifest, PHASE4_MANIFEST_JSON)
+    return manifest
 
 
 DEV_FRAME_PARQUET = os.path.join(V2_ARTIFACT_DIR, "dev_frame_v2.parquet")
