@@ -132,6 +132,13 @@ def ag_anchors(e9_state, ag_state):
     return M.build_anchors_for_symbol(e9_state, ag_state)
 
 
+@pytest.fixture(scope="session")
+def ag_dual(e9_state, ag_state):
+    sel = e9_state[e9_state["symbol"] == "AG"].sort_values("semantic_key").head(80)
+    base = M.build_base_anchors(sel, ag_state)
+    return base, M.run_symbol_paths_dual(ag_state, base)
+
+
 # =========================================================================== #
 # T0                                                                          #
 # =========================================================================== #
@@ -753,3 +760,227 @@ def test_rc9_provenance_smoke_cache_fails_closed(monkeypatch, tmp_path):
     monkeypatch.setattr(M, "R4_ENV_MANIFEST", str(fake))
     with pytest.raises(RuntimeError):
         M.load_env_provenance("ZZ")
+
+
+# =========================================================================== #
+# Formal T2 (PRE-T2) curve-capture + simultaneous-band + invariants            #
+# =========================================================================== #
+def test_curve_h1_equals_m15_checkpoint(ag_dual):
+    base, dual = ag_dual
+    a9 = dual["A9"]
+    assert _arr_eq(a9["curve_mfe"][:, 0], a9["checkpoints"]["m15"]["mfe"])
+    assert _arr_eq(a9["curve_mae"][:, 0], a9["checkpoints"]["m15"]["mae"])
+    assert _arr_eq(a9["curve_r"][:, 0], a9["checkpoints"]["m15"]["r"])
+
+
+def test_curve_h4_equals_h1_checkpoint(ag_dual):
+    base, dual = ag_dual
+    a9 = dual["A9"]
+    assert _arr_eq(a9["curve_mfe"][:, 3], a9["checkpoints"]["h1"]["mfe"])
+    assert _arr_eq(a9["curve_mae"][:, 3], a9["checkpoints"]["h1"]["mae"])
+
+
+def test_curve_h16_equals_h4_checkpoint_where_available(ag_dual):
+    base, dual = ag_dual
+    a9 = dual["A9"]
+    cp = a9["checkpoints"]["h4"]
+    valid = np.isfinite(cp["mfe"])
+    assert _arr_eq(a9["curve_mfe"][valid, 15], cp["mfe"][valid])
+    assert _arr_eq(a9["curve_mae"][valid, 15], cp["mae"][valid])
+
+
+def test_truncated_candidate_nan_for_later_h():
+    c = M.make_synthetic_case(6, 30, seed=3)
+    c["end_idx"][0] = c["entry_idx"][0] + 3   # candidate 0 truncated at step 3
+    sig = inspect.signature(M.scan_paths_streaming)
+    out = M.scan_paths_streaming(**{k: c[k] for k in c if k in sig.parameters},
+                                 capture_curve=True)
+    assert not np.any(np.isnan(out["curve_mfe"][0, :4]))
+    assert np.all(np.isnan(out["curve_mfe"][0, 4:]))
+
+
+def test_future_bar_mutation_cannot_change_earlier_curve_cells():
+    c = M.make_synthetic_case(4, 40, seed=11)
+    sig = inspect.signature(M.scan_paths_streaming)
+    kw = {k: c[k] for k in c if k in sig.parameters}
+    o1 = M.scan_paths_streaming(**kw, capture_curve=True)
+    c2 = {k: (v.copy() if isinstance(v, np.ndarray) else v) for k, v in c.items()}
+    mut = int(c2["entry_idx"][0] + 12)
+    c2["high"][mut] *= 2.0
+    c2["low"][mut] *= 0.5
+    kw2 = {k: c2[k] for k in c2 if k in sig.parameters}
+    o2 = M.scan_paths_streaming(**kw2, capture_curve=True)
+    # isolate candidate 0: the mutated bar is step 12 FOR candidate 0 only; earlier
+    # cells (steps 0..11) must be byte-identical. (A global bar maps to different
+    # steps across candidates, so we compare a single candidate, not all.)
+    assert np.array_equal(o1["curve_mfe"][0, :12], o2["curve_mfe"][0, :12])
+    assert np.array_equal(o1["curve_ps"][0, :12], o2["curve_ps"][0, :12])
+    # and the mutated step (12) itself must differ
+    assert not np.array_equal(o1["curve_mfe"][0, 12], o2["curve_mfe"][0, 12])
+
+
+def test_reference_vs_production_curve_differential():
+    c = M.make_synthetic_case(20, 60, seed=5)
+    rep = M.diff_reference_vs_production(c)
+    assert rep["mismatch"] == 0
+    assert rep["curve_mismatch"] == 0
+    assert rep["max_abs_error"] <= 1e-12
+
+
+def test_a9_e9_agreement_whole_curve_invariant(ag_dual):
+    base, dual = ag_dual
+    agreement = (np.asarray(base["a9_direction"]) == np.asarray(base["e9_direction"]))
+    idx = np.flatnonzero(agreement)
+    assert idx.size > 0
+    a9, e9 = dual["A9"], dual["E9"]
+    for c in ("curve_mfe", "curve_mae", "curve_r", "curve_ps"):
+        assert _arr_eq(a9[c][idx], e9[c][idx])
+    M.check_agreement_invariant(a9, e9, agreement, "AG")
+
+
+def test_a9_e9_disagreement_mfe_mae_mirror_every_h():
+    a9_r = np.array([[0.1, 0.2, 0.3, 0.4, 0.5, 0.6]])
+    e9_r = -a9_r
+    a9_mfe = np.array([[1.0, 1.1, 1.2, 1.3, 1.4, 1.5]])
+    e9_mae = a9_mfe
+    a9_mae = np.array([[0.5, 0.6, 0.7, 0.8, 0.9, 1.0]])
+    e9_mfe = a9_mae
+    a9_ps = a9_mfe - a9_mae
+    e9_ps = -a9_ps
+    a9 = {"curve_mfe": a9_mfe, "curve_mae": a9_mae, "curve_r": a9_r, "curve_ps": a9_ps}
+    e9 = {"curve_mfe": e9_mfe, "curve_mae": e9_mae, "curve_r": e9_r, "curve_ps": e9_ps}
+    dis = np.array([True])
+    M.check_disagreement_mirror(a9, e9, dis, "SYN")
+    bad = {"curve_mfe": a9_mfe.copy(), "curve_mae": a9_mae.copy(),
+           "curve_r": a9_r.copy(), "curve_ps": a9_ps.copy()}
+    bad["curve_mfe"][0, 0] = 999.0
+    with pytest.raises(RuntimeError):
+        M.check_disagreement_mirror(bad, e9, dis, "SYN")
+
+
+def test_a9_e9_disagreement_signed_return_negation_every_h(ag_dual):
+    base, dual = ag_dual
+    dis = (np.asarray(base["a9_direction"]) != np.asarray(base["e9_direction"]))
+    idx = np.flatnonzero(dis)
+    if idx.size == 0:
+        pytest.skip("no disagreement rows in AG subset")
+    a9, e9 = dual["A9"], dual["E9"]
+    assert _arr_eq(a9["curve_r"][idx], -e9["curve_r"][idx])
+    assert _arr_eq(a9["curve_ps"][idx], -e9["curve_ps"][idx])
+
+
+def test_a9_e9_availability_masks_identical(ag_dual):
+    base, dual = ag_dual
+    a9, e9 = dual["A9"], dual["E9"]
+    assert np.array_equal(np.isfinite(a9["curve_ps"]), np.isfinite(e9["curve_ps"]))
+
+
+def test_per_system_gid_weight_remains_one(e9_state):
+    g = e9_state.groupby("gid")["sample_weight_raw"].sum().to_numpy(np.float64)
+    assert np.allclose(g, 1.0, atol=1e-9)
+
+
+def test_whole_gid_curve_bootstrap_cluster_dependence():
+    rng = np.random.default_rng(0)
+    n = 60
+    gid = np.array([f"g{i // 4}" for i in range(n)])
+    correct = rng.integers(0, 2, n).astype(bool)
+    val = rng.normal(size=15)
+    value = (np.tile(val[:, None], (1, 4)).reshape(-1, 1)
+             + rng.normal(0, 1e-9, (n, 1)))
+    value = np.repeat(value, 10, axis=1)
+    ug, nc, dc, nw, dw = M.build_group_curve_sufficient_stats(
+        value, correct, gid, np.ones(n))
+    point, reps1 = M.bootstrap_delta_curve(nc, dc, nw, dw, B=300, seed=20260924)
+    _, reps2 = M.bootstrap_delta_curve(nc, dc, nw, dw, B=300, seed=20260924)
+    assert np.array_equal(reps1, reps2)  # deterministic under frozen seed
+    # point matches the analytic whole-gid aggregation (cluster-respecting)
+    analytic = nc.sum(0) / dc.sum(0) - nw.sum(0) / dw.sum(0)
+    assert np.allclose(point, analytic, atol=1e-12)
+
+
+def test_simultaneous_band_deterministic_frozen_seed():
+    rng = np.random.default_rng(1)
+    val = rng.normal(size=(50, 30))
+    correct = rng.integers(0, 2, 50).astype(bool)
+    gid = np.array([f"g{i // 3}" for i in range(50)])
+    ug, nc, dc, nw, dw = M.build_group_curve_sufficient_stats(
+        val, correct, gid, np.ones(50))
+    _, r1 = M.bootstrap_delta_curve(nc, dc, nw, dw, B=200, seed=20260924)
+    _, r2 = M.bootstrap_delta_curve(nc, dc, nw, dw, B=200, seed=20260924)
+    assert np.array_equal(r1, r2)
+    band = M.simultaneous_band(np.nanmean(r1, axis=0), r1)
+    assert band["lower"].shape[0] == 30
+    assert np.all(band["upper"] >= band["lower"] - 1e-12)
+
+
+def test_formal_runner_has_no_best_h_selection():
+    src = inspect.getsource(M.run_formal_t2)
+    for tok in ("argmax", "argmin", "best_h", "select_primary", "best primary",
+                "optimal_h", "best bar"):
+        assert tok not in src, f"forbidden token present in formal runner: {tok}"
+
+
+def test_production_scan_signature_excludes_oracle_fields():
+    sig = inspect.signature(M.scan_paths_streaming)
+    for p in sig.parameters:
+        assert "oracle" not in p
+    for f in M.AUDIT_ONLY_FIELDS:
+        assert f not in sig.parameters
+
+
+def test_formal_runner_one_dual_scan_per_symbol_and_no_reference():
+    orig_ref = M.scan_paths_reference
+    calls = {"n": 0}
+
+    def boom(*a, **k):
+        calls["n"] += 1
+        raise RuntimeError("REFERENCE_CALLED")
+    M.scan_paths_reference = boom
+    try:
+        M.reset_counters()
+        M.run_formal_t2(symbols=("AG",), n_subset=30, population="small", verbose=False)
+    finally:
+        M.scan_paths_reference = orig_ref
+    assert calls["n"] == 0, "formal runner must not call the Reference kernel"
+    assert M.COUNTERS["path_scan_count"] == 1
+    assert M.COUNTERS["direction_chain_run_count"] == 1
+    assert M.COUNTERS["candidate_python_loop_count"] == 0
+    assert M.COUNTERS["full_history_recompute_count"] == 0
+    with pytest.raises(RuntimeError):
+        M.run_formal_t2(symbols=("AG",), population="full")
+
+
+def test_curve_artifact_key_uniqueness(ag_dual):
+    base, dual = ag_dual
+    chunk = M.curve_chunk_from_dual(base, dual, "AG")
+    assert set(M.CURVE_COLUMNS).issubset(chunk.columns)
+    keys = chunk[["semantic_key", "direction_system", "h_bar"]]
+    assert keys.drop_duplicates().shape[0] == keys.shape[0]
+
+
+def test_l2_row_metrics_key_uniqueness(ag_dual):
+    base, dual = ag_dual
+    frame = M.assemble_row_metrics(base, dual, "AG")
+    assert set(M.ROW_METRICS_COLUMNS).issubset(frame.columns)
+    keys = frame[["semantic_key", "direction_system"]]
+    assert keys.drop_duplicates().shape[0] == frame.shape[0]
+
+
+def test_event_cumulative_incidence_synthetic_oracle():
+    fs = np.array([-1, 0, 2, 4, -1, 1], dtype=np.int32)
+    corr = np.array([True, True, False, False, True, False])
+    wt = np.array([1.0, 1.0, 2.0, 2.0, 1.0, 1.0])
+    fc, fz = M.event_cumulative_incidence(fs, corr, wt, 5)
+    assert abs(fc[2] - 1.0 / 3.0) < 1e-12
+    assert abs(fz[2] - 3.0 / 5.0) < 1e-12
+    assert np.all(np.diff(fc) >= -1e-12)
+    assert np.all((fc >= -1e-12) & (fc <= 1 + 1e-12))
+
+
+def test_e9_fix_break_arithmetic_identity():
+    a9 = np.array([1, 1, 0, 0, 1, 0])
+    e9 = np.array([1, 0, 1, 0, 1, 1])
+    res = M.verify_disagreement_arithmetic(a9, e9)
+    assert res["identity_holds"]
+    assert (res["e9_fix"] - res["e9_break"]) == (res["n_correct_e9"] - res["n_correct_a9"])

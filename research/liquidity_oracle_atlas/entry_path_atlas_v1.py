@@ -54,6 +54,8 @@ from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 from research.liquidity_oracle_atlas.train_direction_model_15sym_v1 import (
     SYMBOLS,
@@ -90,8 +92,12 @@ ARTIFACT_DIR = os.path.join("artifacts", "entry_path_atlas_v1")
 E9_STATE_PARQUET = os.path.join(ARTIFACT_DIR, "e9_direction_state_v1.parquet")
 ANCHORS_PARQUET = os.path.join(ARTIFACT_DIR, "entry_path_anchors_v1.parquet")
 ROW_METRICS_PARQUET = os.path.join(ARTIFACT_DIR, "entry_path_row_metrics_v1.parquet")
+CURVE_PARQUET = os.path.join(ARTIFACT_DIR, "entry_path_curve_v1.parquet")
 EVIDENCE_DIR = os.path.join("research", "liquidity_oracle_atlas", "evidence")
 MANIFEST_JSON = os.path.join(EVIDENCE_DIR, "entry_path_atlas_v1_manifest.json")
+T1_5_ARCHIVE_JSON = os.path.join(EVIDENCE_DIR, "entry_path_atlas_v1_t1_5_manifest.json")
+STAGE_PRE_T2 = "pre_t2_implementation"
+REVIEWED_PARENT_PRE_T2 = "893ca1632631f3862c2e17c482b6d90b9c541805"
 R4_ENV_DIR = os.path.join("artifacts", "candidate_gate_r4_m15_touch_nextbar_v1")
 R4_ENV_MANIFEST = os.path.join(R4_ENV_DIR, "r4_env_manifest.json")
 
@@ -765,8 +771,14 @@ def scan_paths_streaming(*, entry_idx, end_idx, entry_price, atr0, side,
                          lb_enter, lb_pierce, lb_reclaim,
                          ahead_sr_touch, ahead_sr_cross,
                          ahead_liq_touch, ahead_liq_cross,
-                         td_ends=None):
-    """Production: loop over TIME, vectorized over Candidates. No Candidate loop."""
+                         td_ends=None, capture_curve=False):
+    """Production: loop over TIME, vectorized over Candidates. No Candidate loop.
+
+    When ``capture_curve=True`` the full 15m path-separation curve is recorded:
+    for every valid Candidate x completed-15m-bar step we keep MFE/MAE/R (and
+    PS = MFE - MAE). The single time-step loop is the only hot loop; no Candidate
+    Python loop and no per-step DataFrame work is introduced.
+    """
     bump("path_scan_count")
     n = len(entry_idx)
     mfe = np.zeros(n, dtype=np.float64)
@@ -792,6 +804,13 @@ def scan_paths_streaming(*, entry_idx, end_idx, entry_price, atr0, side,
     max_step = int(np.max(end_idx - entry_idx)) if n else 0
     bump("path_step_count", max_step + 1)
 
+    # Full 15m path-separation curve (column index == step; h_bar = step + 1).
+    if capture_curve:
+        H = max_step + 1
+        curve_mfe = np.full((n, H), np.nan, dtype=np.float64)
+        curve_mae = np.full((n, H), np.nan, dtype=np.float64)
+        curve_r = np.full((n, H), np.nan, dtype=np.float64)
+
     for step in range(max_step + 1):
         j = entry_idx + step
         valid = (j <= end_idx) & (j < n_bars)
@@ -807,6 +826,10 @@ def scan_paths_streaming(*, entry_idx, end_idx, entry_price, atr0, side,
         adv = np.where(side > 0, entry_price - lo, hi - entry_price) / atr0
         mfe[valid] = np.maximum(mfe[valid], fav[valid])
         mae[valid] = np.maximum(mae[valid], adv[valid])
+        if capture_curve:
+            curve_mfe[valid, step] = mfe[valid]
+            curve_mae[valid, step] = mae[valid]
+            curve_r[valid, step] = (side * (cl - entry_price) / atr0)[valid]
 
         _update_backstop(sr, valid, step, side, lo, hi, cl,
                          sr_enter, sr_pierce, sr_reclaim)
@@ -855,6 +878,11 @@ def scan_paths_streaming(*, entry_idx, end_idx, entry_price, atr0, side,
         "mfe_at_first_ahead_liq": mfe_at_liq, "mae_before_first_ahead_liq": mae_before_liq,
         "checkpoints": snaps,
     })
+    if capture_curve:
+        out["curve_mfe"] = curve_mfe
+        out["curve_mae"] = curve_mae
+        out["curve_r"] = curve_r
+        out["curve_ps"] = curve_mfe - curve_mae
     return out
 
 
@@ -938,8 +966,10 @@ def run_symbol_paths_dual(state: SymbolState, base: dict) -> dict:
     v_a9 = make_direction_view("A9", base, state)
     v_e9 = make_direction_view("E9", base, state)
     case = build_dual_case(state, v_a9, v_e9)
-    full = scan_paths_streaming(**{k: case[k] for k in case
-                                   if k in inspect.signature(scan_paths_streaming).parameters})
+    full = scan_paths_streaming(
+        **{k: case[k] for k in case
+           if k in inspect.signature(scan_paths_streaming).parameters},
+        capture_curve=True)
     n = len(base["entry_idx"])
     a9_out, e9_out = _slice_dual(full, n)
     return {"n": n, "full": full, "A9": a9_out, "E9": e9_out,
@@ -979,6 +1009,13 @@ def check_agreement_invariant(a9_out, e9_out, agreement_mask, symbol="?"):
                 raise RuntimeError(
                     f"STOP_A9_E9_AGREEMENT_INVARIANT_FAILED symbol={symbol} "
                     f"checkpoint={nm}.{m}")
+    # Whole-curve agreement (RC F, extended): for agreement rows the FULL 15m
+    # MFE/MAE/R/PS curve must be NaN-mask identical between A9 and E9.
+    for c in ("curve_mfe", "curve_mae", "curve_r", "curve_ps"):
+        if c in a9_out and c in e9_out:
+            if not _arr_eq(a9_out[c][idx], e9_out[c][idx]):
+                raise RuntimeError(
+                    f"STOP_A9_E9_AGREEMENT_INVARIANT_FAILED symbol={symbol} curve={c}")
 
 
 def decompose_disagreement(base, symbol="?"):
@@ -1006,6 +1043,33 @@ def decompose_disagreement(base, symbol="?"):
     }
 
 
+def check_disagreement_mirror(a9_out, e9_out, disagreement_mask, symbol="?"):
+    """HARD gate (RC 15): for every DISAGREEMENT candidate the two direction systems
+    have OPPOSITE sides, so their path curves must be exact mirrors:
+
+        A9_MFE(h) == E9_MAE(h);  A9_MAE(h) == E9_MFE(h)
+        A9_R(h)   == -E9_R(h);   A9_PS(h)   == -E9_PS(h)
+
+    at every observed 15m step (NaN-mask equal). The side-relative structural events
+    are NOT required to mirror (different canonical zones).
+    """
+    idx = np.flatnonzero(disagreement_mask)
+    if idx.size == 0:
+        return
+    if not _arr_eq(a9_out["curve_mfe"][idx], e9_out["curve_mae"][idx]):
+        raise RuntimeError(
+            f"STOP_A9_E9_DISAGREEMENT_PATH_MIRROR_FAILED symbol={symbol} pair=mfe_mae")
+    if not _arr_eq(a9_out["curve_mae"][idx], e9_out["curve_mfe"][idx]):
+        raise RuntimeError(
+            f"STOP_A9_E9_DISAGREEMENT_PATH_MIRROR_FAILED symbol={symbol} pair=mae_mfe")
+    if not _arr_eq(a9_out["curve_r"][idx], -e9_out["curve_r"][idx]):
+        raise RuntimeError(
+            f"STOP_A9_E9_DISAGREEMENT_PATH_MIRROR_FAILED symbol={symbol} pair=r")
+    if not _arr_eq(a9_out["curve_ps"][idx], -e9_out["curve_ps"][idx]):
+        raise RuntimeError(
+            f"STOP_A9_E9_DISAGREEMENT_PATH_MIRROR_FAILED symbol={symbol} pair=ps")
+
+
 # --------------------------------------------------------------------------- #
 # 7. Reference kernel (T0/T1 only)                                             #
 # --------------------------------------------------------------------------- #
@@ -1015,10 +1079,16 @@ def scan_paths_reference(*, entry_idx, end_idx, entry_price, atr0, side,
                          lb_enter, lb_pierce, lb_reclaim,
                          ahead_sr_touch, ahead_sr_cross,
                          ahead_liq_touch, ahead_liq_cross,
-                         td_ends=None):
+                         td_ends=None, capture_curve=False):
     """Deliberately slow per-candidate reference. T0/T1 only."""
     n = len(entry_idx)
     res = {"mfe_final": np.zeros(n), "mae_final": np.zeros(n)}
+    H_ref = int(np.max(end_idx - entry_idx)) + 1 if n else 0
+    curve_mfe = curve_mae = curve_r = None
+    if capture_curve and H_ref > 0:
+        curve_mfe = np.full((n, H_ref), np.nan, dtype=np.float64)
+        curve_mae = np.full((n, H_ref), np.nan, dtype=np.float64)
+        curve_r = np.full((n, H_ref), np.nan, dtype=np.float64)
     for pfx in ("sr", "lb"):
         res[f"{pfx}_first_touch"] = np.full(n, -1, np.int32)
         res[f"{pfx}_first_pierce"] = np.full(n, -1, np.int32)
@@ -1051,6 +1121,10 @@ def scan_paths_reference(*, entry_idx, end_idx, entry_price, atr0, side,
             hi = float(high[j]); lo = float(low[j]); cl = float(close[j])
             mfe = max(mfe, ((hi - p0) if s > 0 else (p0 - lo)) / atr)
             mae = max(mae, ((p0 - lo) if s > 0 else (hi - p0)) / atr)
+            if capture_curve:
+                curve_mfe[i, step] = mfe
+                curve_mae[i, step] = mae
+                curve_r[i, step] = s * (cl - p0) / atr
 
             for pfx, (eb, pb, rb) in (
                     ("sr", (float(sr_enter[i]), float(sr_pierce[i]), float(sr_reclaim[i]))),
@@ -1119,6 +1193,11 @@ def scan_paths_reference(*, entry_idx, end_idx, entry_price, atr0, side,
                 res[f"{pfx}_first_pierce"][i] >= 0
                 and res[f"{pfx}_first_reclaim"][i] < 0)
     res["checkpoints"] = snaps
+    if capture_curve:
+        res["curve_mfe"] = curve_mfe
+        res["curve_mae"] = curve_mae
+        res["curve_r"] = curve_r
+        res["curve_ps"] = curve_mfe - curve_mae
     return res
 
 
@@ -1256,15 +1335,23 @@ def _cmp(a, b, out):
 def diff_reference_vs_production(case: dict) -> dict:
     _sig = inspect.signature(scan_paths_streaming)
     clean = {k: v for k, v in case.items() if k in _sig.parameters}
-    p = scan_paths_streaming(**clean)
-    r = scan_paths_reference(**clean)
+    # Curve differential: both kernels must produce the identical 15m path curve.
+    p = scan_paths_streaming(**clean, capture_curve=True)
+    r = scan_paths_reference(**clean, capture_curve=True)
     out = {"rows": len(p["mfe_final"]), "cells": 0, "mismatch": 0,
-           "max_abs_error": 0.0, "first_mismatch": None}
+           "max_abs_error": 0.0, "first_mismatch": None,
+           "curve_cells": 0, "curve_mismatch": 0}
     for f in DIFF_FIELDS:
         _cmp(p[f], r[f], out)
     for name in CHECKPOINT_NAMES:
         for m in ("mfe", "mae", "r"):
             _cmp(p["checkpoints"][name][m], r["checkpoints"][name][m], out)
+    for c in ("curve_mfe", "curve_mae", "curve_r", "curve_ps"):
+        _cmp(p[c], r[c], out)
+        out["curve_cells"] += int(p[c].size)
+        m = np.isfinite(p[c]) & np.isfinite(r[c])
+        if m.any():
+            out["curve_mismatch"] += int((np.abs(p[c][m] - r[c][m]) > 1e-12).sum())
     # finite float error
     for f in ("mfe_final", "mae_final", "mfe_at_first_ahead_sr",
               "mae_before_first_ahead_sr", "mfe_at_first_ahead_liq",
@@ -1508,6 +1595,600 @@ def run_kernel_checkpoint(symbols=SYMBOLS, n_subset=50, verbose=True) -> dict:
 
 
 # --------------------------------------------------------------------------- #
+# 10. Full 15m path-curve statistics (Formal T2)                               #
+# --------------------------------------------------------------------------- #
+# 15m is the execution AND observation axis. h_bar = step + 1 = number of
+# completed valid 15m bars observed after Candidate fill. The previous scalar
+# "delta_PS_4h" is retired; the primary is the FULL curve over h.
+
+_EVENT_FIELDS = (
+    "sr_first_touch", "sr_first_pierce", "sr_same_bar_reclaim", "sr_first_reclaim",
+    "sr_bars_to_reclaim", "sr_first_failed_reclaim", "sr_break_continue",
+    "lb_first_touch", "lb_first_pierce", "lb_same_bar_reclaim", "lb_first_reclaim",
+    "lb_bars_to_reclaim", "lb_first_failed_reclaim", "lb_break_continue",
+    "first_ahead_sr_touch", "first_ahead_sr_cross",
+    "first_ahead_liq_touch", "first_ahead_liq_cross",
+    "mfe_at_first_ahead_sr", "mae_before_first_ahead_sr",
+    "mfe_at_first_ahead_liq", "mae_before_first_ahead_liq",
+)
+# adverse: wrong-direction experiences MORE of these -> Wrong - Correct
+_ADVERSE_EVENTS = ("sr_first_pierce", "sr_first_failed_reclaim", "sr_break_continue",
+                   "lb_first_pierce", "lb_first_failed_reclaim", "lb_break_continue")
+# favorable / ahead: correct-direction experiences MORE -> Correct - Wrong
+_FAVORABLE_EVENTS = ("sr_first_reclaim", "lb_first_reclaim",
+                     "first_ahead_sr_touch", "first_ahead_sr_cross",
+                     "first_ahead_liq_touch", "first_ahead_liq_cross")
+
+
+def build_group_curve_sufficient_stats(value_matrix, correct, gid, weight):
+    """gid x h weighted numerator/denominator for correct and wrong.
+
+    Returns (ug, num_c, den_c, num_w, den_w). Within each gid the Candidate
+    weights sum to 1 (verified separately); the total is therefore a mean over
+    gids, preserving whole-gid cluster dependence.
+    """
+    value_matrix = np.asarray(value_matrix, dtype=np.float64)
+    correct = np.asarray(correct, dtype=bool)
+    weight = np.asarray(weight, dtype=np.float64)
+    ug, inv = np.unique(gid, return_inverse=True)
+    G = len(ug)
+    H = value_matrix.shape[1] if value_matrix.ndim == 2 else 1
+    if value_matrix.ndim == 1:
+        value_matrix = value_matrix[:, None]
+    num_c = np.zeros((G, H))
+    den_c = np.zeros((G, H))
+    num_w = np.zeros((G, H))
+    den_w = np.zeros((G, H))
+    cc = correct.astype(np.float64)
+    wc = np.where(correct, weight, 0.0)
+    wz = np.where(~correct, weight, 0.0)
+    for h in range(H):
+        v = value_matrix[:, h]
+        ok = np.isfinite(v)
+        wv_c = np.where(ok, v * wc, 0.0)
+        wv_z = np.where(ok, v * wz, 0.0)
+        num_c[:, h] = np.bincount(inv, weights=wv_c, minlength=G)
+        den_c[:, h] = np.bincount(inv, weights=wc, minlength=G)
+        num_w[:, h] = np.bincount(inv, weights=wv_z, minlength=G)
+        den_w[:, h] = np.bincount(inv, weights=wz, minlength=G)
+    return ug, num_c, den_c, num_w, den_w
+
+
+def _safe_div(num, den):
+    den = np.where(den == 0, 1.0, den)
+    out = num / den
+    return np.where(np.isfinite(out), out, np.nan)
+
+
+def bootstrap_delta_curve(num_c, den_c, num_w, den_w, B=2000, seed=20260924,
+                          batch_size=100):
+    """Whole-gid bootstrap of the COMPLETE Delta(h) curve.
+
+    Every replicate resamples whole gids and returns the full curve, so the
+    simultaneous band reflects joint across-h variation (no best-h selection).
+    """
+    G, H = num_c.shape
+    rng = np.random.default_rng(seed)
+    point = _safe_div(num_c.sum(0), den_c.sum(0)) - _safe_div(num_w.sum(0), den_w.sum(0))
+    reps = np.full((B, H), np.nan, dtype=np.float64)
+    for b0 in range(0, B, batch_size):
+        b1 = min(B, b0 + batch_size)
+        idx = rng.integers(0, G, size=(b1 - b0, G))
+        nc = num_c[idx].sum(1)
+        dc = den_c[idx].sum(1)
+        nw = num_w[idx].sum(1)
+        dw = den_w[idx].sum(1)
+        reps[b0:b1] = _safe_div(nc, dc) - _safe_div(nw, dw)
+    return point, reps
+
+
+def pointwise_ci(reps, alpha=0.05):
+    lo = np.nanquantile(reps, alpha / 2.0, axis=0)
+    hi = np.nanquantile(reps, 1.0 - alpha / 2.0, axis=0)
+    return lo, hi
+
+
+def simultaneous_band(point, reps, alpha=0.05):
+    """Studentized max-|t| simultaneous band.
+
+    The band width q*se is shared across all h, so it accounts for looking at
+    many 15m landmarks simultaneously (no pointwise selective inference).
+    """
+    se = np.nanstd(reps, axis=0, ddof=1)
+    se_safe = np.where(se > 0, se, np.nan)
+    z = (reps - point[None, :]) / se_safe[None, :]
+    max_t = np.nanmax(np.abs(z), axis=1)
+    q = float(np.nanquantile(max_t, 1.0 - alpha))
+    lower = point - q * se
+    upper = point + q * se
+    return {"lower": lower, "upper": upper, "se": se, "q": q}
+
+
+def _cumulative_incidence(first_step, mask, weight, max_step):
+    weight = np.asarray(weight, np.float64)
+    # denominator = total at-risk weight (all candidates in the group, including
+    # those that never experience the event = censored), NOT only experiencers.
+    total = float(np.where(mask, weight, 0.0).sum())
+    if total <= 0:
+        return np.zeros(max_step + 1)
+    experienced = np.where(mask & (first_step >= 0), weight, 0.0)
+    counts = np.bincount(np.clip(first_step, 0, max_step), weights=experienced,
+                        minlength=max_step + 1)
+    return np.cumsum(counts) / total
+
+
+def event_cumulative_incidence(first_step, correct, weight, max_step):
+    """Weighted cumulative incidence F_e(h) = P(T_e <= h) for correct and wrong."""
+    fc = _cumulative_incidence(first_step, correct, weight, max_step)
+    fz = _cumulative_incidence(first_step, ~np.asarray(correct, bool), weight, max_step)
+    return fc, fz
+
+
+def verify_disagreement_arithmetic(a9_correct, e9_correct):
+    """RC section 16 identity:
+
+        (E9_FIX - E9_BREAK) == (n_correct_E9 - n_correct_A9)
+
+    Both sides are computed independently and must agree (no hard-coded value).
+    """
+    a9_c = np.asarray(a9_correct, dtype=np.uint8)
+    e9_c = np.asarray(e9_correct, dtype=np.uint8)
+    agreement = (a9_c == e9_c)
+    e9_fix = int(np.sum(~agreement & (a9_c == 0) & (e9_c == 1)))
+    e9_break = int(np.sum(~agreement & (a9_c == 1) & (e9_c == 0)))
+    n_correct_e9 = int(np.sum(e9_c == 1))
+    n_correct_a9 = int(np.sum(a9_c == 1))
+    return {"e9_fix": e9_fix, "e9_break": e9_break,
+            "n_correct_e9": n_correct_e9, "n_correct_a9": n_correct_a9,
+            "identity_holds": (e9_fix - e9_break) == (n_correct_e9 - n_correct_a9)}
+
+
+# --------------------------------------------------------------------------- #
+# 10b. L2 row-metrics + long curve artifact writers                             #
+# --------------------------------------------------------------------------- #
+ROW_METRICS_COLUMNS = [
+    "semantic_key", "symbol", "gid", "direction_system", "direction",
+    "sample_weight_raw", "decision_time", "fill_time", "entry_price", "ATR0",
+    "segment", "trading_day",
+    "oracle_direction", "direction_correct", "oracle_entry_quality_atr",
+    "teacher_exit_return_atr", "oracle_exit_fill_time", "agreement_class",
+] + list(_EVENT_FIELDS) + [
+    "mfe_final", "mae_final",
+    "m15_mfe", "m15_mae", "m15_r", "h1_mfe", "h1_mae", "h1_r",
+    "h4_mfe", "h4_mae", "h4_r", "td1_mfe", "td1_mae", "td1_r",
+    "td3_mfe", "td3_mae", "td3_r", "td5_mfe", "td5_mae", "td5_r",
+]
+CURVE_COLUMNS = ["semantic_key", "direction_system", "symbol", "gid", "h_bar",
+                 "elapsed_minutes", "MFE", "MAE", "PS", "signed_return"]
+
+
+def _pad_to(curve, H_global):
+    n, H = curve.shape
+    if H == H_global:
+        return curve
+    out = np.full((n, H_global), np.nan, dtype=np.float64)
+    out[:, :H] = curve
+    return out
+
+
+def curve_chunk_from_dual(base, dual, symbol):
+    """Build the long-format curve chunk (valid observations only). Vectorized."""
+    parts = []
+    sk = np.asarray(base["semantic_key"], dtype=object)
+    gid = np.asarray(base["gid"], dtype=object)
+    for sys_name, out in (("A9", dual["A9"]), ("E9", dual["E9"])):
+        mfe = out["curve_mfe"]; mae = out["curve_mae"]
+        ps = out["curve_ps"]; r = out["curve_r"]
+        i_idx, step_idx = np.nonzero(np.isfinite(mfe))
+        if i_idx.size == 0:
+            continue
+        parts.append(pd.DataFrame({
+            "semantic_key": sk[i_idx], "direction_system": sys_name,
+            "symbol": symbol, "gid": gid[i_idx],
+            "h_bar": step_idx + 1, "elapsed_minutes": (step_idx + 1) * 15,
+            "MFE": mfe[i_idx, step_idx], "MAE": mae[i_idx, step_idx],
+            "PS": ps[i_idx, step_idx], "signed_return": r[i_idx, step_idx],
+        }))
+    if not parts:
+        return pd.DataFrame(columns=CURVE_COLUMNS)
+    return pd.concat(parts, ignore_index=True)
+
+
+def assemble_row_metrics(base, dual, symbol):
+    """Build L2 row metrics for ONE symbol (semantic_key x direction_system)."""
+    df = base["df"]
+    sk = np.asarray(base["semantic_key"], dtype=object)
+    gid = np.asarray(base["gid"], dtype=object)
+    sym = np.asarray(base["df"]["symbol"].to_numpy(object))
+    w = np.asarray(df["sample_weight_raw"].to_numpy(), dtype=np.float64)
+    dec_t = np.asarray(df["candidate_decision_time"].to_numpy(object))
+    fill_t = np.asarray(df["candidate_fill_time"].to_numpy(object))
+    entry_price = np.asarray(base["entry_price"], dtype=np.float64)
+    atr0 = np.asarray(base["atr0"], dtype=np.float64)
+    seg = np.asarray(base["entry_segment"], dtype=np.int64)
+    a9_dir = np.asarray(base["a9_direction"], dtype=object)
+    e9_dir = np.asarray(base["e9_direction"], dtype=object)
+    a9_c = np.asarray(base["a9_direction_correct"], dtype=np.uint8)
+    e9_c = np.asarray(base["e9_direction_correct"], dtype=np.uint8)
+    oracle_dir = np.asarray(df["oracle_direction"].to_numpy(object))
+    oeq = np.asarray(df["oracle_entry_quality_atr"].to_numpy(np.float64))
+    oexit = np.asarray(df["oracle_exit_fill_time"].to_numpy(object))
+    a9_ter = np.asarray(df["a9_teacher_exit_return_atr"].to_numpy(np.float64))
+    e9_ter = np.asarray(df["e9_teacher_exit_return_atr"].to_numpy(np.float64))
+    agreement = (a9_c == e9_c)
+    cls = np.where(agreement, "AGREEMENT",
+                   np.where((a9_c == 0) & (e9_c == 1), "E9_FIX", "E9_BREAK"))
+
+    parts = []
+    for sys_name, out, direction, d_correct, ter in (
+            ("A9", dual["A9"], a9_dir, a9_c, a9_ter),
+            ("E9", dual["E9"], e9_dir, e9_c, e9_ter)):
+        rec = {
+            "semantic_key": sk, "symbol": sym, "gid": gid,
+            "direction_system": sys_name, "direction": direction,
+            "sample_weight_raw": w, "decision_time": dec_t, "fill_time": fill_t,
+            "entry_price": entry_price, "ATR0": atr0, "segment": seg,
+            "trading_day": np.nan,
+            "oracle_direction": oracle_dir, "direction_correct": d_correct,
+            "oracle_entry_quality_atr": oeq, "teacher_exit_return_atr": ter,
+            "oracle_exit_fill_time": oexit, "agreement_class": cls,
+            "mfe_final": out["mfe_final"], "mae_final": out["mae_final"],
+        }
+        for f in _EVENT_FIELDS:
+            rec[f] = out[f]
+        for name in CHECKPOINT_NAMES:
+            for m in ("mfe", "mae", "r"):
+                rec[f"{name}_{m}"] = out["checkpoints"][name][m]
+        parts.append(pd.DataFrame(rec))
+    return pd.concat(parts, ignore_index=True)[ROW_METRICS_COLUMNS]
+
+
+def write_row_metrics_parquet(path, frames):
+    """Write the L2 row-metrics parquet (one table, single writer)."""
+    if not frames:
+        raise RuntimeError("STOP_EMPTY_ROW_METRICS")
+    table = pa.Table.from_pandas(frames[0], preserve_index=False)
+    with pq.ParquetWriter(path, table.schema) as w:
+        w.write_table(table)
+        for fr in frames[1:]:
+            w.write_table(pa.Table.from_pandas(fr, preserve_index=False, schema=table.schema))
+
+
+def write_curve_parquet(path, chunks):
+    """Write the long-format 15m curve parquet (single writer, chunked append)."""
+    if not chunks:
+        raise RuntimeError("STOP_EMPTY_CURVE")
+    table = pa.Table.from_pandas(chunks[0], preserve_index=False)
+    with pq.ParquetWriter(path, table.schema) as w:
+        w.write_table(table)
+        for ch in chunks[1:]:
+            w.write_table(pa.Table.from_pandas(ch, preserve_index=False, schema=table.schema))
+
+
+# --------------------------------------------------------------------------- #
+# 10c. Formal T2 runner (PRE-T2: full population NOT authorized yet)            #
+# --------------------------------------------------------------------------- #
+def run_formal_t2(symbols=SYMBOLS, n_subset=None, write_artifacts=False,
+                  population="small", verbose=True):
+    """Formal T2 production call graph.
+
+    Per symbol: load canonical environment ONCE, build BaseAnchor ONCE, build A9
+    and E9 views, stack to 2N, ONE streaming scan with curve capture. Never calls
+    the Reference kernel, never recomputes environment/ATR/zones per system, never
+    selects a single best-h.
+
+    Full 13773-Candidate population is BLOCKED at PRE-T2 (governance): pass
+    population="full" only after explicit authorization.
+    """
+    if population == "full":
+        raise RuntimeError("STOP_FORMAL_T2_FULL_POPULATION_NOT_AUTHORIZED")
+    t_start = time.time()
+    reset_counters()
+    if verbose:
+        print("materialize frozen E9 (+A9 alias) direction state (run_chain ONCE) ...",
+              file=sys.stderr, flush=True)
+    e9 = materialize_e9_direction_state(save=True, verbose=verbose)
+
+    H_global = 0
+    sym_acc = []
+    for sym in symbols:
+        if verbose:
+            print(f"symbol {sym}: load canonical state + dual scan ...", file=sys.stderr, flush=True)
+        st = load_symbol_state(sym)
+        if not st.env_complete:
+            continue
+        sel = e9[e9["symbol"] == sym].sort_values("semantic_key")
+        if n_subset is not None:
+            sel = sel.head(int(n_subset))
+        base = build_base_anchors(sel, st)
+        if base is None or len(base["entry_idx"]) == 0:
+            continue
+        dual = run_symbol_paths_dual(st, base)
+        agreement_mask = (np.asarray(base["a9_direction"]) == np.asarray(base["e9_direction"]))
+        disagreement_mask = ~agreement_mask
+        # RC F (whole-curve) + RC 15 (disagreement mirror) HARD gates
+        check_agreement_invariant(dual["A9"], dual["E9"], agreement_mask, sym)
+        check_disagreement_mirror(dual["A9"], dual["E9"], disagreement_mask, sym)
+        decomp = decompose_disagreement(base, sym)
+        # RC section 16 arithmetic identity
+        arith = verify_disagreement_arithmetic(
+            base["a9_direction_correct"], base["e9_direction_correct"])
+        if not arith["identity_holds"]:
+            raise RuntimeError(f"STOP_A9_E9_DISAGREEMENT_ARITHMETIC symbol={sym}")
+
+        a9 = dual["A9"]; e9o = dual["E9"]
+        sym_acc.append({
+            "symbol": sym, "base": base, "dual": dual,
+            "a9_ps": a9["curve_ps"], "e9_ps": e9o["curve_ps"],
+            "a9_mfe": a9["curve_mfe"], "e9_mfe": e9o["curve_mfe"],
+            "a9_mae": a9["curve_mae"], "e9_mae": e9o["curve_mae"],
+            "a9_r": a9["curve_r"], "e9_r": e9o["curve_r"],
+            "a9_correct": np.asarray(base["a9_direction_correct"], dtype=bool),
+            "e9_correct": np.asarray(base["e9_direction_correct"], dtype=bool),
+            "weight": np.asarray(base["df"]["sample_weight_raw"].to_numpy(np.float64)),
+            "gid": np.asarray(base["gid"], dtype=object),
+            "a9_side": np.asarray(base["a9_side"], dtype=np.float64),
+            "e9_side": np.asarray(base["e9_side"], dtype=np.float64),
+            "decomp": decomp, "agreement_mask": agreement_mask,
+            "H_sym": a9["curve_ps"].shape[1],
+        })
+        H_global = max(H_global, a9["curve_ps"].shape[1])
+
+    if not sym_acc:
+        raise RuntimeError("STOP_FORMAL_T2_NO_SYMBOLS")
+
+    # ---- aggregate across symbols into global padded matrices ----
+    a9_ps = np.vstack([_pad_to(s["a9_ps"], H_global) for s in sym_acc])
+    e9_ps = np.vstack([_pad_to(s["e9_ps"], H_global) for s in sym_acc])
+    a9_mfe = np.vstack([_pad_to(s["a9_mfe"], H_global) for s in sym_acc])
+    e9_mfe = np.vstack([_pad_to(s["e9_mfe"], H_global) for s in sym_acc])
+    a9_mae = np.vstack([_pad_to(s["a9_mae"], H_global) for s in sym_acc])
+    e9_mae = np.vstack([_pad_to(s["e9_mae"], H_global) for s in sym_acc])
+    a9_r = np.vstack([_pad_to(s["a9_r"], H_global) for s in sym_acc])
+    e9_r = np.vstack([_pad_to(s["e9_r"], H_global) for s in sym_acc])
+    gid_all = np.concatenate([s["gid"] for s in sym_acc])
+    w_all = np.concatenate([s["weight"] for s in sym_acc])
+    a9_correct = np.concatenate([s["a9_correct"] for s in sym_acc])
+    e9_correct = np.concatenate([s["e9_correct"] for s in sym_acc])
+    a9_side = np.concatenate([s["a9_side"] for s in sym_acc])
+    e9_side = np.concatenate([s["e9_side"] for s in sym_acc])
+    N_total = a9_ps.shape[0]
+
+    # ---- per-system gid weight remains 1 (RC section 7): within each direction
+    # system the Candidate weights inside a gid must still sum to 1; duplicating
+    # A9/E9 views must NOT halve the weight. This is a FULL-population property
+    # (a truncated subset legitimately splits gids), so verify on the whole
+    # materialized Candidate population, which A9 and E9 share identically. ----
+    def gid_weight_all_one(e9_df):
+        g = e9_df.groupby("gid")["sample_weight_raw"].sum().to_numpy(np.float64)
+        return bool(np.allclose(g, 1.0, atol=1e-9))
+    per_system_gid_weight_ok = gid_weight_all_one(e9)
+
+    # ---- availability masks identical between A9 and E9 (RC section 17) ----
+    a9_avail = np.isfinite(a9_ps)
+    e9_avail = np.isfinite(e9_ps)
+    availability_masks_identical = bool(np.array_equal(a9_avail, e9_avail))
+
+    # ---- curve statistics for E9 (primary) and A9 (secondary) ----
+    def delta_curves(value_matrix, correct):
+        ug, nc, dc, nw, dw = build_group_curve_sufficient_stats(
+            value_matrix, correct, gid_all, w_all)
+        point, reps = bootstrap_delta_curve(nc, dc, nw, dw, B=2000, seed=20260924)
+        lo, hi = pointwise_ci(reps)
+        band = simultaneous_band(point, reps)
+        return {"point": point, "reps": reps, "pointwise_lo": lo, "pointwise_hi": hi,
+                "simul_lower": band["lower"], "simul_upper": band["upper"],
+                "q": band["q"],
+                "band_excludes_zero_at_some_h": bool(
+                    np.any((band["lower"] > 0) | (band["upper"] < 0)))}
+    e9_curves = {
+        "PS": delta_curves(e9_ps, e9_correct),
+        "MAE": delta_curves(e9_mae, e9_correct),
+        "MFE": delta_curves(e9_mfe, e9_correct),
+        "R": delta_curves(e9_r, e9_correct),
+    }
+    a9_curves = {
+        "PS": delta_curves(a9_ps, a9_correct),
+        "MAE": delta_curves(a9_mae, a9_correct),
+        "MFE": delta_curves(a9_mfe, a9_correct),
+        "R": delta_curves(a9_r, a9_correct),
+    }
+
+    # ---- structural event curves (E9 primary) ----
+    event_curves = {}
+    for ev in _EVENT_FIELDS:
+        if ev in ("mfe_at_first_ahead_sr", "mae_before_first_ahead_sr",
+                  "mfe_at_first_ahead_liq", "mae_before_first_ahead_liq"):
+            continue
+        e9_first = np.concatenate([s["dual"]["E9"][ev].astype(np.int32)
+                                  for s in sym_acc])
+        fc, fz = event_cumulative_incidence(e9_first, e9_correct, w_all, H_global - 1)
+        if ev in _ADVERSE_EVENTS:
+            delta = fz - fc          # Wrong - Correct
+        else:
+            delta = fc - fz          # Correct - Wrong
+        event_curves[ev] = {"F_correct": fc, "F_wrong": fz, "delta": delta}
+
+    # ---- descriptive verdict (no best-h selection) ----
+    verdict_e9 = ("PATH_SEPARATION_DETECTED"
+                  if e9_curves["PS"]["band_excludes_zero_at_some_h"]
+                  else "NO_GLOBAL_IDENTIFIABLE_PATH_SEPARATION")
+
+    # ---- aggregate disagreement arithmetic ----
+    agg = {"agreement": 0, "disagreement": 0, "e9_fix": 0, "e9_break": 0}
+    for s in sym_acc:
+        for k in agg:
+            agg[k] += s["decomp"][k]
+
+    perf = {
+        "total_environment_loads": int(COUNTERS["raw_exec_load_count"]),
+        "direction_chain_runs": int(COUNTERS["direction_chain_run_count"]),
+        "path_scans": int(COUNTERS["path_scan_count"]),
+        "full_history_recompute_count": int(COUNTERS["full_history_recompute_count"]),
+        "reference_call_count_production": int(COUNTERS["reference_call_count_production"]),
+        "candidate_python_loop_count": int(COUNTERS["candidate_python_loop_count"]),
+        "hotloop_dataframe_concat_count": int(COUNTERS["hotloop_dataframe_concat_count"]),
+        "candidate_views_processed": int(2 * N_total),
+        "runtime_sec": time.time() - t_start,
+    }
+
+    result = {
+        "population": population, "n_symbols": len(sym_acc),
+        "n_candidates_total": int(N_total),
+        "H_global": int(H_global),
+        "per_system_gid_weight_ok": per_system_gid_weight_ok,
+        "availability_masks_identical": availability_masks_identical,
+        "e9_curves": e9_curves, "a9_curves": a9_curves,
+        "event_curves": event_curves,
+        "verdict_e9": verdict_e9,
+        "disagreement_counts": agg,
+        "performance": perf,
+    }
+
+    if write_artifacts:
+        row_frames = [assemble_row_metrics(s["base"], s["dual"], s["symbol"])
+                      for s in sym_acc]
+        write_row_metrics_parquet(ROW_METRICS_PARQUET, row_frames)
+        curve_chunks = [curve_chunk_from_dual(s["base"], s["dual"], s["symbol"])
+                        for s in sym_acc]
+        write_curve_parquet(CURVE_PARQUET, curve_chunks)
+        result["artifacts"] = {
+            "row_metrics": _sha256_file(ROW_METRICS_PARQUET) if os.path.exists(ROW_METRICS_PARQUET) else None,
+            "curve": _sha256_file(CURVE_PARQUET) if os.path.exists(CURVE_PARQUET) else None,
+        }
+    return result
+
+
+def archive_t1_5_manifest():
+    """Archive the already-reviewed T1.5 evidence once (preserve historical result)."""
+    if os.path.exists(T1_5_ARCHIVE_JSON):
+        return T1_5_ARCHIVE_JSON
+    if not os.path.exists(MANIFEST_JSON):
+        return None
+    with open(MANIFEST_JSON) as f:
+        data = json.load(f)
+    data["stage"] = "t1_5_integration"
+    data["immediate_reviewed_parent_sha"] = "9be36d3f91410ee6be416cdf9025b1858b4b86eb"
+    data["archived_for"] = "ENTRY-PATH-ATLAS-V1 PRE-T2 (15m full-curve redesign)"
+    os.makedirs(EVIDENCE_DIR, exist_ok=True)
+    with open(T1_5_ARCHIVE_JSON, "w") as f:
+        json.dump(_clean(data), f, indent=2)
+    return T1_5_ARCHIVE_JSON
+
+
+def run_pret2_checkpoint(verbose=True) -> dict:
+    """PRE-T2 checkpoint: validate the 15m curve infrastructure on synthetic /
+    small fixtures; do NOT estimate the full primary curve.
+
+    Produces the authoritative PRE-T2 manifest (reviewed parent = 893ca16).
+    """
+    t_start = time.time()
+    archive_t1_5_manifest()
+
+    # (a) curve-kernel differential: Reference vs Production on synthetic + real AG
+    syn = make_synthetic_case(40, 220, seed=7)
+    syn_rep = diff_reference_vs_production(syn)
+    e9 = materialize_e9_direction_state(save=True, verbose=verbose)
+    ag_e9 = e9[e9["symbol"] == "AG"].sort_values("semantic_key").head(40)
+    st = load_symbol_state("AG")
+    base = build_base_anchors(ag_e9, st)
+    real_rep = diff_reference_vs_production(run_symbol_paths_dual(st, base)["case"])
+
+    # (b) simultaneous band determinism (frozen seed)
+    ug, nc, dc, nw, dw = build_group_curve_sufficient_stats(
+        np.random.default_rng(1).normal(size=(50, 30)),
+        np.random.default_rng(2).integers(0, 2, 50).astype(bool),
+        np.array([f"g{i//3}" for i in range(50)]),
+        np.ones(50))
+    _, reps1 = bootstrap_delta_curve(nc, dc, nw, dw, B=200, seed=20260924)
+    _, reps2 = bootstrap_delta_curve(nc, dc, nw, dw, B=200, seed=20260924)
+    band_deterministic = bool(np.array_equal(reps1, reps2))
+
+    # (c) event cumulative-incidence math on synthetic oracle
+    fs = np.array([-1, 0, 2, 4, -1, 1], dtype=np.int32)
+    corr = np.array([True, True, False, False, True, False])
+    wt = np.array([1.0, 1.0, 2.0, 2.0, 1.0, 1.0])
+    # correct gids weights: idx0,1,4 -> 1,1,1 (total 3); experienced by step<=2: idx1 only -> 1
+    # wrong gids weights: idx2,3,5 -> 2,2,1 (total 5); experienced by step<=2: idx2 (2) + idx5 (1) -> 3
+    fc, fz = event_cumulative_incidence(fs, corr, wt, 5)
+    inc_ok = (abs(fc[2] - 1.0 / 3.0) < 1e-12) and (abs(fz[2] - 3.0 / 5.0) < 1e-12)
+
+    # (d) disagreement arithmetic identity
+    arith = verify_disagreement_arithmetic(
+        np.array([1, 1, 0, 0, 1, 0]), np.array([1, 0, 1, 0, 1, 1]))
+
+    # (e) full production call graph on small AG subset (no Reference, no full pop)
+    ft2 = run_formal_t2(symbols=("AG",), n_subset=40, write_artifacts=False,
+                        population="small", verbose=verbose)
+
+    extra = {
+        "branch": "entry-path-atlas-v1",
+        "code_sha": _git_head_sha(),
+        "reviewed_parent_sha": REVIEWED_PARENT_PRE_T2,
+        "primary_endpoint": {
+            "name": "delta_PS_curve_E9_15m",
+            "definition": "Delta_PS_E9(h) for ALL h (completed 15m bars); "
+                          "full-curve simultaneous band; no single best-h selection",
+            "observation_axis": "15m",
+            "landmark_4h": "h4 = 16 bars = descriptive landmark only",
+        },
+        "curve_kernel_differential": {
+            "synthetic_rows": syn_rep["rows"],
+            "synthetic_final_mismatch": syn_rep["mismatch"],
+            "synthetic_curve_mismatch": syn_rep["curve_mismatch"],
+            "real_ag_rows": real_rep["rows"],
+            "real_ag_final_mismatch": real_rep["mismatch"],
+            "real_ag_curve_mismatch": real_rep["curve_mismatch"],
+            "max_abs_error": max(syn_rep["max_abs_error"], real_rep["max_abs_error"]),
+        },
+        "simultaneous_band_synthetic": {
+            "deterministic_under_frozen_seed": band_deterministic, "seed": 20260924,
+        },
+        "event_incidence_synthetic": {"math_ok": bool(inc_ok)},
+        "disagreement_arithmetic": arith,
+        "formal_t2_small_ag": {
+            "n_candidates": ft2["n_candidates_total"],
+            "per_system_gid_weight_ok": ft2["per_system_gid_weight_ok"],
+            "availability_masks_identical": ft2["availability_masks_identical"],
+            "verdict_e9_small": ft2["verdict_e9"],
+            "disagreement_counts": ft2["disagreement_counts"],
+            "performance": ft2["performance"],
+        },
+        "artifact_schemas": {
+            "entry_path_row_metrics_v1.parquet": {
+                "key": ["semantic_key", "direction_system"],
+                "expected_rows_full": 27546,
+                "columns": ROW_METRICS_COLUMNS,
+            },
+            "entry_path_curve_v1.parquet": {
+                "key": ["semantic_key", "direction_system", "h_bar"],
+                "format": "long",
+                "columns": CURVE_COLUMNS,
+            },
+        },
+        "governance": {
+            "full_13773_formal_t2": "NOT RUN (not authorized at PRE-T2)",
+            "formal_runner_guard": "population='full' raises STOP_FORMAL_T2_FULL_POPULATION_NOT_AUTHORIZED",
+            "no_best_h_selection": True,
+            "reference_kernel_never_called_in_formal_runner": True,
+            "one_dual_production_scan_per_symbol": True,
+            "a9_secondary_comparator_only": True,
+            "a9_vs_e9_final_verdict": "reserved for FUTURE-RX-DIRECTION-LAYER-ABLATION-V1",
+        },
+        "unverified_items": [
+            "Full 13773-Candidate Formal T2 primary curve (E9 and A9) NOT estimated.",
+            "Full L2 row-metrics parquet (27546 rows) NOT generated.",
+            "Full long-format 15m curve parquet NOT generated.",
+            "Formal scientific verdict (PATH_SEPARATION_DETECTED / NO...) NOT issued.",
+            "Stop-Loss / Take-Profit experiments NOT run.",
+            "A9-vs-E9 final system verdict reserved for downstream frozen ablation.",
+        ],
+        "runtime_sec": time.time() - t_start,
+    }
+    return write_manifest(extra=extra, stage=STAGE_PRE_T2)
+
+
+# --------------------------------------------------------------------------- #
 # 11. Manifest                                                                 #
 # --------------------------------------------------------------------------- #
 def write_manifest(*, stage=STAGE, extra=None, path=MANIFEST_JSON):
@@ -1517,13 +2198,18 @@ def write_manifest(*, stage=STAGE, extra=None, path=MANIFEST_JSON):
         "reviewed_parent_sha": REVIEWED_SHA,
         "stage": stage,
         "primary_endpoint": {
-            "name": "delta_PS_4h",
-            "definition": "E[PS_4h | direction_correct=1] - E[PS_4h | direction_correct=0]",
-            "ps": "MFE - MAE (side-normalized, ATR0 units)",
-            "checkpoint": PRIMARY_CHECKPOINT,
-            "bars": 16,
-            "inference": "whole-gid cluster bootstrap (correct and wrong means "
-                         "recomputed inside the SAME replicate)",
+            "name": "delta_PS_curve_E9_15m",
+            "definition": "Delta_PS_E9(h) = E_w[PS_E9(h)|correct] - E_w[PS_E9(h)|wrong] "
+                          "for EVERY completed-15m-bar event-time h",
+            "ps": "MFE(h) - MAE(h), side-normalized, ATR0 units",
+            "observation_axis": "15 minutes (execution + observation)",
+            "landmarks": {"m15": "h=1 bar", "h1": "h=4 bars", "h4": "h=16 bars (4h)",
+                          "td1": "end of trading day 1", "td3": "end of trading day 3",
+                          "td5": "end of trading day 5"},
+            "note": "4h (h4=16 bars) is a REPORTING LANDMARK, NOT the scientific primary "
+                    "horizon; the primary is the full 15m path-separation curve.",
+            "inference": "whole-gid cluster bootstrap of the COMPLETE curve + simultaneous "
+                         "95% confidence band; no single best-h selection",
         },
         "audit_only_fields": list(AUDIT_ONLY_FIELDS),
         "realtime_policy": FORBIDDEN_REALTIME_FEATURE,
