@@ -217,6 +217,75 @@ def assert_clean_efficiency() -> dict:
     return snap
 
 
+DEV_FRAME_PARQUET = os.path.join(V2_ARTIFACT_DIR, "dev_frame_v2.parquet")
+V1_WIN_FEATURES = os.path.join(V1_ARTIFACT_DIR, "win_features_v1.parquet")
+V1_PAYOFF_FEATURES = os.path.join(V1_ARTIFACT_DIR, "payoff_features_v1.parquet")
+
+JOIN_KEYS = ("symbol", "decision_bar", "side")
+
+
+def build_development_frame(extra: Optional[pd.DataFrame] = None,
+                            save: bool = True) -> pd.DataFrame:
+    """TRAIN labels joined with the feature contract, on (symbol, bar, side).
+
+    V1 WIN33 / PAY8 come from the frozen V1 feature parquets (so A0 IS the V1
+    matrix by construction). `extra` carries V2 columns keyed the same way.
+    """
+    labels = read_train_labels()
+    win = read_parquet(V1_WIN_FEATURES)
+    pay = read_parquet(V1_PAYOFF_FEATURES)
+
+    # Labels already carry some geometry columns (e.g. log_structural_rr). The
+    # frozen V1 FEATURE parquet is the contract's source of truth, so the label
+    # duplicates are dropped instead of being suffix-split.
+    overlap = ((set(win.columns) | set(pay.columns))
+               - set(JOIN_KEYS)) & set(labels.columns)
+    if overlap:
+        labels = labels.drop(columns=sorted(overlap))
+
+    df = labels.merge(win, on=list(JOIN_KEYS), how="left",
+                      validate="many_to_one")
+    df = df.merge(pay, on=list(JOIN_KEYS), how="left",
+                  validate="many_to_one")
+    if extra is not None:
+        df = df.merge(extra, on=list(JOIN_KEYS), how="left",
+                      validate="many_to_one")
+
+    # Join completeness = every label row FOUND a feature row. Individual
+    # feature values may legitimately be NaN (e.g. liquidity distance when no
+    # liquidity zone is active); LightGBM consumes those natively and V1 did
+    # too. An unmatched key, by contrast, leaves the whole row NaN.
+    from research.liquidity_oracle_atlas.decomposed_value_features_v2 import (
+        SHARED41,
+    )
+    block = df[list(SHARED41)]
+    unmatched = block.isna().all(axis=1)
+    if bool(unmatched.any()) or len(df) != len(labels):
+        raise StopV2Leakage(
+            "STOP_V2_FEATURE_JOIN_INCOMPLETE "
+            f"n_unmatched={int(unmatched.sum())} "
+            f"rows={len(df)} labels={len(labels)}")
+    bump("feature_materializations")
+    if save:
+        write_parquet(df, DEV_FRAME_PARQUET)
+    return df
+
+
+def load_development_frame(columns: Optional[list] = None) -> pd.DataFrame:
+    return read_parquet(DEV_FRAME_PARQUET, columns=columns)
+
+
+def build_plan_from_devframe() -> Any:
+    """The outer calendar is built ONCE on the full frame (all horizons)."""
+    from research.liquidity_oracle_atlas.walkforward_development_v1 import (
+        build_fold_plan,
+    )
+    frame = load_development_frame(columns=[
+        "symbol", "decision_bar", "side", "horizon", "decision_time",
+        "label_available_time", "sample_weight", "episode_return_atr"])
+    return build_fold_plan(frame)
+
+
 def main() -> dict:
     """Phase-1 smoke: prove the guard and the frozen plan are wired."""
     from research.liquidity_oracle_atlas.walkforward_development_v1 import (
