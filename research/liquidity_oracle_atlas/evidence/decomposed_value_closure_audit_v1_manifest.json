@@ -1,0 +1,59 @@
+{
+  "task_id": "FUTURE-R13.5-TD5-DECOMPOSED-CLOSURE-AUDIT-V1",
+  "reviewed_base_sha": "d7c228e5b2c0bedb0c4890a75335d97c4937ed1a",
+  "phase4_status": "NO_V2_MODEL_IMPROVEMENT",
+  "phase4_manifest_sha": "da50212b3faa0be96abe3f5e58e80bc74152df134279a95308ccf644b64d4a2b",
+  "generator_code_sha": "b0b162a170c06802d3049b19894a0896e833e7832c98a731d93dd128f803f073",
+  "bootstrap": {
+    "method": "trading_day_block_bootstrap",
+    "block_trading_days": 5,
+    "n_boot": 5000,
+    "seed": 20260925
+  },
+  "input_artifact_shas": {
+    "a0_td5_oof_shards": [
+      "3699eb523da7e7050fbb37b003c5c00db9719d1dc0989ef742d71959a5d383d5",
+      "fa798e49ea16aa53686277de98d836a123bb398ced620cb1d35b70cd6fbd53a2",
+      "8d6e72202799462c0ce5794be95184704c661320dbb17e9dc5130b3dc9c4e8b8",
+      "ae2a0d5573b56c0c21e91c5fdc1866544bfb0453f75fc716b0a4a292233a4470",
+      "f9a8280e9c46f73258f301951163165a50ee50b3836d6e548458d0b7ce14add9"
+    ],
+    "a1_td5_oof_shards": [
+      "727863667d3344862d502dea99c3437dd4cba04b1c1337dc4f0a977b8b1044eb",
+      "5164608497889c449ebaf89652699bd1eee5b0a52c2fe48c7e56a35c74572d3c",
+      "3c521a48233d902bd9dfe98f14a277cfd2208adf2734a433ec8637871a1c96f2",
+      "92c4380d76809024b8ab5cb8fbcbbc774fa4a1911509e213e95672c14ba7fae9",
+      "d7348216993dcd4773b284c88fec66b57c2cacbf6a2cf7dc308c93d6f3cb3edb"
+    ],
+    "labels_train_v1": "c9cb77b82ecd9b8996c9ce064a18dbb5ccbcacbd4743ad2cd3dc58c1fae1a61e",
+    "state_v1": "b0ae386fa8da9f723a1f1f596495d97b8325bb24f02cc566f146a42c6fbcebe9",
+    "phase4_manifest": "da50212b3faa0be96abe3f5e58e80bc74152df134279a95308ccf644b64d4a2b"
+  },
+  "output_artifact_shas": {
+    "ledger": "c9367d0bc16bb1caeb2866b714167b19bf5b366fa7ea29f30730f75143b42a27",
+    "deciles": "68c29d8b44107460cdd7c215f8b967da1dd400ea2fa2903d3c2b792ce6f44e09",
+    "gate": "3621a4b1a510af5d840828f990b8d71f4d46954b914dd82fab26b16ecb3720d1",
+    "forensics": "4fb2ebf59918a2ed0e5f8ab944e764562333c8675cf5a5437ba21625aa693377"
+  },
+  "summary_sha": "2cd1a5a121dfad761b5802df59c1d24511537ac0f6639f7a1696003b039a3e30",
+  "a0_vs_a1_payoff_diff": {
+    "max_abs_mu_win_diff": 0.0,
+    "max_abs_mu_loss_diff": 0.0
+  },
+  "closure_identity_validated": true,
+  "direction_layer": {
+    "production_root_direction": "E9",
+    "audited_in_r13_5": false,
+    "reason": "NO_FROZEN_CAUSAL_TRAIN_OOF_E9_ROOT_AXIS"
+  },
+  "governance": {
+    "model_fits": 0,
+    "hyperparameter_searches": 0,
+    "feature_changes": 0,
+    "direction_model_fits": 0,
+    "dev_val_reads": 0,
+    "old_test_label_reads": 0,
+    "old_test_policy_reads": 0,
+    "E9_train_oof_axis_reads": 0
+  }
+}

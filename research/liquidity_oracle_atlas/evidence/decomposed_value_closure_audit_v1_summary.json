@@ -1,0 +1,311 @@
+{
+  "populations": {
+    "A0_V1_DISJOINT": {
+      "ALL_TD5_OOF": {
+        "win": {
+          "ordinary_brier": 0.23354427758508495,
+          "ordinary_logloss": 0.659596897709799,
+          "money_weighted_brier": 0.26711086925208577,
+          "money_weighted_logloss": 0.7318035699535638,
+          "p_top20_actual_return": 0.06252623656287923,
+          "p_bottom20_actual_return": -0.036203822381769016,
+          "p_top20_minus_bottom20": 0.09873005894464824
+        },
+        "payoff": {
+          "winner_mu_win_mae": 0.7973541835671656,
+          "winner_mu_win_rmse": 1.4655662060586345,
+          "winner_mu_win_bias": 0.04502845272696685,
+          "winner_mu_win_corr": 0.6369516352022045,
+          "loser_mu_loss_mae": 0.7795348768558459,
+          "loser_mu_loss_rmse": 1.4337429588970838,
+          "loser_mu_loss_bias": 0.03479285968805911,
+          "loser_mu_loss_corr": 0.6512469626331142,
+          "winner_magnitude_top20_minus_bottom20": 3.127448294661988,
+          "loser_magnitude_top20_minus_bottom20": 3.156494610886969,
+          "oracle_sign_reconstruction_mae": 0.78821127751289,
+          "oracle_sign_reconstruction_rmse": 1.4493253065646263,
+          "oracle_sign_reconstruction_bias": 0.004072944616432457,
+          "oracle_sign_reconstruction_corr": 0.8168042972074868
+        },
+        "money_weighted_prob": {
+          "money_weighted_brier": 0.26711086925208577,
+          "money_weighted_logloss": 0.7318035699535638,
+          "oracle_realized_magnitude_mae": 1.6367793652281013,
+          "oracle_realized_magnitude_rmse": 2.731679553957991
+        },
+        "closure": {
+          "total_bias": 0.007372146174774119,
+          "probability_bias": 0.003299201558341653,
+          "magnitude_bias": 0.004072944616432457,
+          "total_rmse": 2.5631807936224065,
+          "probability_rmse": 2.126045886579865,
+          "magnitude_rmse": 1.4493253065646263,
+          "total_mse": 6.5698957807947895,
+          "probability_mse_component": 4.520071111843164,
+          "magnitude_mse_component": 2.1005438442486484,
+          "cross_term": -0.050719175297021496
+        },
+        "gate": {
+          "ev_positive_fraction": 0.49269178065725894,
+          "captured_profit": 17393.67503556518,
+          "admitted_loss": 17058.371097311545,
+          "selected_net": 335.30393825363353,
+          "missed_profit": 16909.224469785182,
+          "avoided_loss": 17244.528408038816,
+          "selected_weight": 20494.5,
+          "selected_actual_mean_return": 0.016360679121404913
+        },
+        "n_rows": 83194
+      },
+      "ROOT_CANDIDATE_TD5": {
+        "win": {
+          "ordinary_brier": 0.23443571452580783,
+          "ordinary_logloss": 0.6612355494224588,
+          "money_weighted_brier": 0.2594979673157322,
+          "money_weighted_logloss": 0.7145141099032825,
+          "p_top20_actual_return": 0.11176600604320076,
+          "p_bottom20_actual_return": -0.10843408476080803,
+          "p_top20_minus_bottom20": 0.2202000908040088
+        },
+        "payoff": {
+          "winner_mu_win_mae": 0.6976639772055198,
+          "winner_mu_win_rmse": 1.3143954675566754,
+          "winner_mu_win_bias": 0.07350535042970012,
+          "winner_mu_win_corr": 0.593695152787517,
+          "loser_mu_loss_mae": 0.6849677700397017,
+          "loser_mu_loss_rmse": 1.281124226977116,
+          "loser_mu_loss_bias": 0.06958502806672179,
+          "loser_mu_loss_corr": 0.6092273833331645,
+          "winner_magnitude_top20_minus_bottom20": 2.491414607072612,
+          "loser_magnitude_top20_minus_bottom20": 2.481730640145401,
+          "oracle_sign_reconstruction_mae": 0.6910948605041016,
+          "oracle_sign_reconstruction_rmse": 1.2972872055593632,
+          "oracle_sign_reconstruction_bias": -0.0005307284493351003,
+          "oracle_sign_reconstruction_corr": 0.7860192517605286
+        },
+        "money_weighted_prob": {
+          "money_weighted_brier": 0.2594979673157322,
+          "money_weighted_logloss": 0.7145141099032825,
+          "oracle_realized_magnitude_mae": 1.3094051418204693,
+          "oracle_realized_magnitude_rmse": 2.223541983943527
+        },
+        "closure": {
+          "total_bias": 0.003996669628005687,
+          "probability_bias": 0.0045273980773407945,
+          "magnitude_bias": -0.0005307284493351003,
+          "total_rmse": 2.11842947988383,
+          "probability_rmse": 1.712100258604191,
+          "magnitude_rmse": 1.2972872055593632,
+          "total_mse": 4.487743461240875,
+          "probability_mse_component": 2.9312872955125373,
+          "magnitude_mse_component": 1.6829540937080212,
+          "cross_term": -0.12649792797968443
+        },
+        "gate": {
+          "ev_positive_fraction": 0.4844665198444309,
+          "captured_profit": 7156.879197490394,
+          "admitted_loss": 7037.182737038378,
+          "selected_net": 119.69646045201625,
+          "missed_profit": 7024.776000082855,
+          "avoided_loss": 7144.472460534873,
+          "selected_weight": 10339.0,
+          "selected_actual_mean_return": 0.011577179654900658
+        },
+        "bootstrap_ci": {
+          "p_top20_minus_bottom20": {
+            "point": 0.22213218551502564,
+            "ci_lo": 0.028984272499721037,
+            "ci_hi": 0.41205779749862875
+          },
+          "mu_win_top20_minus_bottom20": {
+            "point": 2.4892016144693563,
+            "ci_lo": 2.2731473964374183,
+            "ci_hi": 2.712354203731587
+          },
+          "mu_loss_top20_minus_bottom20": {
+            "point": 2.476826551057533,
+            "ci_lo": 2.2641802941753375,
+            "ci_hi": 2.691282651016658
+          },
+          "ev_top20_minus_bottom20": {
+            "point": 0.05867198308055647,
+            "ci_lo": -0.16051079852838215,
+            "ci_hi": 0.2810049289522433
+          },
+          "ev_positive_weighted_return": {
+            "point": 0.010905511013281856,
+            "ci_lo": -0.03966395279762244,
+            "ci_hi": 0.0613666812816902
+          }
+        },
+        "n_rows": 42682
+      }
+    },
+    "A1_SHARE_TO_WIN": {
+      "ALL_TD5_OOF": {
+        "win": {
+          "ordinary_brier": 0.23248877792982361,
+          "ordinary_logloss": 0.6571650536605377,
+          "money_weighted_brier": 0.2669734568701601,
+          "money_weighted_logloss": 0.7307753754465153,
+          "p_top20_actual_return": 0.0299195400905425,
+          "p_bottom20_actual_return": -0.0833497084461062,
+          "p_top20_minus_bottom20": 0.1132692485366487
+        },
+        "payoff": {
+          "winner_mu_win_mae": 0.7973541835671656,
+          "winner_mu_win_rmse": 1.4655662060586345,
+          "winner_mu_win_bias": 0.04502845272696685,
+          "winner_mu_win_corr": 0.6369516352022045,
+          "loser_mu_loss_mae": 0.7795348768558459,
+          "loser_mu_loss_rmse": 1.4337429588970838,
+          "loser_mu_loss_bias": 0.03479285968805911,
+          "loser_mu_loss_corr": 0.6512469626331142,
+          "winner_magnitude_top20_minus_bottom20": 3.127448294661988,
+          "loser_magnitude_top20_minus_bottom20": 3.156494610886969,
+          "oracle_sign_reconstruction_mae": 0.78821127751289,
+          "oracle_sign_reconstruction_rmse": 1.4493253065646263,
+          "oracle_sign_reconstruction_bias": 0.004072944616432457,
+          "oracle_sign_reconstruction_corr": 0.8168042972074868
+        },
+        "money_weighted_prob": {
+          "money_weighted_brier": 0.2669734568701601,
+          "money_weighted_logloss": 0.7307753754465153,
+          "oracle_realized_magnitude_mae": 1.6381762140055023,
+          "oracle_realized_magnitude_rmse": 2.750890303807
+        },
+        "closure": {
+          "total_bias": 0.0029541956736997134,
+          "probability_bias": -0.001118748942732744,
+          "magnitude_bias": 0.004072944616432457,
+          "total_rmse": 2.5539718180776174,
+          "probability_rmse": 2.1061113412369354,
+          "magnitude_rmse": 1.4493253065646263,
+          "total_mse": 6.522772047534691,
+          "probability_mse_component": 4.435704981686842,
+          "magnitude_mse_component": 2.1005438442486484,
+          "cross_term": -0.013476778400801115
+        },
+        "gate": {
+          "ev_positive_fraction": 0.481332788422242,
+          "captured_profit": 16925.27567548403,
+          "admitted_loss": 16938.11471671763,
+          "selected_net": -12.839041233601165,
+          "missed_profit": 17377.623829866327,
+          "avoided_loss": 17364.78478863273,
+          "selected_weight": 20022.0,
+          "selected_actual_mean_return": -0.0006412466903205436
+        },
+        "n_rows": 83194
+      },
+      "ROOT_CANDIDATE_TD5": {
+        "win": {
+          "ordinary_brier": 0.2337938931806897,
+          "ordinary_logloss": 0.6598483503296059,
+          "money_weighted_brier": 0.2600887645720013,
+          "money_weighted_logloss": 0.7154440498657852,
+          "p_top20_actual_return": 0.10156717878682714,
+          "p_bottom20_actual_return": -0.12231499806647789,
+          "p_top20_minus_bottom20": 0.22388217685330503
+        },
+        "payoff": {
+          "winner_mu_win_mae": 0.6976639772055198,
+          "winner_mu_win_rmse": 1.3143954675566754,
+          "winner_mu_win_bias": 0.07350535042970012,
+          "winner_mu_win_corr": 0.593695152787517,
+          "loser_mu_loss_mae": 0.6849677700397017,
+          "loser_mu_loss_rmse": 1.281124226977116,
+          "loser_mu_loss_bias": 0.06958502806672179,
+          "loser_mu_loss_corr": 0.6092273833331645,
+          "winner_magnitude_top20_minus_bottom20": 2.491414607072612,
+          "loser_magnitude_top20_minus_bottom20": 2.481730640145401,
+          "oracle_sign_reconstruction_mae": 0.6910948605041016,
+          "oracle_sign_reconstruction_rmse": 1.2972872055593632,
+          "oracle_sign_reconstruction_bias": -0.0005307284493351003,
+          "oracle_sign_reconstruction_corr": 0.7860192517605286
+        },
+        "money_weighted_prob": {
+          "money_weighted_brier": 0.2600887645720013,
+          "money_weighted_logloss": 0.7154440498657852,
+          "oracle_realized_magnitude_mae": 1.3110186753078266,
+          "oracle_realized_magnitude_rmse": 2.240726380343872
+        },
+        "closure": {
+          "total_bias": 0.000761804008054469,
+          "probability_bias": 0.0012925324573895708,
+          "magnitude_bias": -0.0005307284493351003,
+          "total_rmse": 2.116616815421752,
+          "probability_rmse": 1.7066212757104062,
+          "magnitude_rmse": 1.2972872055593632,
+          "total_mse": 4.480066743326118,
+          "probability_mse_component": 2.9125561787074146,
+          "magnitude_mse_component": 1.6829540937080212,
+          "cross_term": -0.11544352908931751
+        },
+        "gate": {
+          "ev_positive_fraction": 0.4670587132749168,
+          "captured_profit": 6800.345200841194,
+          "admitted_loss": 6912.381864381418,
+          "selected_net": -112.03666354022425,
+          "missed_profit": 7381.309996732056,
+          "avoided_loss": 7269.273333191832,
+          "selected_weight": 9967.5,
+          "selected_actual_mean_return": -0.011240196994253784
+        },
+        "bootstrap_ci": {
+          "p_top20_minus_bottom20": {
+            "point": 0.22461727320855152,
+            "ci_lo": 0.04495515499809589,
+            "ci_hi": 0.4126748642044444
+          },
+          "mu_win_top20_minus_bottom20": {
+            "point": 2.4892016144693563,
+            "ci_lo": 2.2731473964374183,
+            "ci_hi": 2.712354203731587
+          },
+          "mu_loss_top20_minus_bottom20": {
+            "point": 2.476826551057533,
+            "ci_lo": 2.2641802941753375,
+            "ci_hi": 2.691282651016658
+          },
+          "ev_top20_minus_bottom20": {
+            "point": -0.07989702887256703,
+            "ci_lo": -0.29704709233463383,
+            "ci_hi": 0.11854491440204812
+          },
+          "ev_positive_weighted_return": {
+            "point": -0.01158604728441656,
+            "ci_lo": -0.05860262400799288,
+            "ci_hi": 0.03360855447834072
+          }
+        },
+        "n_rows": 42682
+      }
+    }
+  },
+  "a0_vs_a1": {
+    "ALL_TD5_OOF": {
+      "delta_probability_mse": -0.08436613015632144,
+      "delta_magnitude_mse": 0.0,
+      "delta_cross_term": 0.03724239689622038,
+      "delta_total_ev_mse": -0.04712373326009889,
+      "delta_admitted_loss": -120.25638059391349,
+      "delta_missed_profit": 468.39936008114455,
+      "delta_selected_actual_mean_return": -0.01700192581172546
+    },
+    "ROOT_CANDIDATE_TD5": {
+      "delta_probability_mse": -0.01873111680512274,
+      "delta_magnitude_mse": 0.0,
+      "delta_cross_term": 0.011054398890366912,
+      "delta_total_ev_mse": -0.007676717914756992,
+      "delta_admitted_loss": -124.80087265695965,
+      "delta_missed_profit": 356.5339966492011,
+      "delta_selected_actual_mean_return": -0.022817376649154442
+    }
+  },
+  "a0_vs_a1_payoff_diff": {
+    "max_abs_mu_win_diff": 0.0,
+    "max_abs_mu_loss_diff": 0.0
+  },
+  "closure_identity_validated": true
+}
