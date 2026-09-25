@@ -1,14 +1,16 @@
 {
-  "task_id": "FUTURE-R13.5-TD5-DECOMPOSED-CLOSURE-AUDIT-V1",
+  "task_id": "FUTURE-R13.5B-TD5-COMPOSER-ISOLATION-AUDIT-V1",
   "reviewed_base_sha": "d7c228e5b2c0bedb0c4890a75335d97c4937ed1a",
+  "parent_r135_sha": "3b493511a2584d8194080d208141f2c98fd80b8c",
   "phase4_status": "NO_V2_MODEL_IMPROVEMENT",
   "phase4_manifest_sha": "da50212b3faa0be96abe3f5e58e80bc74152df134279a95308ccf644b64d4a2b",
-  "generator_code_sha": "c4713437fbc011f9ba64d293fd0ce7bcfef67c03cfe5472cb63a306116f4b284",
+  "generator_code_sha": "d5ebcd0108b4af1740e48cf74c7aea19a84abcfaf17f1771fe0508a9cc548ad2",
   "bootstrap": {
-    "method": "trading_day_block_bootstrap",
+    "method": "trading_day_block_bootstrap_complete",
     "block_trading_days": 5,
     "n_boot": 5000,
-    "seed": 20260925
+    "seed": 20260925,
+    "n_complete_blocks_ROOT_A0": 28
   },
   "input_artifact_shas": {
     "a0_td5_oof_shards": [
@@ -30,20 +32,20 @@
     "phase4_manifest": "da50212b3faa0be96abe3f5e58e80bc74152df134279a95308ccf644b64d4a2b"
   },
   "output_artifact_shas": {
-    "ledger": "c9367d0bc16bb1caeb2866b714167b19bf5b366fa7ea29f30730f75143b42a27",
-    "deciles": "68c29d8b44107460cdd7c215f8b967da1dd400ea2fa2903d3c2b792ce6f44e09",
-    "gate": "3621a4b1a510af5d840828f990b8d71f4d46954b914dd82fab26b16ecb3720d1",
-    "forensics": "4fb2ebf59918a2ed0e5f8ab944e764562333c8675cf5a5437ba21625aa693377"
+    "ledger": "f2f973ff1378863429aaae8bdd7308b0f293aa63f62f52bdcf96a6653f98a100",
+    "detail": "fa014c5275ec233090487243ef2d1877a4172fbdb2cdd996f45738aa55f0a809"
   },
-  "summary_sha": "bf4873842fa5e33aca6bbc467e08474a43821f5da65be96b72532f720308d4f1",
-  "a0_vs_a1_payoff_diff": {
-    "max_abs_mu_win_diff": 0.0,
-    "max_abs_mu_loss_diff": 0.0
-  },
-  "closure_identity_validated": true,
+  "summary_sha": "25d0e0321235a166f387c002a24efc492cd5b924da6a566103dc46fdadcdb487",
+  "score_names": [
+    "p",
+    "EV_W",
+    "p_minus_pBE",
+    "EV_C",
+    "EV_R"
+  ],
   "direction_layer": {
     "production_root_direction": "E9",
-    "audited_in_r13_5": false,
+    "audited_in_r13_5b": false,
     "reason": "NO_FROZEN_CAUSAL_TRAIN_OOF_E9_ROOT_AXIS"
   },
   "governance": {
