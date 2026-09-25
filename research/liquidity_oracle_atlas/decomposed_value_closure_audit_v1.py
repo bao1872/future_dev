@@ -530,9 +530,13 @@ def build_decile_tables(df: pd.DataFrame, arch: str, population: str) -> pd.Data
 # Block bootstrap (plan §32)                                                   #
 # --------------------------------------------------------------------------- #
 def _block_index_map(trading_days: np.ndarray, block: int):
+    """Complete block bootstrap: only keep whole `block`-day blocks and drop
+    the trailing remainder (plan R13.5 fix: n_complete = floor(n_days/5))."""
     days = np.sort(pd.unique(trading_days))
+    n_complete = len(days) // block
+    days = days[: n_complete * block]
     pos = {d: np.where(trading_days == d)[0] for d in days}
-    blocks = [days[i:i + block] for i in range(0, len(days), block)]
+    blocks = [days[i * block:(i + 1) * block] for i in range(n_complete)]
     block_idx = [np.concatenate([pos[d] for d in b]) for b in blocks]
     return block_idx
 
