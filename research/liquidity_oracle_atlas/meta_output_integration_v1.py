@@ -61,7 +61,7 @@ EPS = 1e-6
 KEY = ["symbol", "decision_bar", "side", "horizon"]
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(HERE))  # .../future_dev
 ARTIFACT_DIR = os.path.join(PROJECT_ROOT, "artifacts", "decomposed_value_v2")
 EVIDENCE_DIR = R.EVIDENCE_DIR
 if not os.path.isabs(EVIDENCE_DIR):
@@ -456,7 +456,7 @@ def _stat_spread(y, w, score, sel, idx):
 
 
 def _bootstrap(arr, stat_fn, block_idx, b: int, seed: int) -> np.ndarray:
-    y, w, score, sel = arr
+    y, w, score, sel = arr[0], arr[1], arr[2], arr[3]
     n_blocks = len(block_idx)
     rng = np.random.default_rng(seed)
     boots = np.empty(b)
@@ -468,8 +468,8 @@ def _bootstrap(arr, stat_fn, block_idx, b: int, seed: int) -> np.ndarray:
 
 
 def _boot_paired(arr_m, arr_p, block_idx, b: int, seed: int) -> np.ndarray:
-    ym, wm, sm, sem = arr_m
-    yp, wp, sp, sep = arr_p
+    ym, wm, sm, sem = arr_m[0], arr_m[1], arr_m[2], arr_m[3]
+    yp, wp, sp, sep = arr_p[0], arr_p[1], arr_p[2], arr_p[3]
     n_blocks = len(block_idx)
     rng = np.random.default_rng(seed)
     diffs = np.empty(b)
@@ -508,7 +508,7 @@ def evaluate(pred: pd.DataFrame, build_frames: Dict[str, pd.DataFrame],
         evf = pd.concat([bf[bf["fold"] == k] for k in range(1, N_FOLDS)],
                         ignore_index=True)
         ap = ap.merge(
-            evf[["symbol", "decision_bar", "side", "fold",
+            evf[["symbol", "decision_bar", "side", "fold", "sample_weight",
                  "episode_return_atr", "win", "p_win", "mu_win", "mu_loss"]],
             on=["symbol", "decision_bar", "side", "fold"],
             how="left", validate="many_to_one",
@@ -516,7 +516,10 @@ def evaluate(pred: pd.DataFrame, build_frames: Dict[str, pd.DataFrame],
         if ap["episode_return_atr"].isna().any():
             raise RuntimeError("STOP_R13_7_OUTCOME_JOIN_MISSING")
 
-        block_idx = _block_index_map(ap["trading_day"].to_numpy(), BOOTSTRAP_BLOCK)
+        # All meta models share the identical target row universe/order, so the
+        # block index built from any one model applies to all (plan #18).
+        ref = ap[ap["meta_model"] == "B0_P"]
+        block_idx = _block_index_map(ref["trading_day"].to_numpy(), BOOTSTRAP_BLOCK)
 
         arrays: Dict[str, Tuple] = {}
         for model in META_MODELS:
