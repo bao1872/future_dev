@@ -1,0 +1,6 @@
+contrast,point,ci_lo,ci_hi,value_arch
+PGM_minus_P_given_A9,-0.074378,-0.281163,0.145274,A0
+PGM_minus_P_given_E9,-0.022054,-0.277261,0.236862,A0
+E9_minus_A9_given_P,-0.020733,-0.173812,0.132924,A0
+E9_minus_A9_given_PGM,0.031591,-0.281175,0.350115,A0
+direction_gate_interaction,0.052324,-0.262291,0.355421,A0

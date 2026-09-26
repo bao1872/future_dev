@@ -1,0 +1,22 @@
+{
+  "n_value_epochs": 21341,
+  "n_direction_matches": 21341,
+  "n_missing": 0,
+  "n_duplicate_value_keys": 0,
+  "n_duplicate_direction_keys": 0,
+  "A9_selected_mean_return": 0.027747,
+  "A9_opposite_mean_return": -0.027747,
+  "A9_direction_advantage": 0.055494,
+  "E9_selected_mean_return": 0.060205,
+  "E9_opposite_mean_return": -0.060205,
+  "E9_direction_advantage": 0.120411,
+  "E9_minus_A9_point": 0.032458,
+  "E9_minus_A9_ci_lo": -0.032687,
+  "E9_minus_A9_ci_hi": 0.111346,
+  "direction_verdict": "A9_E9_DIRECTION_UNRESOLVED",
+  "agreement_rate": 0.69247,
+  "disagreement_count": 6563,
+  "E9_wins_disagreement": 3173,
+  "A9_wins_disagreement": 3169,
+  "ties_disagreement": 221
+}
