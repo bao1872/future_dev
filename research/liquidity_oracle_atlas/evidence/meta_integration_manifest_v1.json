@@ -1,0 +1,68 @@
+{
+  "experiment": "FUTURE-R13.6-R13.7",
+  "reviewed_parent_sha": "b1ee4d3e94c9709f176afe915c6f68ad7c047153",
+  "population": "ROOT_CANDIDATE_TD5",
+  "horizon": "td5",
+  "meta_models": [
+    "B0_P",
+    "B1_EV_C",
+    "B2_MARGIN",
+    "B3_EV_W",
+    "M1_POLY2_RIDGE",
+    "M2_SPLINE_RIDGE",
+    "M3_PGM3",
+    "M4_GMM_MOE3"
+  ],
+  "prediction_artifact_sha256": "304ae792cfc3bafcdf6acb07892d24c745c1f2937ff9ec6915deb58546daf851",
+  "governance": {
+    "dev_val_reads": 0,
+    "old_test_label_reads": 0,
+    "old_test_policy_reads": 0,
+    "base_model_fits": 0,
+    "direction_model_fits": 0,
+    "hyperparameter_searches": 0
+  },
+  "no_threshold_mining": true,
+  "no_hyperparameter_search": true,
+  "no_dev_val": true,
+  "no_test": true,
+  "stop": "AWAITING_R13_7_META_INTEGRATION_REVIEW",
+  "generator_code_sha": "98e499ce356a466f1160b4c55290d5106bc6e5e5",
+  "prediction_artifact": {
+    "path": "/Users/zhenbao/Desktop/coding/future_dev/artifacts/decomposed_value_v2/meta_integration_oof_v1.parquet",
+    "sha256": "304ae792cfc3bafcdf6acb07892d24c745c1f2937ff9ec6915deb58546daf851"
+  },
+  "frozen_inputs": [
+    "WIN33",
+    "PAY8",
+    "SHARED41",
+    "SPACE18",
+    "PATH8",
+    "VOL6",
+    "A0_V1_DISJOINT",
+    "A1_SHARE_TO_WIN",
+    "TD5 labels",
+    "Phase-4 result"
+  ],
+  "prohibited": [
+    "E9 fit/read",
+    "DEV VAL read",
+    "old TEST read",
+    "base-model refit",
+    "symbol/side/time/regime features",
+    "hyperparameter search",
+    "threshold mining"
+  ],
+  "bootstrap": {
+    "B": 5000,
+    "seed": 20260925,
+    "block": 5,
+    "complete_blocks_only": true
+  },
+  "selection_thresholds": {
+    "q10": 0.9,
+    "q20": 0.8,
+    "q30": 0.7,
+    "source": "meta_train_history_only"
+  }
+}

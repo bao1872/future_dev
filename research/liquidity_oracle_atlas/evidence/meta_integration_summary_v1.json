@@ -1,0 +1,30 @@
+{
+  "experiment": "FUTURE-R13.6-R13.7",
+  "reviewed_parent_sha": "b1ee4d3e94c9709f176afe915c6f68ad7c047153",
+  "population": "ROOT_CANDIDATE_TD5",
+  "horizon": "td5",
+  "meta_models": [
+    "B0_P",
+    "B1_EV_C",
+    "B2_MARGIN",
+    "B3_EV_W",
+    "M1_POLY2_RIDGE",
+    "M2_SPLINE_RIDGE",
+    "M3_PGM3",
+    "M4_GMM_MOE3"
+  ],
+  "prediction_artifact_sha256": "304ae792cfc3bafcdf6acb07892d24c745c1f2937ff9ec6915deb58546daf851",
+  "governance": {
+    "dev_val_reads": 0,
+    "old_test_label_reads": 0,
+    "old_test_policy_reads": 0,
+    "base_model_fits": 0,
+    "direction_model_fits": 0,
+    "hyperparameter_searches": 0
+  },
+  "no_threshold_mining": true,
+  "no_hyperparameter_search": true,
+  "no_dev_val": true,
+  "no_test": true,
+  "stop": "AWAITING_R13_7_META_INTEGRATION_REVIEW"
+}
