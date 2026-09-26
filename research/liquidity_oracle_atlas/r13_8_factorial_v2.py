@@ -103,6 +103,10 @@ FACT_MATCHED_CSV = os.path.join(EVIDENCE_DIR, "r13_8_factorial_matched_coverage_
 FACT_CONTRAST_CSV = os.path.join(EVIDENCE_DIR, "r13_8_factorial_contrasts_v2.csv")
 PGM_REGIMES_CSV = os.path.join(EVIDENCE_DIR, "r13_8_pgm_regimes_v2.csv")
 MANIFEST_JSON = os.path.join(EVIDENCE_DIR, "r13_8_manifest_v2.json")
+# ---- Reviewer repair (NEED_REVISION) evidence paths ----
+PAIR_AUDIT_JSON = os.path.join(EVIDENCE_DIR, "r13_8_pair_universe_audit_v2.json")
+ROUTER_GATE_CSV = os.path.join(EVIDENCE_DIR, "r13_8_router_probability_gate_v2.csv")
+MATCHEDN_CSV = os.path.join(EVIDENCE_DIR, "r13_8_matchedN_p_vs_pgm_v2.csv")
 
 
 # --------------------------------------------------------------------------- #
@@ -229,8 +233,14 @@ def verify_crosswalk(ep: pd.DataFrame, dir_index: pd.DataFrame) -> dict:
     }
 
 
-def build_direction_axis(ds, data, dir_index, ep: pd.DataFrame) -> pd.DataFrame:
-    """Run 5 causal Direction chains; each produces BOTH A9 and E9."""
+def build_direction_axis(ds, data, dir_index, ep: pd.DataFrame,
+                         train_idx=None) -> pd.DataFrame:
+    """Run 5 causal Direction chains; each produces BOTH A9 and E9.
+
+    The historical FIT/VAL pool is explicitly intersected with the frozen TRAIN
+    index (reviewer repair section 5) so that no old VAL/TEST row can enter the
+    Direction fit.
+    """
     cand = pd.to_datetime(ds["candidate_decision_time"]).to_numpy("datetime64[ns]").astype("int64")
     oexit = pd.to_datetime(ds["oracle_exit_fill_time"]).to_numpy("datetime64[ns]").astype("int64")
 
@@ -243,8 +253,8 @@ def build_direction_axis(ds, data, dir_index, ep: pd.DataFrame) -> pd.DataFrame:
         target_rows = target["dir_row"].to_numpy(int)
         T_ns = int(pd.to_datetime(target["decision_time"]).min().value)
 
-        avail = np.where((cand < T_ns) & (oexit < T_ns))[0]
-        fit_idx, val_idx = split_85_15(data, avail)
+        fit_idx, val_idx = direction_history_pool(data, ds, T_ns, train_idx)
+        n_preq = _prequential_oof_fit_count(data, ds, fit_idx)
         chain = run_axis_chain(data, ds, fit_idx, val_idx, target_rows)
 
         # chain outputs are positioned by test_idx order == target_rows order
@@ -280,7 +290,9 @@ def build_direction_axis(ds, data, dir_index, ep: pd.DataFrame) -> pd.DataFrame:
             "max_val_decision_time": str(pd.to_datetime(np.max(cand[val_idx]))),
             "max_val_oracle_exit_fill_time": str(pd.to_datetime(np.max(oexit[val_idx]))),
             "n_estimators": chain["n_estimators"],
-            "n_underlying_model_fits": 3,  # router A (m0) + fixed router + E9 gated experts
+            "n_prequential_oof_router_fits": n_preq,
+            # 1 (m0) + 1 (fixed router) + N (prequential OOF router) + 2 (E9 LONG/SHORT experts)
+            "n_underlying_model_fits": 4 + n_preq,
         })
         # hard assert: max label availability < cutoff
         assert np.max(cand[fit_idx]) < T_ns and np.max(oexit[fit_idx]) < T_ns
@@ -299,6 +311,54 @@ def split_85_15(data, available_idx: np.ndarray) -> Tuple[np.ndarray, np.ndarray
     fit_days = set(uniq[:cut].tolist())
     is_fit = np.array([d in fit_days for d in day])
     return available_idx[is_fit], available_idx[~is_fit]
+
+
+def direction_history_pool(data, ds, T_ns: int, train_idx=None) -> Tuple[np.ndarray, np.ndarray]:
+    """Build the causal Direction FIT/VAL history pool for one target fold.
+
+    The pool is the set of bars with candidate_decision_time < T and
+    oracle_exit_fill_time < T, optionally intersected with the frozen TRAIN index
+    (reviewer repair section 5). This is the single source of truth used by both
+    build_direction_axis and the audit tests.
+    """
+    cand = pd.to_datetime(ds["candidate_decision_time"]).to_numpy("datetime64[ns]").astype("int64")
+    oexit = pd.to_datetime(ds["oracle_exit_fill_time"]).to_numpy("datetime64[ns]").astype("int64")
+    hist_pool = np.where((cand < T_ns) & (oexit < T_ns))[0]
+    if train_idx is not None:
+        hist_pool = np.intersect1d(np.asarray(train_idx), hist_pool)
+    return split_85_15(data, hist_pool)
+
+
+def _prequential_oof_fit_count(data, ds, train_idx) -> int:
+    """Count the number of prequential OOF router fits (reviewer repair section 6).
+
+    Mirrors the canonical OOF quarter loop in direction_gated_experts_v1 (every
+    quarter after the first warm-up quarter with a non-empty, non-straddling
+    prediction block triggers exactly one fixed-router fit). This is a PURE count
+    over the canonical block construction -- no model is fitted.
+    """
+    dec = data.decision_time_ns
+    oex = data.oexit_time_ns
+    gid = data.gid
+    t = pd.to_datetime(dec).astype("datetime64[ns]")
+    pidx = pd.PeriodIndex(t, freq="Q")
+    qord = (pidx.year * 4 + (pidx.quarter - 1)).to_numpy()
+    train_idx = np.asarray(train_idx)
+    trq = qord[train_idx]
+    tq = np.unique(trq)
+    dfq = pd.DataFrame({"gid": gid[train_idx], "q": trq})
+    nq = dfq.groupby("gid", sort=False)["q"].nunique()
+    straddling = nq[nq > 1].index.to_numpy()
+    straddle_mask = (np.isin(gid, straddling) if straddling.size
+                     else np.zeros(len(gid), dtype=bool))
+    n_fits = 0
+    for q in tq[1:]:
+        block_all = train_idx[trq == q]
+        pred_idx = block_all[~straddle_mask[block_all]]
+        if pred_idx.size == 0:
+            continue
+        n_fits += 1
+    return int(n_fits)
 
 
 # --------------------------------------------------------------------------- #
@@ -544,7 +604,120 @@ def direction_summary(d: pd.DataFrame, block_idx):
 
 
 # --------------------------------------------------------------------------- #
-# Main orchestration                                                          #
+# Reviewer repair (NEED_REVISION): frozen-artifact evidence repair helpers       #
+# --------------------------------------------------------------------------- #
+def pair_universe_audit(value_root: pd.DataFrame) -> dict:
+    """Prove every (symbol,decision_bar,fold) has both LONG & SHORT with pair
+    sample_weight summing to 1.0 (reviewer repair section 2)."""
+    grp = value_root.groupby(["symbol", "decision_bar", "fold"], sort=False)
+    n_rows = len(value_root)
+    n_epochs = value_root.drop_duplicates(["symbol", "decision_bar", "fold"]).shape[0]
+    incomplete = 0
+    max_err = 0.0
+    for _, g in grp:
+        if set(g["side"].tolist()) != {"LONG", "SHORT"}:
+            incomplete += 1
+        sw = g["sample_weight"].to_numpy(float)
+        err = abs(float(sw.sum()) - 1.0)
+        if err > max_err:
+            max_err = err
+    if incomplete > 0:
+        raise RuntimeError("STOP_R13_8_INCOMPLETE_TWO_SIDE_EPOCH")
+    if max_err > 1e-12:
+        raise RuntimeError("STOP_R13_8_PAIR_WEIGHT_DRIFT")
+    return {"rows": int(n_rows), "epochs": int(n_epochs),
+            "incomplete_epochs": int(incomplete),
+            "max_pair_weight_error": float(max_err)}
+
+
+def epoch_universe_identity(vr_a0: pd.DataFrame, vr_a1: pd.DataFrame) -> dict:
+    """Require A0 and A1 epoch universe (symbol,decision_bar,fold,decision_time,
+    trading_day) to be identical (reviewer repair section 3)."""
+    keys = ["symbol", "decision_bar", "fold", "decision_time", "trading_day"]
+    s0 = set(map(tuple, vr_a0[keys].drop_duplicates().to_numpy()))
+    s1 = set(map(tuple, vr_a1[keys].drop_duplicates().to_numpy()))
+    if s0 != s1:
+        raise RuntimeError("STOP_R13_8_A0_A1_EPOCH_UNIVERSE_DRIFT")
+    return {"a0_epochs": len(s0), "a1_epochs": len(s1), "identical": True}
+
+
+def router_probability_gate(axis: pd.DataFrame) -> pd.DataFrame:
+    """Per-fold canonical gate: max |router_p_long - a9_p_long| <= 1e-4
+    (reviewer repair section 4). No prediction regeneration."""
+    rows = []
+    for k in range(N_FOLDS):
+        a = axis[axis["fold"] == k]
+        dev = float(np.max(np.abs(
+            a["router_p_long"].to_numpy(float) - a["a9_p_long"].to_numpy(float))))
+        if dev > 1e-4:
+            raise RuntimeError("STOP_R13_8_FIXED_ROUTER_A_PROBABILITY_MISMATCH")
+        rows.append({"fold": int(k), "max_abs_a9_minus_router_p": dev})
+    return pd.DataFrame(rows)
+
+
+def corrected_fit_counts(axis: pd.DataFrame, ds, data) -> pd.DataFrame:
+    """Recompute Direction fit counts from the FROZEN axis (reviewer repair section 6)."""
+    cand = pd.to_datetime(ds["candidate_decision_time"]).to_numpy("datetime64[ns]").astype("int64")
+    oexit = pd.to_datetime(ds["oracle_exit_fill_time"]).to_numpy("datetime64[ns]").astype("int64")
+    rows = []
+    for k in range(N_FOLDS):
+        target = axis[axis["fold"] == k]
+        if len(target) == 0:
+            continue
+        T_ns = int(pd.to_datetime(target["decision_time"]).min().value)
+        avail = np.where((cand < T_ns) & (oexit < T_ns))[0]
+        fit_idx, val_idx = split_85_15(data, avail)
+        n_preq = _prequential_oof_fit_count(data, ds, fit_idx)
+        rows.append({
+            "fold": int(k),
+            "cutoff": str(pd.to_datetime(T_ns)),
+            "n_direction_fit": int(fit_idx.size),
+            "n_direction_val": int(val_idx.size),
+            "n_target": int(target.shape[0]),
+            "max_fit_decision_time": str(pd.to_datetime(np.max(cand[fit_idx]))),
+            "max_fit_oracle_exit_fill_time": str(pd.to_datetime(np.max(oexit[fit_idx]))),
+            "max_val_decision_time": str(pd.to_datetime(np.max(cand[val_idx]))),
+            "max_val_oracle_exit_fill_time": str(pd.to_datetime(np.max(oexit[val_idx]))),
+            "n_prequential_oof_router_fits": int(n_preq),
+            "n_underlying_model_fits": 4 + int(n_preq),
+        })
+        assert np.max(cand[fit_idx]) < T_ns and np.max(oexit[fit_idx]) < T_ns
+        assert np.max(cand[val_idx]) < T_ns and np.max(oexit[val_idx]) < T_ns
+    return pd.DataFrame(rows)
+
+
+def boot_matched_pair(score_base, score_chall, y, w, fold, block_idx, k_per_fold, B, seed):
+    """Paired bootstrap: top-k by base-score return vs top-k by challenger-score
+    return, using identical block draws (reviewer repair section 7)."""
+    rng = np.random.default_rng(seed)
+    n_blocks = len(block_idx)
+    folds = np.unique(fold)
+    p_ret = np.empty(B)
+    g_ret = np.empty(B)
+    for b in range(B):
+        idx = np.concatenate([block_idx[rng.integers(0, n_blocks)]
+                              for _ in range(n_blocks)])
+        yy = y[idx]; ww = w[idx]
+        sb = score_base[idx]; sc = score_chall[idx]; ff = fold[idx]
+        tp = 0.0; twp = 0.0; tg = 0.0; twg = 0.0
+        for f in folds:
+            fm = ff == f
+            if not fm.any():
+                continue
+            k = k_per_fold.get(int(f), 0)
+            if k <= 0:
+                continue
+            ob = np.argsort(-sb[fm])[:k]
+            oc = np.argsort(-sc[fm])[:k]
+            tp += float(np.sum(ww[fm][ob] * yy[fm][ob])); twp += float(ww[fm][ob].sum())
+            tg += float(np.sum(ww[fm][oc] * yy[fm][oc])); twg += float(ww[fm][oc].sum())
+        p_ret[b] = tp / twp if twp > 0 else np.nan
+        g_ret[b] = tg / twg if twg > 0 else np.nan
+    return p_ret[np.isfinite(p_ret)], g_ret[np.isfinite(g_ret)]
+
+
+# --------------------------------------------------------------------------- #
+# Main orchestration (reviewer repair: reuse frozen prediction artifacts)         #
 # --------------------------------------------------------------------------- #
 def main():
     os.makedirs(ARTIFACT_DIR, exist_ok=True)
@@ -556,25 +729,32 @@ def main():
     print("E9_CANONICAL = gated META10 LONG/SHORT correctness experts")
     print("DIRECTION_LABEL_HORIZON = oracle_exit_fill_time")
 
-    # ---- Phase 1: crosswalk ----
+    # ---- Phase 1: crosswalk (no model fit) ----
     split, ds, data, dir_index = build_direction_assets()
+    train_idx = split["train_idx"]
     value_roots = {a: load_value_root(arch) for a, arch in ARCHS.items()}
     epochs = {a: map_epochs(vr, dir_index) for a, vr in value_roots.items()}
     xwalk = verify_crosswalk(epochs["A0"], dir_index)
 
-    # ---- Phase 2+3: Direction axis (all folds, both A9 & E9) ----
-    axis, prov = build_direction_axis(ds, data, dir_index, epochs["A0"])
-    R.write_parquet(axis, DIRECTION_AXIS_PARQUET)
+    # ---- Phase 2: verify frozen prediction artifacts (reviewer section 1) ----
+    with open(MANIFEST_JSON) as f:
+        manifest_prev = json.load(f)
     axis_sha = sha256_of(DIRECTION_AXIS_PARQUET)
-    print(f"[R13.8] direction axis frozen: {DIRECTION_AXIS_PARQUET} sha={axis_sha}")
+    fact_sha = sha256_of(FACTORIAL_OOF_PARQUET)
+    if (axis_sha != manifest_prev.get("direction_axis_sha256") or
+            fact_sha != manifest_prev.get("factorial_oof_sha256")):
+        raise RuntimeError("STOP_R13_8_REPAIR_FROZEN_ARTIFACT_UNAVAILABLE")
+    axis = pd.read_parquet(DIRECTION_AXIS_PARQUET)
+    fact_ledger = pd.read_parquet(FACTORIAL_OOF_PARQUET)
+    print(f"[R13.8] frozen axis sha={axis_sha}")
+    print(f"[R13.8] frozen factorial oof sha={fact_sha}")
 
-    # Direction audit uses A0 (primary) full common universe (all 5 folds)
+    # ---- Phase 3: Direction audit (frozen axis, all 5 folds) ----
     d_audit = direction_audit_table(value_roots["A0"], axis)
     block_idx_all = block_index_map(d_audit["trading_day"].to_numpy(), BOOTSTRAP_BLOCK)
     dir_summary = direction_summary(d_audit, block_idx_all)
     R.write_json_evidence({**xwalk, **dir_summary}, DIR_SUMMARY_JSON)
 
-    # direction fold + disagreement tables
     fold_rows = []
     for k in range(N_FOLDS):
         dk = d_audit[d_audit["fold"] == k]
@@ -593,177 +773,201 @@ def main():
                          .rename(columns={"y_a9": "y_A9", "y_e9": "y_E9"}),
                          DIR_DISAGREE_CSV)
 
-    # ---- Phase 4: factorial Value-gate scores per (D, V) ----
-    factorial_rows = []
-    regime_rows = []
+    # ---- Phase 4: pair + universe audits (reviewer sections 2, 3) ----
+    pair_audit = {a: pair_universe_audit(value_roots[a]) for a in ARCHS}
+    R.write_json_evidence({"A0": pair_audit["A0"], "A1": pair_audit["A1"]},
+                          PAIR_AUDIT_JSON)
+    universe = epoch_universe_identity(value_roots["A0"], value_roots["A1"])
+    sel_counts = {}
+    for D in DIR_SYSTEMS:
+        for Va in ARCHS:
+            chosen = direction_conditioned_value(value_roots[Va], axis, D)
+            n = len(chosen)
+            if n != 21341:
+                raise RuntimeError(f"STOP_R13_8_SELECTION_EPOCH_COUNT:{D}_{Va}_{n}")
+            if chosen.duplicated(["symbol", "decision_bar"]).any():
+                raise RuntimeError("STOP_R13_8_MULTIPLE_CHOSEN_SIDE")
+            sel_counts[f"{D}_{Va}"] = int(n)
+
+    # ---- Phase 5: router probability gate (reviewer section 4) ----
+    router_gate = router_probability_gate(axis)
+    R.write_csv_evidence(router_gate, ROUTER_GATE_CSV)
+
+    # ---- Phase 6: corrected Direction fit counts (reviewer section 6) ----
+    fit_counts = corrected_fit_counts(axis, ds, data)
+    R.write_csv_evidence(fit_counts, os.path.join(
+        EVIDENCE_DIR, "r13_8_direction_provenance_v2.csv"))
+
+    # ---- Phase 7: reconstruct analysis frames from FROZEN fact_ledger ----
+    # No PGM re-fit, no prediction regeneration: scores/trade20 come from the
+    # frozen artifact; outcomes come from frozen TRAIN labels via value roots.
+    cond = {}
+    for Va in ARCHS:
+        for D in DIR_SYSTEMS:
+            led = fact_ledger[(fact_ledger["direction"] == D) &
+                              (fact_ledger["value_arch"] == Va)].copy()
+            chosen = direction_conditioned_value(value_roots[Va], axis, D)
+            # Only pull outcome from chosen; led already carries epoch_weight /
+            # trading_day / fold / score / trade20 (avoids pandas _x/_y suffixing).
+            ch = chosen[["symbol", "decision_bar", "fold", "episode_return_atr"]].copy()
+            merged = led.merge(ch, on=["symbol", "decision_bar", "fold"], how="left")
+            if merged["episode_return_atr"].isna().any():
+                raise RuntimeError("STOP_R13_8_OUTCOME_JOIN_MISSING")
+            cond[(D, Va)] = merged
+
+    cells = {}
+    block_idx_map = {}
+    for (D, Va), merged in cond.items():
+        c = {}
+        for G in GATES:
+            s = merged[merged["gate"] == G].reset_index(drop=True)
+            c[G] = {
+                "y": s["episode_return_atr"].to_numpy(float),
+                "w": s["epoch_weight"].to_numpy(float),
+                "sel": s["trade20"].to_numpy(bool),
+                "score": s["score"].to_numpy(float),
+                "fold": s["fold"].to_numpy(),
+                "trading_day": s["trading_day"].to_numpy(),
+            }
+        bi = block_index_map(c["P"]["trading_day"], BOOTSTRAP_BLOCK)
+        cells[(D, Va)] = (c, bi)
+
+    # ---- Phase 8: cell metrics (fact_models / fact_fold) ----
     fact_models = []
     fact_fold = []
-    fact_matched = []
-    contrast_accum = {}  # (D,V) -> cells dict for bootstrap contrasts
-
-    # block alignment uses the SAME axis epoch order that pgm_crossfit preserves
-    # (folds 1..4, within-fold = axis order). Do NOT reorder res.
-    block_idx = block_index_map(
-        axis[axis["fold"].isin(range(1, N_FOLDS))]["trading_day"].to_numpy(),
-        BOOTSTRAP_BLOCK)
-
-    cells_for_contrast = {}
-    for D in DIR_SYSTEMS:
-        for Va, arch in ARCHS.items():
-            frame = direction_conditioned_value(value_roots[Va], axis, D)
-            res, rp, pgm_meta = pgm_crossfit(frame)
-            y = res["episode_return_atr"].to_numpy(float)
-            w = res["epoch_weight"].to_numpy(float)
-            fold = res["fold"].to_numpy()
-
-            cell = {}
-            for G in GATES:
-                score = res[f"score_{G}"].to_numpy(float)
-                sel = res[f"select20_{G}"].to_numpy(bool)
-                cell[G] = (y, w, sel)
-                # matched20 k per fold
-                k20 = {int(f): max(1, int(np.ceil(0.2 * (fold == f).sum())))
-                       for f in np.unique(fold)}
-                m20 = boot_matched(score, y, w, fold, block_idx, k20,
-                                   BOOTSTRAP_B, BOOTSTRAP_SEED)
-                # matched-N (N = P select20 count per fold)
-                kN = {int(f): int(((fold == f) & res[f"select20_P"]).sum())
-                      for f in np.unique(fold)}
-                mN = boot_matched(res[f"score_PGM3"].to_numpy(float), y, w, fold,
-                                  block_idx, kN, BOOTSTRAP_B, BOOTSTRAP_SEED)
-                mean_ret = _wmean(y[sel], w[sel]) if w[sel].sum() > 0 else np.nan
-                cov = float(w[sel].sum() / w.sum()) if w.sum() > 0 else np.nan
-                ys = y[sel]
-                ws = w[sel]
-                wins = ys > 0
-                win_rate = float(wins.mean()) if wins.size > 0 else np.nan
-                aw = _wmean(ys[wins], ws[wins]) if wins.any() else np.nan
-                al = _wmean(ys[~wins], ws[~wins]) if (~wins).any() else np.nan
-                pr = (aw / abs(al)) if (al and not np.isnan(al) and al != 0) else np.nan
-                fact_models.append({
-                    "direction": D, "value_arch": Va,
-                    "gate": G,
-                    "causal_q80_coverage": round(cov, 6),
-                    "selected_mean_return": round(mean_ret, 6),
-                    "win_rate": round(win_rate, 6),
-                    "avg_win": round(aw, 6) if not np.isnan(aw) else np.nan,
-                    "avg_loss": round(al, 6) if not np.isnan(al) else np.nan,
-                    "payoff_ratio": round(pr, 6) if not np.isnan(pr) else np.nan,
-                    "matched20_return": round(float(np.nanmean(m20)), 6),
-                    "matchedN_return": round(float(np.nanmean(mN)), 6),
-                })
-                fact_matched.append({
+    for (D, Va), (c, bi) in cells.items():
+        for G in GATES:
+            y = c[G]["y"]; w = c[G]["w"]; sel = c[G]["sel"]
+            sc = c[G]["score"]; fold = c[G]["fold"]
+            k20 = {int(f): max(1, int(np.ceil(0.2 * (fold == f).sum())))
+                   for f in np.unique(fold)}
+            m20 = boot_matched(sc, y, w, fold, bi, k20, BOOTSTRAP_B, BOOTSTRAP_SEED)
+            mean_ret = _wmean(y[sel], w[sel]) if w[sel].sum() > 0 else np.nan
+            cov = float(w[sel].sum() / w.sum()) if w.sum() > 0 else np.nan
+            ys = y[sel]; ws = w[sel]; wins = ys > 0
+            win_rate = float(wins.mean()) if wins.size > 0 else np.nan
+            aw = _wmean(ys[wins], ws[wins]) if wins.any() else np.nan
+            al = _wmean(ys[~wins], ws[~wins]) if (~wins).any() else np.nan
+            pr = (aw / abs(al)) if (al and not np.isnan(al) and al != 0) else np.nan
+            fact_models.append({
+                "direction": D, "value_arch": Va, "gate": G,
+                "causal_q80_coverage": round(cov, 6),
+                "selected_mean_return": round(mean_ret, 6),
+                "win_rate": round(win_rate, 6),
+                "avg_win": round(aw, 6) if not np.isnan(aw) else np.nan,
+                "avg_loss": round(al, 6) if not np.isnan(al) else np.nan,
+                "payoff_ratio": round(pr, 6) if not np.isnan(pr) else np.nan,
+                "matched20_return": round(float(np.nanmean(m20)), 6),
+            })
+            for kf in range(1, N_FOLDS):
+                fm = fold == kf
+                fsel = fm & sel
+                fr = _wmean(y[fsel], w[fsel]) if w[fsel].sum() > 0 else np.nan
+                fcov = float(w[fsel].sum() / w[fm].sum()) if w[fm].sum() > 0 else np.nan
+                fact_fold.append({
                     "direction": D, "value_arch": Va, "gate": G,
-                    "matched20_mean": round(float(np.nanmean(m20)), 6),
-                    "matched20_ci_lo": round(float(np.nanpercentile(m20, 2.5)), 6),
-                    "matched20_ci_hi": round(float(np.nanpercentile(m20, 97.5)), 6),
-                    "matchedN_mean": round(float(np.nanmean(mN)), 6),
-                    "matchedN_ci_lo": round(float(np.nanpercentile(mN, 2.5)), 6),
-                    "matchedN_ci_hi": round(float(np.nanpercentile(mN, 97.5)), 6),
+                    "eval_fold": kf,
+                    "TRADE20_coverage": round(fcov, 6),
+                    "TRADE20_mean_return": round(fr, 6),
                 })
 
-            # per-fold factorial table
-            for k in range(1, N_FOLDS):
-                fmask = fold == k
-                for G in GATES:
-                    fm = fmask & cell[G][2]
-                    fr = _wmean(y[fm], w[fm]) if w[fm].sum() > 0 else np.nan
-                    fcov = float(w[fm].sum() / w[fmask].sum()) if w[fmask].sum() > 0 else np.nan
-                    fact_fold.append({
-                        "direction": D, "value_arch": Va, "gate": G,
-                        "eval_fold": k,
-                        "TRADE20_coverage": round(fcov, 6),
-                        "TRADE20_mean_return": round(fr, 6),
-                    })
+    # ---- Phase 9: matched-N (P baseline vs PGM3 challenger), reviewer section 7 ----
+    matched_rows = []
+    for (D, Va), (c, bi) in cells.items():
+        yP, wP, selP, scP = c["P"]["y"], c["P"]["w"], c["P"]["sel"], c["P"]["score"]
+        yG, wG, selG, scG = c["PGM3"]["y"], c["PGM3"]["w"], c["PGM3"]["sel"], c["PGM3"]["score"]
+        fold = c["P"]["fold"]
+        folds = np.unique(fold)
+        kP = {int(f): int(((fold == f) & selP).sum()) for f in folds}
+        k20d = {int(f): max(1, int(np.ceil(0.2 * (fold == f).sum()))) for f in folds}
+        P_ret20 = _wmean(yP[selP], wP[selP])
+        G_ret20 = _wmean(yG[selG], wG[selG])
+        p20, g20 = boot_matched_pair(scP, scG, yP, wP, fold, bi, k20d,
+                                     BOOTSTRAP_B, BOOTSTRAP_SEED)
+        pN, gN = boot_matched_pair(scP, scG, yP, wP, fold, bi, kP,
+                                   BOOTSTRAP_B, BOOTSTRAP_SEED)
+        lo20, hi20 = (np.nanpercentile(g20 - p20, 2.5),
+                      np.nanpercentile(g20 - p20, 97.5))
+        loN, hiN = (np.nanpercentile(gN - pN, 2.5),
+                    np.nanpercentile(gN - pN, 97.5))
+        nstr = ",".join(f"{int(f)}={kP[int(f)]}" for f in folds)
+        G_retN = _wmean(yG[selG], wG[selG])
+        matched_rows.append({
+            "direction": D, "value_arch": Va, "match_kind": "matched20",
+            "P_return": round(P_ret20, 6), "PGM_return": round(G_ret20, 6),
+            "PGM_minus_P_point": round(G_ret20 - P_ret20, 6),
+            "ci_lo": round(lo20, 6), "ci_hi": round(hi20, 6), "n_per_fold": nstr})
+        matched_rows.append({
+            "direction": D, "value_arch": Va, "match_kind": "matchedN",
+            "P_return": round(P_ret20, 6), "PGM_return": round(G_retN, 6),
+            "PGM_minus_P_point": round(G_retN - P_ret20, 6),
+            "ci_lo": round(loN, 6), "ci_hi": round(hiN, 6), "n_per_fold": nstr})
 
-            # regime table (PGM3)
-            if rp is not None:
-                p_win = res["p_win"].to_numpy(float)
-                mu_win = res["mu_win"].to_numpy(float)
-                mu_loss = res["mu_loss"].to_numpy(float)
-                denom = np.maximum(mu_win, 0) + np.maximum(mu_loss, 0)
-                p_be = np.where(denom > 0, np.maximum(mu_loss, 0) / denom, 0.5)
-                win = (y > 0).astype(float)
-                labels = ["REGIME_LOW", "REGIME_MID", "REGIME_HIGH"]
-                for k in range(1, N_FOLDS):
-                    fmask = fold == k
-                    for r in range(3):
-                        g = rp[fmask, r] * w[fmask]
-                        s = g.sum()
-                        if s <= 0:
-                            continue
-                        regime_rows.append({
-                            "direction": D, "value_arch": Va, "eval_fold": k,
-                            "regime": labels[r],
-                            "weight_share": round(float(s / w[fmask].sum()), 6),
-                            "mean_p_win": round(float(np.sum(g * p_win[fmask]) / s), 6),
-                            "mean_mu_win": round(float(np.sum(g * mu_win[fmask]) / s), 6),
-                            "mean_mu_loss": round(float(np.sum(g * mu_loss[fmask]) / s), 6),
-                            "mean_p_break_even": round(float(np.sum(g * p_be[fmask]) / s), 6),
-                            "mean_actual_return": round(float(np.sum(g * y[fmask]) / s), 6),
-                            "actual_win_rate": round(float(np.sum(g * win[fmask]) / s), 6),
-                        })
-
-            # factorial ledger rows (NO outcome)
-            for G in GATES:
-                sub = res[["symbol", "decision_bar", "fold", "decision_time",
-                           "trading_day", "epoch_weight"]].copy()
-                sub["direction"] = D
-                sub["value_arch"] = Va
-                sub["gate"] = G
-                sub["selected_side"] = res["side"].to_numpy()
-                sub["score"] = res[f"score_{G}"].to_numpy(float)
-                sub["q80"] = res[f"q80_{G}"].to_numpy(float)
-                sub["trade20"] = res[f"select20_{G}"].to_numpy(bool)
-                factorial_rows.append(sub)
-
-            # store R20 point + cell for contrast bootstrap
-            cells_for_contrast[(D, Va)] = {
-                "P": cell["P"], "PGM3": cell["PGM3"]
-            }
-
-    # ---- Phase: factorial contrasts (bootstrap, paired blocks) ----
-    # Flat cells: key = "D_V_G" -> (y, w, sel). Compare A0 primary A9 vs E9.
+    # ---- Phase 10: contrasts A0 + A1 (reviewer sections 8, 9) ----
     flat = {}
-    for (D, Va), c in cells_for_contrast.items():
-        if Va != "A0":
-            continue
+    obs = {}
+    for (D, Va), (c, bi) in cells.items():
         for G in ("P", "PGM3"):
-            flat[f"{D}_{Va}_{G}"] = c[G]
-    contrast_fns = {
-        "PGM_minus_P_given_A9": lambda rr: rr["A9_A0_PGM3"] - rr["A9_A0_P"],
-        "PGM_minus_P_given_E9": lambda rr: rr["E9_A0_PGM3"] - rr["E9_A0_P"],
-        "E9_minus_A9_given_P": lambda rr: rr["E9_A0_P"] - rr["A9_A0_P"],
-        "E9_minus_A9_given_PGM": lambda rr: rr["E9_A0_PGM3"] - rr["A9_A0_PGM3"],
-    }
-    cb = boot_contrasts(flat, contrast_fns, block_idx, BOOTSTRAP_B, BOOTSTRAP_SEED)
-    contrast_rows = []
-    for name, v in cb.items():
-        pt, lo, hi = _ci(v)
-        contrast_rows.append({
-            "contrast": name,
-            "point": round(pt, 6), "ci_lo": round(lo, 6), "ci_hi": round(hi, 6),
-            "value_arch": "A0",
-        })
-    # interaction
-    inter = cb["PGM_minus_P_given_E9"] - cb["PGM_minus_P_given_A9"]
-    ipt, ilo, ihi = _ci(inter)
-    contrast_rows.append({
-        "contrast": "direction_gate_interaction",
-        "point": round(ipt, 6), "ci_lo": round(ilo, 6), "ci_hi": round(ihi, 6),
-        "value_arch": "A0",
-    })
+            flat[f"{D}_{Va}_{G}"] = (c[G]["y"], c[G]["w"], c[G]["sel"])
+            obs[f"{D}_{Va}_{G}"] = _wmean(c[G]["y"][c[G]["sel"]], c[G]["w"][c[G]["sel"]])
 
-    # ---- write evidence ----
-    fact_ledger = pd.concat(factorial_rows, ignore_index=True)
-    R.write_parquet(fact_ledger, FACTORIAL_OOF_PARQUET)
-    fact_ledger_sha = sha256_of(FACTORIAL_OOF_PARQUET)
+    contrast_defs = []
+    for Va in ("A0", "A1"):
+        contrast_defs += [
+            (f"PGM_minus_P_given_A9", Va,
+             lambda rr, Va=Va: rr[f"A9_{Va}_PGM3"] - rr[f"A9_{Va}_P"]),
+            (f"PGM_minus_P_given_E9", Va,
+             lambda rr, Va=Va: rr[f"E9_{Va}_PGM3"] - rr[f"E9_{Va}_P"]),
+            (f"E9_minus_A9_given_P", Va,
+             lambda rr, Va=Va: rr[f"E9_{Va}_P"] - rr[f"A9_{Va}_P"]),
+            (f"E9_minus_A9_given_PGM", Va,
+             lambda rr, Va=Va: rr[f"E9_{Va}_PGM3"] - rr[f"A9_{Va}_PGM3"]),
+        ]
+    for Va in ("A0", "A1"):
+        contrast_defs.append((
+            "direction_gate_interaction", Va,
+            lambda rr, Va=Va: (rr[f"E9_{Va}_PGM3"] - rr[f"E9_{Va}_P"])
+            - (rr[f"A9_{Va}_PGM3"] - rr[f"A9_{Va}_P"])))
+
+    def _obs_point(name, Va):
+        if name == "PGM_minus_P_given_A9":
+            return obs[f"A9_{Va}_PGM3"] - obs[f"A9_{Va}_P"]
+        if name == "PGM_minus_P_given_E9":
+            return obs[f"E9_{Va}_PGM3"] - obs[f"E9_{Va}_P"]
+        if name == "E9_minus_A9_given_P":
+            return obs[f"E9_{Va}_P"] - obs[f"A9_{Va}_P"]
+        if name == "E9_minus_A9_given_PGM":
+            return obs[f"E9_{Va}_PGM3"] - obs[f"A9_{Va}_PGM3"]
+        if name == "direction_gate_interaction":
+            return (obs[f"E9_{Va}_PGM3"] - obs[f"E9_{Va}_P"]) - \
+                   (obs[f"A9_{Va}_PGM3"] - obs[f"A9_{Va}_P"])
+        raise KeyError(name)
+
+    contrast_rows = []
+    for Va in ("A0", "A1"):
+        bi = cells[("A9", Va)][1]
+        flat_Va = {k: v for k, v in flat.items() if f"_{Va}_" in k}
+        Va_fns = {name: fn for (name, v, fn) in contrast_defs if v == Va}
+        cb = boot_contrasts(flat_Va, Va_fns, bi, BOOTSTRAP_B, BOOTSTRAP_SEED)
+        for (name, v, fn) in contrast_defs:
+            if v != Va:
+                continue
+            dist = cb[name]
+            lo = float(np.nanpercentile(dist, 2.5))
+            hi = float(np.nanpercentile(dist, 97.5))
+            pt = _obs_point(name, Va)
+            contrast_rows.append({
+                "contrast": name, "value_arch": Va,
+                "point": round(pt, 6), "ci_lo": round(lo, 6), "ci_hi": round(hi, 6),
+            })
+
+    # ---- Phase 11: write evidence (frozen parquet artifacts left untouched) ----
     R.write_csv_evidence(pd.DataFrame(fact_models), FACT_MODELS_CSV)
     R.write_csv_evidence(pd.DataFrame(fact_fold), FACT_FOLD_CSV)
-    R.write_csv_evidence(pd.DataFrame(fact_matched), FACT_MATCHED_CSV)
+    R.write_csv_evidence(pd.DataFrame(matched_rows), MATCHEDN_CSV)
     R.write_csv_evidence(pd.DataFrame(contrast_rows), FACT_CONTRAST_CSV)
-    R.write_csv_evidence(pd.DataFrame(regime_rows), PGM_REGIMES_CSV)
-    R.write_csv_evidence(prov, os.path.join(EVIDENCE_DIR, "r13_8_direction_provenance_v2.csv"))
+    # pgm_regimes_v2 + factorial ledger are reused from the frozen artifact set;
+    # they are NOT regenerated (no PGM re-fit, no prediction regeneration).
 
     # ---- manifest ----
     canon_mod = os.path.join(HERE, "direction_gated_experts_v1.py")
@@ -771,6 +975,7 @@ def main():
                  for f in range(N_FOLDS)]
     a1_shards = [sha256_of(R._unit_paths("A1_SHARE_TO_WIN", f, HORIZON)[0])
                  for f in range(N_FOLDS)]
+    fit_total = int(fit_counts["n_underlying_model_fits"].sum())
     lineage = {
         "r13_8_code_sha": os.environ.get("R13_8_CODE_SHA", "PENDING_COMMIT"),
         "canonical_direction_module_sha256": sha256_of(canon_mod),
@@ -779,33 +984,44 @@ def main():
         "train_labels_sha256": sha256_of(R.ALLOWED_V1_LABELS_TRAIN),
         "state_sha256": sha256_of(R.ALLOWED_V1_STATE),
         "direction_dataset_rows": int(len(ds)),
+        "original_direction_model_byte_sha_available": False,
     }
     manifest = {
         "experiment": "FUTURE-R13.8-V2",
         "reviewed_parent_sha": REVIEWED_PARENT_SHA,
         "r13_7_code_sha": R13_7_CODE_SHA,
         "r13_7_evidence_sha": R13_7_EVIDENCE_SHA,
+        "evidence_repair": "NEED_REVISION__EVIDENCE_REPAIR_ONLY",
         "direction_axis_sha256": axis_sha,
-        "factorial_oof_sha256": fact_ledger_sha,
+        "factorial_oof_sha256": fact_sha,
         "lineage": lineage,
         "crosswalk": xwalk,
         "governance": {
             "dev_val_reads": 0, "old_test_label_reads": 0,
             "closed_test_direction_axis_reads": 0,
-            "direction_chain_runs": N_FOLDS,
-            "a9_e9_separate_duplicate_chain_runs": 0,
+            "direction_chain_runs_reused": N_FOLDS,
+            "direction_model_refits": 0,
+            "prediction_refits": 0,
             "E33_fits": 0, "M33_fits": 0, "M9_fits": 0,
             "base_value_model_fits": 0, "pgm_fits": 16,
             "threshold_mining": False, "symbol_filtering": False,
             "regime_filtering": False,
+            "direction_underlying_model_fits_total": fit_total,
+            "direction_underlying_fits_per_fold":
+                fit_counts[["fold", "n_underlying_model_fits"]].to_dict("records"),
         },
         "direction_audit": dir_summary,
-        "contrasts_A0": {r["contrast"]: r for r in contrast_rows},
-        "stop": "AWAITING_R13_8_V2_FACTORIAL_REVIEW",
+        "pair_universe_audit": {"A0": pair_audit["A0"], "A1": pair_audit["A1"]},
+        "epoch_universe_identity": universe,
+        "direction_selection_epoch_counts": sel_counts,
+        "router_probability_gate": router_gate.to_dict("records"),
+        "contrasts_A0": {r["contrast"]: r for r in contrast_rows if r["value_arch"] == "A0"},
+        "contrasts_A1": {r["contrast"]: r for r in contrast_rows if r["value_arch"] == "A1"},
+        "stop": "AWAITING_R13_8_V2_REPAIR_REVIEW",
     }
     R.write_json_evidence(manifest, MANIFEST_JSON)
-    print(f"[R13.8] evidence written. direction verdict = {dir_summary['direction_verdict']}")
-    print(f"[R13.8] STOP: AWAITING_R13_8_V2_FACTORIAL_REVIEW")
+    print(f"[R13.8] evidence REPAIR written. direction verdict = {dir_summary['direction_verdict']}")
+    print(f"[R13.8] STOP: AWAITING_R13_8_V2_REPAIR_REVIEW")
 
 
 if __name__ == "__main__":
