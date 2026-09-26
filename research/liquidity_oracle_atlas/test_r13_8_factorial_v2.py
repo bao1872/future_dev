@@ -31,6 +31,10 @@ from research.liquidity_oracle_atlas.r13_8_factorial_v2 import (
     meta_state,
     pair_universe_audit,
     pgm_crossfit,
+    _wmean,
+    observed_matched_return,
+    boot_matched_pair,
+    corrected_fit_counts,
     router_probability_gate,
     run_axis_chain,
     verify_crosswalk,
@@ -271,19 +275,28 @@ def test_direction_history_frozen_train_only():
 
 
 def test_matchedN_uses_p_baseline_and_pgm_challenger():
-    """§7 / §13.7-8: matched-N compares top-N by P vs top-N by PGM3 (EV_C excluded)."""
+    """§7 / §13.7-8: matched-N compares top-N by P vs top-N by PGM3 (EV_C excluded).
+
+    matched20 point = top-ceil(0.2n)-by-SCORE (deterministic), not the causal-q80
+    selected-mean. matchedN point = top-kP-by-SCORE where kP = causal-q80 P count.
+    """
     m = pd.read_csv(str(MATCHEDN_CSV))
     # EV_C / gate axis never enters the matched-N P-vs-PGM evidence
     assert set(m["direction"].unique()) == {"A9", "E9"}
     assert set(m["value_arch"].unique()) == {"A0", "A1"}
     assert "EV_C" not in m.columns
-    row = m[(m.direction == "A9") & (m.value_arch == "A0") & (m.match_kind == "matched20")].iloc[0]
-    # observed P and PGM3 cell means, and observed point (not a bootstrap mean)
-    assert abs(row["P_return"] - 0.150116) < 1e-4
-    assert abs(row["PGM_return"] - 0.068888) < 1e-4
-    assert abs(row["PGM_minus_P_point"] - (0.068888 - 0.150116)) < 1e-4
+    r20 = m[(m.direction == "A9") & (m.value_arch == "A0") & (m.match_kind == "matched20")].iloc[0]
+    rN = m[(m.direction == "A9") & (m.value_arch == "A0") & (m.match_kind == "matchedN")].iloc[0]
+    # matched20: top-20%-by-score (deterministic)
+    assert abs(r20["P_return"] - 0.170042) < 1e-4
+    assert abs(r20["PGM_return"] - 0.061070) < 1e-4
+    assert abs(r20["PGM_minus_P_point"] - (0.061070 - 0.170042)) < 1e-4
+    # matchedN: top-kP-by-score (kP = causal-q80 P count)
+    assert abs(rN["P_return"] - 0.150116) < 1e-4
+    assert abs(rN["PGM_return"] - 0.058482) < 1e-4
+    assert abs(rN["PGM_minus_P_point"] - (0.058482 - 0.150116)) < 1e-4
     # P and PGM3 are distinct (the original bug wrote PGM into all rows)
-    assert abs(row["P_return"] - row["PGM_return"]) > 1e-3
+    assert abs(r20["P_return"] - r20["PGM_return"]) > 1e-3
 
 
 def test_contrasts_a0_and_a1_five_rows_each():
@@ -315,3 +328,119 @@ def test_direction_fit_count_includes_prequential_and_experts():
     assert (p["n_underlying_model_fits"] == 4 + p["n_prequential_oof_router_fits"]).all()
     assert p["n_underlying_model_fits"].sum() == 29
     assert (p["n_underlying_model_fits"] >= 4).all()
+
+
+# --------------------------------------------------------------------------- #
+# Final matched-coverage patch (§1-§7): observed_matched_return + joint mask     #
+# --------------------------------------------------------------------------- #
+def _build_cell(D, Va, G):
+    """Rebuild a (score, y, w, fold, sel) cell from the frozen fact_ledger +
+    value roots exactly as main() does."""
+    inp = _repair_inputs()
+    led = inp["fact_ledger"][
+        (inp["fact_ledger"].direction == D)
+        & (inp["fact_ledger"].value_arch == Va)
+        & (inp["fact_ledger"].gate == G)].copy()
+    chosen = direction_conditioned_value(inp["value_roots"][Va], inp["axis"], D)
+    ch = chosen[["symbol", "decision_bar", "fold", "episode_return_atr"]].copy()
+    merged = led.merge(ch, on=["symbol", "decision_bar", "fold"], how="left")
+    return (merged["score"].to_numpy(float),
+            merged["episode_return_atr"].to_numpy(float),
+            merged["epoch_weight"].to_numpy(float),
+            merged["fold"].to_numpy(),
+            merged["trade20"].to_numpy(bool))
+
+
+def test_matched20_point_equals_topk_by_score():
+    """§1-§3 / §6.1: matched20 point equals the direct deterministic top-20%-by-score
+    return (recomputed from the frozen ledger)."""
+    scP, yP, wP, foldP, _ = _build_cell("A9", "A0", "P")
+    scG, yG, wG, foldG, _ = _build_cell("A9", "A0", "PGM3")
+    folds = np.unique(foldP)
+    k20 = {int(f): max(1, int(np.ceil(0.20 * (foldP == f).sum()))) for f in folds}
+    P20 = observed_matched_return(scP, yP, wP, foldP, k20)
+    PGM20 = observed_matched_return(scG, yG, wG, foldG, k20)
+    m = pd.read_csv(str(MATCHEDN_CSV))
+    row = m[(m.direction == "A9") & (m.value_arch == "A0") & (m.match_kind == "matched20")].iloc[0]
+    assert abs(row["P_return"] - P20) < 1e-6
+    assert abs(row["PGM_return"] - PGM20) < 1e-6
+
+
+def test_matched20_point_not_causal_q80_mean():
+    """§2 / §6.2: matched20 point must NOT be the causal-q80 selected-mean return
+    (unless coincidentally identical)."""
+    scP, yP, wP, foldP, selP = _build_cell("A9", "A0", "P")
+    q80_mean = _wmean(yP[selP], wP[selP])
+    m = pd.read_csv(str(MATCHEDN_CSV))
+    row = m[(m.direction == "A9") & (m.value_arch == "A0") & (m.match_kind == "matched20")].iloc[0]
+    assert abs(row["P_return"] - q80_mean) > 1e-4
+
+
+def test_matchedN_point_equals_same_N_selection():
+    """§3 / §6.3: matchedN point equals the direct same-N (kP) top-by-score return,
+    where kP = causal-q80 P selection count per fold."""
+    scP, yP, wP, foldP, selP = _build_cell("A9", "A0", "P")
+    scG, yG, wG, foldG, selG = _build_cell("A9", "A0", "PGM3")
+    folds = np.unique(foldP)
+    kP = {int(f): int(((foldP == f) & selP).sum()) for f in folds}
+    PN = observed_matched_return(scP, yP, wP, foldP, kP)
+    PGMN = observed_matched_return(scG, yG, wG, foldG, kP)
+    m = pd.read_csv(str(MATCHEDN_CSV))
+    row = m[(m.direction == "A9") & (m.value_arch == "A0") & (m.match_kind == "matchedN")].iloc[0]
+    assert abs(row["P_return"] - PN) < 1e-6
+    assert abs(row["PGM_return"] - PGMN) < 1e-6
+
+
+def test_matched20_n_per_fold_equals_k20():
+    """§4 / §6.4: matched20 n_per_fold encodes ceil(0.20 * per-fold count)."""
+    scP, yP, wP, foldP, _ = _build_cell("A9", "A0", "P")
+    folds = np.unique(foldP)
+    k20 = {int(f): max(1, int(np.ceil(0.20 * (foldP == f).sum()))) for f in folds}
+    m = pd.read_csv(str(MATCHEDN_CSV))
+    row = m[(m.direction == "A9") & (m.value_arch == "A0") & (m.match_kind == "matched20")].iloc[0]
+    n_per = {int(k): int(v) for k, v in (p.split("=") for p in row["n_per_fold"].split(","))}
+    assert n_per == k20
+
+
+def test_matchedN_n_per_fold_equals_kP():
+    """§5 / §6.5: matchedN n_per_fold encodes the causal-q80 P selection count."""
+    scP, yP, wP, foldP, selP = _build_cell("A9", "A0", "P")
+    folds = np.unique(foldP)
+    kP = {int(f): int(((foldP == f) & selP).sum()) for f in folds}
+    m = pd.read_csv(str(MATCHEDN_CSV))
+    row = m[(m.direction == "A9") & (m.value_arch == "A0") & (m.match_kind == "matchedN")].iloc[0]
+    n_per = {int(k): int(v) for k, v in (p.split("=") for p in row["n_per_fold"].split(","))}
+    assert n_per == kP
+
+
+def test_bootstrap_paired_alignment():
+    """§4 / §6.6: boot_matched_pair returns P/PGM arrays of equal length and paired
+    replicate alignment; with identical scores p_ret == g_ret exactly."""
+    n = 400
+    fold = np.repeat(np.arange(1, 5), 100)
+    rng = np.random.default_rng(0)
+    score = rng.random(n)
+    y = rng.standard_normal(n)
+    w = np.ones(n)
+    bi = block_index_map(np.arange(n), 5)
+    p_ret, g_ret = boot_matched_pair(score, score, y, w, fold, bi,
+                                     {f: 10 for f in range(1, 5)}, 200, 12345)
+    assert p_ret.shape == g_ret.shape
+    assert np.isfinite(p_ret).sum() == np.isfinite(g_ret).sum()
+    assert np.allclose(p_ret, g_ret, equal_nan=True)
+
+
+def test_corrected_fit_counts_use_frozen_train():
+    """§5 / §6.7: corrected fit counts are derived from the frozen-TRAIN-pool
+    direction_history_pool and remain 5/5/6/6/7 (total 29)."""
+    inp = _repair_inputs()
+    split = inp["split"]; ds = inp["ds"]; data = inp["data"]
+    train_idx = np.asarray(split["train_idx"])
+    fc = corrected_fit_counts(inp["axis"], ds, data, train_idx)
+    assert list(fc["n_underlying_model_fits"]) == [5, 5, 6, 6, 7]
+    assert int(fc["n_underlying_model_fits"].sum()) == 29
+    for k in range(N_FOLDS):
+        target = inp["axis"][inp["axis"]["fold"] == k]
+        T_ns = int(pd.to_datetime(target["decision_time"]).min().value)
+        fit_idx, val_idx = direction_history_pool(data, ds, T_ns, train_idx)
+        assert set(fit_idx.tolist()) | set(val_idx.tolist()) <= set(train_idx.tolist())

@@ -655,8 +655,11 @@ def router_probability_gate(axis: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def corrected_fit_counts(axis: pd.DataFrame, ds, data) -> pd.DataFrame:
-    """Recompute Direction fit counts from the FROZEN axis (reviewer repair section 6)."""
+def corrected_fit_counts(axis: pd.DataFrame, ds, data, train_idx) -> pd.DataFrame:
+    """Recompute Direction fit counts from the FROZEN axis (reviewer repair section 6).
+
+    The history pool is built via direction_history_pool with an explicit frozen
+    TRAIN intersection (reviewer final patch section 5)."""
     cand = pd.to_datetime(ds["candidate_decision_time"]).to_numpy("datetime64[ns]").astype("int64")
     oexit = pd.to_datetime(ds["oracle_exit_fill_time"]).to_numpy("datetime64[ns]").astype("int64")
     rows = []
@@ -665,8 +668,7 @@ def corrected_fit_counts(axis: pd.DataFrame, ds, data) -> pd.DataFrame:
         if len(target) == 0:
             continue
         T_ns = int(pd.to_datetime(target["decision_time"]).min().value)
-        avail = np.where((cand < T_ns) & (oexit < T_ns))[0]
-        fit_idx, val_idx = split_85_15(data, avail)
+        fit_idx, val_idx = direction_history_pool(data, ds, T_ns, train_idx)
         n_preq = _prequential_oof_fit_count(data, ds, fit_idx)
         rows.append({
             "fold": int(k),
@@ -714,6 +716,25 @@ def boot_matched_pair(score_base, score_chall, y, w, fold, block_idx, k_per_fold
         p_ret[b] = tp / twp if twp > 0 else np.nan
         g_ret[b] = tg / twg if twg > 0 else np.nan
     return p_ret[np.isfinite(p_ret)], g_ret[np.isfinite(g_ret)]
+
+
+def observed_matched_return(score, y, w, fold, k_per_fold) -> float:
+    """Deterministic observed return of the top-k-by-SCORE rows per fold
+    (reviewer final matched-coverage patch). This is the matched point estimate,
+    NOT the causal-q80 selected-mean return."""
+    total = 0.0
+    total_w = 0.0
+    for f in np.unique(fold):
+        fm = fold == f
+        k = int(k_per_fold.get(int(f), 0))
+        if k <= 0 or not fm.any():
+            continue
+        idx_local = np.where(fm)[0]
+        order_local = np.argsort(-score[fm])[:k]
+        idx = idx_local[order_local]
+        total += float(np.sum(w[idx] * y[idx]))
+        total_w += float(np.sum(w[idx]))
+    return total / total_w if total_w > 0 else np.nan
 
 
 # --------------------------------------------------------------------------- #
@@ -794,7 +815,7 @@ def main():
     R.write_csv_evidence(router_gate, ROUTER_GATE_CSV)
 
     # ---- Phase 6: corrected Direction fit counts (reviewer section 6) ----
-    fit_counts = corrected_fit_counts(axis, ds, data)
+    fit_counts = corrected_fit_counts(axis, ds, data, split["train_idx"])
     R.write_csv_evidence(fit_counts, os.path.join(
         EVIDENCE_DIR, "r13_8_direction_provenance_v2.csv"))
 
@@ -875,33 +896,44 @@ def main():
     matched_rows = []
     for (D, Va), (c, bi) in cells.items():
         yP, wP, selP, scP = c["P"]["y"], c["P"]["w"], c["P"]["sel"], c["P"]["score"]
-        yG, wG, selG, scG = c["PGM3"]["y"], c["PGM3"]["w"], c["PGM3"]["sel"], c["PGM3"]["score"]
+        yG, wG, scG = c["PGM3"]["y"], c["PGM3"]["w"], c["PGM3"]["score"]
         fold = c["P"]["fold"]
         folds = np.unique(fold)
         kP = {int(f): int(((fold == f) & selP).sum()) for f in folds}
-        k20d = {int(f): max(1, int(np.ceil(0.2 * (fold == f).sum()))) for f in folds}
-        P_ret20 = _wmean(yP[selP], wP[selP])
-        G_ret20 = _wmean(yG[selG], wG[selG])
-        p20, g20 = boot_matched_pair(scP, scG, yP, wP, fold, bi, k20d,
+        k20 = {int(f): max(1, int(np.ceil(0.20 * (fold == f).sum()))) for f in folds}
+        # Observed points: top-k by SCORE (not causal-q80 selected-mean).
+        P20_obs = observed_matched_return(scP, yP, wP, fold, k20)
+        PGM20_obs = observed_matched_return(scG, yG, wG, fold, k20)
+        delta20_obs = PGM20_obs - P20_obs
+        PN_obs = observed_matched_return(scP, yP, wP, fold, kP)
+        PGMN_obs = observed_matched_return(scG, yG, wG, fold, kP)
+        deltaN_obs = PGMN_obs - PN_obs
+        # Bootstrap CI from paired identical block draws.
+        p20, g20 = boot_matched_pair(scP, scG, yP, wP, fold, bi, k20,
                                      BOOTSTRAP_B, BOOTSTRAP_SEED)
         pN, gN = boot_matched_pair(scP, scG, yP, wP, fold, bi, kP,
                                    BOOTSTRAP_B, BOOTSTRAP_SEED)
+        # Joint finite mask BEFORE taking the paired difference.
+        m20 = np.isfinite(p20) & np.isfinite(g20)
+        p20, g20 = p20[m20], g20[m20]
+        mN = np.isfinite(pN) & np.isfinite(gN)
+        pN, gN = pN[mN], gN[mN]
         lo20, hi20 = (np.nanpercentile(g20 - p20, 2.5),
                       np.nanpercentile(g20 - p20, 97.5))
         loN, hiN = (np.nanpercentile(gN - pN, 2.5),
                     np.nanpercentile(gN - pN, 97.5))
-        nstr = ",".join(f"{int(f)}={kP[int(f)]}" for f in folds)
-        G_retN = _wmean(yG[selG], wG[selG])
+        nstr20 = ",".join(f"{int(f)}={k20[int(f)]}" for f in folds)
+        nstrN = ",".join(f"{int(f)}={kP[int(f)]}" for f in folds)
         matched_rows.append({
             "direction": D, "value_arch": Va, "match_kind": "matched20",
-            "P_return": round(P_ret20, 6), "PGM_return": round(G_ret20, 6),
-            "PGM_minus_P_point": round(G_ret20 - P_ret20, 6),
-            "ci_lo": round(lo20, 6), "ci_hi": round(hi20, 6), "n_per_fold": nstr})
+            "P_return": round(P20_obs, 6), "PGM_return": round(PGM20_obs, 6),
+            "PGM_minus_P_point": round(delta20_obs, 6),
+            "ci_lo": round(lo20, 6), "ci_hi": round(hi20, 6), "n_per_fold": nstr20})
         matched_rows.append({
             "direction": D, "value_arch": Va, "match_kind": "matchedN",
-            "P_return": round(P_ret20, 6), "PGM_return": round(G_retN, 6),
-            "PGM_minus_P_point": round(G_retN - P_ret20, 6),
-            "ci_lo": round(loN, 6), "ci_hi": round(hiN, 6), "n_per_fold": nstr})
+            "P_return": round(PN_obs, 6), "PGM_return": round(PGMN_obs, 6),
+            "PGM_minus_P_point": round(deltaN_obs, 6),
+            "ci_lo": round(loN, 6), "ci_hi": round(hiN, 6), "n_per_fold": nstrN})
 
     # ---- Phase 10: contrasts A0 + A1 (reviewer sections 8, 9) ----
     flat = {}
@@ -1017,11 +1049,11 @@ def main():
         "router_probability_gate": router_gate.to_dict("records"),
         "contrasts_A0": {r["contrast"]: r for r in contrast_rows if r["value_arch"] == "A0"},
         "contrasts_A1": {r["contrast"]: r for r in contrast_rows if r["value_arch"] == "A1"},
-        "stop": "AWAITING_R13_8_V2_REPAIR_REVIEW",
+        "stop": "AWAITING_R13_8_V2_FINAL_REVIEW",
     }
     R.write_json_evidence(manifest, MANIFEST_JSON)
     print(f"[R13.8] evidence REPAIR written. direction verdict = {dir_summary['direction_verdict']}")
-    print(f"[R13.8] STOP: AWAITING_R13_8_V2_REPAIR_REVIEW")
+    print(f"[R13.8] STOP: AWAITING_R13_8_V2_FINAL_REVIEW")
 
 
 if __name__ == "__main__":
