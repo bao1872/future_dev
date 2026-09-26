@@ -1,0 +1,14 @@
+{
+  "A0": {
+    "rows": 42682,
+    "epochs": 21341,
+    "incomplete_epochs": 0,
+    "max_pair_weight_error": 0.0
+  },
+  "A1": {
+    "rows": 42682,
+    "epochs": 21341,
+    "incomplete_epochs": 0,
+    "max_pair_weight_error": 0.0
+  }
+}

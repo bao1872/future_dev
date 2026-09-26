@@ -1,6 +1,11 @@
-contrast,point,ci_lo,ci_hi,value_arch
-PGM_minus_P_given_A9,-0.074378,-0.281163,0.145274,A0
-PGM_minus_P_given_E9,-0.022054,-0.277261,0.236862,A0
-E9_minus_A9_given_P,-0.020733,-0.173812,0.132924,A0
-E9_minus_A9_given_PGM,0.031591,-0.281175,0.350115,A0
-direction_gate_interaction,0.052324,-0.262291,0.355421,A0
+contrast,value_arch,point,ci_lo,ci_hi
+PGM_minus_P_given_A9,A0,-0.081229,-0.283746,0.120488
+PGM_minus_P_given_E9,A0,-0.029935,-0.220648,0.162502
+E9_minus_A9_given_P,A0,-0.018515,-0.187542,0.149919
+E9_minus_A9_given_PGM,A0,0.032778,-0.179922,0.24585
+direction_gate_interaction,A0,0.051293,-0.196927,0.306966
+PGM_minus_P_given_A9,A1,-0.006894,-0.11841,0.091213
+PGM_minus_P_given_E9,A1,0.134249,0.054622,0.229653
+E9_minus_A9_given_P,A1,-0.02515,-0.184202,0.145587
+E9_minus_A9_given_PGM,A1,0.115992,-0.07867,0.317102
+direction_gate_interaction,A1,0.141142,0.016919,0.297017
