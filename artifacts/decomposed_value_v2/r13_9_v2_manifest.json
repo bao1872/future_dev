@@ -1,0 +1,33 @@
+{
+  "task_id": "FUTURE-R13.9-V2-TARGET-POLICY-ALIGNMENT-AUDIT",
+  "reviewed_parent_sha": "e63d1e9120c4d5c875dbf21190409f8ab9e4b6b9",
+  "generated_by_commit": "e63d1e9120c4d5c875dbf21190409f8ab9e4b6b9",
+  "model_fits": 0,
+  "direction_fits": 0,
+  "win_fits": 0,
+  "payoff_fits": 0,
+  "PGM_fits": 0,
+  "prediction_refits": 0,
+  "threshold_recomputes": 0,
+  "environment_recomputes": 0,
+  "geometry_recomputes": 0,
+  "DEV_reads": 0,
+  "old_TEST_reads": 0,
+  "episode_parity_max_return_error": 0.0,
+  "hold5_parity_max_return_error": 0.0,
+  "A9_target_policy_status": "NO_SEQUENTIAL_P_EDGE",
+  "E9_target_policy_status": "NO_SEQUENTIAL_P_EDGE",
+  "HOLD5_DIRECTION_STATUS": "A9_E9_HOLD5_UNRESOLVED",
+  "DEV_PRIMARY_POLICY_STATUS": "NO_HOLD5_POLICY_ELIGIBLE",
+  "DEV_PRIMARY_POLICY_CANDIDATES": [],
+  "target_semantics": {
+    "n": 68900,
+    "mean_delta_hold5_minus_episode": 0.6312243208780617,
+    "median_delta": 0.43027319907990025,
+    "corr_episode_hold5": 0.25623911151162887,
+    "sign_agreement": 0.5471117561683599,
+    "win_label_agreement": 0.5658345428156749,
+    "episode_pos_hold5_neg": 13752,
+    "episode_neg_hold5_pos": 16162
+  }
+}

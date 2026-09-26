@@ -1,0 +1,3 @@
+direction,policy,n_executed,executed_mean_episode,executed_mean_hold5,n_blocked_selected,blocked_mean_episode,blocked_mean_hold5
+A9,A9_A0_P20_HOLD5,0,,,3265,0.14996092759291937,0.28727071378321667
+E9,E9_A0_P20_HOLD5,0,,,3285,0.13478452940022023,0.5966158281656315

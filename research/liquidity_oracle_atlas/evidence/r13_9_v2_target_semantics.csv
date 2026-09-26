@@ -1,0 +1,2 @@
+n,mean_delta_hold5_minus_episode,median_delta,corr_episode_hold5,sign_agreement,win_label_agreement,episode_pos_hold5_neg,episode_neg_hold5_pos
+68900,0.6312243208780617,0.43027319907990025,0.25623911151162887,0.5471117561683599,0.5658345428156749,13752,16162

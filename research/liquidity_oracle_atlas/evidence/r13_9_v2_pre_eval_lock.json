@@ -1,0 +1,128 @@
+{
+  "task_id": "FUTURE-R13.9-V2-TARGET-POLICY-ALIGNMENT-AUDIT",
+  "reviewed_parent_sha": "e63d1e9120c4d5c875dbf21190409f8ab9e4b6b9",
+  "generated_by_commit": "e63d1e9120c4d5c875dbf21190409f8ab9e4b6b9",
+  "direction_axis_sha256": "026b20755ff625420d39167a18c98209c00e91fd5df92930d8e58306f751d6ac",
+  "factorial_oof_sha256": "70fa060f4f42b239f64ed28025461ae310516d22f7f7adcd41b18975cef81406",
+  "state_sha256": "b0ae386fa8da9f723a1f1f596495d97b8325bb24f02cc566f146a42c6fbcebe9",
+  "renewal_axis_sha256": "2cf8a2c0e4409835a72934c669f28e064eff0b2b859d5e636d4cb24dad087dec",
+  "train_labels_sha256": "c9cb77b82ecd9b8996c9ce064a18dbb5ccbcacbd4743ad2cd3dc58c1fae1a61e",
+  "entry_decision_ledger_sha256": "69b24f838b601f73241e51e3e1c5960a4f34f9ac57d97b5fcfa0939fee621999",
+  "policy_count": 12,
+  "policy_definitions": [
+    {
+      "policy": "A9_A0_ALL_EPISODE",
+      "direction": "A9",
+      "value_arch": "A0",
+      "gate": "ALL",
+      "exit": "EPISODE",
+      "primary": true
+    },
+    {
+      "policy": "A9_A0_ALL_HOLD5",
+      "direction": "A9",
+      "value_arch": "A0",
+      "gate": "ALL",
+      "exit": "HOLD5",
+      "primary": true
+    },
+    {
+      "policy": "A9_A0_P20_EPISODE",
+      "direction": "A9",
+      "value_arch": "A0",
+      "gate": "P20",
+      "exit": "EPISODE",
+      "primary": true
+    },
+    {
+      "policy": "A9_A0_P20_HOLD5",
+      "direction": "A9",
+      "value_arch": "A0",
+      "gate": "P20",
+      "exit": "HOLD5",
+      "primary": true
+    },
+    {
+      "policy": "A9_A1_P20_EPISODE",
+      "direction": "A9",
+      "value_arch": "A1",
+      "gate": "P20",
+      "exit": "EPISODE",
+      "primary": false
+    },
+    {
+      "policy": "A9_A1_P20_HOLD5",
+      "direction": "A9",
+      "value_arch": "A1",
+      "gate": "P20",
+      "exit": "HOLD5",
+      "primary": false
+    },
+    {
+      "policy": "E9_A0_ALL_EPISODE",
+      "direction": "E9",
+      "value_arch": "A0",
+      "gate": "ALL",
+      "exit": "EPISODE",
+      "primary": true
+    },
+    {
+      "policy": "E9_A0_ALL_HOLD5",
+      "direction": "E9",
+      "value_arch": "A0",
+      "gate": "ALL",
+      "exit": "HOLD5",
+      "primary": true
+    },
+    {
+      "policy": "E9_A0_P20_EPISODE",
+      "direction": "E9",
+      "value_arch": "A0",
+      "gate": "P20",
+      "exit": "EPISODE",
+      "primary": true
+    },
+    {
+      "policy": "E9_A0_P20_HOLD5",
+      "direction": "E9",
+      "value_arch": "A0",
+      "gate": "P20",
+      "exit": "HOLD5",
+      "primary": true
+    },
+    {
+      "policy": "E9_A1_P20_EPISODE",
+      "direction": "E9",
+      "value_arch": "A1",
+      "gate": "P20",
+      "exit": "EPISODE",
+      "primary": false
+    },
+    {
+      "policy": "E9_A1_P20_HOLD5",
+      "direction": "E9",
+      "value_arch": "A1",
+      "gate": "P20",
+      "exit": "HOLD5",
+      "primary": false
+    }
+  ],
+  "evaluation_folds": [
+    1,
+    2,
+    3,
+    4
+  ],
+  "hold": "TD5",
+  "entry": "next valid open",
+  "exit": "terminal deadline close",
+  "renewal": false,
+  "PGM": false,
+  "EV_C": false,
+  "threshold_recompute": false,
+  "PRIMARY_EXIT": "TRUE_HOLD5",
+  "DIAGNOSTIC_EXIT": "EPISODE_EXIT",
+  "A0_primary": true,
+  "A1_replication_only": true,
+  "A1_cannot_set_primary_verdict": true
+}

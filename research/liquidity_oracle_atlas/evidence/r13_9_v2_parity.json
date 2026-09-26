@@ -1,0 +1,44 @@
+{
+  "A9_A0_ALL_EPISODE": {
+    "max_return_error": 0.0,
+    "max_exit_price_error": 0.0
+  },
+  "A9_A0_ALL_HOLD5": {
+    "max_return_error": 0.0
+  },
+  "A9_A0_P20_EPISODE": {
+    "max_return_error": 0.0,
+    "max_exit_price_error": 0.0
+  },
+  "A9_A0_P20_HOLD5": {
+    "max_return_error": 0.0
+  },
+  "A9_A1_P20_EPISODE": {
+    "max_return_error": 0.0,
+    "max_exit_price_error": 0.0
+  },
+  "A9_A1_P20_HOLD5": {
+    "max_return_error": 0.0
+  },
+  "E9_A0_ALL_EPISODE": {
+    "max_return_error": 0.0,
+    "max_exit_price_error": 0.0
+  },
+  "E9_A0_ALL_HOLD5": {
+    "max_return_error": 0.0
+  },
+  "E9_A0_P20_EPISODE": {
+    "max_return_error": 0.0,
+    "max_exit_price_error": 0.0
+  },
+  "E9_A0_P20_HOLD5": {
+    "max_return_error": 0.0
+  },
+  "E9_A1_P20_EPISODE": {
+    "max_return_error": 0.0,
+    "max_exit_price_error": 0.0
+  },
+  "E9_A1_P20_HOLD5": {
+    "max_return_error": 0.0
+  }
+}
