@@ -60,7 +60,8 @@ def test_no_silent_drop_real_join_meta():
     meta = df.attrs["join_meta"]
     assert meta["full_oof_rows_pre_join"] == meta["full_rows_post_join"]
     assert meta["unmatched_rows"] == 0
-    assert meta["duplicate_keys"] == 0
+    assert meta["duplicate_label_keys"] == 0
+    assert meta["duplicate_post_join_keys"] == 0
     assert meta["sampled_rows"] == len(df)
 
 
@@ -494,22 +495,32 @@ def test_load_t1_5_frame_deterministic_and_capped():
 def test_t1_5_artifact_schema_and_no_model_fit():
     # cap high enough that every subgroup clears the n>=50 CI threshold
     res = M.run_t1_5(cap_per_symbol=120, seed=20260929, B=5)
-    # 1. data integrity clean
-    assert res["data_integrity"]["all_clean"] is True
-    assert res["data_integrity"]["unmatched"] == 0
-    assert res["data_integrity"]["duplicate_keys"] == 0
-    # 2. D_geometry covers pooled + per-symbol + by-side, each with CI
+    # 1. data integrity clean (uses MEASURED canonical-join metadata, not hardcoded 0)
+    integ = res["data_integrity"]
+    assert integ["all_clean"] is True
+    assert integ["unmatched_rows"] == 0
+    assert integ["duplicate_label_keys"] == 0
+    assert integ["duplicate_post_join_keys"] == 0
+    # real measured canonical-join universe (pre == post because loader hard-fails
+    # on any drop); equality + positivity proves join evidence is measured, not 0.
+    assert integ["full_oof_rows_pre_join"] == integ["full_rows_post_join"]
+    assert integ["full_oof_rows_pre_join"] > 0
+    assert integ["selected_rows"] == 15 * 120
+    # 2. D_geometry covers pooled + per-symbol + by-side, each with CI + bootstrap_mean
     dg = res["D_geometry"]
     assert isinstance(dg["pooled"], dict) and "observed_D" in dg["pooled"]
+    assert "bootstrap_mean" in dg["pooled"]
     # pooled (all symbols) and by-side (both sides) clear n>=50 -> CI present
     for entry in [dg["pooled"]] + list(dg["by_side"].values()):
-        assert "observed_D" in entry and "bootstrap_ci_low" in entry
+        for k in ("observed_D", "bootstrap_mean", "bootstrap_ci_low",
+                  "bootstrap_ci_high", "n", "n_trading_days", "n_valid_reps"):
+            assert k in entry
         assert entry["n_trading_days"] is not None and entry["n_trading_days"] > 0
         assert entry["n_valid_reps"] > 0
     assert set(dg["by_side"].keys()) == {"LONG", "SHORT"}
     for entry in dg["per_symbol"].values():
-        assert "observed_D" in entry and "bootstrap_ci_low" in entry
-        assert "n_valid_reps" in entry
+        for k in ("observed_D", "bootstrap_mean", "bootstrap_ci_low", "n_valid_reps"):
+            assert k in entry
     # 3. diagnostics present
     assert len(res["p_win_decile_diagnostic"]) == M.N_P_BINS
     assert len(res["diagnostic_C_old_payoff_models"]) == M.N_P_BINS
@@ -521,13 +532,59 @@ def test_t1_5_artifact_schema_and_no_model_fit():
     assert res["governance"]["t2_run"] is False
 
 
-def test_t1_5_row_artifact_regenerates_summary():
-    # the row parquet must reproduce the diagnostic-C win-head calibration exactly
+def test_t1_5_build_single_load_no_reload(tmp_path):
+    # build_t1_5_artifact must load the canonical frame EXACTLY ONCE and reuse it for
+    # the row artifact; it must NOT reload/merge/attach again merely to write rows.
+    import unittest.mock as mock
+    import hashlib
+    real = M.load_t1_5_frame
+    captured = {}
+
+    def spy(cap_per_symbol=M.T1_5_CAP, seed=M.T1_5_SEED, return_meta=False):
+        df = real(cap_per_symbol=cap_per_symbol, seed=seed, return_meta=return_meta)
+        captured["df"] = df
+        return df
+
+    with mock.patch.object(M, "load_t1_5_frame", side_effect=spy) as m:
+        res = M.build_t1_5_artifact(cap_per_symbol=60, seed=20260929, B=3,
+                                    evidence_dir=tmp_path)
+    assert m.call_count == 1, m.call_count
+    # row artifact must be byte-identical to a parquet written from the SAME one df
+    chk = tmp_path / "check.parquet"
+    captured["df"][M.T1_5_ROW_COLUMNS].to_parquet(chk, index=False)
+
+    def _sha(p):
+        h = hashlib.sha256()
+        with open(p, "rb") as f:
+            for c in iter(lambda: f.read(65536), b""):
+                h.update(c)
+        return h.hexdigest()
+    assert _sha(chk) == res["row_artifact"]["sha256"]
+    assert res["runtime_seconds"] >= res.get("analysis_runtime_seconds", 0)
+
+
+def test_t1_5_row_artifact_round_trip():
+    # TRUE round-trip: write the row artifact, read it BACK from parquet, recompute,
+    # and verify exact/tolerance parity. (Does NOT call load_t1_5_frame as the
+    # read-back substitute.)
+    import tempfile, os
     df = M.load_t1_5_frame(cap_per_symbol=60, seed=20260929)
-    res = M.run_t1_5(cap_per_symbol=60, seed=20260929, B=3)
-    recomputed = M.diag_old_payoff_model(df)
-    # first p-bin actual_win_magnitude from summary must match recompute
-    summary_first = res["diagnostic_C_old_payoff_models"][0]
-    rc_first = recomputed[0]
-    assert abs(summary_first["actual_win_magnitude"] - rc_first["actual_win_magnitude"]) < 1e-12
-    assert abs(summary_first["win_bias"] - rc_first["win_bias"]) < 1e-12
+    tmp = os.path.join(tempfile.mkdtemp(), "rows.parquet")
+    df[M.T1_5_ROW_COLUMNS].to_parquet(tmp, index=False)
+    back = pd.read_parquet(tmp)
+
+    # pooled observed D
+    d0 = M.compute_stratified_geometry_contrast(df)["D_geometry"]
+    d1 = M.compute_stratified_geometry_contrast(back)["D_geometry"]
+    assert abs(d0 - d1) < 1e-9
+
+    # one per-symbol observed D
+    sym = sorted(df["symbol"].unique().tolist())[0]
+    sd0 = M.compute_stratified_geometry_contrast(df[df["symbol"] == sym])["D_geometry"]
+    sd1 = M.compute_stratified_geometry_contrast(back[back["symbol"] == sym])["D_geometry"]
+    assert abs(sd0 - sd1) < 1e-9
+
+    # first p-bin Diagnostic C actual_win_magnitude
+    c0 = M.diag_old_payoff_model(df)[0]["actual_win_magnitude"]
+    c1 = M.diag_old_payoff_model(back)[0]["actual_win_magnitude"]
+    assert abs(c0 - c1) < 1e-9

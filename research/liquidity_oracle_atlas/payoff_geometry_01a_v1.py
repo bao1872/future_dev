@@ -350,6 +350,7 @@ def stratified_d_geometry_breakdown(df: pd.DataFrame,
                                  p_bin_edges=edges)
         return {
             "observed_D": b["observed_D"],
+            "bootstrap_mean": b["bootstrap_mean"],
             "n": n,
             "n_trading_days": int(sub["trading_day"].nunique()),
             "bootstrap_ci_low": b["ci_lo"],
@@ -475,18 +476,23 @@ def load_audit_frame(sample_n: int | None = None, seed: int = BOOTSTRAP_SEED) ->
         sampled_rows = len(merged)
 
     # True join evidence (reported verbatim in the Evidence Packet; never a
-    # placeholder). These numbers describe the FULL (pre-sample) join universe.
+    # placeholder). These numbers describe the FULL (pre-sample) join universe and
+    # are MEASURED, not inferred: the loader hard-fails above if any of them would
+    # be non-zero, so a non-zero value can never silently reach the packet.
+    duplicate_post_join = int(merged.duplicated(subset=key_cols).sum())
     merged.attrs["join_meta"] = {
         "full_oof_rows_pre_join": int(pre_join_rows),
         "full_rows_post_join": int(post_join_rows),
         "unmatched_rows": int(pre_join_rows - post_join_rows),
-        "duplicate_keys": int(dup),
+        "duplicate_label_keys": int(dup),
+        "duplicate_post_join_keys": int(duplicate_post_join),
         "sampled_rows": int(sampled_rows),
     }
     return merged.reset_index(drop=True)
 
 
-def load_t1_5_frame(cap_per_symbol: int = 1000, seed: int = 20260929) -> pd.DataFrame:
+def load_t1_5_frame(cap_per_symbol: int = 1000, seed: int = 20260929,
+                    return_meta: bool = False):
     """Deterministic T1.5 subset.
 
     ALL available symbols, each capped at ``cap_per_symbol`` OOF candidates, fixed
@@ -495,9 +501,13 @@ def load_t1_5_frame(cap_per_symbol: int = 1000, seed: int = 20260929) -> pd.Data
     silent drop / duplicate key), then capped per symbol using a fixed-seed
     within-symbol permutation so the selection depends ONLY on symbol and the seed,
     never on the outcome. trading_day is attached (hard-fail if any unresolved).
+
+    The canonical join evidence (pre/post rows, unmatched, duplicate keys) is
+    propagated on ``df.attrs["join_meta"]`` so the analysis never re-hardcodes 0.
     """
     COUNTERS["candidate_load_count"] += 1
     full = load_audit_frame(sample_n=None, seed=seed)  # full clean join, no random cap
+    join_meta = dict(full.attrs.get("join_meta", {}))   # measured, propagated
     rng = np.random.default_rng(seed)
     parts = []
     for sym in sorted(full["symbol"].unique().tolist()):
@@ -509,7 +519,11 @@ def load_t1_5_frame(cap_per_symbol: int = 1000, seed: int = 20260929) -> pd.Data
         parts.append(sub)
     df = pd.concat(parts, ignore_index=True)
     df = _attach_trading_day(df)  # hard-fail if any trading_day unresolved
-    return df.reset_index(drop=True)
+    df.attrs["join_meta"] = join_meta  # keep the real join evidence with the frame
+    out = df.reset_index(drop=True)
+    if return_meta:
+        return out, join_meta
+    return out
 
 
 def _attach_trading_day(df: pd.DataFrame, require_all: bool = True) -> pd.DataFrame:
@@ -916,10 +930,12 @@ def t1_audit(sample_n: int = T1_SAMPLE_N) -> dict:
         "full_oof_rows_pre_join": meta.get("full_oof_rows_pre_join"),
         "full_rows_post_join": meta.get("full_rows_post_join"),
         "unmatched_rows": meta.get("unmatched_rows"),
-        "duplicate_keys": meta.get("duplicate_keys"),
+        "duplicate_label_keys": meta.get("duplicate_label_keys"),
+        "duplicate_post_join_keys": meta.get("duplicate_post_join_keys"),
         "sampled_rows": meta.get("sampled_rows"),
         "join_clean": bool(meta.get("unmatched_rows", 1) == 0
-                           and meta.get("duplicate_keys", 1) == 0),
+                           and meta.get("duplicate_label_keys", 1) == 0
+                           and meta.get("duplicate_post_join_keys", 1) == 0),
     }
 
     # owner alignment
@@ -1302,34 +1318,34 @@ def _sha256_file(p: Path) -> str:
     return h.hexdigest()
 
 
-def run_t1_5(cap_per_symbol: int = T1_5_CAP, seed: int = T1_5_SEED,
-             B: int = T1_5_B) -> dict:
-    """T1.5 E2E pipeline validation. NO model fit/refit/tune. NO T2.
+def analyze_frame(df: pd.DataFrame, B: int = T1_5_B) -> dict:
+    """Core analysis over an already-loaded, trading_day-attached frame.
 
-    Exercises: load -> deterministic subset -> trading_day attach -> data integrity
-    -> D_geometry (pooled/per-symbol/LONG/SHORT, B=500 day-block bootstrap) ->
-    p_win decile diagnostic -> Diagnostic C (conditional calibration of frozen old
-    payoff models) -> event-semantic reconciliation -> artifacts + SHA256.
+    Single source of truth for data integrity + D_geometry + diagnostics + events.
+    The frame is loaded EXACTLY ONCE by the caller (T1.5 or the future T2
+    full-population runner) and reused for statistics, bootstrap, AND the row
+    artifact -- never re-loaded / re-joined merely to write artifacts.
 
-    T1.5 PASS does NOT require D>0; it validates the engineering + statistics
-    pipeline (keys correct, no silent drop, valid bootstrap, complete per-symbol
-    output, point/CI parity, artifact schema, runtime vs TP budget, no model fit).
+    Data-integrity evidence is the MEASURED canonical-join metadata (propagated by
+    the loader on ``df.attrs["join_meta"]``), never a hardcoded 0.
     """
-    t0 = time.perf_counter()
-    df = load_t1_5_frame(cap_per_symbol=cap_per_symbol, seed=seed)
     n = len(df)
-
-    # --- 1. Data integrity (subset already a clean validated join) ---
+    join_meta = dict(df.attrs.get("join_meta", {}))
     dup_keys = int(df.duplicated(subset=["symbol", "decision_bar", "side"]).sum())
     missing_trading_day = int(df["trading_day"].isna().sum())
     missing_G = int(df["G"].isna().sum())
     missing_L = int(df["L"].isna().sum())
     missing_true_return = int(df["true_episode_return_atr"].isna().sum())
     integrity = {
+        "full_oof_rows_pre_join": join_meta.get("full_oof_rows_pre_join"),
+        "full_rows_post_join": join_meta.get("full_rows_post_join"),
+        "unmatched_rows": join_meta.get("unmatched_rows"),
+        "duplicate_label_keys": join_meta.get("duplicate_label_keys"),
+        "duplicate_post_join_keys": join_meta.get("duplicate_post_join_keys"),
+        "selected_rows": int(n),
         "input_oof_rows_selected": int(n),
         "joined_rows": int(n),
-        "unmatched": 0,          # loader hard-fails on any join drop
-        "duplicate_keys": dup_keys,
+        "duplicate_keys_within_subset": dup_keys,
         "missing_trading_day": missing_trading_day,
         "missing_G": missing_G,
         "missing_L": missing_L,
@@ -1338,24 +1354,46 @@ def run_t1_5(cap_per_symbol: int = T1_5_CAP, seed: int = T1_5_SEED,
         "per_symbol_counts": {s: int(c) for s, c in df["symbol"].value_counts().items()},
         "sides": sorted(df["side"].unique().tolist()),
         "n_trading_days_total": int(df["trading_day"].nunique()),
-        "all_clean": bool(dup_keys == 0 and missing_trading_day == 0
-                          and missing_G == 0 and missing_L == 0
-                          and missing_true_return == 0),
+        "all_clean": bool(
+            (join_meta.get("unmatched_rows", 1) == 0)
+            and (join_meta.get("duplicate_label_keys", 1) == 0)
+            and (join_meta.get("duplicate_post_join_keys", 1) == 0)
+            and dup_keys == 0 and missing_trading_day == 0
+            and missing_G == 0 and missing_L == 0 and missing_true_return == 0),
     }
 
-    # --- 2. D_geometry: pooled / per-symbol / LONG / SHORT, B=500 ---
+    # D_geometry: pooled / per-symbol / LONG / SHORT, B bootstrap replicates,
+    # each universe using its OWN p_win quantile edges (Micro Fix 04).
     breakdown = stratified_d_geometry_breakdown(df, with_ci=True, bootstrap_reps=B)
-
-    # --- 3. p_win decile diagnostic ---
     pdecile = diag_pwin_decile_table(df)
-
-    # --- 4. Diagnostic C: conditional calibration of frozen old payoff models ---
     diag_c = diag_old_payoff_model(df)
-
-    # --- 5. Event-semantic reconciliation ---
     events = diag_event_reconciliation(df)
+    return {
+        "data_integrity": integrity,
+        "D_geometry": breakdown,
+        "p_win_decile_diagnostic": pdecile,
+        "diagnostic_C_old_payoff_models": diag_c,
+        "event_semantics": events,
+    }
 
-    elapsed = time.perf_counter() - t0
+
+def run_t1_5(df: pd.DataFrame | None = None, cap_per_symbol: int = T1_5_CAP,
+             seed: int = T1_5_SEED, B: int = T1_5_B) -> dict:
+    """T1.5 E2E pipeline validation. NO model fit/refit/tune. NO T2.
+
+    Loads the deterministic subset exactly once (if not supplied by the caller) and
+    reuses that SAME frame for statistics, bootstrap, and (in build_t1_5_artifact)
+    the row artifact -- never a second canonical-data rebuild.
+
+    T1.5 PASS does NOT require D>0; it validates the engineering + statistics
+    pipeline (keys correct, no silent drop, valid bootstrap, complete per-symbol
+    output, point/CI parity, artifact schema, runtime vs TP budget, no model fit).
+    """
+    t0 = time.perf_counter()
+    if df is None:
+        df = load_t1_5_frame(cap_per_symbol=cap_per_symbol, seed=seed)
+    core = analyze_frame(df, B=B)
+    analysis_sec = time.perf_counter() - t0
     return {
         "TASK_ID": TASK_ID,
         "STAGE": "T1.5",
@@ -1372,11 +1410,7 @@ def run_t1_5(cap_per_symbol: int = T1_5_CAP, seed: int = T1_5_SEED,
             "bottom_frac": BOTTOM_FRAC,
             "p_bin_edges_rule": "per-analysis-universe quantiles of p_win (frozen within S)",
         },
-        "data_integrity": integrity,
-        "D_geometry": breakdown,
-        "p_win_decile_diagnostic": pdecile,
-        "diagnostic_C_old_payoff_models": diag_c,
-        "event_semantics": events,
+        **core,
         "counters": dict(COUNTERS),
         "governance": {
             "model_fit_count": COUNTERS["model_fit_count"],
@@ -1385,20 +1419,26 @@ def run_t1_5(cap_per_symbol: int = T1_5_CAP, seed: int = T1_5_SEED,
             "full_population_high_low_run": False,
             "scientific_interpretation": "NONE (E2E pipeline validation only; STOP FOR REVIEWER)",
         },
-        "runtime_seconds": float(elapsed),
+        # analysis-only timing; build_t1_5_artifact sets runtime_seconds to span the
+        # full load -> analysis -> artifact-write path.
+        "analysis_runtime_seconds": float(analysis_sec),
     }
 
 
 def build_t1_5_artifact(cap_per_symbol: int = T1_5_CAP, seed: int = T1_5_SEED,
-                        B: int = T1_5_B) -> dict:
-    result = run_t1_5(cap_per_symbol=cap_per_symbol, seed=seed, B=B)
-    EVID.mkdir(parents=True, exist_ok=True)
-    rows_path = EVID / "payoff_geometry_01a_t1_5_rows.parquet"
-    summary_path = EVID / "payoff_geometry_01a_t1_5_summary.json"
-    manifest_path = EVID / "payoff_geometry_01a_t1_5_manifest.json"
+                        B: int = T1_5_B, evidence_dir: Path | None = None) -> dict:
+    out_dir = evidence_dir if evidence_dir is not None else EVID
+    t0 = time.perf_counter()
+    # Load EXACTLY ONCE, then reuse the same frame for analysis AND the row artifact.
+    df = load_t1_5_frame(cap_per_symbol=cap_per_symbol, seed=seed)
+    result = run_t1_5(df=df, cap_per_symbol=cap_per_symbol, seed=seed, B=B)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    rows_path = out_dir / "payoff_geometry_01a_t1_5_rows.parquet"
+    summary_path = out_dir / "payoff_geometry_01a_t1_5_summary.json"
+    manifest_path = out_dir / "payoff_geometry_01a_t1_5_manifest.json"
 
-    # row-level artifact (deterministic; recompute identical subset for reproducibility)
-    rows_df = load_t1_5_frame(cap_per_symbol=cap_per_symbol, seed=seed)[T1_5_ROW_COLUMNS]
+    # row-level artifact written directly from the SAME loaded frame (no reload)
+    rows_df = df[T1_5_ROW_COLUMNS]
     rows_df.to_parquet(rows_path, index=False)
     rows_sha = _sha256_file(rows_path)
 
@@ -1408,6 +1448,9 @@ def build_t1_5_artifact(cap_per_symbol: int = T1_5_CAP, seed: int = T1_5_SEED,
         "rows": int(len(rows_df)),
         "columns": list(T1_5_ROW_COLUMNS),
     }
+    # full-pipeline runtime (load -> analysis -> artifact writes)
+    result["runtime_seconds"] = float(time.perf_counter() - t0)
+
     summary_text = json.dumps(_t1_5_jsonable(result), indent=2, allow_nan=False)
     summary_path.write_text(summary_text)
     summary_sha = _sha256_file(summary_path)
@@ -1429,7 +1472,9 @@ def build_t1_5_artifact(cap_per_symbol: int = T1_5_CAP, seed: int = T1_5_SEED,
         "runtime_seconds": result["runtime_seconds"],
         "model_fit_count": result["governance"]["model_fit_count"],
         "note": "row-level parquet is the row artifact; summary JSON embeds row_artifact.sha256; "
-                "this manifest records both SHAs for provenance. T1.5 only; T2 NOT run.",
+                "this manifest records both SHAs for provenance. T1.5 only; T2 NOT run. "
+                "generator_commit MUST equal the committed code SHA (artifact generated only "
+                "after code is committed + pushed).",
     }
     manifest_text = json.dumps(manifest, indent=2, sort_keys=True)
     manifest_path.write_text(manifest_text)
@@ -1505,7 +1550,9 @@ def main(argv=None) -> int:
         print("subset rows:", integ["input_oof_rows_selected"],
               "symbols:", integ["n_symbols"], "trading_days:", integ["n_trading_days_total"])
         print("integrity all_clean:", integ["all_clean"],
-              "unmatched:", integ["unmatched"], "dup_keys:", integ["duplicate_keys"],
+              "unmatched_rows:", integ["unmatched_rows"],
+              "dup_label_keys:", integ["duplicate_label_keys"],
+              "dup_post_join_keys:", integ["duplicate_post_join_keys"],
               "missing_td:", integ["missing_trading_day"],
               "missing_true_return:", integ["missing_true_return"])
         print("POOLED D_geom:", round(float(dg["pooled"]["observed_D"]), 4),
