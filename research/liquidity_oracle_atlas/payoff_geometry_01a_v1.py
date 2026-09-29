@@ -130,11 +130,12 @@ def log_geometry_ratio(g: np.ndarray, l: np.ndarray) -> np.ndarray:
     return np.log(g / l)
 
 
-def assign_p_bins(p_win: np.ndarray, n_bins: int = N_P_BINS) -> np.ndarray:
-    """Frozen, outcome-independent stratification of candidates by p_win.
+def compute_p_bin_edges(p_win: np.ndarray, n_bins: int = N_P_BINS) -> np.ndarray:
+    """Frozen, outcome-independent p_win quantile edges.
 
-    Uses quantile edges of the p_win distribution, so the bin assignment depends
-    ONLY on p_win, never on the true return. Deterministic given p_win.
+    Depends ONLY on p_win, never on the true return. Deterministic given p_win.
+    Returned edges MUST be frozen from the full candidate set and then reused on
+    every resample (bootstrap) so that binning is identical across replicates.
     """
     p = np.asarray(p_win, dtype=float)
     if not np.isfinite(p).all() or ((p < 0.0) | (p > 1.0)).any():
@@ -142,6 +143,19 @@ def assign_p_bins(p_win: np.ndarray, n_bins: int = N_P_BINS) -> np.ndarray:
     edges = np.quantile(p, np.linspace(0.0, 1.0, n_bins + 1))
     edges[0] = edges[0] - 1e-9
     edges[-1] = edges[-1] + 1e-9
+    return edges
+
+
+def assign_p_bins(p_win: np.ndarray, n_bins: int = N_P_BINS,
+                  edges: np.ndarray | None = None) -> np.ndarray:
+    """Stratify candidates by frozen p_win edges.
+
+    If ``edges`` is provided (frozen from the full sample), it is reused exactly;
+    otherwise edges are computed from ``p_win`` (used only at the top level).
+    """
+    if edges is None:
+        edges = compute_p_bin_edges(p_win, n_bins)
+    p = np.asarray(p_win, dtype=float)
     bins = np.digitize(p, edges[1:-1]).astype(int)  # 0 .. n_bins-1
     return bins
 
@@ -158,11 +172,13 @@ def compute_stratified_geometry_contrast(
     z_col: str = "log_gl",
     outcome_col: str = "true_episode_return_atr",
     weight_col: str = "weights",
+    p_bin_edges: np.ndarray | None = None,
 ) -> dict:
     """Primary estimand D_geometry (production, vectorized).
 
     Returns the aggregated contrast plus per-stratum detail. No fitting, no IO,
-    no reference calls.
+    no reference calls. ``p_bin_edges`` is frozen from the full sample so that
+    every bootstrap replicate uses identical binning (parity with Reference).
     """
     p = df[p_col].to_numpy(dtype=float, copy=False)
     z = df[z_col].to_numpy(dtype=float, copy=False)
@@ -174,7 +190,9 @@ def compute_stratified_geometry_contrast(
     if not np.isfinite(z).all() or not np.isfinite(y).all() or not np.isfinite(w).all():
         raise ValueError("non-finite input to stratified contrast")
 
-    bins = assign_p_bins(p, n_p_bins)
+    edges = p_bin_edges if p_bin_edges is not None else compute_p_bin_edges(p, n_p_bins)
+    n_p_bins = len(edges) - 1
+    bins = assign_p_bins(p, n_p_bins, edges=edges)
     tmp = pd.DataFrame({"bin": bins, "z": z, "y": y, "w": w})
     # within-bin rank (method='first' for deterministic, tie-stable ordering)
     tmp["rnk"] = tmp.groupby("bin")["z"].rank(method="first").to_numpy(dtype=np.int64)
@@ -284,21 +302,66 @@ def assert_stratified_parity(df: pd.DataFrame, tol: float = 1e-9) -> None:
             raise AssertionError(f"per-bin parity FAIL: {a} vs {b}")
 
 
-# --------------------------------------------------------------------------- #
-# Synthetic barrier payoff (DIAGNOSTIC ONLY — NOT a canonical realized return)   #
-# --------------------------------------------------------------------------- #
-def synthetic_barrier_payoff_atr(df: pd.DataFrame) -> np.ndarray:
-    """DIAGNOSTIC_ONLY.
+def stratified_d_geometry_breakdown(df: pd.DataFrame,
+                                    p_bin_edges: np.ndarray | None = None) -> dict:
+    """Single-instrument boundary breakdown of D_geometry.
 
-    +/-G/+/-L pseudo-return assuming a strict TP/SL-barrier world. This is NOT
-    the canonical realized label. It exists solely so diagnostic B can quantify
-    how far the true episode_return_atr deviates from the idealized barrier
-    payoff.
+    Pooled D_geometry is ONLY pooled research evidence. Per the strategy execution
+    boundary (multi-symbol pooled training, single-instrument execution), each
+    symbol's result must be retained separately, along with LONG/SHORT splits.
+    Formal conclusions for a specific instrument use THAT instrument's result.
+
+    ``p_bin_edges`` is frozen once from the full sample (no per-symbol re-binning).
+    """
+    if p_bin_edges is None:
+        p_bin_edges = compute_p_bin_edges(df["p_win"].to_numpy(float))
+    out: dict = {}
+    out["pooled"] = compute_stratified_geometry_contrast(
+        df, p_bin_edges=p_bin_edges)["D_geometry"]
+    out["per_symbol"] = {}
+    for sym in sorted(df["symbol"].unique().tolist()):
+        sub = df[df["symbol"] == sym]
+        if len(sub) >= 50:
+            out["per_symbol"][sym] = compute_stratified_geometry_contrast(
+                sub, p_bin_edges=p_bin_edges)["D_geometry"]
+    out["by_side"] = {}
+    for side in sorted(df["side"].unique().tolist()):
+        sub = df[df["side"] == side]
+        if len(sub) >= 50:
+            out["by_side"][side] = compute_stratified_geometry_contrast(
+                sub, p_bin_edges=p_bin_edges)["D_geometry"]
+    return out
+
+
+# --------------------------------------------------------------------------- #
+# Event-based synthetic barrier payoff (DIAGNOSTIC ONLY — NOT a realized return) #
+# --------------------------------------------------------------------------- #
+def event_based_synthetic_payoff(df: pd.DataFrame) -> np.ndarray:
+    """DIAGNOSTIC_ONLY — event-semantic barrier-world pseudo-return.
+
+    Defined strictly by ``event_class`` (NOT by the win sign):
+
+        FAVORABLE_FIRST -> +G   (favorable boundary touched first)
+        ADVERSE_FIRST   -> -L   (adverse boundary touched first)
+        BOTH_SAME_BAR   -> NaN  (ambiguous: both boundaries in one bar)
+        NONE            -> NaN  (no boundary resolution)
+
+    This is NOT the canonical realized label. It exists solely so diagnostic B can
+    quantify how far the true episode_return_atr deviates from the idealized
+    barrier-world payoff. Because we have now confirmed FAVORABLE_FIRST does NOT
+    imply final profit and ADVERSE_FIRST does NOT imply final loss, building this
+    pseudo-return from the ``win`` sign would silently re-introduce exactly the
+    semantics mismatch the Reviewer rejected.
     """
     g = df["G"].to_numpy(dtype=float, copy=False)
     l = df["L"].to_numpy(dtype=float, copy=False)
-    win = df["win"].to_numpy(dtype=bool, copy=False)
-    return np.where(win, g, -l)
+    ev = df["event_class"].to_numpy()
+    out = np.full(len(df), np.nan, dtype=float)
+    fav = ev == "FAVORABLE_FIRST"
+    adv = ev == "ADVERSE_FIRST"
+    out[fav] = g[fav]
+    out[adv] = -l[adv]
+    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -337,7 +400,7 @@ def load_audit_frame(sample_n: int | None = None, seed: int = BOOTSTRAP_SEED) ->
     labels = pd.concat(label_frames, ignore_index=True)
     labels = labels[labels["horizon"] == AUDIT_HORIZON]
     key_cols = ["symbol", "decision_bar", "side"]
-    dup = labels.duplicated(subset=key_cols).sum()
+    dup = int(labels.duplicated(subset=key_cols).sum())
     if dup > 0:
         raise ValueError(f"ambiguous candidate key: {dup} duplicate (symbol,decision_bar,side) in td5 labels")
     labels = labels[["symbol", "decision_bar", "side", "G", "L",
@@ -367,21 +430,49 @@ def load_audit_frame(sample_n: int | None = None, seed: int = BOOTSTRAP_SEED) ->
         if merged[c].isna().any():
             raise ValueError(f"NaN in required column {c} (must not occur)")
 
+    sampled_rows = len(merged)
     if sample_n is not None and sample_n < len(merged):
         merged = merged.sample(n=sample_n, random_state=seed).reset_index(drop=True)
+        sampled_rows = len(merged)
+
+    # True join evidence (reported verbatim in the Evidence Packet; never a
+    # placeholder). These numbers describe the FULL (pre-sample) join universe.
+    merged.attrs["join_meta"] = {
+        "full_oof_rows_pre_join": int(pre_join_rows),
+        "full_rows_post_join": int(post_join_rows),
+        "unmatched_rows": int(pre_join_rows - post_join_rows),
+        "duplicate_keys": int(dup),
+        "sampled_rows": int(sampled_rows),
+    }
     return merged.reset_index(drop=True)
 
 
-def _attach_trading_day(df: pd.DataFrame) -> pd.DataFrame:
-    """Attach canonical trading_day from frozen state_v1 (decision_bar == bar_index)."""
+def _attach_trading_day(df: pd.DataFrame, require_all: bool = True) -> pd.DataFrame:
+    """Attach canonical trading_day from frozen state_v1 (decision_bar == bar_index).
+
+    Hard-fail guarantees (no silent NaT fallback):
+      * state (symbol, bar_index) key is unique;
+      * every candidate resolves a trading_day (missing > 0 => STOP).
+    """
     if "trading_day" in df.columns:
+        if df["trading_day"].isna().any():
+            raise RuntimeError("STOP: input already contains unresolved trading_day")
         return df
     state = pd.read_parquet(STATE_PARQUET, columns=["symbol", "bar_index", "trading_day"])
-    # map bar_index -> trading_day per symbol
+    dup_state = int(state.duplicated(subset=["symbol", "bar_index"]).sum())
+    if dup_state > 0:
+        raise ValueError(
+            f"state trading_day key not unique: {dup_state} duplicate (symbol,bar_index)")
     idx = state.set_index(["symbol", "bar_index"])["trading_day"]
     keys = list(zip(df["symbol"], df["decision_bar"]))
+    resolved = [idx.get(k) for k in keys]
+    missing = sum(1 for t in resolved if t is None or pd.isna(t))
+    if require_all and missing > 0:
+        raise RuntimeError(
+            f"STOP: {missing} candidates failed to resolve trading_day "
+            f"(silent day-join forbidden)")
     df = df.copy()
-    df["trading_day"] = [idx.get(k, pd.NaT) for k in keys]
+    df["trading_day"] = resolved
     return df
 
 
@@ -440,36 +531,62 @@ def diag_event_reconciliation(df: pd.DataFrame) -> dict:
                    .groupby(["event_class", "_win"]).size()
                    .unstack(fill_value=0).to_dict())
 
-    # true episode_return_atr minus synthetic barrier payoff (DIAGNOSTIC_ONLY)
-    synth = synthetic_barrier_payoff_atr(df)
-    diff = df["true_episode_return_atr"].to_numpy(float) - synth
-    mean_diff = float(np.average(diff, weights=df["weights"].to_numpy(float)))
+    # true episode_return_atr minus EVENT-BASED synthetic barrier payoff.
+    # Defined ONLY for FAVORABLE_FIRST -> +G and ADVERSE_FIRST -> -L.
+    # BOTH_SAME_BAR / NONE have no barrier resolution, so they are excluded
+    # (reported separately under by_event_class as the real true return).
+    synth = event_based_synthetic_payoff(df)
+    defined = ~np.isnan(synth)
+    if defined.any():
+        w_def = df["weights"].to_numpy(float)[defined]
+        diff_def = df["true_episode_return_atr"].to_numpy(float)[defined] - synth[defined]
+        mean_diff = float(np.average(diff_def, weights=w_def))
+    else:
+        mean_diff = float("nan")
     per_class_diff = {}
     for ev in classes:
         d = df[df["event_class"] == ev]
         if len(d) == 0:
             continue
-        s = synthetic_barrier_payoff_atr(d)
-        per_class_diff[ev] = float(np.average(
-            d["true_episode_return_atr"].to_numpy(float) - s,
-            weights=d["weights"].to_numpy(float)))
+        s = event_based_synthetic_payoff(d)
+        m = ~np.isnan(s)
+        if m.any():
+            per_class_diff[ev] = float(np.average(
+                d["true_episode_return_atr"].to_numpy(float)[m] - s[m],
+                weights=d["weights"].to_numpy(float)[m]))
+        else:
+            per_class_diff[ev] = None  # BOTH_SAME_BAR / NONE: no barrier resolution
 
     return {
         "by_event_class": rows,
         "P_win_given_FAVORABLE_FIRST": p_win_fav,
         "P_loss_given_ADVERSE_FIRST": p_loss_adv,
         "win_event_confusion": confusion,
-        "mean_true_minus_synthetic_atr": mean_diff,
-        "mean_true_minus_synthetic_by_class": per_class_diff,
-        "synthetic_note": "DIAGNOSTIC_ONLY: +/-G/+/-L pseudo-return; NOT canonical realized return",
+        "mean_true_minus_event_synthetic_atr": mean_diff,
+        "true_minus_event_synthetic_by_class": per_class_diff,
+        "event_synthetic_note": "DIAGNOSTIC_ONLY: FAVORABLE_FIRST->+G, ADVERSE_FIRST->-L; "
+                                "BOTH_SAME_BAR/NONE undefined (no barrier resolution)",
     }
 
 
 def diag_old_payoff_model(df: pd.DataFrame, n_bins: int = N_P_BINS) -> list:
-    """Diagnostic C: compare frozen old payoff-model predictions vs canonical G/L.
+    """Diagnostic C: same-semantics comparison of frozen old payoff-model targets.
 
-    Uses the frozen OOF columns mu_win / mu_loss / predicted_rr. Diagnostic only.
-    No refit. If those columns are absent, returns an explicit SKIP marker.
+    The frozen old payoff models are, by their own definition:
+        mu_win  = predicted E[Y | Y>0, X]
+        mu_loss = predicted E[-Y | Y<=0, X]
+        predicted_rr = mu_win / mu_loss
+    Therefore G/L is NOT their calibration target. Comparing predicted_rr to G/L
+    and calling disagreement a "model error" would be wrong.
+
+    Instead, for each p_win stratum we compute the ACTUAL realized magnitudes:
+        actual_win_magnitude  = weighted E[Y | Y>0]
+        actual_loss_magnitude = weighted E[-Y | Y<=0]
+        actual_realized_RR    = actual_win_magnitude / actual_loss_magnitude
+    and place them next to mean mu_win / mean mu_loss / mean predicted_rr.
+    Canonical G/L / log(G/L) is reported SEPARATELY as a pure geometry diagnostic.
+
+    Diagnostic only. No refit. Never label predicted_rr vs G/L disagreement a model error.
     """
     if not all(c in df.columns for c in ("mu_win", "mu_loss", "predicted_rr")):
         return [{"SKIP": "frozen mu_win/mu_loss/predicted_rr OOF columns absent"}]
@@ -477,15 +594,28 @@ def diag_old_payoff_model(df: pd.DataFrame, n_bins: int = N_P_BINS) -> list:
     out = []
     for b in sorted(set(bins.tolist())):
         d = df.iloc[np.where(bins == b)[0]]
-        w = d["weights"].to_numpy(float)
+        dw = d["weights"].to_numpy(float)
+        dy = d["true_episode_return_atr"].to_numpy(float)
+        win_mask = dy > 0
+        loss_mask = ~win_mask
+        actual_win_mag = (float(np.average(dy[win_mask], weights=dw[win_mask]))
+                          if win_mask.any() else float("nan"))
+        actual_loss_mag = (float(np.average(-dy[loss_mask], weights=dw[loss_mask]))
+                           if loss_mask.any() else float("nan"))
+        actual_rr = (actual_win_mag / actual_loss_mag
+                     if (actual_loss_mag > 0 and not math.isnan(actual_win_mag))
+                     else float("nan"))
         out.append({
             "p_bin": int(b),
             "n": int(len(d)),
-            "mean_predicted_rr": float(np.average(d["predicted_rr"], weights=w)),
-            "mean_mu_win": float(np.average(d["mu_win"], weights=w)),
-            "mean_mu_loss": float(np.average(d["mu_loss"], weights=w)),
-            "mean_canonical_G_over_L": float(np.average(d["G"] / d["L"], weights=w)),
-            "mean_canonical_log_GL": float(np.average(d["log_gl"], weights=w)),
+            "actual_win_magnitude": actual_win_mag,
+            "actual_loss_magnitude": actual_loss_mag,
+            "actual_realized_RR": actual_rr,
+            "mean_mu_win": float(np.average(d["mu_win"], weights=dw)),
+            "mean_mu_loss": float(np.average(d["mu_loss"], weights=dw)),
+            "mean_predicted_rr": float(np.average(d["predicted_rr"], weights=dw)),
+            "mean_canonical_G_over_L": float(np.average(d["G"] / d["L"], weights=dw)),
+            "mean_canonical_log_GL": float(np.average(d["log_gl"], weights=dw)),
         })
     return out
 
@@ -493,59 +623,85 @@ def diag_old_payoff_model(df: pd.DataFrame, n_bins: int = N_P_BINS) -> list:
 # --------------------------------------------------------------------------- #
 # Bootstrap (day-clustered paired) — used only in T1 audit + T1.5/T2            #
 # --------------------------------------------------------------------------- #
+def _complete_block_indices(trading_days, block: int = BOOTSTRAP_BLOCK_DAYS):
+    """Reuse R13.5 audited owner semantics
+    (decomposed_value_composer_isolation_audit_v1._complete_block_indices).
+
+    Sorts unique trading days, keeps only complete blocks of size ``block``
+    (terminal remainder dropped, consistent with R13.5), and returns a list of
+    row-index arrays, one per block.
+    """
+    days = np.sort(pd.unique(trading_days))
+    n_complete = len(days) // block
+    days = days[: n_complete * block]
+    pos = {d: np.where(trading_days == d)[0] for d in days}
+    blocks = [days[i * block:(i + 1) * block] for i in range(n_complete)]
+    block_idx = [np.concatenate([pos[d] for d in b]) for b in blocks]
+    return block_idx, n_complete
+
+
+def _select_blocks(block_idx, chosen):
+    """Concatenate sampled blocks, PRESERVING multiplicity (no dedup).
+
+    ``chosen`` is an array of block indices drawn WITH replacement. A block that
+    appears k times contributes its rows k times. This is the core of the
+    bootstrap; using a set() here would silently discard resampled weight.
+    """
+    return np.concatenate([block_idx[c] for c in chosen])
+
+
 def bootstrap_d_geometry(df: pd.DataFrame, b: int = 200, seed: int = BOOTSTRAP_SEED,
                          block: int = BOOTSTRAP_BLOCK_DAYS) -> dict:
-    """Trading-day block bootstrap of D_geometry.
+    """Trading-day block bootstrap of D_geometry (reuses R13.5 audited owner).
 
-    Resamples DAY-BLOCKS (not rows), recomputes the full stratified statistic on
-    the resampled rows, and returns point estimate + 95% CI. NOT run on the full
-    evaluation population in this checkpoint (audit sample only).
+    Resamples DAY-BLOCKS WITH replacement (preserving multiplicity), recomputes
+    the full stratified statistic on the resampled rows, and returns the observed
+    point estimate plus the bootstrap mean and 95% CI separately. NOT run on the
+    full evaluation population in this checkpoint (audit sample only).
     """
     if "trading_day" not in df.columns:
         df = _attach_trading_day(df)
     td = df["trading_day"].to_numpy()
-    # convert to sortable int (ns) for deterministic blocking
     td_int = pd.to_datetime(pd.Series(td)).to_numpy("datetime64[ns]").astype("int64")
-    days_sorted = np.unique(td_int)
-    n_days = len(days_sorted)
-    if n_days < 2:
-        return {"point": float("nan"), "ci_lo": float("nan"), "ci_hi": float("nan"),
-                "n_days": int(n_days), "n_reps": 0, "note": "too few days for bootstrap"}
-    if n_days < block:
-        block = n_days  # fall back to full-day resample
-    n_full = n_days // block
-    if n_full == 0:
-        n_full = 1
-        block = n_days
+    block_idx, n_complete = _complete_block_indices(td_int, block)
+    if n_complete == 0:
+        return {"observed_D": float("nan"), "bootstrap_mean": float("nan"),
+                "ci_lo": float("nan"), "ci_hi": float("nan"), "n_valid_reps": 0,
+                "n_complete_blocks": 0,
+                "note": "too few complete blocks for bootstrap"}
+    # freeze p-bin edges from the full sample so every replicate uses identical bins
+    p_bin_edges = compute_p_bin_edges(df["p_win"].to_numpy(float))
+    observed_D = compute_stratified_geometry_contrast(df, p_bin_edges=p_bin_edges)["D_geometry"]
     rng = np.random.default_rng(seed)
-    draws = rng.integers(0, n_full, size=(b, n_full))
-    day_pos = {d: i for i, d in enumerate(days_sorted)}
-    Ds = []
-    for rep in draws:
-        picked_days = set()
-        for blk in rep.tolist():
-            picked_days.update(days_sorted[blk * block:(blk + 1) * block].tolist())
-        mask = np.array([td_int[i] in picked_days for i in range(len(td_int))])
-        if mask.sum() < 50:
+    boots = []
+    for _ in range(b):
+        chosen = rng.integers(0, n_complete, size=n_complete)  # WITH replacement
+        sel = _select_blocks(block_idx, chosen)                # multiplicity preserved
+        if len(sel) < 50:
             continue
-        sub = df.iloc[np.where(mask)[0]]
+        sub = df.iloc[sel]
         try:
-            res = compute_stratified_geometry_contrast(sub)
+            D = compute_stratified_geometry_contrast(sub, p_bin_edges=p_bin_edges)["D_geometry"]
         except Exception:
             continue
-        if math.isfinite(res["D_geometry"]):
-            Ds.append(res["D_geometry"])
-    COUNTERS["bootstrap_rep_count"] += len(Ds)
-    if len(Ds) == 0:
-        return {"point": float("nan"), "ci_lo": float("nan"), "ci_hi": float("nan"),
-                "n_days": int(n_days), "n_reps": 0, "note": "no valid replicates"}
-    Ds = np.asarray(Ds, dtype=float)
+        if math.isfinite(D):
+            boots.append(D)
+    COUNTERS["bootstrap_rep_count"] += len(boots)
+    if len(boots) == 0:
+        return {"observed_D": observed_D, "bootstrap_mean": float("nan"),
+                "ci_lo": float("nan"), "ci_hi": float("nan"), "n_valid_reps": 0,
+                "n_complete_blocks": int(n_complete),
+                "note": "no valid replicates"}
+    boots = np.asarray(boots, dtype=float)
     return {
-        "point": float(np.mean(Ds)),
-        "ci_lo": float(np.quantile(Ds, 0.025)),
-        "ci_hi": float(np.quantile(Ds, 0.975)),
-        "n_days": int(n_days),
-        "n_reps": int(len(Ds)),
+        "observed_D": float(observed_D),
+        "bootstrap_mean": float(np.mean(boots)),
+        "ci_lo": float(np.quantile(boots, 0.025)),
+        "ci_hi": float(np.quantile(boots, 0.975)),
+        "n_valid_reps": int(len(boots)),
+        "n_complete_blocks": int(n_complete),
+        "method": "trading_day_complete_block_bootstrap (R13.5 audited owner): terminal "
+                  "remainder excluded; blocks drawn WITH replacement; multiplicity preserved",
         "note": "day-block bootstrap on AUDIT sample only; full-population run reserved for T1.5/T2",
     }
 
@@ -640,17 +796,22 @@ def t0_synthetic() -> dict:
 # --------------------------------------------------------------------------- #
 def t1_audit(sample_n: int = T1_SAMPLE_N) -> dict:
     df = load_audit_frame(sample_n=sample_n)
-    # attach trading_day for the audit bootstrap
+    # attach trading_day for the audit bootstrap (hard-fail if any unresolved)
     df_day = _attach_trading_day(df)
 
+    # TRUE join evidence. load_audit_frame already hard-fails on a silent drop;
+    # we report the real pre/post universe counts, never a len(df)==len(df) placeholder.
+    meta = df.attrs.get("join_meta", {})
     parity = {
         "rows": int(len(df)),
-        "pre_join_oof_rows": int(len(df)),  # load_audit_frame already guarantees == post
-        "post_join_rows": int(len(df)),
-        "rows_preserved": bool(len(df) == len(df)),  # placeholder; real check below
+        "full_oof_rows_pre_join": meta.get("full_oof_rows_pre_join"),
+        "full_rows_post_join": meta.get("full_rows_post_join"),
+        "unmatched_rows": meta.get("unmatched_rows"),
+        "duplicate_keys": meta.get("duplicate_keys"),
+        "sampled_rows": meta.get("sampled_rows"),
+        "join_clean": bool(meta.get("unmatched_rows", 1) == 0
+                           and meta.get("duplicate_keys", 1) == 0),
     }
-    # REAL pre/post parity (load_audit_frame raises on mismatch, but we also assert here)
-    parity["pre_post_equal"] = bool(parity["pre_join_oof_rows"] == parity["post_join_rows"])
 
     # owner alignment
     parity["p_win_min"] = float(df["p_win"].min())
@@ -676,6 +837,9 @@ def t1_audit(sample_n: int = T1_SAMPLE_N) -> dict:
     parity["stratified_D_geometry_audit"] = prod["D_geometry"]
     parity["stratified_n_bins_used"] = prod["n_bins_used"]
 
+    # single-instrument boundary breakdown (pooled + per-symbol + by-side)
+    parity["stratified_breakdown"] = stratified_d_geometry_breakdown(df)
+
     # negative controls (REAL: prove the system catches deliberate errors)
     parity["neg_sign_sensitivity"] = _neg_sign_sensitivity(df)
     parity["neg_relationship_sensitivity"] = _neg_relationship_sensitivity(df)
@@ -688,7 +852,7 @@ def t1_audit(sample_n: int = T1_SAMPLE_N) -> dict:
     parity["diag_event_reconciliation"] = diag_event_reconciliation(df)
     parity["diag_old_payoff_model"] = diag_old_payoff_model(df)
 
-    # bootstrap on AUDIT sample only (labeled; not scientific)
+    # bootstrap on AUDIT sample only (labeled; not scientific); fields reported separately
     parity["bootstrap_audit"] = bootstrap_d_geometry(df_day, b=200)
 
     return parity
@@ -827,25 +991,66 @@ def _synthetic_frame(n: int, seed: int = 0) -> pd.DataFrame:
     return df
 
 
-def tp_microbenchmark() -> dict:
-    N = 10000
-    t_N = _time_kernel(_synthetic_frame(N, 1))
-    t_2N = _time_kernel(_synthetic_frame(2 * N, 2))
-    t_4N = _time_kernel(_synthetic_frame(4 * N, 3))
-    r_2 = t_2N / t_N
-    r_4 = t_4N / t_2N
-    return {
-        "N": N, "t_N": t_N, "t_2N": t_2N, "t_4N": t_4N,
-        "ratio_2N": r_2, "ratio_4N": r_4,
-        "gate_2N_pass": bool(r_2 < 3.0), "gate_4N_pass": bool(r_4 < 3.0),
-        "complexity": "O(N) precompute (log G/L, weights) + O(N log N) within-bin ranking",
-    }
+def _synthetic_frame_with_days(n: int, seed: int = 0, rows_per_day: int = 10) -> pd.DataFrame:
+    """Synthetic frame with a trading_day column so block bootstrap can run (audit only)."""
+    df = _synthetic_frame(n, seed)
+    df["trading_day"] = (np.arange(n) // rows_per_day).astype("int64")
+    return df
 
 
 def _time_kernel(df: pd.DataFrame) -> float:
     start = time.perf_counter()
     _ = compute_stratified_geometry_contrast(df)
     return time.perf_counter() - start
+
+
+def _time_bootstrap(df: pd.DataFrame, b: int) -> float:
+    start = time.perf_counter()
+    _ = bootstrap_d_geometry(df, b=b)
+    return time.perf_counter() - start
+
+
+def tp_microbenchmark() -> dict:
+    # --- contrast-only scaling (O(N) precompute + O(N log N) within-bin ranking) ---
+    N = 10000
+    t_N = _time_kernel(_synthetic_frame(N, 1))
+    t_2N = _time_kernel(_synthetic_frame(2 * N, 2))
+    t_4N = _time_kernel(_synthetic_frame(4 * N, 3))
+    r_2 = t_2N / t_N
+    r_4 = t_4N / t_2N
+
+    # --- bootstrap scaling (O(B * N log N)) on synthetic frames with trading_day ---
+    B = 100
+    NB = 10000
+    t_b1 = _time_bootstrap(_synthetic_frame_with_days(NB, 7), B)              # N=10k, B=100
+    t_b2 = _time_bootstrap(_synthetic_frame_with_days(NB, 8), 2 * B)         # N=10k, B=200
+    t_b3 = _time_bootstrap(_synthetic_frame_with_days(2 * NB, 9), B)         # N=20k, B=100
+    r_b = t_b2 / t_b1                                                        # ~= 2  -> O(B)
+    r_bn = t_b3 / t_b1                                                       # ~= 2  -> O(N)
+
+    # --- formal T2 runtime projection (NOT a T1.5/T2 run) ---
+    N_FULL = 138000
+    B_FULL = 2000
+    t_single_rep = t_b1 / B
+    proj_t2_sec = t_single_rep * (N_FULL / NB) * B_FULL
+
+    return {
+        "contrast_N": N, "contrast_t_N": t_N, "contrast_t_2N": t_2N, "contrast_t_4N": t_4N,
+        "contrast_ratio_2N": r_2, "contrast_ratio_4N": r_4,
+        "contrast_gate_2N_pass": bool(r_2 < 3.0), "contrast_gate_4N_pass": bool(r_4 < 3.0),
+        "bootstrap_N": NB, "bootstrap_B": B,
+        "bootstrap_t_B": t_b1, "bootstrap_t_2B": t_b2, "bootstrap_t_2N": t_b3,
+        "bootstrap_ratio_B": r_b, "bootstrap_ratio_N": r_bn,
+        "bootstrap_gate_B_pass": bool(r_b < 3.0), "bootstrap_gate_N_pass": bool(r_bn < 3.0),
+        "complexity": "O(N) precompute + O(N log N) within-bin ranking; "
+                      "bootstrap O(B * N log N) with trading-day block resampling",
+        "formal_t2_projection": {
+            "N_full": N_FULL, "B_full": B_FULL,
+            "projected_seconds": float(proj_t2_sec),
+            "projected_minutes": float(proj_t2_sec / 60.0),
+            "note": "extrapolation from synthetic benchmark; NOT a T1.5/T2 run",
+        },
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -856,6 +1061,19 @@ def _git_head_sha() -> str:
         import subprocess
         return subprocess.check_output(
             ["git", "rev-parse", "HEAD"], cwd=PROJECT_ROOT
+        ).decode().strip()[:7]
+    except Exception:
+        return "unknown"
+
+
+def _remote_branch_tip_sha() -> str:
+    try:
+        import subprocess
+        branch = subprocess.check_output(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=PROJECT_ROOT
+        ).decode().strip()
+        return subprocess.check_output(
+            ["git", "rev-parse", f"origin/{branch}"], cwd=PROJECT_ROOT
         ).decode().strip()[:7]
     except Exception:
         return "unknown"
@@ -873,14 +1091,18 @@ def build_evidence_packet() -> dict:
     t1 = t1_audit()
     tp = tp_microbenchmark()
     local_sha = _git_head_sha()
+    remote_tip = _remote_branch_tip_sha()
     packet = {
         "TASK_ID": TASK_ID,
         "REVISION_OF": "PAYOFF-GEOMETRY-01",
         "REVIEWED_PARENT_SHA": REVIEWED_PARENT_SHA,
-        "LOCAL_SHA": local_sha,
-        "REMOTE_SHA": local_sha,
+        "GENERATOR_COMMIT_SHA": local_sha,
+        "CHECKPOINT_TIP_SHA": remote_tip,
+        "REMOTE_BRANCH_TIP_SHA": remote_tip,
         "GENERATOR_CODE_SHA": _module_content_sha(),
-        "git_status_note": "see `git rev-parse HEAD` at commit time; REMOTE_SHA = module commit (pushed)",
+        "git_status_note": "GENERATOR_COMMIT_SHA = module commit (git rev-parse HEAD at build); "
+                           "CHECKPOINT_TIP_SHA / REMOTE_BRANCH_TIP_SHA = remote branch tip before this push; "
+                           "final pushed tip reported in IDE response",
         "frozen_math": {
             "p_win_definition": "P(episode_return_atr > 0 | X)  [NOT P(favorable-before-adverse)]",
             "Z_definition": "log(G / L), G/L = decision-time favorable/adverse ATR distances",
@@ -966,7 +1188,9 @@ def main(argv=None) -> int:
         # report pulled from the SAME packet object so stdout == artifact
         print("wrote", out)
         print("TASK_ID:", pkt["TASK_ID"])
-        print("LOCAL_SHA:", pkt["LOCAL_SHA"], "REMOTE_SHA:", pkt["REMOTE_SHA"])
+        print("GENERATOR_COMMIT_SHA:", pkt["GENERATOR_COMMIT_SHA"],
+              "CHECKPOINT_TIP_SHA:", pkt["CHECKPOINT_TIP_SHA"],
+              "REMOTE_BRANCH_TIP_SHA:", pkt["REMOTE_BRANCH_TIP_SHA"])
         print("GENERATOR_CODE_SHA:", pkt["GENERATOR_CODE_SHA"])
         print("T0 log_gl.Z:", pkt["T0"]["log_gl"]["Z"])
         print("T0 stratified D_geometry:", pkt["T0"]["stratified_contrast"]["D_geometry"])
@@ -974,7 +1198,10 @@ def main(argv=None) -> int:
               pkt["T1"]["stratified_D_geometry_audit"])
         print("T1 P(win|FAV):", pkt["T1"]["diag_event_reconciliation"]["P_win_given_FAVORABLE_FIRST"],
               "P(loss|ADV):", pkt["T1"]["diag_event_reconciliation"]["P_loss_given_ADVERSE_FIRST"])
-        print("TP ratios:", pkt["TP"]["ratio_2N"], pkt["TP"]["ratio_4N"])
+        print("TP contrast scaling:", pkt["TP"]["contrast_ratio_2N"], pkt["TP"]["contrast_ratio_4N"])
+        print("TP bootstrap scaling B/N:",
+              pkt["TP"]["bootstrap_ratio_B"], pkt["TP"]["bootstrap_ratio_N"],
+              "proj_min", round(pkt["TP"]["formal_t2_projection"]["projected_minutes"], 2))
         print("GOVERNANCE full_population_run:", pkt["governance"]["full_population_high_low_run"],
               "t1_5_run:", pkt["governance"]["t1_5_run"], "t2_run:", pkt["governance"]["t2_run"])
     return 0
