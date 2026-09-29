@@ -1,0 +1,26 @@
+{
+  "STAGE": "T2",
+  "TASK_ID": "PAYOFF-GEOMETRY-01A",
+  "config": {
+    "bootstrap_B": 2000,
+    "bootstrap_block_days": 5,
+    "bootstrap_seed": 20260929,
+    "bottom_frac": 0.2,
+    "cap_per_symbol": null,
+    "n_p_bins": 10,
+    "p_bin_edges_rule": "per-analysis-universe quantiles of p_win (frozen within S)",
+    "population": "full_oof",
+    "seed": null,
+    "top_frac": 0.2
+  },
+  "generator_commit": "769d4a3fa7cc771b00660e80a5d966f76010f23b",
+  "model_fit_count": 0,
+  "note": "row-level parquet is the row artifact; summary JSON embeds row_artifact.sha256; this manifest records both SHAs for provenance. T2 FORMAL full-population evaluation; NO model fit/refit/tune. generator_commit MUST equal the committed code SHA (artifact generated only after code is committed + pushed). runtime_seconds covers load+analysis+row parquet+summary write; the full wall time through manifest completion is reported in the returned result as manifest_runtime_seconds.",
+  "row_path": "payoff_geometry_01a_t2_rows.parquet",
+  "row_rows": 83194,
+  "row_sha256": "64aeba87ccce18be18b084fad82e7030d6587c47426c0e748adaabc9ea00c925",
+  "runtime_seconds": 160.940451542,
+  "summary_bytes": 20986,
+  "summary_path": "payoff_geometry_01a_t2_summary.json",
+  "summary_sha256": "481bc8317ffb93423afc0e4affe05fde085e5d068a33b302b5a77586134f4af1"
+}
