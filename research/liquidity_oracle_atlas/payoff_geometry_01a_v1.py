@@ -1203,7 +1203,7 @@ def _git_head_sha() -> str:
         import subprocess
         return subprocess.check_output(
             ["git", "rev-parse", "HEAD"], cwd=PROJECT_ROOT
-        ).decode().strip()[:7]
+        ).decode().strip()
     except Exception:
         return "unknown"
 

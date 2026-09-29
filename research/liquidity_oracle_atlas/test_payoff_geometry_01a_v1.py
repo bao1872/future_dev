@@ -646,3 +646,36 @@ def test_full_join_duplicate_pre_sample():
     # hardcoded placeholder) -- and they are reported from the full join universe.
     assert meta_full["duplicate_label_keys"] == 0
     assert meta_full["duplicate_post_join_keys"] == 0
+
+
+# --------------------------------------------------------------------------- #
+# Provenance gate — generator_commit must be the FULL 40-char reviewed code SHA  #
+# (not a 7-char abbreviation). This is the explicit closure-rerun provenance    #
+# requirement: manifest.generator_commit == exact reviewed CODE SHA.             #
+# --------------------------------------------------------------------------- #
+def test_git_head_sha_is_full_40_char_sha():
+    import subprocess
+    sha = M._git_head_sha()
+    assert isinstance(sha, str)
+    assert len(sha) == 40, f"expected 40-char SHA, got {len(sha)}: {sha!r}"
+    assert all(c in "0123456789abcdef" for c in sha), f"non-hex char in {sha!r}"
+    head = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=M.PROJECT_ROOT
+    ).decode().strip()
+    assert sha == head, f"git_head_sha {sha!r} != git rev-parse HEAD {head!r}"
+
+
+def test_manifest_generator_commit_is_full_sha(tmp_path):
+    # Run a (small) T1.5 build into a TEMP dir so the OFFICIAL evidence artifacts are
+    # NOT regenerated; then assert the manifest records the full 40-char SHA.
+    import json
+    res = M.build_t1_5_artifact(cap_per_symbol=60, seed=20260929, B=3,
+                                 evidence_dir=tmp_path)
+    manifest_path = tmp_path / "payoff_geometry_01a_t1_5_manifest.json"
+    assert manifest_path.exists(), "manifest not written to evidence_dir"
+    manifest = json.loads(manifest_path.read_text())
+    assert "generator_commit" in manifest
+    assert manifest["generator_commit"] == M._git_head_sha(), manifest["generator_commit"]
+    assert len(manifest["generator_commit"]) == 40, manifest["generator_commit"]
+    # also reflected on the returned result object
+    assert res["local_git_head"] == manifest["generator_commit"]
