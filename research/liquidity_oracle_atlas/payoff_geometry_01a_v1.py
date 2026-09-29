@@ -1294,6 +1294,13 @@ T1_5_CAP = 1000
 T1_5_B = 500
 T1_5_SEED = 20260929
 
+# T2 — formal full-population evaluation. Statistical design is FROZEN and identical
+# to T1.5 except for population (full OOF, NO per-symbol cap) and bootstrap count.
+# B is frozen to 2000 to match the TP B_FULL projection; this is NOT the earlier
+# 138,000 N_FULL placeholder (that was a TP performance-projection assumption only).
+# The real canonical OOF population is 83,194 rows and T2 consumes ALL of it.
+T2_B = 2000
+
 T1_5_ROW_COLUMNS = [
     "symbol", "decision_time", "decision_bar", "side", "trading_day", "fold",
     "p_win", "G", "L", "log_gl",
@@ -1545,17 +1552,199 @@ def build_t1_5_artifact(cap_per_symbol: int = T1_5_CAP, seed: int = T1_5_SEED,
 
 
 # --------------------------------------------------------------------------- #
+# T2 — formal full-population evaluation runner (reuses the frozen analysis core)  #
+# --------------------------------------------------------------------------- #
+def load_t2_frame() -> pd.DataFrame:
+    """T2 full-population canonical loader.
+
+    Build the formal T2 analysis frame from the SAME audited canonical owners:
+      * call the canonical OOF/label loader EXACTLY once with the full population
+        (no per-symbol cap, no random subsample, no outcome-based selection);
+      * require the full OOF -> label join to remain lossless (load_audit_frame hard-fails);
+      * attach trading_day (hard-fail if any unresolved);
+      * propagate the MEASURED join_meta on df.attrs so analysis never re-hardcodes 0.
+    Returns exactly ONE full analysis frame. T2 contract:
+      selected_rows == full_rows_post_join (no cap/subsampling).
+    If the frozen inputs unexpectedly produce a different canonical population,
+    load_audit_frame's hard-fails surface it (no silent force to 83194).
+    """
+    full = load_audit_frame(sample_n=None)            # full clean lossless join, NO cap
+    df = _attach_trading_day(full)                    # hard-fail if any trading_day unresolved
+    df.attrs["join_meta"] = dict(full.attrs.get("join_meta", {}))
+    return df.reset_index(drop=True)
+
+
+def run_t2(df: pd.DataFrame | None = None, B: int = T2_B) -> dict:
+    """Formal T2 full-population inference run. NO model fit/refit/tune.
+
+    Loads the full canonical population exactly once (if not supplied by the caller)
+    and reuses that SAME frame for statistics, bootstrap, and (in build_t2_artifact)
+    the row artifact -- never a second canonical-data rebuild.
+
+    This is the FORMAL full-population evaluation, unlike T1.5 (deterministic
+    cap-1000/symbol engineering validation). The statistical design is FROZEN and
+    identical to T1.5 except for population (full OOF) and bootstrap count (B=2000).
+    """
+    t0 = time.perf_counter()
+    counters_before = dict(COUNTERS)
+    if df is None:
+        df = load_t2_frame()
+    core = analyze_frame(df, B=B)
+    counters_after = dict(COUNTERS)
+    counters_delta = {k: counters_after.get(k, 0) - counters_before.get(k, 0)
+                      for k in counters_before}
+    analysis_sec = time.perf_counter() - t0
+    return {
+        "TASK_ID": TASK_ID,
+        "STAGE": "T2",
+        "scope_note": "FORMAL full-population inference evaluation (no cap, no subsample); "
+                      "reuses the frozen PAYOFF-GEOMETRY-01A analysis core; NO model fit/refit/tune.",
+        "config": {
+            "population": "full_oof",
+            "cap_per_symbol": None,
+            "seed": None,
+            "bootstrap_B": int(B),
+            "bootstrap_block_days": BOOTSTRAP_BLOCK_DAYS,
+            "bootstrap_seed": BOOTSTRAP_SEED,
+            "n_p_bins": N_P_BINS,
+            "top_frac": TOP_FRAC,
+            "bottom_frac": BOTTOM_FRAC,
+            "p_bin_edges_rule": "per-analysis-universe quantiles of p_win (frozen within S)",
+        },
+        **core,
+        "counters": counters_delta,
+        "counters_global": dict(COUNTERS),
+        "governance": {
+            "model_fit_count": counters_delta.get("model_fit_count", 0),
+            "t1_5_run": False,
+            "t2_run": True,
+            "full_population_high_low_run": True,
+            "scientific_interpretation": "NONE during code implementation; STOP FOR REVIEWER",
+        },
+        "analysis_runtime_seconds": float(analysis_sec),
+    }
+
+
+def build_t2_artifact(B: int = T2_B, evidence_dir: Path | None = None) -> dict:
+    """Build the official T2 evidence artifacts (rows parquet / summary / manifest).
+
+    Does NOT overwrite the T1.5 evidence (output names are distinct: t2_*). Loads the
+    canonical T2 frame EXACTLY ONCE and reuses the same frame for analysis and the row
+    artifact; computes row SHA256 and final summary SHA256; records the full 40-char
+    generator_commit; reports run-local pipeline_counters; preserves the honest timing
+    boundaries already established for T1.5.
+    """
+    out_dir = evidence_dir if evidence_dir is not None else EVID
+    t0 = time.perf_counter()
+    counters_before = dict(COUNTERS)
+    # Load EXACTLY ONCE, then reuse the same frame for analysis AND the row artifact.
+    df = load_t2_frame()
+    result = run_t2(df=df, B=B)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    rows_path = out_dir / "payoff_geometry_01a_t2_rows.parquet"
+    summary_path = out_dir / "payoff_geometry_01a_t2_summary.json"
+    manifest_path = out_dir / "payoff_geometry_01a_t2_manifest.json"
+
+    # row-level artifact written directly from the SAME loaded frame (no reload)
+    rows_df = df[T1_5_ROW_COLUMNS]
+    rows_df.to_parquet(rows_path, index=False)
+    rows_sha = _sha256_file(rows_path)
+
+    result["row_artifact"] = {
+        "path": rows_path.name,
+        "sha256": rows_sha,
+        "rows": int(len(rows_df)),
+        "columns": list(T1_5_ROW_COLUMNS),
+    }
+
+    # summary JSON (v0): written once so runtime_seconds can be measured AFTER it and
+    # therefore genuinely cover load + analysis + row parquet + summary JSON write.
+    summary_text = json.dumps(_t1_5_jsonable(result), indent=2, allow_nan=False)
+    summary_path.write_text(summary_text)
+    summary_sha = _sha256_file(summary_path)
+
+    # runtime_seconds: wall time covering load + analysis + row parquet + summary JSON
+    # write. The manifest write below and the final summary rewrite are measured
+    # separately (manifest_runtime_seconds); a file cannot measure the cost of writing
+    # itself, so those terminal writes are the explicit documented boundary.
+    result["runtime_seconds"] = float(time.perf_counter() - t0)
+
+    # run-local pipeline counters: deltas over the ENTIRE load -> analysis -> artifact
+    # path (so the Evidence Packet reports THIS execution, not accumulated history).
+    counters_after = dict(COUNTERS)
+    result["pipeline_counters"] = {
+        k: counters_after.get(k, 0) - counters_before.get(k, 0)
+        for k in counters_before
+    }
+
+    # summary JSON (v1, final): rewrite to embed runtime_seconds + pipeline_counters.
+    # The manifest below references THIS final summary sha/bytes, so provenance stays
+    # consistent (manifest.summary_sha == on-disk summary sha).
+    summary_text = json.dumps(_t1_5_jsonable(result), indent=2, allow_nan=False)
+    summary_path.write_text(summary_text)
+    summary_sha = _sha256_file(summary_path)
+
+    # Provenance manifest: a file cannot embed its own sha, so both artifact SHAs
+    # live here (this is the canonical integrity record; the summary embeds the row sha).
+    local_head = _git_head_sha()
+    manifest = {
+        "TASK_ID": TASK_ID,
+        "STAGE": "T2",
+        "summary_path": summary_path.name,
+        "summary_sha256": summary_sha,
+        "summary_bytes": len(summary_text.encode("utf-8")),
+        "row_path": rows_path.name,
+        "row_sha256": rows_sha,
+        "row_rows": int(len(rows_df)),
+        "generator_commit": local_head,    # full 40-char reviewed code SHA
+        "config": result["config"],
+        "runtime_seconds": result["runtime_seconds"],
+        "model_fit_count": result["governance"]["model_fit_count"],
+        "note": "row-level parquet is the row artifact; summary JSON embeds row_artifact.sha256; "
+                "this manifest records both SHAs for provenance. T2 FORMAL full-population "
+                "evaluation; NO model fit/refit/tune. generator_commit MUST equal the committed "
+                "code SHA (artifact generated only after code is committed + pushed). "
+                "runtime_seconds covers load+analysis+row parquet+summary write; the full wall "
+                "time through manifest completion is reported in the returned result as "
+                "manifest_runtime_seconds.",
+    }
+    manifest_text = json.dumps(manifest, indent=2, sort_keys=True)
+    manifest_path.write_text(manifest_text)
+    manifest_sha = _sha256_file(manifest_path)
+
+    # full pipeline wall runtime through manifest completion. The manifest's own terminal
+    # byte-write is the only excluded sub-millisecond piece (documented boundary above).
+    result["manifest_runtime_seconds"] = float(time.perf_counter() - t0)
+
+    result["summary_artifact"] = {
+        "path": summary_path.name,
+        "sha256": summary_sha,
+        "bytes": len(summary_text.encode("utf-8")),
+    }
+    result["manifest_artifact"] = {
+        "path": manifest_path.name,
+        "sha256": manifest_sha,
+    }
+    result["local_git_head"] = local_head
+    return result
+
+
+# --------------------------------------------------------------------------- #
 # CLI                                                                          #
 # --------------------------------------------------------------------------- #
-def main(argv=None) -> int:
+def build_parser():
     import argparse
     ap = argparse.ArgumentParser(description="PAYOFF-GEOMETRY-01A kernel checkpoint")
-    ap.add_argument("stage", choices=["t0", "t1", "tp", "all", "packet", "t1_5"])
+    ap.add_argument("stage", choices=["t0", "t1", "tp", "all", "packet", "t1_5", "t2"])
     ap.add_argument("--sample-n", type=int, default=T1_SAMPLE_N)
     ap.add_argument("--cap", type=int, default=T1_5_CAP)
     ap.add_argument("--b", type=int, default=T1_5_B)
     ap.add_argument("--seed", type=int, default=T1_5_SEED)
-    args = ap.parse_args(argv)
+    return ap
+
+
+def main(argv=None) -> int:
+    args = build_parser().parse_args(argv)
 
     if args.stage == "t0":
         print(t0_synthetic())
@@ -1618,6 +1807,40 @@ def main(argv=None) -> int:
         print("counters:", res["counters"])
         print("GOVERNANCE model_fit_count:", res["governance"]["model_fit_count"],
               "t1_5_run:", res["governance"]["t1_5_run"], "t2_run:", res["governance"]["t2_run"])
+        print("row_artifact_sha256:", res["row_artifact"]["sha256"])
+        print("summary_artifact_sha256:", res["summary_artifact"]["sha256"])
+        print("manifest_artifact_sha256:", res["manifest_artifact"]["sha256"])
+        print("local_git_head:", res["local_git_head"])
+    elif args.stage == "t2":
+        # Formal T2 uses the FROZEN B=2000 unless the operator explicitly overrides via --b.
+        t2_b = args.b if args.b != T1_5_B else T2_B
+        res = build_t2_artifact(B=t2_b)
+        integ = res["data_integrity"]
+        dg = res["D_geometry"]
+        print("wrote", EVID / res["row_artifact"]["path"], "rows", res["row_artifact"]["rows"])
+        print("wrote", EVID / res["summary_artifact"]["path"])
+        print("STAGE: T2  scope: FORMAL full-population inference evaluation (NO model fit)")
+        print("population rows:", integ["selected_rows"],
+              "symbols:", integ["n_symbols"], "trading_days:", integ["n_trading_days_total"])
+        print("integrity all_clean:", integ["all_clean"],
+              "unmatched_rows:", integ["unmatched_rows"],
+              "dup_label_keys:", integ["duplicate_label_keys"],
+              "dup_post_join_keys:", integ["duplicate_post_join_keys"],
+              "missing_td:", integ["missing_trading_day"],
+              "missing_true_return:", integ["missing_true_return"])
+        print("POOLED D_geom:", round(float(dg["pooled"]["observed_D"]), 4),
+              "CI[", round(float(dg["pooled"]["bootstrap_ci_low"]), 4), ",",
+              round(float(dg["pooled"]["bootstrap_ci_high"]), 4), "]",
+              "n_valid_reps:", dg["pooled"]["n_valid_reps"])
+        for sym, v in dg["per_symbol"].items():
+            print(f"  {sym}: D={float(v['observed_D']):+.4f} "
+                  f"CI[{float(v['bootstrap_ci_low']):+.4f},{float(v['bootstrap_ci_high']):+.4f}] "
+                  f"N={v['n']} days={v['n_trading_days']} reps={v['n_valid_reps']}")
+        print("runtime_seconds:", round(res["runtime_seconds"], 2))
+        print("counters:", res["counters"])
+        print("GOVERNANCE model_fit_count:", res["governance"]["model_fit_count"],
+              "t2_run:", res["governance"]["t2_run"],
+              "full_population_run:", res["governance"]["full_population_high_low_run"])
         print("row_artifact_sha256:", res["row_artifact"]["sha256"])
         print("summary_artifact_sha256:", res["summary_artifact"]["sha256"])
         print("manifest_artifact_sha256:", res["manifest_artifact"]["sha256"])

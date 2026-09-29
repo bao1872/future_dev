@@ -679,3 +679,177 @@ def test_manifest_generator_commit_is_full_sha(tmp_path):
     assert len(manifest["generator_commit"]) == 40, manifest["generator_commit"]
     # also reflected on the returned result object
     assert res["local_git_head"] == manifest["generator_commit"]
+
+
+# --------------------------------------------------------------------------- #
+# T2 — formal full-population runner (CODE + TESTS ONLY; no formal 2000-bootstrap  #
+# full-population run here; tests use small B / temp dirs / synthetic fixtures).     #
+# --------------------------------------------------------------------------- #
+# A. Full population — no cap
+def test_load_t2_frame_full_population_no_cap():
+    df = M.load_t2_frame()
+    meta = df.attrs["join_meta"]
+    # T2 contract: selected_rows == full_rows_post_join (no cap/subsampling).
+    assert len(df) == meta["full_rows_post_join"]
+    # lossless canonical join (loader hard-fails on any drop, so these are measured 0).
+    assert meta["unmatched_rows"] == 0
+    assert meta["duplicate_label_keys"] == 0
+    assert meta["duplicate_post_join_keys"] == 0
+    # lossless join => pre == post.
+    assert meta["full_oof_rows_pre_join"] == meta["full_rows_post_join"]
+    # NO T1.5 cap logic: the full canonical OOF population, strictly larger than the
+    # cap-1000 subset (15*1000). We assert the *contract* (== measured post-join), not
+    # a hardcoded 83194.
+    assert len(df) == meta["full_rows_post_join"]
+    assert len(df) > 15 * 1000
+    # all 15 symbols + both sides present
+    assert df["symbol"].nunique() == 15
+    assert set(df["side"].unique()) == {"LONG", "SHORT"}
+    # trading_day attached, no missing
+    assert "trading_day" in df.columns
+    assert df["trading_day"].isna().sum() == 0
+
+
+# B. Single canonical load
+def test_t2_build_single_load_no_reload(tmp_path):
+    import unittest.mock as mock
+    import hashlib
+    real = M.load_t2_frame
+    captured = {}
+
+    def spy():
+        d = real()
+        captured["df"] = d
+        return d
+
+    with mock.patch.object(M, "load_t2_frame", side_effect=spy) as m:
+        res = M.build_t2_artifact(B=3, evidence_dir=tmp_path)
+    assert m.call_count == 1, m.call_count
+    # row artifact must be byte-identical to a parquet written from the SAME one df
+    chk = tmp_path / "check.parquet"
+    captured["df"][M.T1_5_ROW_COLUMNS].to_parquet(chk, index=False)
+
+    def _sha(p):
+        h = hashlib.sha256()
+        with open(p, "rb") as f:
+            for c in iter(lambda: f.read(65536), b""):
+                h.update(c)
+        return h.hexdigest()
+    assert _sha(chk) == res["row_artifact"]["sha256"]
+    assert res["runtime_seconds"] >= res.get("analysis_runtime_seconds", 0)
+    pc = res["pipeline_counters"]
+    assert pc["candidate_load_count"] == 1, pc
+    assert pc["model_fit_count"] == 0, pc
+    assert pc["reference_call_count"] == 0, pc
+    assert pc["full_history_recompute_count"] == 0, pc
+    assert res["manifest_runtime_seconds"] >= res["runtime_seconds"]
+
+
+# C. No model / reference / full-history work
+def test_t2_no_model_reference_full_history():
+    res = M.run_t2(B=3)
+    pc = res["counters"]  # run_t2 returns run-local counter deltas under "counters"
+    assert pc["model_fit_count"] == 0
+    assert pc["reference_call_count"] == 0
+    assert pc["full_history_recompute_count"] == 0
+    assert res["governance"]["model_fit_count"] == 0
+    assert res["governance"]["t2_run"] is True
+    assert res["governance"]["full_population_high_low_run"] is True
+    assert res["governance"]["t1_5_run"] is False
+
+
+# D. T2 schema (small B for the TEST only)
+def test_t2_schema_small_b():
+    res = M.run_t2(B=3)
+    dg = res["D_geometry"]
+    assert isinstance(dg["pooled"], dict) and "observed_D" in dg["pooled"]
+    for entry in [dg["pooled"]] + list(dg["per_symbol"].values()) + list(dg["by_side"].values()):
+        for k in ("observed_D", "bootstrap_mean", "bootstrap_ci_low",
+                  "bootstrap_ci_high", "n", "n_trading_days", "n_valid_reps"):
+            assert k in entry
+        assert entry["n_valid_reps"] > 0
+    assert set(dg["by_side"].keys()) == {"LONG", "SHORT"}
+    assert len(dg["per_symbol"]) == 15  # every symbol present
+    # diagnostics present
+    assert len(res["p_win_decile_diagnostic"]) == M.N_P_BINS
+    assert len(res["diagnostic_C_old_payoff_models"]) == M.N_P_BINS
+    assert "P_win_given_FAVORABLE_FIRST" in res["event_semantics"]
+    assert "P_loss_given_ADVERSE_FIRST" in res["event_semantics"]
+    # hard gates from data integrity
+    integ = res["data_integrity"]
+    assert integ["unmatched_rows"] == 0
+    assert integ["duplicate_label_keys"] == 0
+    assert integ["duplicate_post_join_keys"] == 0
+    assert integ["selected_rows"] == integ["full_rows_post_join"]
+    assert integ["n_symbols"] == 15
+    assert set(integ["sides"]) == {"LONG", "SHORT"}
+    assert integ["all_clean"] is True
+
+
+# E. Artifact provenance (temp dir; official evidence NOT regenerated; T1.5 untouched)
+def test_t2_artifact_provenance(tmp_path):
+    import json
+    res = M.build_t2_artifact(B=3, evidence_dir=tmp_path)
+    manifest_path = tmp_path / "payoff_geometry_01a_t2_manifest.json"
+    summary_path = tmp_path / "payoff_geometry_01a_t2_summary.json"
+    rows_path = tmp_path / "payoff_geometry_01a_t2_rows.parquet"
+    assert manifest_path.exists() and summary_path.exists() and rows_path.exists()
+    manifest = json.loads(manifest_path.read_text())
+    # full 40-char HEAD
+    assert manifest["generator_commit"] == M._git_head_sha()
+    assert len(manifest["generator_commit"]) == 40
+    # STAGE == T2
+    assert manifest["STAGE"] == "T2"
+    # required manifest fields
+    for k in ("TASK_ID", "config", "row_path", "row_rows", "row_sha256",
+              "summary_path", "summary_sha256", "summary_bytes",
+              "runtime_seconds", "model_fit_count"):
+        assert k in manifest, f"missing manifest key {k}"
+    # row/summary hashes match generated files
+    assert manifest["row_sha256"] == M._sha256_file(rows_path)
+    assert manifest["summary_sha256"] == M._sha256_file(summary_path)
+    # row_rows == full_rows_post_join == selected_rows (T2 contract)
+    integ = res["data_integrity"]
+    assert manifest["row_rows"] == integ["full_rows_post_join"]
+    assert manifest["row_rows"] == integ["selected_rows"]
+    # T1.5 artifacts untouched in this temp dir
+    t1_5_files = list(tmp_path.glob("payoff_geometry_01a_t1_5_*"))
+    assert t1_5_files == [], f"T1.5 artifacts unexpectedly written: {t1_5_files}"
+
+
+# F. Row round trip
+def test_t2_row_artifact_round_trip():
+    import tempfile, os
+    df = M.load_t2_frame()
+    tmp = os.path.join(tempfile.mkdtemp(), "t2_rows.parquet")
+    df[M.T1_5_ROW_COLUMNS].to_parquet(tmp, index=False)
+    back = pd.read_parquet(tmp)
+
+    # pooled observed D
+    d0 = M.compute_stratified_geometry_contrast(df)["D_geometry"]
+    d1 = M.compute_stratified_geometry_contrast(back)["D_geometry"]
+    assert abs(d0 - d1) < 1e-9
+
+    # one per-symbol observed D
+    sym = sorted(df["symbol"].unique().tolist())[0]
+    sd0 = M.compute_stratified_geometry_contrast(df[df["symbol"] == sym])["D_geometry"]
+    sd1 = M.compute_stratified_geometry_contrast(back[back["symbol"] == sym])["D_geometry"]
+    assert abs(sd0 - sd1) < 1e-9
+
+    # first Diagnostic C actual_win_magnitude
+    c0 = M.diag_old_payoff_model(df)[0]["actual_win_magnitude"]
+    c1 = M.diag_old_payoff_model(back)[0]["actual_win_magnitude"]
+    assert abs(c0 - c1) < 1e-9
+
+
+# G. CLI wiring (parse only; do NOT invoke the formal default T2 during the suite)
+def test_cli_t2_wired_without_invoking_formal_run():
+    parser = M.build_parser()
+    # "t2" is a valid choice (does not raise)
+    assert parser.parse_args(["t2"]).stage == "t2"
+    # other stages still valid
+    assert parser.parse_args(["t1_5"]).stage == "t1_5"
+    assert parser.parse_args(["t0"]).stage == "t0"
+    # bogus stage still rejected
+    with pytest.raises(SystemExit):
+        parser.parse_args(["not_a_stage"])
