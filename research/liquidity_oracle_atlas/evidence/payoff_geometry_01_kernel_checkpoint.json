@@ -1,0 +1,113 @@
+{
+  "TASK_ID": "PAYOFF-GEOMETRY-01",
+  "REVIEWED_PARENT_SHA": "942a2e3",
+  "BASE_SHA": "942a2e3",
+  "LOCAL_SHA": "942a2e3",
+  "REMOTE_SHA": "PENDING_PUSH",
+  "git_status_note": "see `git status` at commit time",
+  "canonical_owner_map": {
+    "candidate/label/G/L/ATR/decision_time/label_available_time/split": "research/liquidity_oracle_atlas/structural_renewal_dataset_v1.py (R8)",
+    "p_win_model_frozen": "win_probability_model_v1.py (R9A)",
+    "p_win_oof_artifact": "artifacts/decomposed_value_v2/oof/A0_V1_DISJOINT_f*_td5.parquet",
+    "G_L_source": "artifacts/opportunity_value_v1/labels_{train,val,test}_v1.parquet [G,L,episode_return_atr,win]"
+  },
+  "label_contract": {
+    "binary": true,
+    "definition": "win = episode_return_atr > 0",
+    "timeout": "none (every episode resolves to a real signed ATR return; event_class NONE = horizon-close fallback, still a real return, NOT a third outcome)",
+    "tie": "y==0 counts as loss (strictly binary)",
+    "no_hit": "absorbed by horizon-close fallback (NONE), still win/loss by sign",
+    "nuance": "idealized realized = +/-G/+/-L only matches FAVORABLE_FIRST/ADVERSE_FIRST; true_episode_return_atr carried separately for honesty"
+  },
+  "G_owner": "structural_renewal_dataset_v1.bracket_metrics: g=side*(favorable-close)/atr",
+  "L_owner": "structural_renewal_dataset_v1.bracket_metrics: l=side*(close-adverse)/atr",
+  "unit": "ATR (single decision-time m15_atr owner; same ATR for G and L)",
+  "availability_time": "G/L use decision-bar close + decision-time atr (<= decision_time); win/episode_return_atr are future labels (evaluation only)",
+  "geometry": {
+    "N_checked": 2000,
+    "unique_G": 2000,
+    "unique_L": 2000,
+    "fixed_or_variable": "VARIABLE_GEOMETRY_CONTINUE"
+  },
+  "T0": {
+    "case1": {
+      "p_score": 0.6,
+      "known_ev_score": 0.4999999999999999,
+      "realized_label_return_atr": 1.5,
+      "prod_known_ev": 0.4999999999999999,
+      "prod_realized": 1.5
+    },
+    "case2": {
+      "p_score": 0.6,
+      "known_ev_score": 0.4999999999999999,
+      "realized_label_return_atr": -1.0,
+      "prod_known_ev": 0.4999999999999999,
+      "prod_realized": -1.0
+    }
+  },
+  "T1": {
+    "rows": 2000,
+    "baseline_N_eq_treatment_N": true,
+    "p_win_min": 0.14339398637540668,
+    "p_win_max": 0.8779959241194266,
+    "g_min": 0.017229856462509904,
+    "g_max": 23.429443977010223,
+    "l_min": 0.027148492456895105,
+    "l_max": 18.982516112648923,
+    "units": "ATR (single decision-time m15_atr owner)",
+    "nan_required": {
+      "p_win": 0,
+      "tp_distance_atr": 0,
+      "sl_distance_atr": 0,
+      "y_win": 0
+    },
+    "availability_causal": true,
+    "geometry_gate": "VARIABLE_GEOMETRY_CONTINUE",
+    "differential": {
+      "rows_compared": 2000,
+      "cells_compared": 6000,
+      "mismatch_count": 0,
+      "max_abs_error": 0.0,
+      "first_mismatch": null
+    },
+    "neg_math_wrongsign_fail": true,
+    "neg_label_swap_fail": true,
+    "neg_key_misalign_fail": true,
+    "neg_causality_unchanged": true,
+    "neg_reference_call_in_prod": true
+  },
+  "TP": {
+    "N": 10000,
+    "t_N": 0.0002494169748388231,
+    "t_2N": 0.00029995798831805587,
+    "t_4N": 0.0006397910183295608,
+    "ratio_2N": 1.2026366229158747,
+    "ratio_4N": 2.1329354217803598,
+    "gate_2N_pass": true,
+    "gate_4N_pass": true,
+    "complexity": "O(N) expected; ratios should approach 2.0"
+  },
+  "counters": {
+    "raw_load_count": 5,
+    "candidate_load_count": 5,
+    "pwin_load_count": 5,
+    "label_geometry_load_count": 5,
+    "model_fit_count": 0,
+    "feature_recompute_count": 0,
+    "label_recompute_count": 0,
+    "reference_call_count": 0,
+    "full_history_recompute_count": 0,
+    "concat_hotloop_count": 0,
+    "score_row_count": 78004
+  },
+  "governance": {
+    "model_fits": 0,
+    "dev_test_reads": 0,
+    "pgm_evc_win_payoff_refits": 0,
+    "forbidden_imports": "none (numpy/pandas/dataclasses/math/pathlib only)"
+  },
+  "reviewer_decision_required": [
+    "PROCEED_TO_T1_5 (small-sample end-to-end evaluation: uplift / decile / bootstrap)",
+    "PROCEED_TO_T2 (single formal full evaluation)"
+  ]
+}
