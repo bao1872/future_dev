@@ -327,13 +327,18 @@ def stratified_d_geometry_breakdown(df: pd.DataFrame,
     question: "within this instrument's own win-rate distribution, do higher-G/L
     trades have better true returns?"
 
-    If ``with_ci`` is True, each entry becomes a dict with:
-        observed_D, n, n_trading_days, bootstrap_ci_low, bootstrap_ci_high,
-        n_valid_reps
-    and the per-symbol / per-side day-block bootstrap reuses the SAME corrected
-    owner (all days retained, with-replacement, multiplicity preserved). The
-    caller must pass ``df`` already carrying a ``trading_day`` column (or have it
-    resolvable) for CI to be computed; otherwise CI is omitted with a note.
+    If ``with_ci`` is True, each entry becomes a dict with the SAME schema for
+    EVERY universe (pooled, per-symbol, per-side):
+        observed_D, bootstrap_mean, n, n_trading_days, bootstrap_ci_low,
+        bootstrap_ci_high, n_valid_reps
+    When CI cannot be computed (n < 50 or no ``trading_day``), bootstrap_mean /
+    bootstrap_ci_low / bootstrap_ci_high are present but ``None`` and
+    ``n_valid_reps == 0`` -- the KEY SET is identical, only the values are null.
+
+    The per-symbol / per-side day-block bootstrap reuses the SAME corrected owner
+    (all days retained, with-replacement, multiplicity preserved). The caller must
+    pass ``df`` already carrying a ``trading_day`` column (or have it resolvable)
+    for CI to be computed; otherwise CI is omitted with a note.
     """
     def _entry(sub: pd.DataFrame, edges: np.ndarray) -> object:
         # edges are frozen WITHIN this universe S (passed by the caller)
@@ -342,9 +347,11 @@ def stratified_d_geometry_breakdown(df: pd.DataFrame,
             return D
         n = len(sub)
         if n < 50 or "trading_day" not in sub.columns:
-            return {"observed_D": D, "n": n, "n_trading_days": None,
-                    "bootstrap_ci_low": None, "bootstrap_ci_high": None,
-                    "n_valid_reps": 0,
+            # SAME schema as the CI branch: bootstrap_mean/CI are present (None) so
+            # every universe reports an identical key set. (Estimator unchanged.)
+            return {"observed_D": D, "bootstrap_mean": None, "n": n,
+                    "n_trading_days": None, "bootstrap_ci_low": None,
+                    "bootstrap_ci_high": None, "n_valid_reps": 0,
                     "note": "insufficient rows or no trading_day for CI"}
         b = bootstrap_d_geometry(sub, b=bootstrap_reps, block=block,
                                  p_bin_edges=edges)
@@ -457,6 +464,12 @@ def load_audit_frame(sample_n: int | None = None, seed: int = BOOTSTRAP_SEED) ->
             f"lost on join (silent drop forbidden)")
     if merged.duplicated(subset=key_cols).any():
         raise ValueError("duplicate candidate key after join (ambiguous alignment)")
+    # Measure duplicate_post_join_keys on the FULL post-join frame, BEFORE any
+    # optional sample/subset, so it belongs to the same full canonical-join universe
+    # as full_oof_rows_pre_join / full_rows_post_join / unmatched_rows /
+    # duplicate_label_keys. Hard-fail above guarantees this is 0, but it is measured
+    # here (not after sampling) so the evidence is defined consistently.
+    duplicate_post_join = int(merged.duplicated(subset=key_cols).sum())
 
     merged = merged.rename(columns={
         "G": "G", "L": "L",
@@ -479,7 +492,6 @@ def load_audit_frame(sample_n: int | None = None, seed: int = BOOTSTRAP_SEED) ->
     # placeholder). These numbers describe the FULL (pre-sample) join universe and
     # are MEASURED, not inferred: the loader hard-fails above if any of them would
     # be non-zero, so a non-zero value can never silently reach the packet.
-    duplicate_post_join = int(merged.duplicated(subset=key_cols).sum())
     merged.attrs["join_meta"] = {
         "full_oof_rows_pre_join": int(pre_join_rows),
         "full_rows_post_join": int(post_join_rows),
@@ -504,8 +516,11 @@ def load_t1_5_frame(cap_per_symbol: int = 1000, seed: int = 20260929,
 
     The canonical join evidence (pre/post rows, unmatched, duplicate keys) is
     propagated on ``df.attrs["join_meta"]`` so the analysis never re-hardcodes 0.
+
+    NOTE: the canonical candidate load is counted ONCE inside load_audit_frame (which
+    this function calls); we do NOT re-increment here, so one logical T1.5 frame load
+    yields exactly one candidate_load_count increment.
     """
-    COUNTERS["candidate_load_count"] += 1
     full = load_audit_frame(sample_n=None, seed=seed)  # full clean join, no random cap
     join_meta = dict(full.attrs.get("join_meta", {}))   # measured, propagated
     rng = np.random.default_rng(seed)
@@ -1388,11 +1403,18 @@ def run_t1_5(df: pd.DataFrame | None = None, cap_per_symbol: int = T1_5_CAP,
     T1.5 PASS does NOT require D>0; it validates the engineering + statistics
     pipeline (keys correct, no silent drop, valid bootstrap, complete per-symbol
     output, point/CI parity, artifact schema, runtime vs TP budget, no model fit).
+
+    Reported counters are RUN-LOCAL deltas (before/after this call), not arbitrary
+    accumulated module history, so the Evidence Packet describes THIS execution.
     """
     t0 = time.perf_counter()
+    counters_before = dict(COUNTERS)
     if df is None:
         df = load_t1_5_frame(cap_per_symbol=cap_per_symbol, seed=seed)
     core = analyze_frame(df, B=B)
+    counters_after = dict(COUNTERS)
+    counters_delta = {k: counters_after.get(k, 0) - counters_before.get(k, 0)
+                      for k in counters_before}
     analysis_sec = time.perf_counter() - t0
     return {
         "TASK_ID": TASK_ID,
@@ -1411,9 +1433,10 @@ def run_t1_5(df: pd.DataFrame | None = None, cap_per_symbol: int = T1_5_CAP,
             "p_bin_edges_rule": "per-analysis-universe quantiles of p_win (frozen within S)",
         },
         **core,
-        "counters": dict(COUNTERS),
+        "counters": counters_delta,           # run-local delta
+        "counters_global": dict(COUNTERS),   # full module history for context
         "governance": {
-            "model_fit_count": COUNTERS["model_fit_count"],
+            "model_fit_count": counters_delta.get("model_fit_count", 0),
             "t1_5_run": True,
             "t2_run": False,
             "full_population_high_low_run": False,
@@ -1429,6 +1452,7 @@ def build_t1_5_artifact(cap_per_symbol: int = T1_5_CAP, seed: int = T1_5_SEED,
                         B: int = T1_5_B, evidence_dir: Path | None = None) -> dict:
     out_dir = evidence_dir if evidence_dir is not None else EVID
     t0 = time.perf_counter()
+    counters_before = dict(COUNTERS)
     # Load EXACTLY ONCE, then reuse the same frame for analysis AND the row artifact.
     df = load_t1_5_frame(cap_per_symbol=cap_per_symbol, seed=seed)
     result = run_t1_5(df=df, cap_per_symbol=cap_per_symbol, seed=seed, B=B)
@@ -1448,9 +1472,30 @@ def build_t1_5_artifact(cap_per_symbol: int = T1_5_CAP, seed: int = T1_5_SEED,
         "rows": int(len(rows_df)),
         "columns": list(T1_5_ROW_COLUMNS),
     }
-    # full-pipeline runtime (load -> analysis -> artifact writes)
+
+    # summary JSON (v0): written once so runtime_seconds can be measured AFTER it and
+    # therefore genuinely cover load + analysis + row parquet + summary JSON write.
+    summary_text = json.dumps(_t1_5_jsonable(result), indent=2, allow_nan=False)
+    summary_path.write_text(summary_text)
+    summary_sha = _sha256_file(summary_path)
+
+    # runtime_seconds: wall time covering load + analysis + row parquet + summary JSON
+    # write. The manifest write below and the final summary rewrite are measured
+    # separately (manifest_runtime_seconds); a file cannot measure the cost of writing
+    # itself, so those terminal writes are the explicit documented boundary.
     result["runtime_seconds"] = float(time.perf_counter() - t0)
 
+    # run-local pipeline counters: deltas over the ENTIRE load -> analysis -> artifact
+    # path (so the Evidence Packet reports THIS execution, not accumulated history).
+    counters_after = dict(COUNTERS)
+    result["pipeline_counters"] = {
+        k: counters_after.get(k, 0) - counters_before.get(k, 0)
+        for k in counters_before
+    }
+
+    # summary JSON (v1, final): rewrite to embed runtime_seconds + pipeline_counters.
+    # The manifest below references THIS final summary sha/bytes, so provenance stays
+    # consistent (manifest.summary_sha == on-disk summary sha).
     summary_text = json.dumps(_t1_5_jsonable(result), indent=2, allow_nan=False)
     summary_path.write_text(summary_text)
     summary_sha = _sha256_file(summary_path)
@@ -1474,11 +1519,17 @@ def build_t1_5_artifact(cap_per_symbol: int = T1_5_CAP, seed: int = T1_5_SEED,
         "note": "row-level parquet is the row artifact; summary JSON embeds row_artifact.sha256; "
                 "this manifest records both SHAs for provenance. T1.5 only; T2 NOT run. "
                 "generator_commit MUST equal the committed code SHA (artifact generated only "
-                "after code is committed + pushed).",
+                "after code is committed + pushed). runtime_seconds covers load+analysis+row "
+                "parquet+summary write; the full wall time through manifest completion is reported "
+                "in the returned result as manifest_runtime_seconds.",
     }
     manifest_text = json.dumps(manifest, indent=2, sort_keys=True)
     manifest_path.write_text(manifest_text)
     manifest_sha = _sha256_file(manifest_path)
+
+    # full pipeline wall runtime through manifest completion. The manifest's own terminal
+    # byte-write is the only excluded sub-millisecond piece (documented boundary above).
+    result["manifest_runtime_seconds"] = float(time.perf_counter() - t0)
 
     result["summary_artifact"] = {
         "path": summary_path.name,

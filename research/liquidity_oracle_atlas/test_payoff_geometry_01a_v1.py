@@ -561,6 +561,16 @@ def test_t1_5_build_single_load_no_reload(tmp_path):
         return h.hexdigest()
     assert _sha(chk) == res["row_artifact"]["sha256"]
     assert res["runtime_seconds"] >= res.get("analysis_runtime_seconds", 0)
+    # (D) reported pipeline counters are RUN-LOCAL deltas over the whole
+    # load -> analysis -> artifact-write path (not accumulated module history).
+    pc = res["pipeline_counters"]
+    assert pc["candidate_load_count"] == 1, pc
+    assert pc["model_fit_count"] == 0, pc
+    assert pc["reference_call_count"] == 0, pc
+    assert pc["full_history_recompute_count"] == 0, pc
+    # runtime_seconds must cover the summary JSON write (build writes summary before
+    # measuring), and manifest_runtime_seconds covers through manifest completion.
+    assert res["manifest_runtime_seconds"] >= res["runtime_seconds"]
 
 
 def test_t1_5_row_artifact_round_trip():
@@ -588,3 +598,51 @@ def test_t1_5_row_artifact_round_trip():
     c0 = M.diag_old_payoff_model(df)[0]["actual_win_magnitude"]
     c1 = M.diag_old_payoff_model(back)[0]["actual_win_magnitude"]
     assert abs(c0 - c1) < 1e-9
+
+
+def test_bootstrap_schema_insufficient_ci_branch():
+    # (A) When a universe has n < 50 (or no trading_day), _entry must still return the
+    # COMPLETE schema including bootstrap_mean (None), not drop the key. cap_per_symbol=30
+    # makes every per-symbol universe fall into the insufficient-CI branch.
+    df = M.load_t1_5_frame(cap_per_symbol=30, seed=20260929)
+    bd = M.stratified_d_geometry_breakdown(df, with_ci=True, bootstrap_reps=5)
+    required = {"observed_D", "bootstrap_mean", "n", "n_trading_days",
+                "bootstrap_ci_low", "bootstrap_ci_high", "n_valid_reps"}
+    for sym, entry in bd["per_symbol"].items():
+        # COMPLETE schema is present for every universe (the insufficient-CI branch
+        # additionally returns a 'note', so we check the required keys are a subset).
+        assert required.issubset(entry.keys()), entry.keys()
+        assert "note" in entry
+        assert entry["n"] <= 50
+        assert entry["bootstrap_mean"] is None
+        assert entry["bootstrap_ci_low"] is None
+        assert entry["bootstrap_ci_high"] is None
+        assert entry["n_valid_reps"] == 0
+    # pooled (all rows) clears n>=50 -> CI branch, bootstrap_mean is a real float
+    assert isinstance(bd["pooled"]["bootstrap_mean"], float)
+    assert bd["pooled"]["n_valid_reps"] > 0
+
+
+def test_full_join_duplicate_pre_sample():
+    # (B) duplicate_post_join_keys must belong to the FULL (pre-sample) canonical join
+    # universe, NOT the optionally sampled frame. load_audit_frame hard-fails if any
+    # duplicate exists, so both are 0 here, but the SAME value must be reported whether
+    # or not a sample is taken (proving it is measured before the sample step).
+    meta_full = M.load_audit_frame(sample_n=None).attrs["join_meta"]
+    meta_sampled = M.load_audit_frame(sample_n=100).attrs["join_meta"]
+    for meta in (meta_full, meta_sampled):
+        assert "duplicate_post_join_keys" in meta
+        assert "duplicate_label_keys" in meta
+        assert "full_oof_rows_pre_join" in meta
+        assert "full_rows_post_join" in meta
+    # duplicate_post_join_keys is independent of sampling (same full universe)
+    assert meta_sampled["duplicate_post_join_keys"] == meta_full["duplicate_post_join_keys"]
+    # but sampled_rows differs, proving the duplicate count is NOT post-sample
+    assert meta_sampled["sampled_rows"] == 100
+    assert meta_full["sampled_rows"] == meta_full["full_rows_post_join"]
+    # all full-universe canonical-join keys reference the same pre-sample universe
+    assert meta_full["full_oof_rows_pre_join"] == meta_full["full_rows_post_join"]
+    # loader hard-fails on any duplicate, so these are genuinely 0 (measured, not a
+    # hardcoded placeholder) -- and they are reported from the full join universe.
+    assert meta_full["duplicate_label_keys"] == 0
+    assert meta_full["duplicate_post_join_keys"] == 0
