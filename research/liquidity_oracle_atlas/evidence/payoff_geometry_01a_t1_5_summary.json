@@ -14,10 +14,15 @@
     "p_bin_edges_rule": "per-analysis-universe quantiles of p_win (frozen within S)"
   },
   "data_integrity": {
+    "full_oof_rows_pre_join": 83194,
+    "full_rows_post_join": 83194,
+    "unmatched_rows": 0,
+    "duplicate_label_keys": 0,
+    "duplicate_post_join_keys": 0,
+    "selected_rows": 15000,
     "input_oof_rows_selected": 15000,
     "joined_rows": 15000,
-    "unmatched": 0,
-    "duplicate_keys": 0,
+    "duplicate_keys_within_subset": 0,
     "missing_trading_day": 0,
     "missing_G": 0,
     "missing_L": 0,
@@ -50,6 +55,7 @@
   "D_geometry": {
     "pooled": {
       "observed_D": -0.021427693442952537,
+      "bootstrap_mean": -0.029249339621757627,
       "n": 15000,
       "n_trading_days": 144,
       "bootstrap_ci_low": -0.27524893162847236,
@@ -59,6 +65,7 @@
     "per_symbol": {
       "AG": {
         "observed_D": 0.20355314637525285,
+        "bootstrap_mean": 0.2681199266436085,
         "n": 1000,
         "n_trading_days": 127,
         "bootstrap_ci_low": -0.6264040757455493,
@@ -67,6 +74,7 @@
       },
       "AL": {
         "observed_D": -0.06503549955299749,
+        "bootstrap_mean": -0.0694686981628404,
         "n": 1000,
         "n_trading_days": 126,
         "bootstrap_ci_low": -0.9229678956637731,
@@ -75,6 +83,7 @@
       },
       "AU": {
         "observed_D": 0.04809297232420943,
+        "bootstrap_mean": 0.11341142925867023,
         "n": 1000,
         "n_trading_days": 134,
         "bootstrap_ci_low": -1.1290960341604432,
@@ -83,6 +92,7 @@
       },
       "CF": {
         "observed_D": 0.5812084812631436,
+        "bootstrap_mean": 0.663934586504223,
         "n": 1000,
         "n_trading_days": 111,
         "bootstrap_ci_low": -0.2086558947860587,
@@ -91,6 +101,7 @@
       },
       "CU": {
         "observed_D": -0.17993229365741467,
+        "bootstrap_mean": -0.3547020187120485,
         "n": 1000,
         "n_trading_days": 128,
         "bootstrap_ci_low": -1.1097658556317227,
@@ -99,6 +110,7 @@
       },
       "I": {
         "observed_D": -0.28284637907078736,
+        "bootstrap_mean": -0.16282351101072778,
         "n": 1000,
         "n_trading_days": 111,
         "bootstrap_ci_low": -1.0512239367222167,
@@ -107,6 +119,7 @@
       },
       "M": {
         "observed_D": 0.3122188569303802,
+        "bootstrap_mean": 0.23032237824512578,
         "n": 1000,
         "n_trading_days": 114,
         "bootstrap_ci_low": -1.156932126584542,
@@ -115,6 +128,7 @@
       },
       "MA": {
         "observed_D": -0.7989142793633282,
+        "bootstrap_mean": -0.7946427844127284,
         "n": 1000,
         "n_trading_days": 130,
         "bootstrap_ci_low": -1.4859653048128674,
@@ -123,6 +137,7 @@
       },
       "NI": {
         "observed_D": 0.37428681936322755,
+        "bootstrap_mean": 0.36202926126713386,
         "n": 1000,
         "n_trading_days": 129,
         "bootstrap_ci_low": -0.18995203755768422,
@@ -131,6 +146,7 @@
       },
       "P": {
         "observed_D": -0.030756955502984688,
+        "bootstrap_mean": -0.08080954760852965,
         "n": 1000,
         "n_trading_days": 120,
         "bootstrap_ci_low": -0.9266134748693122,
@@ -139,6 +155,7 @@
       },
       "RB": {
         "observed_D": -0.4024010494064505,
+        "bootstrap_mean": -0.41654540197938295,
         "n": 1000,
         "n_trading_days": 124,
         "bootstrap_ci_low": -1.3626858856174404,
@@ -147,6 +164,7 @@
       },
       "RU": {
         "observed_D": 0.12633209945406257,
+        "bootstrap_mean": 0.1309842736337764,
         "n": 1000,
         "n_trading_days": 130,
         "bootstrap_ci_low": -0.5138826555262173,
@@ -155,6 +173,7 @@
       },
       "SC": {
         "observed_D": -0.02518226597967198,
+        "bootstrap_mean": 0.010763772726494267,
         "n": 1000,
         "n_trading_days": 128,
         "bootstrap_ci_low": -0.6766510187692396,
@@ -163,6 +182,7 @@
       },
       "SN": {
         "observed_D": 0.2640445282579881,
+        "bootstrap_mean": 0.2548147973601837,
         "n": 1000,
         "n_trading_days": 133,
         "bootstrap_ci_low": -0.3491879164593455,
@@ -171,6 +191,7 @@
       },
       "TA": {
         "observed_D": -0.5700359011966104,
+        "bootstrap_mean": -0.5288173421400316,
         "n": 1000,
         "n_trading_days": 119,
         "bootstrap_ci_low": -1.0532260723852698,
@@ -181,6 +202,7 @@
     "by_side": {
       "LONG": {
         "observed_D": 0.04069083593745451,
+        "bootstrap_mean": 0.02587578027035766,
         "n": 7562,
         "n_trading_days": 144,
         "bootstrap_ci_low": -0.2577311062120106,
@@ -189,6 +211,7 @@
       },
       "SHORT": {
         "observed_D": -0.12580334999735246,
+        "bootstrap_mean": -0.12421914793239704,
         "n": 7438,
         "n_trading_days": 144,
         "bootstrap_ci_low": -0.4104131433428528,
@@ -556,8 +579,22 @@
     "event_synthetic_note": "DIAGNOSTIC_ONLY: FAVORABLE_FIRST->+G, ADVERSE_FIRST->-L; BOTH_SAME_BAR/NONE undefined (no barrier resolution)"
   },
   "counters": {
+    "raw_load_count": 0,
+    "candidate_load_count": 0,
+    "pwin_load_count": 0,
+    "label_geometry_load_count": 0,
+    "model_fit_count": 0,
+    "feature_recompute_count": 0,
+    "label_recompute_count": 0,
+    "reference_call_count": 0,
+    "full_history_recompute_count": 0,
+    "concat_hotloop_count": 0,
+    "score_row_count": 22612158,
+    "bootstrap_rep_count": 9000
+  },
+  "counters_global": {
     "raw_load_count": 1,
-    "candidate_load_count": 2,
+    "candidate_load_count": 1,
     "pwin_load_count": 1,
     "label_geometry_load_count": 1,
     "model_fit_count": 0,
@@ -576,10 +613,10 @@
     "full_population_high_low_run": false,
     "scientific_interpretation": "NONE (E2E pipeline validation only; STOP FOR REVIEWER)"
   },
-  "runtime_seconds": 13.830304209,
+  "analysis_runtime_seconds": 13.334075583,
   "row_artifact": {
     "path": "payoff_geometry_01a_t1_5_rows.parquet",
-    "sha256": "0779488435357e73a7905f62d26ec2bdd8bcf7a5902f2352ecd861a4df380bd3",
+    "sha256": "ddaeab40a5a24f5a2505c0cae8e1bb4ec7fa5cac7e0041556ef59c6ac9268d32",
     "rows": 15000,
     "columns": [
       "symbol",
@@ -600,5 +637,20 @@
       "mu_loss",
       "predicted_rr"
     ]
+  },
+  "runtime_seconds": 14.034794541999998,
+  "pipeline_counters": {
+    "raw_load_count": 1,
+    "candidate_load_count": 1,
+    "pwin_load_count": 1,
+    "label_geometry_load_count": 1,
+    "model_fit_count": 0,
+    "feature_recompute_count": 0,
+    "label_recompute_count": 0,
+    "reference_call_count": 0,
+    "full_history_recompute_count": 0,
+    "concat_hotloop_count": 0,
+    "score_row_count": 22612158,
+    "bootstrap_rep_count": 9000
   }
 }

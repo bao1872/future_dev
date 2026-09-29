@@ -12,14 +12,14 @@
     "seed": 20260929,
     "top_frac": 0.2
   },
-  "generator_commit": "5083229",
+  "generator_commit": "83df16902d401da6f7bc6e86b9215889b2f2142c",
   "model_fit_count": 0,
-  "note": "row-level parquet is the row artifact; summary JSON embeds row_artifact.sha256; this manifest records both SHAs for provenance. T1.5 only; T2 NOT run.",
+  "note": "row-level parquet is the row artifact; summary JSON embeds row_artifact.sha256; this manifest records both SHAs for provenance. T1.5 only; T2 NOT run. generator_commit MUST equal the committed code SHA (artifact generated only after code is committed + pushed). runtime_seconds covers load+analysis+row parquet+summary write; the full wall time through manifest completion is reported in the returned result as manifest_runtime_seconds.",
   "row_path": "payoff_geometry_01a_t1_5_rows.parquet",
   "row_rows": 15000,
-  "row_sha256": "0779488435357e73a7905f62d26ec2bdd8bcf7a5902f2352ecd861a4df380bd3",
-  "runtime_seconds": 13.830304209,
-  "summary_bytes": 18963,
+  "row_sha256": "ddaeab40a5a24f5a2505c0cae8e1bb4ec7fa5cac7e0041556ef59c6ac9268d32",
+  "runtime_seconds": 14.034794541999998,
+  "summary_bytes": 20853,
   "summary_path": "payoff_geometry_01a_t1_5_summary.json",
-  "summary_sha256": "32332557edc7aaf0bd2dacfb835351ecfe26fd22098f5cd514d05e5f66ea8b8a"
+  "summary_sha256": "6f2fbacbdc8cb87ef352731d68f8ed165a10cf716d9ad8e720e73394d56cd08d"
 }
