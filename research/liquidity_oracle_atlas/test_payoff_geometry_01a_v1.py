@@ -470,3 +470,64 @@ def test_evidence_packet_builds():
     assert "stratified_breakdown" in pkt["T1"]
     assert "bootstrap_audit" in pkt["T1"]
     assert "observed_D" in pkt["T1"]["bootstrap_audit"]
+
+
+# --------------------------------------------------------------------------- #
+# T1.5 — E2E pipeline validation (lightweight; full run is cap=1000 B=500)       #
+# --------------------------------------------------------------------------- #
+def test_load_t1_5_frame_deterministic_and_capped():
+    a = M.load_t1_5_frame(cap_per_symbol=50, seed=20260929)
+    b = M.load_t1_5_frame(cap_per_symbol=50, seed=20260929)
+    # deterministic: identical across runs
+    pd.testing.assert_frame_equal(a, b)
+    # all symbols present, each capped at 50
+    assert a["symbol"].nunique() >= 2
+    counts = a["symbol"].value_counts()
+    assert int(counts.max()) <= 50
+    # LONG/SHORT both preserved
+    assert set(a["side"].unique()) == {"LONG", "SHORT"}
+    # trading_day attached, no missing
+    assert "trading_day" in a.columns
+    assert a["trading_day"].isna().sum() == 0
+
+
+def test_t1_5_artifact_schema_and_no_model_fit():
+    # cap high enough that every subgroup clears the n>=50 CI threshold
+    res = M.run_t1_5(cap_per_symbol=120, seed=20260929, B=5)
+    # 1. data integrity clean
+    assert res["data_integrity"]["all_clean"] is True
+    assert res["data_integrity"]["unmatched"] == 0
+    assert res["data_integrity"]["duplicate_keys"] == 0
+    # 2. D_geometry covers pooled + per-symbol + by-side, each with CI
+    dg = res["D_geometry"]
+    assert isinstance(dg["pooled"], dict) and "observed_D" in dg["pooled"]
+    # pooled (all symbols) and by-side (both sides) clear n>=50 -> CI present
+    for entry in [dg["pooled"]] + list(dg["by_side"].values()):
+        assert "observed_D" in entry and "bootstrap_ci_low" in entry
+        assert entry["n_trading_days"] is not None and entry["n_trading_days"] > 0
+        assert entry["n_valid_reps"] > 0
+    assert set(dg["by_side"].keys()) == {"LONG", "SHORT"}
+    for entry in dg["per_symbol"].values():
+        assert "observed_D" in entry and "bootstrap_ci_low" in entry
+        assert "n_valid_reps" in entry
+    # 3. diagnostics present
+    assert len(res["p_win_decile_diagnostic"]) == M.N_P_BINS
+    assert len(res["diagnostic_C_old_payoff_models"]) == M.N_P_BINS
+    assert "P_win_given_FAVORABLE_FIRST" in res["event_semantics"]
+    assert "P_loss_given_ADVERSE_FIRST" in res["event_semantics"]
+    # 4. governance: NO model fit, T1.5 flagged, T2 NOT run
+    assert res["governance"]["model_fit_count"] == 0
+    assert res["governance"]["t1_5_run"] is True
+    assert res["governance"]["t2_run"] is False
+
+
+def test_t1_5_row_artifact_regenerates_summary():
+    # the row parquet must reproduce the diagnostic-C win-head calibration exactly
+    df = M.load_t1_5_frame(cap_per_symbol=60, seed=20260929)
+    res = M.run_t1_5(cap_per_symbol=60, seed=20260929, B=3)
+    recomputed = M.diag_old_payoff_model(df)
+    # first p-bin actual_win_magnitude from summary must match recompute
+    summary_first = res["diagnostic_C_old_payoff_models"][0]
+    rc_first = recomputed[0]
+    assert abs(summary_first["actual_win_magnitude"] - rc_first["actual_win_magnitude"]) < 1e-12
+    assert abs(summary_first["win_bias"] - rc_first["win_bias"]) < 1e-12

@@ -486,6 +486,32 @@ def load_audit_frame(sample_n: int | None = None, seed: int = BOOTSTRAP_SEED) ->
     return merged.reset_index(drop=True)
 
 
+def load_t1_5_frame(cap_per_symbol: int = 1000, seed: int = 20260929) -> pd.DataFrame:
+    """Deterministic T1.5 subset.
+
+    ALL available symbols, each capped at ``cap_per_symbol`` OOF candidates, fixed
+    seed, NO outcome-based sampling, LONG/SHORT preserved. Built on top of the
+    already-validated clean join in load_audit_frame (which hard-fails on any
+    silent drop / duplicate key), then capped per symbol using a fixed-seed
+    within-symbol permutation so the selection depends ONLY on symbol and the seed,
+    never on the outcome. trading_day is attached (hard-fail if any unresolved).
+    """
+    COUNTERS["candidate_load_count"] += 1
+    full = load_audit_frame(sample_n=None, seed=seed)  # full clean join, no random cap
+    rng = np.random.default_rng(seed)
+    parts = []
+    for sym in sorted(full["symbol"].unique().tolist()):
+        sub = full[full["symbol"] == sym]
+        if len(sub) > cap_per_symbol:
+            # deterministic within-symbol shuffle; outcome never consulted
+            idx = rng.permutation(len(sub))[:cap_per_symbol]
+            sub = sub.iloc[idx]
+        parts.append(sub)
+    df = pd.concat(parts, ignore_index=True)
+    df = _attach_trading_day(df)  # hard-fail if any trading_day unresolved
+    return df.reset_index(drop=True)
+
+
 def _attach_trading_day(df: pd.DataFrame, require_all: bool = True) -> pd.DataFrame:
     """Attach canonical trading_day from frozen state_v1 (decision_bar == bar_index).
 
@@ -1231,13 +1257,208 @@ def build_evidence_packet() -> dict:
 
 
 # --------------------------------------------------------------------------- #
+# T1.5 — E2E pipeline validation (deterministic cap-1000/symbol subset)         #
+# --------------------------------------------------------------------------- #
+T1_5_CAP = 1000
+T1_5_B = 500
+T1_5_SEED = 20260929
+
+T1_5_ROW_COLUMNS = [
+    "symbol", "decision_time", "decision_bar", "side", "trading_day", "fold",
+    "p_win", "G", "L", "log_gl",
+    "true_episode_return_atr", "win", "event_class", "weights",
+    "mu_win", "mu_loss", "predicted_rr",
+]
+
+
+def _t1_5_jsonable(o):
+    """Recursively convert numpy scalars to native python and NaN/inf to None so
+    the summary JSON is strict JSON (allow_nan=False)."""
+    if isinstance(o, dict):
+        return {k: _t1_5_jsonable(v) for k, v in o.items()}
+    if isinstance(o, (list, tuple)):
+        return [_t1_5_jsonable(v) for v in o]
+    if isinstance(o, np.integer):
+        return int(o)
+    if isinstance(o, np.floating):
+        v = float(o)
+        return None if (math.isnan(v) or math.isinf(v)) else v
+    if isinstance(o, float):
+        return None if (math.isnan(o) or math.isinf(o)) else o
+    if isinstance(o, np.bool_):
+        return bool(o)
+    if isinstance(o, np.ndarray):
+        return _t1_5_jsonable(o.tolist())
+    if o is None or isinstance(o, (int, str, bool)):
+        return o
+    return str(o)
+
+
+def _sha256_file(p: Path) -> str:
+    h = hashlib.sha256()
+    with open(p, "rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def run_t1_5(cap_per_symbol: int = T1_5_CAP, seed: int = T1_5_SEED,
+             B: int = T1_5_B) -> dict:
+    """T1.5 E2E pipeline validation. NO model fit/refit/tune. NO T2.
+
+    Exercises: load -> deterministic subset -> trading_day attach -> data integrity
+    -> D_geometry (pooled/per-symbol/LONG/SHORT, B=500 day-block bootstrap) ->
+    p_win decile diagnostic -> Diagnostic C (conditional calibration of frozen old
+    payoff models) -> event-semantic reconciliation -> artifacts + SHA256.
+
+    T1.5 PASS does NOT require D>0; it validates the engineering + statistics
+    pipeline (keys correct, no silent drop, valid bootstrap, complete per-symbol
+    output, point/CI parity, artifact schema, runtime vs TP budget, no model fit).
+    """
+    t0 = time.perf_counter()
+    df = load_t1_5_frame(cap_per_symbol=cap_per_symbol, seed=seed)
+    n = len(df)
+
+    # --- 1. Data integrity (subset already a clean validated join) ---
+    dup_keys = int(df.duplicated(subset=["symbol", "decision_bar", "side"]).sum())
+    missing_trading_day = int(df["trading_day"].isna().sum())
+    missing_G = int(df["G"].isna().sum())
+    missing_L = int(df["L"].isna().sum())
+    missing_true_return = int(df["true_episode_return_atr"].isna().sum())
+    integrity = {
+        "input_oof_rows_selected": int(n),
+        "joined_rows": int(n),
+        "unmatched": 0,          # loader hard-fails on any join drop
+        "duplicate_keys": dup_keys,
+        "missing_trading_day": missing_trading_day,
+        "missing_G": missing_G,
+        "missing_L": missing_L,
+        "missing_true_return": missing_true_return,
+        "n_symbols": int(df["symbol"].nunique()),
+        "per_symbol_counts": {s: int(c) for s, c in df["symbol"].value_counts().items()},
+        "sides": sorted(df["side"].unique().tolist()),
+        "n_trading_days_total": int(df["trading_day"].nunique()),
+        "all_clean": bool(dup_keys == 0 and missing_trading_day == 0
+                          and missing_G == 0 and missing_L == 0
+                          and missing_true_return == 0),
+    }
+
+    # --- 2. D_geometry: pooled / per-symbol / LONG / SHORT, B=500 ---
+    breakdown = stratified_d_geometry_breakdown(df, with_ci=True, bootstrap_reps=B)
+
+    # --- 3. p_win decile diagnostic ---
+    pdecile = diag_pwin_decile_table(df)
+
+    # --- 4. Diagnostic C: conditional calibration of frozen old payoff models ---
+    diag_c = diag_old_payoff_model(df)
+
+    # --- 5. Event-semantic reconciliation ---
+    events = diag_event_reconciliation(df)
+
+    elapsed = time.perf_counter() - t0
+    return {
+        "TASK_ID": TASK_ID,
+        "STAGE": "T1.5",
+        "scope_note": "E2E pipeline validation on a deterministic cap-1000/symbol subset; "
+                      "NOT a formal inference; no model fit/refit/tune.",
+        "config": {
+            "cap_per_symbol": int(cap_per_symbol),
+            "seed": int(seed),
+            "bootstrap_B": int(B),
+            "bootstrap_block_days": BOOTSTRAP_BLOCK_DAYS,
+            "bootstrap_seed": BOOTSTRAP_SEED,
+            "n_p_bins": N_P_BINS,
+            "top_frac": TOP_FRAC,
+            "bottom_frac": BOTTOM_FRAC,
+            "p_bin_edges_rule": "per-analysis-universe quantiles of p_win (frozen within S)",
+        },
+        "data_integrity": integrity,
+        "D_geometry": breakdown,
+        "p_win_decile_diagnostic": pdecile,
+        "diagnostic_C_old_payoff_models": diag_c,
+        "event_semantics": events,
+        "counters": dict(COUNTERS),
+        "governance": {
+            "model_fit_count": COUNTERS["model_fit_count"],
+            "t1_5_run": True,
+            "t2_run": False,
+            "full_population_high_low_run": False,
+            "scientific_interpretation": "NONE (E2E pipeline validation only; STOP FOR REVIEWER)",
+        },
+        "runtime_seconds": float(elapsed),
+    }
+
+
+def build_t1_5_artifact(cap_per_symbol: int = T1_5_CAP, seed: int = T1_5_SEED,
+                        B: int = T1_5_B) -> dict:
+    result = run_t1_5(cap_per_symbol=cap_per_symbol, seed=seed, B=B)
+    EVID.mkdir(parents=True, exist_ok=True)
+    rows_path = EVID / "payoff_geometry_01a_t1_5_rows.parquet"
+    summary_path = EVID / "payoff_geometry_01a_t1_5_summary.json"
+    manifest_path = EVID / "payoff_geometry_01a_t1_5_manifest.json"
+
+    # row-level artifact (deterministic; recompute identical subset for reproducibility)
+    rows_df = load_t1_5_frame(cap_per_symbol=cap_per_symbol, seed=seed)[T1_5_ROW_COLUMNS]
+    rows_df.to_parquet(rows_path, index=False)
+    rows_sha = _sha256_file(rows_path)
+
+    result["row_artifact"] = {
+        "path": rows_path.name,
+        "sha256": rows_sha,
+        "rows": int(len(rows_df)),
+        "columns": list(T1_5_ROW_COLUMNS),
+    }
+    summary_text = json.dumps(_t1_5_jsonable(result), indent=2, allow_nan=False)
+    summary_path.write_text(summary_text)
+    summary_sha = _sha256_file(summary_path)
+
+    # Provenance manifest: a file cannot embed its own sha, so both artifact SHAs
+    # live here (this is the canonical integrity record; the summary embeds the row sha).
+    local_head = _git_head_sha()
+    manifest = {
+        "TASK_ID": TASK_ID,
+        "STAGE": "T1.5",
+        "summary_path": summary_path.name,
+        "summary_sha256": summary_sha,
+        "summary_bytes": len(summary_text.encode("utf-8")),
+        "row_path": rows_path.name,
+        "row_sha256": rows_sha,
+        "row_rows": int(len(rows_df)),
+        "generator_commit": local_head,
+        "config": result["config"],
+        "runtime_seconds": result["runtime_seconds"],
+        "model_fit_count": result["governance"]["model_fit_count"],
+        "note": "row-level parquet is the row artifact; summary JSON embeds row_artifact.sha256; "
+                "this manifest records both SHAs for provenance. T1.5 only; T2 NOT run.",
+    }
+    manifest_text = json.dumps(manifest, indent=2, sort_keys=True)
+    manifest_path.write_text(manifest_text)
+    manifest_sha = _sha256_file(manifest_path)
+
+    result["summary_artifact"] = {
+        "path": summary_path.name,
+        "sha256": summary_sha,
+        "bytes": len(summary_text.encode("utf-8")),
+    }
+    result["manifest_artifact"] = {
+        "path": manifest_path.name,
+        "sha256": manifest_sha,
+    }
+    result["local_git_head"] = local_head
+    return result
+
+
+# --------------------------------------------------------------------------- #
 # CLI                                                                          #
 # --------------------------------------------------------------------------- #
 def main(argv=None) -> int:
     import argparse
     ap = argparse.ArgumentParser(description="PAYOFF-GEOMETRY-01A kernel checkpoint")
-    ap.add_argument("stage", choices=["t0", "t1", "tp", "all", "packet"])
+    ap.add_argument("stage", choices=["t0", "t1", "tp", "all", "packet", "t1_5"])
     ap.add_argument("--sample-n", type=int, default=T1_SAMPLE_N)
+    ap.add_argument("--cap", type=int, default=T1_5_CAP)
+    ap.add_argument("--b", type=int, default=T1_5_B)
+    ap.add_argument("--seed", type=int, default=T1_5_SEED)
     args = ap.parse_args(argv)
 
     if args.stage == "t0":
@@ -1274,6 +1495,35 @@ def main(argv=None) -> int:
               "proj_min", round(pkt["TP"]["formal_t2_projection"]["projected_minutes"], 2))
         print("GOVERNANCE full_population_run:", pkt["governance"]["full_population_high_low_run"],
               "t1_5_run:", pkt["governance"]["t1_5_run"], "t2_run:", pkt["governance"]["t2_run"])
+    elif args.stage == "t1_5":
+        res = build_t1_5_artifact(cap_per_symbol=args.cap, seed=args.seed, B=args.b)
+        integ = res["data_integrity"]
+        dg = res["D_geometry"]
+        print("wrote", EVID / res["row_artifact"]["path"], "rows", res["row_artifact"]["rows"])
+        print("wrote", EVID / res["summary_artifact"]["path"])
+        print("STAGE: T1.5  scope: E2E pipeline validation (NO T2, NO model fit)")
+        print("subset rows:", integ["input_oof_rows_selected"],
+              "symbols:", integ["n_symbols"], "trading_days:", integ["n_trading_days_total"])
+        print("integrity all_clean:", integ["all_clean"],
+              "unmatched:", integ["unmatched"], "dup_keys:", integ["duplicate_keys"],
+              "missing_td:", integ["missing_trading_day"],
+              "missing_true_return:", integ["missing_true_return"])
+        print("POOLED D_geom:", round(float(dg["pooled"]["observed_D"]), 4),
+              "CI[", round(float(dg["pooled"]["bootstrap_ci_low"]), 4), ",",
+              round(float(dg["pooled"]["bootstrap_ci_high"]), 4), "]",
+              "n_valid_reps:", dg["pooled"]["n_valid_reps"])
+        for sym, v in dg["per_symbol"].items():
+            print(f"  {sym}: D={float(v['observed_D']):+.4f} "
+                  f"CI[{float(v['bootstrap_ci_low']):+.4f},{float(v['bootstrap_ci_high']):+.4f}] "
+                  f"N={v['n']} days={v['n_trading_days']} reps={v['n_valid_reps']}")
+        print("runtime_seconds:", round(res["runtime_seconds"], 2))
+        print("counters:", res["counters"])
+        print("GOVERNANCE model_fit_count:", res["governance"]["model_fit_count"],
+              "t1_5_run:", res["governance"]["t1_5_run"], "t2_run:", res["governance"]["t2_run"])
+        print("row_artifact_sha256:", res["row_artifact"]["sha256"])
+        print("summary_artifact_sha256:", res["summary_artifact"]["sha256"])
+        print("manifest_artifact_sha256:", res["manifest_artifact"]["sha256"])
+        print("local_git_head:", res["local_git_head"])
     return 0
 
 
