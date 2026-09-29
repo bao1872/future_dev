@@ -166,6 +166,87 @@ def test_stratified_breakdown_paths():
         assert isinstance(v, float) and np.isfinite(v)
 
 
+# MICRO FIX 04 — estimator consistency: every universe uses its OWN p_win edges
+# for both the point estimate and every bootstrap replicate.
+def _two_symbol_different_p(seed=11, n=300, n_days=20):
+    rng = np.random.default_rng(seed)
+    pa = rng.uniform(0.10, 0.40, n // 2)   # symbol A: low win-rate band
+    pb = rng.uniform(0.60, 0.90, n // 2)   # symbol B: high win-rate band
+    df = pd.DataFrame({
+        "symbol": (["A"] * (n // 2) + ["B"] * (n - n // 2)),
+        "side": (["LONG"] * (n // 4) + ["SHORT"] * (n // 4)) * 2,
+        "trading_day": np.repeat(np.arange(n_days), n // n_days + 1)[:n],
+        "p_win": np.concatenate([pa, pb]),
+        "G": rng.uniform(0.2, 4.0, n),
+        "L": rng.uniform(0.2, 4.0, n),
+        "true_episode_return_atr": rng.normal(0.0, 0.5, n),
+        "weights": rng.uniform(0.1, 1.0, n),
+    })
+    df["log_gl"] = M.log_geometry_ratio(df["G"].to_numpy(float), df["L"].to_numpy(float))
+    return df
+
+
+def test_breakdown_point_estimate_equals_ci_observed():
+    # A: deliberately different p distributions per symbol.
+    df = _two_symbol_different_p()
+    no_ci = M.stratified_d_geometry_breakdown(df, with_ci=False)
+    with_ci = M.stratified_d_geometry_breakdown(df, with_ci=True, bootstrap_reps=20)
+    # per-symbol parity: with_ci=False D == with_ci=True observed_D
+    for sym in ("A", "B"):
+        assert abs(no_ci["per_symbol"][sym]
+                   - with_ci["per_symbol"][sym]["observed_D"]) < 1e-12
+    # pooled + by-side parity (same estimand whether or not CI is requested)
+    assert abs(no_ci["pooled"] - with_ci["pooled"]["observed_D"]) < 1e-12
+    for side in ("LONG", "SHORT"):
+        assert abs(no_ci["by_side"][side]
+                   - with_ci["by_side"][side]["observed_D"]) < 1e-12
+
+
+def test_breakdown_subgroup_uses_own_edges_not_pooled():
+    # each subgroup's D must be computed with THAT subgroup's own p_win quantiles,
+    # not the pooled edges, and must be internally reproducible from own edges.
+    df = _two_symbol_different_p()
+    b = M.stratified_d_geometry_breakdown(df, with_ci=False)
+    sub_A = df[df["symbol"] == "A"]
+    own_edges = M.compute_p_bin_edges(sub_A["p_win"].to_numpy(float))
+    recomputed = M.compute_stratified_geometry_contrast(
+        sub_A, p_bin_edges=own_edges)["D_geometry"]
+    assert abs(b["per_symbol"]["A"] - recomputed) < 1e-12
+
+
+def test_bootstrap_does_not_recompute_supplied_edges():
+    df = M.load_audit_frame(sample_n=800)
+    df = M._attach_trading_day(df)
+    edges = M.compute_p_bin_edges(df["p_win"].to_numpy(float))
+    calls = {"n": 0}
+    orig = M.compute_p_bin_edges
+
+    def _spy(*a, **k):
+        calls["n"] += 1
+        return orig(*a, **k)
+
+    M.compute_p_bin_edges = _spy
+    try:
+        res = M.bootstrap_d_geometry(df, b=20, p_bin_edges=edges)
+    finally:
+        M.compute_p_bin_edges = orig
+    # supplied edges must be used AS-IS: bootstrap must not recompute them
+    assert calls["n"] == 0
+    # observed_D must equal the contrast computed with the same edges
+    expected = M.compute_stratified_geometry_contrast(
+        df, p_bin_edges=edges)["D_geometry"]
+    assert abs(res["observed_D"] - expected) < 1e-12
+
+
+def test_pooled_point_estimate_parity_unchanged():
+    df = _two_symbol_different_p()
+    b = M.stratified_d_geometry_breakdown(df, with_ci=False)
+    pooled_edges = M.compute_p_bin_edges(df["p_win"].to_numpy(float))
+    direct = M.compute_stratified_geometry_contrast(
+        df, p_bin_edges=pooled_edges)["D_geometry"]
+    assert abs(b["pooled"] - direct) < 1e-12
+
+
 # --------------------------------------------------------------------------- #
 # FIX #1 — bootstrap correctness                                                #
 # --------------------------------------------------------------------------- #
@@ -208,10 +289,11 @@ def test_per_symbol_bootstrap_result_schema():
     })
     df["log_gl"] = M.log_geometry_ratio(df["G"].to_numpy(float), df["L"].to_numpy(float))
     b = M.stratified_d_geometry_breakdown(df, with_ci=True, bootstrap_reps=50)
-    assert isinstance(b["pooled"], float)
+    # under with_ci=True every entry (including pooled) is a CI-bearing dict
+    assert isinstance(b["pooled"], dict)
     assert set(b["per_symbol"].keys()) == {"AG", "RB"}
     assert set(b["by_side"].keys()) == {"LONG", "SHORT"}
-    for entry in list(b["per_symbol"].values()) + list(b["by_side"].values()):
+    for entry in [b["pooled"]] + list(b["per_symbol"].values()) + list(b["by_side"].values()):
         assert "observed_D" in entry
         assert "bootstrap_ci_low" in entry
         assert "bootstrap_ci_high" in entry

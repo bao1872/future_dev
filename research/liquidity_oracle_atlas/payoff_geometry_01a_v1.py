@@ -314,7 +314,18 @@ def stratified_d_geometry_breakdown(df: pd.DataFrame,
     symbol's result must be retained separately, along with LONG/SHORT splits.
     Formal conclusions for a specific instrument must use THAT instrument's own CI.
 
-    ``p_bin_edges`` is frozen once from the full sample (no per-symbol re-binning).
+    ESTIMATOR CONSISTENCY (frozen): for EVERY analysis universe S -- pooled, each
+    symbol independently, LONG independently, SHORT independently -- the p strata
+    are frozen WITHIN S. Concretely, ``edges_S = quantiles of p_win within S`` and
+    the SAME edges_S are used for BOTH the observed D_S AND every bootstrap
+    replicate for S. There is NO pooling of quantile edges across universes, and a
+    subgroup's point estimate never depends on the pooled (or any other) edges.
+
+    Consequently ``with_ci=False`` and ``with_ci=True`` return the IDENTICAL
+    observed_D for the same subgroup (the latter additionally attaches the CI). This
+    is required so a symbol's point estimate and its CI answer exactly the same
+    question: "within this instrument's own win-rate distribution, do higher-G/L
+    trades have better true returns?"
 
     If ``with_ci`` is True, each entry becomes a dict with:
         observed_D, n, n_trading_days, bootstrap_ci_low, bootstrap_ci_high,
@@ -324,13 +335,9 @@ def stratified_d_geometry_breakdown(df: pd.DataFrame,
     caller must pass ``df`` already carrying a ``trading_day`` column (or have it
     resolvable) for CI to be computed; otherwise CI is omitted with a note.
     """
-    if p_bin_edges is None:
-        p_bin_edges = compute_p_bin_edges(df["p_win"].to_numpy(float))
-    pooled = compute_stratified_geometry_contrast(df, p_bin_edges=p_bin_edges)["D_geometry"]
-    out: dict = {"pooled": pooled, "per_symbol": {}, "by_side": {}}
-
-    def _entry(sub: pd.DataFrame) -> object:
-        D = compute_stratified_geometry_contrast(sub, p_bin_edges=p_bin_edges)["D_geometry"]
+    def _entry(sub: pd.DataFrame, edges: np.ndarray) -> object:
+        # edges are frozen WITHIN this universe S (passed by the caller)
+        D = compute_stratified_geometry_contrast(sub, p_bin_edges=edges)["D_geometry"]
         if not with_ci:
             return D
         n = len(sub)
@@ -339,7 +346,8 @@ def stratified_d_geometry_breakdown(df: pd.DataFrame,
                     "bootstrap_ci_low": None, "bootstrap_ci_high": None,
                     "n_valid_reps": 0,
                     "note": "insufficient rows or no trading_day for CI"}
-        b = bootstrap_d_geometry(sub, b=bootstrap_reps, block=block)
+        b = bootstrap_d_geometry(sub, b=bootstrap_reps, block=block,
+                                 p_bin_edges=edges)
         return {
             "observed_D": b["observed_D"],
             "n": n,
@@ -349,10 +357,18 @@ def stratified_d_geometry_breakdown(df: pd.DataFrame,
             "n_valid_reps": b["n_valid_reps"],
         }
 
+    # pooled universe uses its OWN p_win quantiles (honor a caller-supplied
+    # p_bin_edges as the pooled edges, else derive from this df).
+    pooled_edges = (p_bin_edges
+                    if p_bin_edges is not None
+                    else compute_p_bin_edges(df["p_win"].to_numpy(float)))
+    out: dict = {"pooled": _entry(df, pooled_edges), "per_symbol": {}, "by_side": {}}
     for sym in sorted(df["symbol"].unique().tolist()):
-        out["per_symbol"][sym] = _entry(df[df["symbol"] == sym])
+        sub = df[df["symbol"] == sym]
+        out["per_symbol"][sym] = _entry(sub, compute_p_bin_edges(sub["p_win"].to_numpy(float)))
     for side in sorted(df["side"].unique().tolist()):
-        out["by_side"][side] = _entry(df[df["side"] == side])
+        sub = df[df["side"] == side]
+        out["by_side"][side] = _entry(sub, compute_p_bin_edges(sub["p_win"].to_numpy(float)))
     return out
 
 
@@ -708,13 +724,20 @@ def _select_blocks(block_idx, chosen):
 
 
 def bootstrap_d_geometry(df: pd.DataFrame, b: int = 200, seed: int = BOOTSTRAP_SEED,
-                         block: int = BOOTSTRAP_BLOCK_DAYS) -> dict:
+                         block: int = BOOTSTRAP_BLOCK_DAYS,
+                         p_bin_edges: np.ndarray | None = None) -> dict:
     """Trading-day block bootstrap of D_geometry (reuses R13.5 audited owner).
 
     Resamples DAY-BLOCKS WITH replacement (preserving multiplicity), recomputes
     the full stratified statistic on the resampled rows, and returns the observed
     point estimate plus the bootstrap mean and 95% CI separately. NOT run on the
     full evaluation population in this checkpoint (audit sample only).
+
+    ``p_bin_edges``: if supplied, it is used AS-IS for BOTH the observed point
+    estimate and every bootstrap replicate (never recomputed). If None, edges are
+    derived from ``df``'s own p_win (so the bootstrap is self-consistent for that
+    df). Callers that already froze per-analysis-universe edges MUST pass them here
+    to keep the point estimate and CI on the same estimand.
     """
     if "trading_day" not in df.columns:
         df = _attach_trading_day(df)
@@ -726,8 +749,10 @@ def bootstrap_d_geometry(df: pd.DataFrame, b: int = 200, seed: int = BOOTSTRAP_S
                 "ci_lo": float("nan"), "ci_hi": float("nan"), "n_valid_reps": 0,
                 "n_blocks": 0,
                 "note": "too few blocks for bootstrap"}
-    # freeze p-bin edges from the full sample so every replicate uses identical bins
-    p_bin_edges = compute_p_bin_edges(df["p_win"].to_numpy(float))
+    # freeze p-bin edges: use supplied edges AS-IS, else derive from this df so every
+    # replicate uses identical bins. Never recompute when edges are provided.
+    if p_bin_edges is None:
+        p_bin_edges = compute_p_bin_edges(df["p_win"].to_numpy(float))
     observed_D = compute_stratified_geometry_contrast(df, p_bin_edges=p_bin_edges)["D_geometry"]
     rng = np.random.default_rng(seed)
     boots = []
