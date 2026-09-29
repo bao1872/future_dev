@@ -303,33 +303,56 @@ def assert_stratified_parity(df: pd.DataFrame, tol: float = 1e-9) -> None:
 
 
 def stratified_d_geometry_breakdown(df: pd.DataFrame,
-                                    p_bin_edges: np.ndarray | None = None) -> dict:
+                                    p_bin_edges: np.ndarray | None = None,
+                                    with_ci: bool = False,
+                                    bootstrap_reps: int = 200,
+                                    block: int = BOOTSTRAP_BLOCK_DAYS) -> dict:
     """Single-instrument boundary breakdown of D_geometry.
 
     Pooled D_geometry is ONLY pooled research evidence. Per the strategy execution
     boundary (multi-symbol pooled training, single-instrument execution), each
     symbol's result must be retained separately, along with LONG/SHORT splits.
-    Formal conclusions for a specific instrument use THAT instrument's result.
+    Formal conclusions for a specific instrument must use THAT instrument's own CI.
 
     ``p_bin_edges`` is frozen once from the full sample (no per-symbol re-binning).
+
+    If ``with_ci`` is True, each entry becomes a dict with:
+        observed_D, n, n_trading_days, bootstrap_ci_low, bootstrap_ci_high,
+        n_valid_reps
+    and the per-symbol / per-side day-block bootstrap reuses the SAME corrected
+    owner (all days retained, with-replacement, multiplicity preserved). The
+    caller must pass ``df`` already carrying a ``trading_day`` column (or have it
+    resolvable) for CI to be computed; otherwise CI is omitted with a note.
     """
     if p_bin_edges is None:
         p_bin_edges = compute_p_bin_edges(df["p_win"].to_numpy(float))
-    out: dict = {}
-    out["pooled"] = compute_stratified_geometry_contrast(
-        df, p_bin_edges=p_bin_edges)["D_geometry"]
-    out["per_symbol"] = {}
+    pooled = compute_stratified_geometry_contrast(df, p_bin_edges=p_bin_edges)["D_geometry"]
+    out: dict = {"pooled": pooled, "per_symbol": {}, "by_side": {}}
+
+    def _entry(sub: pd.DataFrame) -> object:
+        D = compute_stratified_geometry_contrast(sub, p_bin_edges=p_bin_edges)["D_geometry"]
+        if not with_ci:
+            return D
+        n = len(sub)
+        if n < 50 or "trading_day" not in sub.columns:
+            return {"observed_D": D, "n": n, "n_trading_days": None,
+                    "bootstrap_ci_low": None, "bootstrap_ci_high": None,
+                    "n_valid_reps": 0,
+                    "note": "insufficient rows or no trading_day for CI"}
+        b = bootstrap_d_geometry(sub, b=bootstrap_reps, block=block)
+        return {
+            "observed_D": b["observed_D"],
+            "n": n,
+            "n_trading_days": int(sub["trading_day"].nunique()),
+            "bootstrap_ci_low": b["ci_lo"],
+            "bootstrap_ci_high": b["ci_hi"],
+            "n_valid_reps": b["n_valid_reps"],
+        }
+
     for sym in sorted(df["symbol"].unique().tolist()):
-        sub = df[df["symbol"] == sym]
-        if len(sub) >= 50:
-            out["per_symbol"][sym] = compute_stratified_geometry_contrast(
-                sub, p_bin_edges=p_bin_edges)["D_geometry"]
-    out["by_side"] = {}
+        out["per_symbol"][sym] = _entry(df[df["symbol"] == sym])
     for side in sorted(df["side"].unique().tolist()):
-        sub = df[df["side"] == side]
-        if len(sub) >= 50:
-            out["by_side"][side] = compute_stratified_geometry_contrast(
-                sub, p_bin_edges=p_bin_edges)["D_geometry"]
+        out["by_side"][side] = _entry(df[df["side"] == side])
     return out
 
 
@@ -570,21 +593,28 @@ def diag_event_reconciliation(df: pd.DataFrame) -> dict:
 
 
 def diag_old_payoff_model(df: pd.DataFrame, n_bins: int = N_P_BINS) -> list:
-    """Diagnostic C: same-semantics comparison of frozen old payoff-model targets.
+    """Diagnostic C: TRUE conditional calibration of the frozen old payoff models.
 
     The frozen old payoff models are, by their own definition:
-        mu_win  = predicted E[Y | Y>0, X]
-        mu_loss = predicted E[-Y | Y<=0, X]
+        mu_win  = predicted E[Y | Y>0, X]      (WIN head, trained on winners only)
+        mu_loss = predicted E[-Y | Y<=0, X]    (LOSS head, trained on losers only)
         predicted_rr = mu_win / mu_loss
-    Therefore G/L is NOT their calibration target. Comparing predicted_rr to G/L
-    and calling disagreement a "model error" would be wrong.
+    Therefore the ONLY correct calibration check is per-head on the SAME support
+    the model was trained on:
 
-    Instead, for each p_win stratum we compute the ACTUAL realized magnitudes:
-        actual_win_magnitude  = weighted E[Y | Y>0]
-        actual_loss_magnitude = weighted E[-Y | Y<=0]
-        actual_realized_RR    = actual_win_magnitude / actual_loss_magnitude
-    and place them next to mean mu_win / mean mu_loss / mean predicted_rr.
-    Canonical G/L / log(G/L) is reported SEPARATELY as a pure geometry diagnostic.
+      WIN head  : on actual winners (Y>0) only, compare
+                  actual_win_magnitude (= weighted mean Y)
+                  vs predicted_win_magnitude_on_winners (= weighted mean mu_win)
+                  + win_bias (= weighted mean(mu_win - Y)) and win_MAE.
+      LOSS head : on actual losers (Y<=0) only, compare
+                  actual_loss_magnitude (= weighted mean -Y)
+                  vs predicted_loss_magnitude_on_losers (= weighted mean mu_loss)
+                  + loss_bias (= weighted mean(mu_loss - (-Y))) and loss_MAE.
+
+    G/L is NOT their calibration target (comparing predicted_rr to G/L is NOT a
+    model-error test). ``actual_realized_RR`` and ``mean_predicted_rr`` are kept
+    ONLY as descriptive ranking diagnostics; E[mu_W/mu_L] != E[mu_W]/E[mu_L] and
+    need not equal the observed group RR, so they are never equated.
 
     Diagnostic only. No refit. Never label predicted_rr vs G/L disagreement a model error.
     """
@@ -596,23 +626,49 @@ def diag_old_payoff_model(df: pd.DataFrame, n_bins: int = N_P_BINS) -> list:
         d = df.iloc[np.where(bins == b)[0]]
         dw = d["weights"].to_numpy(float)
         dy = d["true_episode_return_atr"].to_numpy(float)
+        dmuw = d["mu_win"].to_numpy(float)
+        dmul = d["mu_loss"].to_numpy(float)
         win_mask = dy > 0
         loss_mask = ~win_mask
-        actual_win_mag = (float(np.average(dy[win_mask], weights=dw[win_mask]))
-                          if win_mask.any() else float("nan"))
-        actual_loss_mag = (float(np.average(-dy[loss_mask], weights=dw[loss_mask]))
-                           if loss_mask.any() else float("nan"))
+        n_win = int(win_mask.sum())
+        n_loss = int(loss_mask.sum())
+
+        if n_win > 0:
+            ww = dw[win_mask]
+            actual_win_mag = float(np.average(dy[win_mask], weights=ww))
+            pred_win_mag = float(np.average(dmuw[win_mask], weights=ww))
+            win_bias = float(np.average(dmuw[win_mask] - dy[win_mask], weights=ww))
+            win_mae = float(np.average(np.abs(dmuw[win_mask] - dy[win_mask]), weights=ww))
+        else:
+            actual_win_mag = pred_win_mag = win_bias = win_mae = float("nan")
+
+        if n_loss > 0:
+            lw = dw[loss_mask]
+            actual_loss_mag = float(np.average(-dy[loss_mask], weights=lw))
+            pred_loss_mag = float(np.average(dmul[loss_mask], weights=lw))
+            # loss_bias = E[mu_loss - (-Y)] = E[mu_loss + Y] on losers
+            loss_bias = float(np.average(dmul[loss_mask] + dy[loss_mask], weights=lw))
+            loss_mae = float(np.average(np.abs(dmul[loss_mask] + dy[loss_mask]), weights=lw))
+        else:
+            actual_loss_mag = pred_loss_mag = loss_bias = loss_mae = float("nan")
+
         actual_rr = (actual_win_mag / actual_loss_mag
                      if (actual_loss_mag > 0 and not math.isnan(actual_win_mag))
                      else float("nan"))
         out.append({
             "p_bin": int(b),
             "n": int(len(d)),
+            "n_win": n_win,
+            "n_loss": n_loss,
             "actual_win_magnitude": actual_win_mag,
+            "predicted_win_magnitude_on_winners": pred_win_mag,
+            "win_bias": win_bias,
+            "win_MAE": win_mae,
             "actual_loss_magnitude": actual_loss_mag,
+            "predicted_loss_magnitude_on_losers": pred_loss_mag,
+            "loss_bias": loss_bias,
+            "loss_MAE": loss_mae,
             "actual_realized_RR": actual_rr,
-            "mean_mu_win": float(np.average(d["mu_win"], weights=dw)),
-            "mean_mu_loss": float(np.average(d["mu_loss"], weights=dw)),
             "mean_predicted_rr": float(np.average(d["predicted_rr"], weights=dw)),
             "mean_canonical_G_over_L": float(np.average(d["G"] / d["L"], weights=dw)),
             "mean_canonical_log_GL": float(np.average(d["log_gl"], weights=dw)),
@@ -624,20 +680,21 @@ def diag_old_payoff_model(df: pd.DataFrame, n_bins: int = N_P_BINS) -> list:
 # Bootstrap (day-clustered paired) — used only in T1 audit + T1.5/T2            #
 # --------------------------------------------------------------------------- #
 def _complete_block_indices(trading_days, block: int = BOOTSTRAP_BLOCK_DAYS):
-    """Reuse R13.5 audited owner semantics
-    (decomposed_value_composer_isolation_audit_v1._complete_block_indices).
+    """Day-block partition covering EVERY original trading day.
 
-    Sorts unique trading days, keeps only complete blocks of size ``block``
-    (terminal remainder dropped, consistent with R13.5), and returns a list of
-    row-index arrays, one per block.
+    Unlike the R13.5 audited owner (which dropped the terminal remainder), this
+    checkpoint requires the FULL day universe to be eligible for resampling, so the
+    terminal partial block is RETAINED. Sorts unique trading days and splits them
+    into consecutive blocks of size ``block`` (the last block may be smaller).
+    Returns (block_idx, n_blocks) where block_idx is a list of row-index arrays,
+    one per block, and every original day belongs to exactly one block.
     """
     days = np.sort(pd.unique(trading_days))
-    n_complete = len(days) // block
-    days = days[: n_complete * block]
+    n_blocks = max(1, math.ceil(len(days) / block))
     pos = {d: np.where(trading_days == d)[0] for d in days}
-    blocks = [days[i * block:(i + 1) * block] for i in range(n_complete)]
+    blocks = [days[i * block:(i + 1) * block] for i in range(n_blocks)]
     block_idx = [np.concatenate([pos[d] for d in b]) for b in blocks]
-    return block_idx, n_complete
+    return block_idx, len(block_idx)
 
 
 def _select_blocks(block_idx, chosen):
@@ -667,8 +724,8 @@ def bootstrap_d_geometry(df: pd.DataFrame, b: int = 200, seed: int = BOOTSTRAP_S
     if n_complete == 0:
         return {"observed_D": float("nan"), "bootstrap_mean": float("nan"),
                 "ci_lo": float("nan"), "ci_hi": float("nan"), "n_valid_reps": 0,
-                "n_complete_blocks": 0,
-                "note": "too few complete blocks for bootstrap"}
+                "n_blocks": 0,
+                "note": "too few blocks for bootstrap"}
     # freeze p-bin edges from the full sample so every replicate uses identical bins
     p_bin_edges = compute_p_bin_edges(df["p_win"].to_numpy(float))
     observed_D = compute_stratified_geometry_contrast(df, p_bin_edges=p_bin_edges)["D_geometry"]
@@ -690,7 +747,7 @@ def bootstrap_d_geometry(df: pd.DataFrame, b: int = 200, seed: int = BOOTSTRAP_S
     if len(boots) == 0:
         return {"observed_D": observed_D, "bootstrap_mean": float("nan"),
                 "ci_lo": float("nan"), "ci_hi": float("nan"), "n_valid_reps": 0,
-                "n_complete_blocks": int(n_complete),
+                "n_blocks": int(n_complete),
                 "note": "no valid replicates"}
     boots = np.asarray(boots, dtype=float)
     return {
@@ -699,9 +756,10 @@ def bootstrap_d_geometry(df: pd.DataFrame, b: int = 200, seed: int = BOOTSTRAP_S
         "ci_lo": float(np.quantile(boots, 0.025)),
         "ci_hi": float(np.quantile(boots, 0.975)),
         "n_valid_reps": int(len(boots)),
-        "n_complete_blocks": int(n_complete),
-        "method": "trading_day_complete_block_bootstrap (R13.5 audited owner): terminal "
-                  "remainder excluded; blocks drawn WITH replacement; multiplicity preserved",
+        "n_blocks": int(n_complete),
+        "method": "trading_day_block_bootstrap: ALL trading days partitioned into "
+                  "consecutive blocks (terminal partial block RETAINED); blocks drawn "
+                  "WITH replacement; multiplicity preserved (no set() dedup)",
         "note": "day-block bootstrap on AUDIT sample only; full-population run reserved for T1.5/T2",
     }
 
@@ -837,8 +895,10 @@ def t1_audit(sample_n: int = T1_SAMPLE_N) -> dict:
     parity["stratified_D_geometry_audit"] = prod["D_geometry"]
     parity["stratified_n_bins_used"] = prod["n_bins_used"]
 
-    # single-instrument boundary breakdown (pooled + per-symbol + by-side)
-    parity["stratified_breakdown"] = stratified_d_geometry_breakdown(df)
+    # single-instrument boundary breakdown (pooled + per-symbol + by-side), each
+    # with its own bootstrap CI (T1.5/T2 path exercised on the audit sample only).
+    parity["stratified_breakdown"] = stratified_d_geometry_breakdown(
+        df_day, with_ci=True, bootstrap_reps=200)
 
     # negative controls (REAL: prove the system catches deliberate errors)
     parity["neg_sign_sensitivity"] = _neg_sign_sensitivity(df)
@@ -1066,19 +1126,6 @@ def _git_head_sha() -> str:
         return "unknown"
 
 
-def _remote_branch_tip_sha() -> str:
-    try:
-        import subprocess
-        branch = subprocess.check_output(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=PROJECT_ROOT
-        ).decode().strip()
-        return subprocess.check_output(
-            ["git", "rev-parse", f"origin/{branch}"], cwd=PROJECT_ROOT
-        ).decode().strip()[:7]
-    except Exception:
-        return "unknown"
-
-
 def _module_content_sha() -> str:
     try:
         return hashlib.sha256(Path(__file__).read_bytes()).hexdigest()[:16]
@@ -1091,18 +1138,17 @@ def build_evidence_packet() -> dict:
     t1 = t1_audit()
     tp = tp_microbenchmark()
     local_sha = _git_head_sha()
-    remote_tip = _remote_branch_tip_sha()
     packet = {
         "TASK_ID": TASK_ID,
         "REVISION_OF": "PAYOFF-GEOMETRY-01",
         "REVIEWED_PARENT_SHA": REVIEWED_PARENT_SHA,
         "GENERATOR_COMMIT_SHA": local_sha,
-        "CHECKPOINT_TIP_SHA": remote_tip,
-        "REMOTE_BRANCH_TIP_SHA": remote_tip,
+        "EVIDENCE_PARENT_SHA": local_sha,
         "GENERATOR_CODE_SHA": _module_content_sha(),
         "git_status_note": "GENERATOR_COMMIT_SHA = module commit (git rev-parse HEAD at build); "
-                           "CHECKPOINT_TIP_SHA / REMOTE_BRANCH_TIP_SHA = remote branch tip before this push; "
-                           "final pushed tip reported in IDE response",
+                           "EVIDENCE_PARENT_SHA = the generator code commit this evidence is built from; "
+                           "final remote branch HEAD is reported in the IDE response after push "
+                           "(self-referential tip fields intentionally omitted)",
         "frozen_math": {
             "p_win_definition": "P(episode_return_atr > 0 | X)  [NOT P(favorable-before-adverse)]",
             "Z_definition": "log(G / L), G/L = decision-time favorable/adverse ATR distances",
@@ -1189,8 +1235,7 @@ def main(argv=None) -> int:
         print("wrote", out)
         print("TASK_ID:", pkt["TASK_ID"])
         print("GENERATOR_COMMIT_SHA:", pkt["GENERATOR_COMMIT_SHA"],
-              "CHECKPOINT_TIP_SHA:", pkt["CHECKPOINT_TIP_SHA"],
-              "REMOTE_BRANCH_TIP_SHA:", pkt["REMOTE_BRANCH_TIP_SHA"])
+              "EVIDENCE_PARENT_SHA:", pkt["EVIDENCE_PARENT_SHA"])
         print("GENERATOR_CODE_SHA:", pkt["GENERATOR_CODE_SHA"])
         print("T0 log_gl.Z:", pkt["T0"]["log_gl"]["Z"])
         print("T0 stratified D_geometry:", pkt["T0"]["stratified_contrast"]["D_geometry"])

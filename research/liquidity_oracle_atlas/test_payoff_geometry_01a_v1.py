@@ -130,10 +130,12 @@ def test_diag_old_payoff_model_same_semantics():
     rows = M.diag_old_payoff_model(df)
     assert len(rows) == M.N_P_BINS
     r = rows[0]
-    # same-semantics realized targets present
-    for k in ("actual_win_magnitude", "actual_loss_magnitude",
-              "actual_realized_RR", "mean_mu_win", "mean_mu_loss",
-              "mean_predicted_rr"):
+    # per-head conditional calibration keys present (winners-only / losers-only)
+    for k in ("actual_win_magnitude", "predicted_win_magnitude_on_winners",
+              "win_bias", "win_MAE",
+              "actual_loss_magnitude", "predicted_loss_magnitude_on_losers",
+              "loss_bias", "loss_MAE",
+              "actual_realized_RR", "mean_predicted_rr"):
         assert k in r
     # canonical G/L kept as a SEPARATE geometry diagnostic, never equated to model targets
     assert "mean_canonical_G_over_L" in r
@@ -177,15 +179,45 @@ def test_bootstrap_block_multiplicity_preserved():
     assert len(sel) == 2 * len(block_idx[0]) + len(block_idx[2])
 
 
-def test_bootstrap_complete_block_remainder_dropped():
-    # 6 unique trading days, block=5 -> only 1 complete block, remainder day dropped
+def test_bootstrap_remainder_in_universe():
+    # 6 unique trading days, block=5 -> 2 blocks: [0..4] and the terminal partial
+    # block [5]. The 6th day MUST be retained in the sampling universe (no silent
+    # remainder discard).
     td = np.array([0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5])
-    block_idx, n_complete = M._complete_block_indices(td, block=5)
-    assert n_complete == 1
-    # the dropped day (value 5, at row positions 10/11) must not appear in any block
+    block_idx, n_blocks = M._complete_block_indices(td, block=5)
+    assert n_blocks == 2
     included_rows = np.concatenate(block_idx)
     included_days = set(td[included_rows].tolist())
-    assert 5 not in included_days
+    assert 5 in included_days
+
+
+def test_per_symbol_bootstrap_result_schema():
+    rng = np.random.default_rng(3)
+    n = 400
+    # two symbols, each with >= 10 trading days (block=5 -> >=2 blocks each)
+    days = np.repeat(np.arange(12), n // 12 + 1)[:n]
+    df = pd.DataFrame({
+        "symbol": (["AG"] * (n // 2) + ["RB"] * (n - n // 2)),
+        "side": (["LONG"] * (n // 4) + ["SHORT"] * (n // 4)) * 2,
+        "trading_day": days,
+        "p_win": rng.uniform(0.1, 0.9, n),
+        "G": rng.uniform(0.2, 4.0, n),
+        "L": rng.uniform(0.2, 4.0, n),
+        "true_episode_return_atr": rng.normal(0.0, 0.5, n),
+        "weights": rng.uniform(0.1, 1.0, n),
+    })
+    df["log_gl"] = M.log_geometry_ratio(df["G"].to_numpy(float), df["L"].to_numpy(float))
+    b = M.stratified_d_geometry_breakdown(df, with_ci=True, bootstrap_reps=50)
+    assert isinstance(b["pooled"], float)
+    assert set(b["per_symbol"].keys()) == {"AG", "RB"}
+    assert set(b["by_side"].keys()) == {"LONG", "SHORT"}
+    for entry in list(b["per_symbol"].values()) + list(b["by_side"].values()):
+        assert "observed_D" in entry
+        assert "bootstrap_ci_low" in entry
+        assert "bootstrap_ci_high" in entry
+        assert "n" in entry and entry["n"] > 0
+        assert "n_trading_days" in entry and entry["n_trading_days"] > 0
+        assert "n_valid_reps" in entry and entry["n_valid_reps"] > 0
 
 
 def test_bootstrap_audit_returns_separate_fields():
@@ -254,7 +286,7 @@ def test_event_based_synthetic_payoff():
 
 
 # --------------------------------------------------------------------------- #
-# FIX #2 — Diagnostic C same-semantics computation                              #
+# FIX #2 — Diagnostic C TRUE conditional calibration (per-head, same support)    #
 # --------------------------------------------------------------------------- #
 def test_diag_c_actual_vs_predicted_targets():
     df = pd.DataFrame({
@@ -277,9 +309,36 @@ def test_diag_c_actual_vs_predicted_targets():
     assert abs(r["actual_loss_magnitude"] - (1.1 / 3.0)) < 1e-12
     # realized RR = win_mag / loss_mag
     assert abs(r["actual_realized_RR"] - (1.0 / 3.0) / (1.1 / 3.0)) < 1e-12
-    assert abs(r["mean_mu_win"] - 0.4) < 1e-9
-    assert abs(r["mean_mu_loss"] - 0.5) < 1e-9
+    # predicted magnitudes are computed ONLY on their own support (winners / losers)
+    assert abs(r["predicted_win_magnitude_on_winners"] - 0.4) < 1e-9
+    assert abs(r["predicted_loss_magnitude_on_losers"] - 0.5) < 1e-9
     assert abs(r["mean_predicted_rr"] - 0.8) < 1e-9
+    # biases
+    # win_bias = mean(mu_win - Y) over winners = mean(-0.1, 0.1, 0.2) = 0.2/3
+    assert abs(r["win_bias"] - (0.2 / 3.0)) < 1e-12
+    # loss_bias = mean(mu_loss + Y) over losers = mean(0.1, -0.1, 0.4) = 0.4/3
+    assert abs(r["loss_bias"] - (0.4 / 3.0)) < 1e-12
+
+
+def test_diag_c_no_cross_support_contamination():
+    # losers carry a HUGE mu_win; the WIN-head predicted quantity must ignore them
+    df = pd.DataFrame({
+        "p_win": [0.6] * 6,
+        "G": [1.0] * 6,
+        "L": [1.0] * 6,
+        "true_episode_return_atr": [0.5, 0.3, 0.2, -0.4, -0.6, -0.1],
+        "win": [True, True, True, False, False, False],
+        "mu_win": [0.4, 0.4, 0.4, 999.0, 999.0, 999.0],   # huge on losers
+        "mu_loss": [999.0, 999.0, 999.0, 0.5, 0.5, 0.5],   # huge on winners
+        "predicted_rr": [0.8] * 6,
+        "weights": [1.0] * 6,
+    })
+    df["log_gl"] = M.log_geometry_ratio(df["G"].to_numpy(float), df["L"].to_numpy(float))
+    r = M.diag_old_payoff_model(df)[0]
+    # predicted_win_magnitude_on_winners uses ONLY the 3 winner rows -> 0.4
+    assert abs(r["predicted_win_magnitude_on_winners"] - 0.4) < 1e-9
+    # predicted_loss_magnitude_on_losers uses ONLY the 3 loser rows -> 0.5
+    assert abs(r["predicted_loss_magnitude_on_losers"] - 0.5) < 1e-9
 
 
 # --------------------------------------------------------------------------- #
@@ -311,11 +370,13 @@ def test_governance_no_model_fit():
 def test_evidence_packet_builds():
     pkt = M.build_evidence_packet()
     assert pkt["TASK_ID"] == "PAYOFF-GEOMETRY-01A"
-    # corrected git identity: distinct fields, no PENDING_PUSH, no LOCAL/REMOTE conflation
+    # cleaned git identity: generator + evidence-parent + code sha; no pre-push tip fields
     assert pkt["GENERATOR_COMMIT_SHA"] != "unknown"
-    assert pkt["CHECKPOINT_TIP_SHA"] != "unknown"
-    assert pkt["REMOTE_BRANCH_TIP_SHA"] != "unknown"
+    assert pkt["EVIDENCE_PARENT_SHA"] != "unknown"
     assert pkt["GENERATOR_CODE_SHA"] != "unknown"
+    # misleading self-referential tip fields must NOT be present
+    assert "CHECKPOINT_TIP_SHA" not in pkt
+    assert "REMOTE_BRANCH_TIP_SHA" not in pkt
     # no legacy/placeholder join evidence remains
     assert "rows_preserved" not in pkt["T1"]
     assert pkt["T1"]["join_clean"] is True
