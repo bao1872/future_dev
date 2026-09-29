@@ -1,0 +1,436 @@
+{
+  "TASK_ID": "PAYOFF-GEOMETRY-01A",
+  "REVISION_OF": "PAYOFF-GEOMETRY-01",
+  "REVIEWED_PARENT_SHA": "305f7de",
+  "LOCAL_SHA": "e2a6785",
+  "REMOTE_SHA": "e2a6785",
+  "GENERATOR_CODE_SHA": "9c5d7c2b5a5b1682",
+  "git_status_note": "see `git rev-parse HEAD` at commit time; REMOTE_SHA = module commit (pushed)",
+  "frozen_math": {
+    "p_win_definition": "P(episode_return_atr > 0 | X)  [NOT P(favorable-before-adverse)]",
+    "Z_definition": "log(G / L), G/L = decision-time favorable/adverse ATR distances",
+    "outcome": "true canonical episode_return_atr (win = episode_return_atr > 0)",
+    "forbidden_identity": "p_win*G - (1-p_win)*L is INVALID and NOT computed",
+    "no_expected_value_claim": true,
+    "no_model_fit": true
+  },
+  "canonical_owner_map": {
+    "label/G/L/win/episode_return_atr/event_class/sample_weight/decision_time/label_available_time/split": "artifacts/opportunity_value_v1/labels_{train,val,test}_v1.parquet (R8)",
+    "p_win_model_frozen": "win_probability_model_v1.py (R9A)",
+    "p_win_oof_artifact": "artifacts/decomposed_value_v2/oof/A0_V1_DISJOINT_f*_td5.parquet",
+    "old_payoff_oof_columns": "mu_win, mu_loss, predicted_rr (frozen, in same OOF parquet)",
+    "trading_day_owner": "artifacts/decomposed_value_v1/state_v1.parquet [symbol,bar_index,trading_day]",
+    "weighting_owner": "labels column sample_weight"
+  },
+  "label_contract": {
+    "win_definition": "win = episode_return_atr > 0  (strictly binary)",
+    "event_class_values": [
+      "FAVORABLE_FIRST",
+      "ADVERSE_FIRST",
+      "BOTH_SAME_BAR",
+      "NONE"
+    ],
+    "nuance": "all four event classes resolve to a real signed ATR return; true_episode_return_atr is the only primary realized-return outcome",
+    "synthetic_barrier_payoff": "DIAGNOSTIC_ONLY (+/-G/+/-L pseudo-return)"
+  },
+  "stratification": {
+    "n_p_bins": 10,
+    "top_frac": 0.2,
+    "bottom_frac": 0.2,
+    "bin_rule": "quantile edges of p_win (outcome-independent, frozen)",
+    "weighting": "canonical sample_weight (within-bin weighted means + across-bin weighted aggregation)"
+  },
+  "T0": {
+    "log_gl": {
+      "G": 2.0,
+      "L": 1.0,
+      "Z": 0.6931471805599453,
+      "expected": 0.6931471805599453
+    },
+    "stratified_contrast": {
+      "D_geometry": 1.5999999999999999,
+      "reference_D": 1.5999999999999999,
+      "expected": 1.6
+    },
+    "true_vs_synthetic": {
+      "G": 1.0,
+      "L": 1.0,
+      "true_episode_return_atr": 0.3,
+      "synthetic_barrier_payoff": 1.0,
+      "difference": -0.7
+    },
+    "event_semantics_preserved": {
+      "classes": [
+        "FAVORABLE_FIRST",
+        "ADVERSE_FIRST",
+        "BOTH_SAME_BAR",
+        "NONE"
+      ],
+      "both_true_ret": 0.2,
+      "none_true_ret": -0.2
+    }
+  },
+  "T1": {
+    "rows": 2000,
+    "pre_join_oof_rows": 2000,
+    "post_join_rows": 2000,
+    "rows_preserved": true,
+    "pre_post_equal": true,
+    "p_win_min": 0.14339398637540668,
+    "p_win_max": 0.8779959241194266,
+    "units": "ATR (single decision-time m15_atr owner; same ATR for G and L)",
+    "nan_required": {
+      "p_win": 0,
+      "G": 0,
+      "L": 0,
+      "true_episode_return_atr": 0,
+      "log_gl": 0,
+      "weights": 0
+    },
+    "event_class_present": true,
+    "event_class_values": [
+      "ADVERSE_FIRST",
+      "BOTH_SAME_BAR",
+      "FAVORABLE_FIRST",
+      "NONE"
+    ],
+    "availability_causal": true,
+    "future_mutation_invariance": true,
+    "stratified_D_geometry_audit": 0.07942690094540349,
+    "stratified_n_bins_used": 10,
+    "neg_sign_sensitivity": {
+      "correct_D": 0.07942690094540349,
+      "wrong_sign_D": -0.09335963040216937,
+      "sign_flipped": true,
+      "note": "wrong-sign Z injection flips D -> kernel is sign-sensitive (catches a wrong-sign bug; not silently passed)"
+    },
+    "neg_relationship_sensitivity": {
+      "real_D": 0.07942690094540349,
+      "D_after_Z_permutation": 0.17519920940946823,
+      "D_after_return_permutation": 0.16898486313676184,
+      "sensitive_to_Z": true,
+      "sensitive_to_return": true,
+      "note": "permuting Z or the true return must change D (catches a kernel that ignores Z, ignores the outcome, or leaks the label)"
+    },
+    "causality_future_mutation": {
+      "passed": true,
+      "method": "future-mutation invariance: G/L/p_win/log_gl unchanged after corrupting future columns (episode_return_atr/win/event_class/mu_*)",
+      "note": "relies on canonical-owner causal proof that G/L/p_win are decision-time-only; renamed from prior 're-read determinism' check"
+    },
+    "diag_pwin_decile": [
+      {
+        "p_bin": 0,
+        "n": 200,
+        "mean_p_win": 0.26385265851037265,
+        "actual_win_rate": 0.25,
+        "mean_G": 5.70900683568552,
+        "mean_L": 1.283966000495513,
+        "mean_G_over_L": 7.508179232294476,
+        "mean_log_GL": 1.6610343476730378,
+        "mean_true_return_atr": -0.16377517307917586
+      },
+      {
+        "p_bin": 1,
+        "n": 200,
+        "mean_p_win": 0.34218932155080145,
+        "actual_win_rate": 0.32,
+        "mean_G": 3.214913384157653,
+        "mean_L": 1.0908563654844579,
+        "mean_G_over_L": 7.331683438350922,
+        "mean_log_GL": 1.374726563829666,
+        "mean_true_return_atr": -0.04045669464157284
+      },
+      {
+        "p_bin": 2,
+        "n": 200,
+        "mean_p_win": 0.38978835817467017,
+        "actual_win_rate": 0.305,
+        "mean_G": 2.513500877722697,
+        "mean_L": 0.9682092517283971,
+        "mean_G_over_L": 6.736513437874885,
+        "mean_log_GL": 1.2814723083134476,
+        "mean_true_return_atr": -0.44140299902620383
+      },
+      {
+        "p_bin": 3,
+        "n": 200,
+        "mean_p_win": 0.4325243061879873,
+        "actual_win_rate": 0.38,
+        "mean_G": 1.903717160829571,
+        "mean_L": 0.997539514505559,
+        "mean_G_over_L": 4.761668098280091,
+        "mean_log_GL": 0.9460227126916593,
+        "mean_true_return_atr": -0.15085100689001102
+      },
+      {
+        "p_bin": 4,
+        "n": 200,
+        "mean_p_win": 0.4692800498999118,
+        "actual_win_rate": 0.47,
+        "mean_G": 1.074070980811725,
+        "mean_L": 0.9697201244211249,
+        "mean_G_over_L": 1.9340229755257081,
+        "mean_log_GL": 0.12373543826452846,
+        "mean_true_return_atr": -0.1141808480714286
+      },
+      {
+        "p_bin": 5,
+        "n": 200,
+        "mean_p_win": 0.5020643545394613,
+        "actual_win_rate": 0.53,
+        "mean_G": 1.0879616181926464,
+        "mean_L": 1.4230755703166966,
+        "mean_G_over_L": 0.8190242870097049,
+        "mean_log_GL": -0.5949925973165604,
+        "mean_true_return_atr": 0.24889963630362824
+      },
+      {
+        "p_bin": 6,
+        "n": 200,
+        "mean_p_win": 0.5373399743953681,
+        "actual_win_rate": 0.575,
+        "mean_G": 1.0252539013389448,
+        "mean_L": 2.0197488704186983,
+        "mean_G_over_L": 0.522517711943785,
+        "mean_log_GL": -1.006019372786382,
+        "mean_true_return_atr": 0.03311746044652205
+      },
+      {
+        "p_bin": 7,
+        "n": 200,
+        "mean_p_win": 0.5749407822280735,
+        "actual_win_rate": 0.595,
+        "mean_G": 1.3035227362290898,
+        "mean_L": 2.4707697818184404,
+        "mean_G_over_L": 0.5087221326457515,
+        "mean_log_GL": -0.9152074164225023,
+        "mean_true_return_atr": -0.1239444823716745
+      },
+      {
+        "p_bin": 8,
+        "n": 200,
+        "mean_p_win": 0.6207514880547607,
+        "actual_win_rate": 0.66,
+        "mean_G": 1.114319372743796,
+        "mean_L": 2.887621619090617,
+        "mean_G_over_L": 0.386032567241474,
+        "mean_log_GL": -1.187508010290096,
+        "mean_true_return_atr": 0.22272200428611433
+      },
+      {
+        "p_bin": 9,
+        "n": 200,
+        "mean_p_win": 0.7151008859345037,
+        "actual_win_rate": 0.665,
+        "mean_G": 1.5816169936865092,
+        "mean_L": 5.691347097267144,
+        "mean_G_over_L": 0.3167915454851255,
+        "mean_log_GL": -1.382862102885648,
+        "mean_true_return_atr": 0.06109732772453576
+      }
+    ],
+    "diag_event_reconciliation": {
+      "by_event_class": {
+        "FAVORABLE_FIRST": {
+          "n": 972,
+          "share": 0.486,
+          "actual_win_rate": 0.8672839506172839,
+          "mean_true_return_atr": 1.514469545738644,
+          "mean_G": 1.3888954125283028,
+          "mean_L": 2.5611512624430643,
+          "mean_G_over_L": 0.9299939305842366
+        },
+        "ADVERSE_FIRST": {
+          "n": 986,
+          "share": 0.493,
+          "actual_win_rate": 0.09127789046653144,
+          "mean_true_return_atr": -1.569919643039435,
+          "mean_G": 2.697233399476803,
+          "mean_L": 1.3962859851482745,
+          "mean_G_over_L": 5.259358100858871
+        },
+        "BOTH_SAME_BAR": {
+          "n": 26,
+          "share": 0.013,
+          "actual_win_rate": 0.4230769230769231,
+          "mean_true_return_atr": -0.3285467430199246,
+          "mean_G": 0.4199065928707543,
+          "mean_L": 0.5681678870587222,
+          "mean_G_over_L": 1.6479362004129674
+        },
+        "NONE": {
+          "n": 16,
+          "share": 0.008,
+          "actual_win_rate": 0.375,
+          "mean_true_return_atr": -0.5835231354008946,
+          "mean_G": 5.323795500209569,
+          "mean_L": 4.976341599684076,
+          "mean_G_over_L": 2.0314722590576335
+        }
+      },
+      "P_win_given_FAVORABLE_FIRST": 0.8672839506172839,
+      "P_loss_given_ADVERSE_FIRST": 0.9087221095334685,
+      "win_event_confusion": {
+        "0": {
+          "ADVERSE_FIRST": 896,
+          "BOTH_SAME_BAR": 15,
+          "FAVORABLE_FIRST": 129,
+          "NONE": 10
+        },
+        "1": {
+          "ADVERSE_FIRST": 90,
+          "BOTH_SAME_BAR": 11,
+          "FAVORABLE_FIRST": 843,
+          "NONE": 6
+        }
+      },
+      "mean_true_minus_synthetic_atr": 0.03257312110422798,
+      "mean_true_minus_synthetic_by_class": {
+        "FAVORABLE_FIRST": 0.48737342802717626,
+        "ADVERSE_FIRST": -0.4153691036465697,
+        "BOTH_SAME_BAR": -0.13754975498718858,
+        "NONE": 0.2843437494515826
+      },
+      "synthetic_note": "DIAGNOSTIC_ONLY: +/-G/+/-L pseudo-return; NOT canonical realized return"
+    },
+    "diag_old_payoff_model": [
+      {
+        "p_bin": 0,
+        "n": 200,
+        "mean_predicted_rr": 2.508375550725357,
+        "mean_mu_win": 3.6145079421115076,
+        "mean_mu_loss": 1.5583759508524184,
+        "mean_canonical_G_over_L": 7.508179232294476,
+        "mean_canonical_log_GL": 1.6610343476730378
+      },
+      {
+        "p_bin": 1,
+        "n": 200,
+        "mean_predicted_rr": 1.9430366918414679,
+        "mean_mu_win": 2.464984160201365,
+        "mean_mu_loss": 1.301471383485583,
+        "mean_canonical_G_over_L": 7.331683438350922,
+        "mean_canonical_log_GL": 1.374726563829666
+      },
+      {
+        "p_bin": 2,
+        "n": 200,
+        "mean_predicted_rr": 1.5761895027554462,
+        "mean_mu_win": 1.9595433727183476,
+        "mean_mu_loss": 1.2920352144381446,
+        "mean_canonical_G_over_L": 6.736513437874885,
+        "mean_canonical_log_GL": 1.2814723083134476
+      },
+      {
+        "p_bin": 3,
+        "n": 200,
+        "mean_predicted_rr": 1.3775497242567658,
+        "mean_mu_win": 1.6752917956032274,
+        "mean_mu_loss": 1.253739148250296,
+        "mean_canonical_G_over_L": 4.761668098280091,
+        "mean_canonical_log_GL": 0.9460227126916593
+      },
+      {
+        "p_bin": 4,
+        "n": 200,
+        "mean_predicted_rr": 1.1346986412766322,
+        "mean_mu_win": 1.2779651387364024,
+        "mean_mu_loss": 1.1848265974708474,
+        "mean_canonical_G_over_L": 1.9340229755257081,
+        "mean_canonical_log_GL": 0.12373543826452846
+      },
+      {
+        "p_bin": 5,
+        "n": 200,
+        "mean_predicted_rr": 0.9873509672801049,
+        "mean_mu_win": 1.3791291105625976,
+        "mean_mu_loss": 1.390059000951725,
+        "mean_canonical_G_over_L": 0.8190242870097049,
+        "mean_canonical_log_GL": -0.5949925973165604
+      },
+      {
+        "p_bin": 6,
+        "n": 200,
+        "mean_predicted_rr": 0.8501084226418755,
+        "mean_mu_win": 1.3875181498315772,
+        "mean_mu_loss": 1.7118225352786787,
+        "mean_canonical_G_over_L": 0.522517711943785,
+        "mean_canonical_log_GL": -1.006019372786382
+      },
+      {
+        "p_bin": 7,
+        "n": 200,
+        "mean_predicted_rr": 0.7699044051705224,
+        "mean_mu_win": 1.6202161336001242,
+        "mean_mu_loss": 2.091321356334506,
+        "mean_canonical_G_over_L": 0.5087221326457515,
+        "mean_canonical_log_GL": -0.9152074164225023
+      },
+      {
+        "p_bin": 8,
+        "n": 200,
+        "mean_predicted_rr": 0.66096969755397,
+        "mean_mu_win": 1.4673006369222066,
+        "mean_mu_loss": 2.284638929069243,
+        "mean_canonical_G_over_L": 0.386032567241474,
+        "mean_canonical_log_GL": -1.187508010290096
+      },
+      {
+        "p_bin": 9,
+        "n": 200,
+        "mean_predicted_rr": 0.5039290816665409,
+        "mean_mu_win": 1.8432047908176268,
+        "mean_mu_loss": 3.8789912433267055,
+        "mean_canonical_G_over_L": 0.3167915454851255,
+        "mean_canonical_log_GL": -1.382862102885648
+      }
+    ],
+    "bootstrap_audit": {
+      "point": 0.020031349811083895,
+      "ci_lo": -0.2687879012133028,
+      "ci_hi": 0.3242030524311407,
+      "n_days": 144,
+      "n_reps": 200,
+      "note": "day-block bootstrap on AUDIT sample only; full-population run reserved for T1.5/T2"
+    }
+  },
+  "TP": {
+    "N": 10000,
+    "t_N": 0.0025430420000001064,
+    "t_2N": 0.00487579199999999,
+    "t_4N": 0.011539959000000044,
+    "ratio_2N": 1.9173069103851945,
+    "ratio_4N": 2.3667865651365085,
+    "gate_2N_pass": true,
+    "gate_4N_pass": true,
+    "complexity": "O(N) precompute (log G/L, weights) + O(N log N) within-bin ranking"
+  },
+  "counters": {
+    "raw_load_count": 1,
+    "candidate_load_count": 1,
+    "pwin_load_count": 1,
+    "label_geometry_load_count": 1,
+    "model_fit_count": 0,
+    "feature_recompute_count": 0,
+    "label_recompute_count": 0,
+    "reference_call_count": 2,
+    "full_history_recompute_count": 0,
+    "concat_hotloop_count": 0,
+    "score_row_count": 332612,
+    "bootstrap_rep_count": 200
+  },
+  "governance": {
+    "model_fits": 0,
+    "dev_test_reads": 0,
+    "pgm_evc_win_payoff_refits": 0,
+    "full_population_high_low_run": false,
+    "t1_5_run": false,
+    "t2_run": false,
+    "scientific_interpretation": "NONE (checkpoint only; STOP FOR REVIEWER)",
+    "forbidden_imports": "none (numpy/pandas/math/time only; state read lazily for trading_day)"
+  },
+  "reviewer_decision_required": [
+    "PROCEED_TO_T1_5 (full-evaluation high/low realized-return experiment + day-cluster bootstrap)",
+    "PROCEED_TO_T2 (single formal full evaluation)"
+  ]
+}
