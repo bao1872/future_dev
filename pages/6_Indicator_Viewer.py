@@ -94,6 +94,17 @@ from research.liquidity_oracle_atlas.dp_label_lifecycle_v1 import (
     run_negative_controls,
     evidence_summary,
 )
+from research.liquidity_oracle_atlas.dp_label_structural_v1 import (
+    load_structural_labels_for_symbol,
+    select_label_near,
+    previous_five,
+    find_structural_representative_cases,
+    draw_structural_overlay,
+    structural_metrics,
+)
+from research.liquidity_oracle_atlas.build_structural_dp_labels_m15_v1 import (
+    check_structural_invariants,
+)
 from research.liquidity_oracle_atlas.indicator_viewer_candidate_overlay_r4_v1 import (
     TRIGGER_BITS_R4,
     build_candidate_marks_r4,
@@ -707,6 +718,17 @@ def main() -> None:
              "does NOT recompute the DP.",
     )
 
+    # Structural DP Label V1 (FUT-M15-STRUCTURAL-DP-LABEL-V1) — read-only overlay.
+    st.session_state.setdefault("iv_show_structural", False)
+    st.session_state.iv_show_structural = st.checkbox(
+        "Structural DP Label V1 (15m)",
+        value=st.session_state.iv_show_structural,
+        help="Read-only view of the canonical structural DP labels: candidate SR/LIQ "
+             "region -> best entry gap -> structural target -> DP TP -> remaining "
+             "target ATR. Reuses the SAME canonical oracle + geometry; never recomputes "
+             "best_entry_gap_atr / tp_atr / remaining_target_atr / target.",
+    )
+
     # (2) NOW build the track from the CURRENT widget values, so the chart
     #     always corresponds to the dropdown in the SAME rerun.
     timing: Dict[str, float] = {}
@@ -946,6 +968,39 @@ def main() -> None:
                         text=f"C#{_r.candidate_id}", showarrow=True, arrowhead=2,
                         ax=0, ay=-28, font={"size": 9, "color": "#FFD166"},
                         opacity=0.9)
+
+        # ---- Structural DP Label V1 (FUT-M15-STRUCTURAL-DP-LABEL-V1) ---------- #
+        # Read-only overlay: candidate SR/LIQ zones + structural target zone +
+        # entry / TP / target levels + shaded "remaining" gap. Reuses the SAME
+        # canonical oracle artifact (band indices) and the structural-label
+        # artifact; never recomputes the three structural quantities.
+        if st.session_state.iv_show_structural and tf == "15m":
+            _sdf = load_structural_labels_for_symbol(symbol)
+            if _sdf is None:
+                st.error(
+                    "Structural DP Label V1 disabled (fail-closed): artifact missing. "
+                    "Generate it first: `python research/liquidity_oracle_atlas/"
+                    "build_structural_dp_labels_m15_v1.py AG`"
+                )
+            else:
+                _slacy = load_oracle_artifact_v4_cached(
+                    str(ORACLE_ARTIFACT_ROOT_V4), symbol, DP_M15_MATH_VERSION,
+                    oracle_cache_token(str(ORACLE_ARTIFACT_ROOT_V4), symbol))
+                _srecs = (build_lifecycle_records(_slacy["trades"], _slacy["actions"])
+                          if _slacy["ok"] else [])
+                _srec_by_ep = {int(r.candidate_id): r for r in _srecs}
+                lo_v, hi_v = compute_viewport(track, int(selected))
+                for _, _srow in _sdf.iterrows():
+                    _srec = _srec_by_ep.get(int(_srow["candidate_episode_id"]))
+                    if _srec is None or int(_srec.band_lo) < 0 or int(_srec.band_hi) < 0:
+                        band_lo = int(_srow["entry_fill_index"])
+                        band_hi = int(_srow["exit_fill_index"])
+                    else:
+                        band_lo, band_hi = int(_srec.band_lo), int(_srec.band_hi)
+                    if band_hi < lo_v or band_lo > hi_v:
+                        continue
+                    draw_structural_overlay(fig, _srow, band_lo, band_hi)
+
         if st.session_state.iv_show_candidate:
             if tf == "15m":
                 # AUDIT-FIX1: BAR-LEVEL audit view. One candidate = ONE blue 15m
@@ -1144,6 +1199,10 @@ def main() -> None:
         if lifecycle_records is not None:
             _render_dp_label_lifecycle(track, symbol, selected, lifecycle_records)
 
+    # ---- Structural DP Label V1 panel (FUT-M15-STRUCTURAL-DP-LABEL-V1) ---- #
+    if st.session_state.iv_show_structural and track.tf_label == "15m":
+        _render_structural_dp_label(track, symbol, selected)
+
     # ---- bottom debug --------------------------------------------------- #
     with st.expander("Technical snapshot", expanded=False):
         st.text(f"global TF index : {snap['index']}")
@@ -1335,6 +1394,101 @@ def _render_dp_label_lifecycle(track, symbol, selected, lifecycle_records):
             "trip B/C (overlapping positions); NC5 (LONG→LONG) must PASS — proving the "
             "gate checks position OVERLAP, not direction alternation."
         )
+
+
+def _render_structural_dp_label(track, symbol, selected):
+    """Render the Structural DP Label V1 panel (FUT-M15-STRUCTURAL-DP-LABEL-V1).
+
+    Read-only: reads ONLY the canonical structural-label artifact (cached). Shows
+    the three structural quantities (best_entry_gap_atr / tp_atr /
+    remaining_target_atr), the mandatory-TP distinction (TARGET REACHED vs EARLY
+    TP), a previous-5-labels audit table, and the invariant gates. The Viewer
+    NEVER recomputes the structural quantities or the target.
+    """
+    st.markdown("---")
+    st.markdown("### Structural DP Label V1 · 15m")
+    st.caption(
+        "Read-only view of the canonical structural DP labels "
+        "(FUT-M15-STRUCTURAL-DP-LABEL-V1). Candidate SR/LIQ region → best-entry gap "
+        "→ structural target → DP TP → remaining target ATR. All three structural "
+        "quantities are read from the artifact; the Viewer never recomputes them. "
+        "The structural target is a HARD upper bound on TP: when price reaches it, "
+        "remaining_target_atr = 0 and TP == Target (mandatory TP)."
+    )
+    sdf = load_structural_labels_for_symbol(symbol)
+    if sdf is None:
+        st.error(
+            "Structural DP Label artifact missing. Generate it first: "
+            "`python research/liquidity_oracle_atlas/build_structural_dp_labels_m15_v1.py AG`"
+        )
+        return
+
+    # ---- invariants (full df; cheap) ----
+    try:
+        inv = check_structural_invariants(sdf)
+        inv_status = "VALID"
+    except Exception as _e:  # pragma: no cover - defensive
+        inv = {"rows": len(sdf), "error": str(_e)}
+        inv_status = "INVALID"
+    st.markdown(f"**Structural invariants: {inv_status}**  (rows={inv.get('rows')})")
+    with st.expander("Structural invariants", expanded=True):
+        irows = [
+            ("best_entry_gap_atr >= 0 (min)", inv.get("best_entry_gap_atr_min"), ""),
+            ("tp_atr >= 0 (min)", inv.get("tp_atr_min"), ""),
+            ("remaining_target_atr >= 0 (min)", inv.get("remaining_target_atr_min"), ""),
+            ("remaining==0 ⇒ TP==Target (max diff)",
+             inv.get("zero_remaining_max_tp_target_diff"), ""),
+            ("TP not beyond target (count)", inv.get("tp_beyond_target_count"), ""),
+            ("seq: label_available ≤ next entry (min Δs)",
+             inv.get("sequential_min_delta"), ""),
+        ]
+        st.table(pd.DataFrame(irows, columns=["Invariant", "value", ""]))
+
+    # ---- current label ----
+    row = select_label_near(sdf, int(selected))
+    if row is None:
+        st.info("No structural label near the current bar.")
+        return
+    reached = bool(int(row.get("target_reached", 0)) == 1)
+    badge = ("TARGET REACHED — MANDATORY TP"
+             if reached else "EARLY TP (before structural target)")
+    st.markdown(f"**Current label: {row['label_id']}**  ·  {badge}")
+    st.table(pd.DataFrame(structural_metrics(row), columns=["Field", "Value"]))
+
+    # ---- jump buttons for required manual cases ----
+    st.markdown("**Jump to required manual cases**")
+    cases = find_structural_representative_cases(sdf)
+    _map = [
+        ("gap≈0", cases.get("gap_zero")),
+        ("large gap", cases.get("gap_large")),
+        ("early TP · large rem", cases.get("early_tp_large_remaining")),
+        ("near-target early TP", cases.get("near_target_early_tp")),
+        ("target reached", cases.get("target_reached")),
+        ("same-dir cont.", cases.get("same_direction_continuation")),
+    ]
+    _cols = st.columns(6)
+    for _col, (_lab, _ids) in zip(_cols, _map):
+        with _col:
+            if _ids:
+                if st.button(_lab, key=f"sd_{_lab}"):
+                    _tgt = sdf[sdf["label_id"] == _ids[0]]
+                    if not _tgt.empty:
+                        st.session_state.iv_selected = int(_tgt.iloc[0]["entry_fill_index"])
+                        st.rerun()
+            else:
+                st.caption(_lab)
+
+    # ---- previous-five-label audit table ----
+    st.markdown("**Previous 5 labels (audit preview of future Layer-2 features)**")
+    pf = previous_five(sdf, row)
+    if pf.empty:
+        st.caption("First structural regions have no 5-label history.")
+    else:
+        tbl = pf[["label_id", "best_entry_gap_atr", "tp_atr",
+                  "remaining_target_atr"]].copy()
+        tbl.insert(0, "lag", list(range(len(pf), 0, -1)))
+        st.table(tbl[["lag", "label_id", "best_entry_gap_atr", "tp_atr",
+                      "remaining_target_atr"]])
 
 
 def _render_candidate_audit(track, symbol, selected, cand_by_time, cand_audit, segments, timing):
