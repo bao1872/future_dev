@@ -639,17 +639,19 @@ def oracle_fill_index(
     fill_time: Any,
     fill_price: float,
     *,
+    expected_tf: str = ORACLE_TF_ONLY,
     rtol: float = ORACLE_ALIGN_RTOL,
     atol: float = ORACLE_ALIGN_ATOL,
 ) -> int:
     """Map an oracle execution ``(fill_time, fill_price)`` to a ViewerTrack x index.
 
     Alignment uses TIME as the semantic key (never ``decision_bar_index``), then
-    VALIDATES ``open(fill) == fill_price``. Returns -1 on any mismatch (non-5m
+    VALIDATES ``open(fill) == fill_price``. Returns -1 on any mismatch (wrong-TF
     track, missing bar, or price mismatch) so a discontinuity / missing bar /
     reindexed series can never silently draw the wrong position.
+    ``expected_tf`` selects the decision clock: "5m" (legacy V2) or "15m" (R4 V4).
     """
-    if track.tf_label != ORACLE_TF_ONLY:
+    if track.tf_label != expected_tf:
         return -1
     ft = np.datetime64(pd.Timestamp(fill_time).to_datetime64(), "ns")
     idx = np.flatnonzero(track.time == ft)
@@ -661,14 +663,17 @@ def oracle_fill_index(
     return x
 
 
-def select_visible_oracle_trades(track: "ViewerTrack", selected: int, trades: Any):
+def select_visible_oracle_trades(
+    track: "ViewerTrack", selected: int, trades: Any, *, tf_label: str = ORACLE_TF_ONLY
+):
     """Vectorized viewport filter, then per-trade time->index alignment.
 
     Returns ``(records, mismatch_count)`` where ``records`` is a list of
-    ``(row_dict, entry_x, exit_x)``. Non-5m tracks return ``([], 0)`` so the
-    overlay never draws execution markers on 15m / 1H / 4H.
+    ``(row_dict, entry_x, exit_x)``. Tracks on another decision clock return
+    ``([], 0)`` so the overlay never draws execution markers on the wrong clock.
+    ``tf_label`` selects the clock: "5m" (legacy V2) or "15m" (R4 V4).
     """
-    if track.tf_label != ORACLE_TF_ONLY:
+    if track.tf_label != tf_label:
         return [], 0
     if trades is None:
         return [], 0
@@ -688,8 +693,12 @@ def select_visible_oracle_trades(track: "ViewerTrack", selected: int, trades: An
     records: list = []
     mismatch = 0
     for row in visible.to_dict("records"):
-        ex = oracle_fill_index(track, row["entry_fill_time"], row["entry_fill_price"])
-        xx = oracle_fill_index(track, row["exit_fill_time"], row["exit_fill_price"])
+        ex = oracle_fill_index(
+            track, row["entry_fill_time"], row["entry_fill_price"], expected_tf=tf_label
+        )
+        xx = oracle_fill_index(
+            track, row["exit_fill_time"], row["exit_fill_price"], expected_tf=tf_label
+        )
         if ex < 0 or xx < 0:
             mismatch += 1
             continue
@@ -717,17 +726,23 @@ def _add_marker_trace(fig, d, *, symbol, color, name, textpos, hovertemplate):
     ))
 
 
-def add_dp_oracle_overlay(fig, track: "ViewerTrack", selected: int, trades: Any):
-    """Add the hindsight oracle Entry/Exit/Reversal markers to ``fig`` (5m only).
+def add_dp_oracle_overlay(
+    fig, track: "ViewerTrack", selected: int, trades: Any,
+    *, tf_label: str = ORACLE_TF_ONLY,
+):
+    """Add the hindsight oracle Entry/Exit/Reversal markers to ``fig``.
 
     At most FOUR marker traces (Long Entry/Exit, Short Entry/Exit) plus ONE
     connector trace are added, regardless of how many trades are visible.
     A reversal (e.g. LONG -> SHORT) naturally yields BOTH an exit marker of the
     closing trade and an entry marker of the opening trade at the same fill.
+    ``tf_label`` selects the decision clock: "5m" (legacy V2) or "15m" (R4 V4).
     """
-    if track.tf_label != ORACLE_TF_ONLY:
+    if track.tf_label != tf_label:
         return fig
-    records, _mismatch = select_visible_oracle_trades(track, selected, trades)
+    records, _mismatch = select_visible_oracle_trades(
+        track, selected, trades, tf_label=tf_label
+    )
     if not records:
         return fig
 
@@ -799,15 +814,20 @@ def add_dp_oracle_overlay(fig, track: "ViewerTrack", selected: int, trades: Any)
     return fig
 
 
-def oracle_viewport_summary(track: "ViewerTrack", selected: int, trades: Any) -> dict:
+def oracle_viewport_summary(
+    track: "ViewerTrack", selected: int, trades: Any, *, tf_label: str = ORACLE_TF_ONLY
+) -> dict:
     """Audit-only summary of the visible oracle trades (no strategy verdict).
 
     Historical-as-of: PnL / holding statistics are computed over CLOSED trades
     only (exit_x <= selected); trades still open at ``selected`` are reported
     separately as ``open_at_selected`` so no FUTURE exit PnL leaks into the
     audit line.
+    ``tf_label`` selects the decision clock: "5m" (legacy V2) or "15m" (R4 V4).
     """
-    records, mismatch = select_visible_oracle_trades(track, selected, trades)
+    records, mismatch = select_visible_oracle_trades(
+        track, selected, trades, tf_label=tf_label
+    )
     S = int(selected)
     closed = [(r, e, x) for (r, e, x) in records if x <= S]
     longs = sum(1 for (r, _e, _x) in records if str(r["direction"]) == "LONG")
