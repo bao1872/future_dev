@@ -742,12 +742,21 @@ def main() -> None:
     # The per-symbol segments are served from a cached owner, so switching bars
     # never re-runs the candidate groupby.
     segments, cand_audit, cand_by_time = [], EMPTY_CAND_AUDIT, {}
+    # Single source of truth for R4 availability THIS rerun. A missing / broken
+    # R4 manifest is decided ONCE here and every later R4 consumer must read this
+    # flag instead of re-calling an R4 loader (a second call re-raises the same
+    # error and takes the whole page down, including the DP Oracle overlay).
+    # Availability is NEVER inferred from `bool(segments)`: a perfectly valid
+    # artifact may legitimately contain zero candidates.
+    r4_available = False
+    r4_error = None
     if st.session_state.iv_show_candidate and tf == "15m":
         _t0 = time.perf_counter()
         try:
             segments, cand_audit, cand_by_time = candidate_segments_r4_cached(
                 track.symbol, git_head()
             )
+            r4_available = True
             timing["candidate_segment_ms"] = (time.perf_counter() - _t0) * 1000.0
             timing["candidate_load_ms"] = 0.0  # artifact read inside cached owner
             try:
@@ -759,6 +768,8 @@ def main() -> None:
                 timing["candidate_math_version"] = "MISSING"
                 timing["candidate_artifact_sha"] = "MISSING"
         except Exception as _e:
+            r4_error = str(_e)
+            r4_available = False
             st.warning(f"R4 candidate gate not available: {_e}")
             segments, cand_audit, cand_by_time = [], EMPTY_CAND_AUDIT, {}
 
@@ -1006,14 +1017,31 @@ def main() -> None:
                 # AUDIT-FIX1: BAR-LEVEL audit view. One candidate = ONE blue 15m
                 # bar; its trigger bar (candidate idx - 1) = ONE orange bar.
                 # Merged episode shading is DISABLED for manual audit.
-                lo, hi = compute_viewport(track, selected)
-                all_marks = candidate_marks_r4_cached(track.symbol, git_head())
-                marks = [m for m in all_marks if lo <= m["cand_track_idx"] <= hi]
-                try:
-                    proof_df = load_candidate_proof_r4_cached(symbol)
-                except Exception as _e:
-                    st.error(f"R4 touch proof unavailable (fail-closed): {_e}")
-                    proof_df = None
+                if not r4_available:
+                    # The R4 load already failed above and warned once. Any
+                    # second load here would re-raise the same missing-manifest
+                    # error and abort the whole page render. Empty marks ->
+                    # vaudit=None -> every R4 consumer below is skipped, while
+                    # the DP Oracle overlay still draws.
+                    marks, proof_df = [], None
+                else:
+                    lo, hi = compute_viewport(track, selected)
+                    try:
+                        all_marks = candidate_marks_r4_cached(track.symbol, git_head())
+                    except Exception as _e:
+                        st.warning(f"R4 candidate marks unavailable: {_e}")
+                        all_marks = None
+                    if all_marks is None:
+                        marks, proof_df = [], None
+                    else:
+                        marks = [m for m in all_marks if lo <= m["cand_track_idx"] <= hi]
+                        # Proof is only meaningful once the candidate artifact
+                        # AND its marks are both present.
+                        try:
+                            proof_df = load_candidate_proof_r4_cached(symbol)
+                        except Exception as _e:
+                            st.error(f"R4 touch proof unavailable (fail-closed): {_e}")
+                            proof_df = None
                 vaudit = (
                     run_viewport_candidate_audit(marks, proof_df)
                     if proof_df is not None else None
@@ -1185,7 +1213,13 @@ def main() -> None:
         # must render there (the old "5m" gate was an R3 leftover that made the
         # audit panel unreachable on the 15m chart).
         if st.session_state.iv_show_candidate and track.tf_label == "15m":
-            _render_candidate_audit(track, symbol, selected, cand_by_time, cand_audit, segments, timing)
+            if not r4_available:
+                st.caption(
+                    "R4 Candidate audit panel skipped — candidate artifact not "
+                    f"available ({r4_error or 'unknown error'})."
+                )
+            else:
+                _render_candidate_audit(track, symbol, selected, cand_by_time, cand_audit, segments, timing)
 
     # ---- DP Label Lifecycle Gate panel (FUT-M15-DP-LABEL-VIZ-GATE-01) ---- #
     if st.session_state.iv_show_lifecycle and track.tf_label == "15m":
