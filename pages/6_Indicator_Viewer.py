@@ -66,7 +66,6 @@ from research.liquidity_oracle_atlas.indicator_viewer_v1 import (
 )
 from research.liquidity_oracle_atlas.indicator_viewer_candidate_overlay_v1 import (
     TRIGGER_BITS,
-    add_candidate_zone_overlay,
     build_candidate_segments,
     candidate_for_symbol,
     candidate_state_at,
@@ -77,6 +76,33 @@ from research.liquidity_oracle_atlas.build_candidate_gate_r3_v1 import (
     load_candidate_gate_summary,
     load_candidate_proof_verified,
     touch_bit,
+)
+from research.liquidity_oracle_atlas.build_candidate_gate_r4_m15_v1 import (
+    load_candidate_gate_summary as load_candidate_gate_summary_r4,
+    touch_bit as touch_bit_r4,
+)
+from research.liquidity_oracle_atlas.build_trade_oracle_dp_m15_one_entry_proximity_v1 import (
+    MATH_VERSION as DP_M15_MATH_VERSION,
+    event_sort_key,
+    load_oracle_artifact as load_oracle_artifact_m15,
+    validate_execution_events,
+)
+from research.liquidity_oracle_atlas.dp_label_lifecycle_v1 import (
+    build_lifecycle_records,
+    run_lifecycle_assertions,
+    find_representative_cases,
+    run_negative_controls,
+    evidence_summary,
+)
+from research.liquidity_oracle_atlas.indicator_viewer_candidate_overlay_r4_v1 import (
+    TRIGGER_BITS_R4,
+    build_candidate_marks_r4,
+    build_proof_by_trigger,
+    build_candidate_segments_r4,
+    candidate_for_symbol_r4,
+    candidate_state_at_r4,
+    load_candidate_rows_r4,
+    run_viewport_candidate_audit,
 )
 
 TF_LABELS = ["5m", "15m", "1H", "4H"]
@@ -98,6 +124,13 @@ EMPTY_CAND_AUDIT = {
 # DP Oracle audit artifacts live outside the indicator pipeline (read-only).
 ORACLE_ARTIFACT_ROOT = (
     Path(__file__).resolve().parents[1] / "artifacts" / ARTIFACT_ROOT_DIRNAME
+)
+# R4 15m Oracle: mechanical 5m R2 port (FUTURE-INTRADAY-DP-ORACLE-R2-ONE-ENTRY-PROXIMITY-15M).
+# DP-internal proximity ONLY; fully decoupled from the R4 Candidate Trading Zones.
+ORACLE_ARTIFACT_ROOT_V4 = (
+    Path(__file__).resolve().parents[1]
+    / "artifacts"
+    / "trade_oracle_dp_m15_one_entry_proximity_v1"
 )
 
 # --- palette --------------------------------------------------------------- #
@@ -480,6 +513,56 @@ def load_candidate_proof_cached(symbol: str):
     return load_candidate_proof_verified(symbol)
 
 
+@st.cache_data(show_spinner="加载 R4 候选区域…")
+def candidate_segments_r4_cached(symbol: str, source_sha: str):
+    """Per-symbol R4 (15m) candidate segments + frozen-truth lookup.
+
+    Reads the canonical R4 candidate gate artifact (ONE canonical owner, shared with
+    DP and the future Model). The 15m candidate maps 1:1 onto the 15m ViewerTrack.
+    """
+    cand_sym = candidate_for_symbol_r4(load_candidate_rows_r4(symbol), symbol)
+    track = build_track_cached(symbol, "15m", source_sha)
+    return build_candidate_segments_r4(cand_sym, track)
+
+
+@st.cache_data(show_spinner="映射 R4 候选 bar（bar-level）…")
+def candidate_marks_r4_cached(symbol: str, source_sha: str):
+    """ALL candidate bars mapped onto the 15m track — one mark per candidate bar.
+
+    AUDIT-FIX1: the audit unit is a single bar pair (Trigger(t-1) -> Candidate(t)),
+    never a merged episode. Cached per (symbol, source_sha) so Prev/Next clicks
+    never re-map (point 9: no per-click history scan).
+    """
+    rows = candidate_for_symbol_r4(load_candidate_rows_r4(symbol), symbol)
+    track = build_track_cached(symbol, "15m", source_sha)
+    return build_candidate_marks_r4(rows, track)
+
+
+@st.cache_data(show_spinner="加载 R4 触发证据…")
+def load_candidate_proof_r4_cached(symbol: str):
+    """Per-symbol R4 touch-proof sidecar (exact hit zones per 15m trigger bar)."""
+    from research.liquidity_oracle_atlas.build_candidate_gate_r4_m15_v1 import (
+        load_candidate_proof_verified as _load,
+    )
+    return _load(symbol)
+
+
+@st.cache_data(show_spinner="加载 R4 执行帧…")
+def load_exec_frame_r4_cached(symbol: str):
+    from research.liquidity_oracle_atlas.build_execution_frame_m15_v1 import (
+        load_execution_frame_m15_verified as _load,
+    )
+    return _load(symbol)
+
+
+@st.cache_data(show_spinner="构建 R4 环境特征…")
+def load_env_features_r4_cached(symbol: str):
+    from research.liquidity_oracle_atlas.build_execution_environment_m15_v1 import (
+        run_environment_m15,
+    )
+    return run_environment_m15(symbol)["features"]
+
+
 @st.cache_resource(show_spinner="构建 forming-MTF 环境…")
 def load_forming_env_cached(symbol: str):
     # Canonical forming-MTF owner (build_forming_environment_v1). Returns the
@@ -506,6 +589,18 @@ def load_oracle_artifact_cached(
     artifact invalidates the cache. The Viewer NEVER recomputes the DP on rerun.
     """
     return load_oracle_artifact(root, symbol, expected_math_version=math_version)
+
+
+@st.cache_data(show_spinner="加载 R4 15m DP Oracle artifact…")
+def load_oracle_artifact_v4_cached(
+    root: str, symbol: str, math_version: str, cache_token: str
+):
+    """R4 15m Oracle (decoupled R2-15m port) read-only, fail-closed load.
+
+    Same cache contract as the legacy loaders; the 15m overlay NEVER falls back
+    to a V2 (5m) artifact.
+    """
+    return load_oracle_artifact_m15(root, symbol, expected_math_version=math_version)
 
 
 def resolve_selection(symbol, tf, n_bars, prev_selected, prev_ctx):
@@ -541,7 +636,8 @@ def main() -> None:
     st.session_state.setdefault("iv_show_liq", True)
     st.session_state.setdefault("iv_show_oracle", False)
     st.session_state.setdefault("iv_show_candidate", False)
-    st.session_state.setdefault("iv_cand_view", "All bars")
+    st.session_state.setdefault("iv_show_dp_proximity", False)
+    st.session_state.setdefault("iv_show_lifecycle", False)
 
     # ---- toolbar columns ------------------------------------------------ #
     col_sym, col_tf, col_date, col_bt, col_prev, col_next, c1, c2, c3 = st.columns(
@@ -573,12 +669,25 @@ def main() -> None:
                  "Decision axis = 5m; no t+1 shift; shows candidate truth only "
                  "(no model / Y / Q / Oracle action).",
         )
+        # AUDIT-FIX1 point 8: NO "All bars / Candidate episodes only" radio.
+        # The manual-audit visual unit is ONE bar pair
+        # (Trigger(t-1) -> Candidate(t)); episode shading is a DP concept and
+        # is disabled for manual audit.
         if st.session_state.iv_show_candidate:
-            st.session_state.iv_cand_view = st.radio(
-                "Candidate display",
-                ["All bars", "Candidate episodes only"],
-                index=0 if st.session_state.iv_cand_view == "All bars" else 1,
+            st.caption(
+                "R4 bar-level audit: one candidate = ONE blue 15m bar; its trigger "
+                "(candidate idx - 1) = ONE orange bar. No episode merging."
             )
+
+        # DP-internal proximity audit (decoupled from R4 Candidate).
+        # Shows the 0.5-ATR proximity band the DP itself uses — NOT the Candidate
+        # Trading Zone. Debug / visual separation only.
+        st.session_state.iv_show_dp_proximity = st.checkbox(
+            "Show DP Proximity Audit",
+            value=st.session_state.iv_show_dp_proximity,
+            help="0.5-ATR proximity — DP INTERNAL ONLY (15m/1h/4h SR/LIQ). "
+                 "This is NOT the R4 Candidate Trading Zone. Visual separation/debug.",
+        )
 
     # DP Oracle audit overlay — OFF by default, read-only, 5m-clock only.
     st.session_state.iv_show_oracle = st.checkbox(
@@ -588,6 +697,16 @@ def main() -> None:
              "trading signal and never a model feature.",
     )
 
+    # DP Label Lifecycle Gate (FUT-M15-DP-LABEL-VIZ-GATE-01) — read-only overlay.
+    st.session_state.iv_show_lifecycle = st.checkbox(
+        "DP Label Lifecycle Gate (15m)",
+        value=st.session_state.iv_show_lifecycle,
+        help="Draws the canonical DP trade lifecycle: Candidate Region (DP proximity "
+             "episode) -> one ENTRY -> holding -> EXIT -> next Candidate, plus the "
+             "Lifecycle table + auto-assertions (A-E) + negative controls. Read-only; "
+             "does NOT recompute the DP.",
+    )
+
     # (2) NOW build the track from the CURRENT widget values, so the chart
     #     always corresponds to the dropdown in the SAME rerun.
     timing: Dict[str, float] = {}
@@ -595,26 +714,31 @@ def main() -> None:
     track = build_track_cached(symbol, tf, git_head())
     timing["track_build_ms"] = (time.perf_counter() - _t0) * 1000.0
 
-    # (2b) Candidate-zone overlay data (frozen T2 truth, 5m decision axis).
-    # FIX1 point 1: only touch the T2 candidate data when the overlay is ON and
-    # the primary chart is 5m. Otherwise leave it entirely untouched.
-    # FIX1 point 2: the per-symbol segments are served from a cached owner, so
-    # switching bars never re-runs the candidate groupby.
+    # (2b) Candidate-zone overlay data (frozen R4 truth, 15m decision axis).
+    # R4: the only valid candidate decision axis is 15m. The 5m axis is raw
+    # plumbing only and never a candidate / feature / decision variable.
+    # The per-symbol segments are served from a cached owner, so switching bars
+    # never re-runs the candidate groupby.
     segments, cand_audit, cand_by_time = [], EMPTY_CAND_AUDIT, {}
-    if st.session_state.iv_show_candidate and track.tf_label == "5m":
+    if st.session_state.iv_show_candidate and tf == "15m":
         _t0 = time.perf_counter()
-        segments, cand_audit, cand_by_time = candidate_segments_cached(symbol, git_head())
-        timing["candidate_segment_ms"] = (time.perf_counter() - _t0) * 1000.0
-        timing["candidate_load_ms"] = 0.0  # artifact read is inside the cached owner
-        # candidate math version + artifact SHA (proves Viewer/DP/Model share it)
         try:
-            _summ = load_candidate_gate_summary()
-            timing["candidate_math_version"] = _summ.get("candidate_math_version", "")
-            _sa = _summ.get("symbol_artifacts", {}).get(symbol, {})
-            timing["candidate_artifact_sha"] = _sa.get("sha256", "")[:12]
-        except FileNotFoundError:
-            timing["candidate_math_version"] = "MISSING"
-            timing["candidate_artifact_sha"] = "MISSING"
+            segments, cand_audit, cand_by_time = candidate_segments_r4_cached(
+                track.symbol, git_head()
+            )
+            timing["candidate_segment_ms"] = (time.perf_counter() - _t0) * 1000.0
+            timing["candidate_load_ms"] = 0.0  # artifact read inside cached owner
+            try:
+                _summ = load_candidate_gate_summary_r4()
+                timing["candidate_math_version"] = _summ.get("candidate_math_version", "")
+                _sa = _summ.get("symbol_artifacts", {}).get(symbol, {})
+                timing["candidate_artifact_sha"] = _sa.get("sha256", "")[:12]
+            except FileNotFoundError:
+                timing["candidate_math_version"] = "MISSING"
+                timing["candidate_artifact_sha"] = "MISSING"
+        except Exception as _e:
+            st.warning(f"R4 candidate gate not available: {_e}")
+            segments, cand_audit, cand_by_time = [], EMPTY_CAND_AUDIT, {}
 
     # (3) Selection: reset to latest bar when symbol/TF changed.
     prev_ctx = st.session_state.get("_iv_ctx")
@@ -657,59 +781,126 @@ def main() -> None:
     selected = int(st.session_state.iv_selected)
     snap = selected_snapshot(track, selected)
 
-    # ---- DP Oracle audit overlay (read-only, fail-closed, 5m only) ------- #
+    # ---- DP Oracle audit overlay (read-only, fail-closed) ---------------- #
+    # R4 V4 (FUTURE-R4-M15-DP-ORACLE-V4): on the 15m decision axis the overlay
+    # loads ONLY the V4 15m artifact and NEVER the legacy V2 (5m) artifact.
+    # The 5m overlay keeps the legacy V2 path unchanged.
     show_oracle = bool(st.session_state.iv_show_oracle)
     oracle_trades = None
     oracle_meta = None
+    oracle_tf = None  # decision clock of the loaded artifact ("5m" / "15m")
+    lifecycle_records = None  # DP Label Lifecycle Gate (15m)
     if show_oracle:
         st.warning(
             "**DP Oracle uses future prices to find hindsight-optimal intraday "
             "trades. It is for audit / research labels only — NOT a causal "
             "trading signal and never a model feature.**"
         )
-        loaded = load_oracle_artifact_cached(
-            str(ORACLE_ARTIFACT_ROOT),
-            symbol,
-            MATH_VERSION,
-            oracle_cache_token(str(ORACLE_ARTIFACT_ROOT), symbol),
-        )
-        if not loaded["ok"]:
-            st.error(f"Oracle overlay disabled (fail-closed): `{loaded['reason']}`.")
+        if tf == "15m":
+            _loaded = load_oracle_artifact_v4_cached(
+                str(ORACLE_ARTIFACT_ROOT_V4),
+                symbol,
+                DP_M15_MATH_VERSION,
+                oracle_cache_token(str(ORACLE_ARTIFACT_ROOT_V4), symbol),
+            )
+            if not _loaded["ok"]:
+                st.error(
+                    f"15m DP Oracle overlay disabled (fail-closed): "
+                    f"`{_loaded['reason']}`. Generate the artifact: "
+                    f"`python -m research.liquidity_oracle_atlas."
+                    f"build_trade_oracle_dp_m15_one_entry_proximity_v1 {symbol}`"
+                )
+            else:
+                oracle_trades = _loaded["trades"]
+                oracle_meta = _loaded["metadata"]
+                oracle_tf = "15m"
+                timing["oracle_integrity"] = oracle_meta.get("integrity")
+                st.session_state["_iv_oracle_trades"] = oracle_trades
+        elif tf == ORACLE_TF_ONLY:
+            loaded = load_oracle_artifact_cached(
+                str(ORACLE_ARTIFACT_ROOT),
+                symbol,
+                MATH_VERSION,
+                oracle_cache_token(str(ORACLE_ARTIFACT_ROOT), symbol),
+            )
+            if not loaded["ok"]:
+                st.error(f"Oracle overlay disabled (fail-closed): `{loaded['reason']}`.")
+            else:
+                oracle_trades = loaded["trades"]
+                oracle_meta = loaded["metadata"]
+                oracle_tf = ORACLE_TF_ONLY
         else:
-            oracle_trades = loaded["trades"]
-            oracle_meta = loaded["metadata"]
-            if tf != ORACLE_TF_ONLY:
-                st.info(
-                    "Oracle executions are defined on the 5m clock. Switch to 5m "
-                    "to inspect exact Entry / Exit points."
+            st.info(
+                "Oracle executions are defined on the 5m (legacy V2) and 15m "
+                "(R4 V4) decision clocks. Switch to 5m or 15m to inspect exact "
+                "Entry / Exit points."
+            )
+        if oracle_trades is not None:
+            _rec, _mism = select_visible_oracle_trades(
+                track, selected, oracle_trades, tf_label=oracle_tf
+            )
+            if _mism > 0:
+                st.error(
+                    f"Oracle overlay disabled (fail-closed): time alignment "
+                    f"mismatch on {_mism} visible trade(s)."
                 )
                 oracle_trades = None
             else:
-                _rec, _mism = select_visible_oracle_trades(track, selected, oracle_trades)
-                if _mism > 0:
-                    st.error(
-                        f"Oracle overlay disabled (fail-closed): time alignment "
-                        f"mismatch on {_mism} visible trade(s)."
+                _summ = oracle_viewport_summary(
+                    track, selected, oracle_trades, tf_label=oracle_tf
+                )
+                st.caption(
+                    f"Oracle audit ({oracle_tf}) · visible trades={_summ['visible_trades']} "
+                    f"(L={_summ['long_trades']} / S={_summ['short_trades']}) · "
+                    f"closed(<= selected)={_summ['closed_trades']} · "
+                    f"open at selected={_summ['open_at_selected']} · "
+                    f"total gross oracle PnL (closed)={_summ['total_gross_points']:.2f} pts · "
+                    f"median holding={_summ['median_holding_bars']:.0f} bars · "
+                    f"objective={oracle_meta.get('objective')} · "
+                    f"cost_mode={oracle_meta.get('cost_mode')}"
+                )
+                if oracle_meta.get("oracle_source_sha") != git_head():
+                    st.warning(
+                        "Oracle artifact oracle_source_sha="
+                        f"`{oracle_meta.get('oracle_source_sha')}` != current "
+                        f"HEAD=`{git_head()}` — possibly stale artifact."
                     )
-                    oracle_trades = None
-                else:
-                    _summ = oracle_viewport_summary(track, selected, oracle_trades)
-                    st.caption(
-                        f"Oracle audit · visible trades={_summ['visible_trades']} "
-                        f"(L={_summ['long_trades']} / S={_summ['short_trades']}) · "
-                        f"closed(<= selected)={_summ['closed_trades']} · "
-                        f"open at selected={_summ['open_at_selected']} · "
-                        f"total gross oracle PnL (closed)={_summ['total_gross_points']:.2f} pts · "
-                        f"median holding={_summ['median_holding_bars']:.0f} bars · "
-                        f"objective={oracle_meta.get('objective')} · "
-                        f"cost_mode={oracle_meta.get('cost_mode')}"
-                    )
-                    if oracle_meta.get("oracle_source_sha") != git_head():
-                        st.warning(
-                            "Oracle artifact oracle_source_sha="
-                            f"`{oracle_meta.get('oracle_source_sha')}` != current "
-                            f"HEAD=`{git_head()}` — possibly stale artifact."
-                        )
+
+    # DP-internal proximity audit (decoupled from R4 Candidate Trading Zones).
+    if st.session_state.iv_show_dp_proximity and tf == "15m":
+        _pa = load_oracle_artifact_v4_cached(
+            str(ORACLE_ARTIFACT_ROOT_V4),
+            symbol,
+            DP_M15_MATH_VERSION,
+            oracle_cache_token(str(ORACLE_ARTIFACT_ROOT_V4), symbol),
+        )
+        if not _pa["ok"]:
+            st.error(
+                f"DP Proximity audit disabled (fail-closed): `{_pa['reason']}`. "
+                f"Generate the artifact first."
+            )
+        else:
+            _acts = _pa["actions"]
+            _dt = pd.to_datetime(_acts["decision_time"])
+            _pa_flag = _acts["dp_proximity_any"].to_numpy(bool)
+            import matplotlib.pyplot as plt
+
+            _f, _ax = plt.subplots(figsize=(10, 1.4))
+            _ax.fill_between(_dt, 0, 1, where=_pa_flag, color="#3a6ea5",
+                             step="mid", alpha=0.5)
+            _ax.set_yticks([])
+            _ax.set_ylim(0, 1)
+            _ax.set_title(
+                "DP-internal 0.5-ATR proximity (15m/1h/4h SR/LIQ) — NOT Candidate",
+                fontsize=9,
+            )
+            st.pyplot(_f)
+            st.caption(
+                "Blue bands = bars where the DP's OWN proximity P_t=1 (distance to any "
+                "pre-existing 15m/1h/4h SR/LIQ <= 0.5 ATR). This is the DP's internal "
+                "entry-permission gate only; it is independent of the R4 Candidate "
+                "Trading Zones."
+            )
 
     # ---- main + snapshot ------------------------------------------------ #
     chart_col, snap_col = st.columns([4, 1])
@@ -717,98 +908,165 @@ def main() -> None:
         _t0 = time.perf_counter()
         fig = build_figure(track, selected, st.session_state.iv_show_dtp,
                            st.session_state.iv_show_sr, st.session_state.iv_show_liq)
-        if st.session_state.iv_show_candidate:
-            if track.tf_label == "5m":
-                # FIX1 point 3: only draw segments that intersect the CURRENT
-                # viewport AND start at/before the selected bar. This keeps the
-                # figure to a handful of vrects instead of every historical
-                # episode (AG has ~1392 episodes; never all go into the figure).
-                lo, hi = compute_viewport(track, selected)
-                visible = [
-                    s for s in segments
-                    if s.end_idx >= lo and s.start_idx <= hi and s.start_idx <= selected
-                ]
-                fig = add_candidate_zone_overlay(fig, visible)
-                # Yellow vertical line marks the TRIGGER bar: the previous 5m bar
-                # whose true-touch (5m SR/LIQ) actually opened the candidate. This
-                # makes the "previous-bar touch -> next-bar candidate" rule visible.
-                _dt = pd.Timestamp(track.available_time[selected])
-                _cstate = candidate_state_at(cand_by_time, _dt)
-                if _cstate["is_candidate"] and int(_cstate["trigger_bar_index"]) >= 0:
-                    _tbi = int(_cstate["trigger_bar_index"])
-                    if 0 <= _tbi < len(track.available_time):
-                        fig.add_vline(
-                            x=_tbi, line_color="gold", line_width=1.5,
-                            opacity=0.9,
-                        )
-                        # FIX2: draw ONLY the exact zones actually hit at the
-                        # trigger bar (from the proof artifact), local to
-                        # [trigger-0.5, candidate+0.5]. Never extends across the
-                        # whole viewport, and the Viewer never re-judges
-                        # bar_hits_zone here — the proof is the single source.
-                        try:
-                            _proof = load_candidate_proof_cached(symbol)
-                            _sel = _proof[_proof["trigger_bar_index"] == _tbi]
-                            _x0, _x1 = _tbi - 0.5, selected + 0.5
-                            for _m in _sel.to_dict("records"):
-                                _is_m5 = _m["tf"] == "m5"
-                                if _m["family"] == "SR":
-                                    _color = "rgba(255,193,7,1)" if _is_m5 else "rgba(120,170,255,0.95)"
-                                    _label = (
-                                        f"5m SR #{int(_m['slot'])}" if _is_m5
-                                        else f"{_m['tf']} SR #{int(_m['slot'])} (conf)"
-                                    )
-                                else:
-                                    _color = "rgba(255,140,0,1)" if _is_m5 else "rgba(170,130,255,0.95)"
-                                    _label = (
-                                        f"5m LIQ {_m.get('side')} #{int(_m['slot'])}" if _is_m5
-                                        else f"{_m['tf']} LIQ {_m.get('side')} #{int(_m['slot'])} (conf)"
-                                    )
-                                fig.add_shape(
-                                    type="rect", xref="x", yref="y",
-                                    x0=_x0, x1=_x1,
-                                    y0=float(_m["bottom"]), y1=float(_m["top"]),
-                                    fillcolor="rgba(0,0,0,0)",
-                                    line={"color": _color, "width": 2.5},
-                                    layer="above",
-                                )
-                                fig.add_annotation(
-                                    x=_x1, y=float(_m["top"]), text=_label,
-                                    showarrow=False, xanchor="left", yanchor="bottom",
-                                    font={"color": _color, "size": 10},
-                                )
-                        except Exception as _e:  # proof missing -> skip draw, keep bands
-                            st.warning(f"touch proof unavailable: {_e}")
-                timing["plot_segment_count"] = len(visible)
-                timing["full_symbol_segments"] = len(segments)
-                st.caption(
-                    f"Blue shaded bands = frozen R3 candidate trading zones "
-                    f"(candidate gate artifact). Rendered {len(visible)} / {len(segments)} "
-                    f"segments in current viewport. Gold line = trigger bar (prev 5m "
-                    f"bar whose 5m SR/LIQ opened the candidate). Decision axis = 5m; "
-                    f"no t+1 shift. Candidate truth only — no model / Y / Q / Oracle "
-                    f"action shown.")
-                if st.session_state.iv_cand_view == "Candidate episodes only" and segments:
-                    starts = sorted({int(s.start_idx) for s in segments})
-                    cp, cn = st.columns(2)
-                    with cp:
-                        if st.button("◀ Prev candidate episode"):
-                            prev = [x for x in starts if x < selected]
-                            if prev:
-                                st.session_state.iv_selected = int(max(prev))
-                                st.rerun()
-                    with cn:
-                        if st.button("Next candidate episode ▶"):
-                            nxt = [x for x in starts if x > selected]
-                            if nxt:
-                                st.session_state.iv_selected = int(min(nxt))
-                                st.rerun()
 
-                    # FIX2: per-Candidate navigation (jump to the next candidate
-                    # BAR, not just episode start) for fast trigger-zone review.
-                    cand_idx = sorted(
-                        {i for s in segments for i in range(s.start_idx, s.end_idx + 1)}
+        # ---- DP Label Lifecycle Gate (FUT-M15-DP-LABEL-VIZ-GATE-01) ---------- #
+        # Read-only overlay: shades each DP "candidate region" (its proximity
+        # episode band) and labels "Candidate #k" at the entry. Reuses the SAME
+        # canonical 15m oracle artifact as the DP overlay; never recomputes DP.
+        if st.session_state.iv_show_lifecycle and tf == "15m":
+            _lacy = load_oracle_artifact_v4_cached(
+                str(ORACLE_ARTIFACT_ROOT_V4), symbol, DP_M15_MATH_VERSION,
+                oracle_cache_token(str(ORACLE_ARTIFACT_ROOT_V4), symbol))
+            if not _lacy["ok"]:
+                st.error(
+                    f"DP Label Lifecycle disabled (fail-closed): `{_lacy['reason']}`. "
+                    f"Generate the artifact first: `python -m "
+                    f"research.liquidity_oracle_atlas."
+                    f"build_trade_oracle_dp_m15_one_entry_proximity_v1 {symbol}`"
+                )
+            else:
+                lifecycle_records = build_lifecycle_records(
+                    _lacy["trades"], _lacy["actions"])
+                lo_v, hi_v = compute_viewport(track, int(selected))
+                for _r in lifecycle_records:
+                    if _r.band_lo < 0 or _r.band_hi < 0:
+                        continue
+                    if _r.band_hi < lo_v or _r.band_lo > hi_v:
+                        continue
+                    _is_cur = (
+                        (_r.entry_fill_index <= int(selected) <= _r.exit_fill_index)
+                        or (_r.band_lo <= int(selected) <= _r.band_hi)
                     )
+                    _col = ("rgba(255,209,102,0.16)" if _is_cur
+                            else "rgba(56,128,255,0.10)")
+                    fig.add_vrect(x0=_r.band_lo - 0.5, x1=_r.band_hi + 0.5,
+                                  fillcolor=_col, line_width=0, layer="below")
+                    fig.add_annotation(
+                        x=_r.entry_fill_index, y=_r.entry_price,
+                        text=f"C#{_r.candidate_id}", showarrow=True, arrowhead=2,
+                        ax=0, ay=-28, font={"size": 9, "color": "#FFD166"},
+                        opacity=0.9)
+        if st.session_state.iv_show_candidate:
+            if tf == "15m":
+                # AUDIT-FIX1: BAR-LEVEL audit view. One candidate = ONE blue 15m
+                # bar; its trigger bar (candidate idx - 1) = ONE orange bar.
+                # Merged episode shading is DISABLED for manual audit.
+                lo, hi = compute_viewport(track, selected)
+                all_marks = candidate_marks_r4_cached(track.symbol, git_head())
+                marks = [m for m in all_marks if lo <= m["cand_track_idx"] <= hi]
+                try:
+                    proof_df = load_candidate_proof_r4_cached(symbol)
+                except Exception as _e:
+                    st.error(f"R4 touch proof unavailable (fail-closed): {_e}")
+                    proof_df = None
+                vaudit = (
+                    run_viewport_candidate_audit(marks, proof_df)
+                    if proof_df is not None else None
+                )
+                timing["viewport_audit"] = vaudit
+                # Fail-closed invariants (points 3/4/5): hard STOP on violation.
+                if vaudit is not None and vaudit["missing_m15_proof"] > 0:
+                    _bad = ", ".join(
+                        f"{i}@{t}" for i, t in zip(
+                            vaudit["missing_proof_indices"][:10],
+                            vaudit["missing_proof_times"][:10],
+                        )
+                    )
+                    st.error(
+                        f"STOP_R4_VIEWER_CANDIDATE_WITHOUT_M15_PROOF :: "
+                        f"missing={vaudit['missing_m15_proof']} ; "
+                        f"bad[15m idx@decision_time] = {_bad}"
+                    )
+                if vaudit is not None and vaudit["bits_proof_mismatch"] > 0:
+                    st.error(
+                        "STOP_R4_TRIGGER_BITS_PROOF_MISMATCH :: "
+                        + " | ".join(vaudit["mismatch_details"][:10])
+                    )
+                if (
+                    vaudit is not None
+                    and vaudit["missing_m15_proof"] == 0
+                    and vaudit["bits_proof_mismatch"] == 0
+                ):
+                    # orange trigger bar + blue candidate bar (one bar each)
+                    for m in marks:
+                        if m["trig_track_idx"] >= 0:
+                            fig.add_vrect(
+                                x0=m["trig_track_idx"] - 0.5,
+                                x1=m["trig_track_idx"] + 0.5,
+                                fillcolor="rgba(255,165,0,0.30)",
+                                line_width=0, layer="below",
+                            )
+                        fig.add_vrect(
+                            x0=m["cand_track_idx"] - 0.5,
+                            x1=m["cand_track_idx"] + 0.5,
+                            fillcolor="rgba(56,128,255,0.30)",
+                            line_width=0, layer="below",
+                        )
+                    # exact HISTORICAL m15 hit-zone for EVERY visible trigger
+                    # (audit-panel-only for h1/h4 — never drawn on the main chart)
+                    _pbt = build_proof_by_trigger(proof_df)
+                    for m in marks:
+                        _t = m["trig_track_idx"]
+                        if _t < 0:
+                            continue
+                        _rows15 = [
+                            r for r in _pbt.get(m["trigger_bar_index"], [])
+                            if r["tf"] == "m15"
+                        ]
+                        _ytop = None
+                        for r in _rows15:
+                            _is_sr = r["family"] == "SR"
+                            _color = "rgba(255,193,7,1)" if _is_sr else "rgba(255,140,0,1)"
+                            fig.add_shape(
+                                type="rect", xref="x", yref="y",
+                                x0=_t - 0.5, x1=_t + 0.5,
+                                y0=float(r["bottom"]), y1=float(r["top"]),
+                                fillcolor="rgba(0,0,0,0)",
+                                line={"color": _color, "width": 2},
+                                layer="above",
+                            )
+                            _ytop = (
+                                float(r["top"])
+                                if _ytop is None else max(_ytop, float(r["top"]))
+                            )
+                        if _rows15:
+                            _has_sr = any(r["family"] == "SR" for r in _rows15)
+                            _has_liq = any(r["family"] == "LIQ" for r in _rows15)
+                            _lbl = (
+                                "S+L" if (_has_sr and _has_liq)
+                                else ("S" if _has_sr else "L")
+                            )
+                            fig.add_annotation(
+                                x=_t, y=_ytop, text=_lbl, showarrow=False,
+                                yanchor="bottom", yshift=2,
+                                font={"color": "rgba(255,200,80,1)", "size": 10},
+                            )
+                    # selected-candidate orientation line at ITS trigger bar
+                    _cstate = candidate_state_at_r4(cand_by_time, selected)
+                    if _cstate["is_candidate"] and int(_cstate["trigger_bar_index"]) >= 0:
+                        _tbi = int(_cstate["trigger_bar_index"])
+                        if 0 <= _tbi < track.n:
+                            fig.add_vline(
+                                x=_tbi - 0.5, line_color="gold", line_width=2.5,
+                                opacity=0.9,
+                            )
+                if vaudit is not None:
+                    timing["candidate_bars_drawn"] = len(marks)
+                    st.caption(
+                        f"R4 bar-level audit: BLUE bar = candidate (one 15m bar); ORANGE bar = "
+                        f"its trigger (candidate idx - 1). Outlined zone = HISTORICAL 15m proof "
+                        f"at the trigger (S=SR, L=LIQ), spanning only that trigger bar — visually "
+                        f"distinct from the CURRENT SR/Liquidity drawn across the viewport; never "
+                        f"judge a past candidate against current SR. Counters: "
+                        f"visible_candidates={vaudit['visible_candidates']} · "
+                        f"visible_triggers={vaudit['visible_triggers']} · "
+                        f"candidates_with_m15_proof={vaudit['candidates_with_m15_proof']} · "
+                        f"missing_m15_proof={vaudit['missing_m15_proof']} · "
+                        f"bits_proof_mismatch={vaudit['bits_proof_mismatch']} "
+                        f"(last three must be 0). Episode shading disabled for manual audit. "
+                        f"No model / Y / Q / Oracle action shown.")
+                    # per-Candidate navigation over the WHOLE symbol (bar-level)
+                    cand_idx = sorted(cand_by_time.keys())
                     if cand_idx:
                         cp2, cn2 = st.columns(2)
                         with cp2:
@@ -825,10 +1083,12 @@ def main() -> None:
                                     st.rerun()
             else:
                 st.info(
-                    "Candidate zones are defined on the 5m decision axis. "
-                    "Switch the primary chart to 5m for candidate-region audit.")
-        if show_oracle and oracle_trades is not None and tf == ORACLE_TF_ONLY:
-            fig = add_dp_oracle_overlay(fig, track, selected, oracle_trades)
+                    "R4 Candidate zones are defined on the 15m decision axis. "
+                    "Switch the primary chart to 15m for candidate-region audit.")
+        if show_oracle and oracle_trades is not None and oracle_tf is not None:
+            fig = add_dp_oracle_overlay(
+                fig, track, selected, oracle_trades, tf_label=oracle_tf
+            )
         timing["figure_build_ms"] = (time.perf_counter() - _t0) * 1000.0
         event = st.plotly_chart(
             fig, key="iv_chart", on_select="rerun", selection_mode="points",
@@ -866,8 +1126,23 @@ def main() -> None:
             st.text(f"  S#{k+1} {lv['level']:.2f} br={lv['broken']} z={lv['zone_active']}")
 
         # ---- candidate audit (A: frozen truth, B: canonical state) ------ #
-        if st.session_state.iv_show_candidate and track.tf_label == "5m":
+        # AUDIT-FIX1: R4 candidates live on the 15m decision axis; the panel
+        # must render there (the old "5m" gate was an R3 leftover that made the
+        # audit panel unreachable on the 15m chart).
+        if st.session_state.iv_show_candidate and track.tf_label == "15m":
             _render_candidate_audit(track, symbol, selected, cand_by_time, cand_audit, segments, timing)
+
+    # ---- DP Label Lifecycle Gate panel (FUT-M15-DP-LABEL-VIZ-GATE-01) ---- #
+    if st.session_state.iv_show_lifecycle and track.tf_label == "15m":
+        if lifecycle_records is None:
+            _lacy = load_oracle_artifact_v4_cached(
+                str(ORACLE_ARTIFACT_ROOT_V4), symbol, DP_M15_MATH_VERSION,
+                oracle_cache_token(str(ORACLE_ARTIFACT_ROOT_V4), symbol))
+            if _lacy["ok"]:
+                lifecycle_records = build_lifecycle_records(
+                    _lacy["trades"], _lacy["actions"])
+        if lifecycle_records is not None:
+            _render_dp_label_lifecycle(track, symbol, selected, lifecycle_records)
 
     # ---- bottom debug --------------------------------------------------- #
     with st.expander("Technical snapshot", expanded=False):
@@ -884,18 +1159,45 @@ def main() -> None:
         st.text(f"  candidate_segment_ms  : {timing.get('candidate_segment_ms', 0.0):.1f}")
         st.text(f"  figure_build_ms       : {timing.get('figure_build_ms', 0.0):.1f}")
         st.text(f"  forming_env_ms        : {timing.get('forming_env_ms', 0.0):.1f}")
-        st.text(f"  plot_segment_count    : {timing.get('plot_segment_count', 0)} "
-                f"/ {timing.get('full_symbol_segments', 0)}  (rendered / full)")
+        st.text(f"  candidate_bars_drawn  : {timing.get('candidate_bars_drawn', 0)}")
         st.text("")
         st.text("CANDIDATE ARTIFACT (shared by Viewer / DP / Model)")
         st.text(f"  math_version          : {timing.get('candidate_math_version', '—')}")
         st.text(f"  artifact SHA          : {timing.get('candidate_artifact_sha', '—')}")
+        _ig = timing.get("oracle_integrity")
+        if _ig is not None:
+            st.text("R4 DP V4 PATH / TRADE INTEGRITY (must all be 0)")
+            st.text(f"  path_errors           : {_ig.get('path_errors')}")
+            st.text(f"  trade_sequence_errors : {_ig.get('trade_sequence_errors')}")
+            st.text(
+                "  viewer_event_errors   : "
+                f"{_viewer_event_errors(st.session_state.get('_iv_oracle_trades'))}"
+            )
         st.json({
             "dtp": d,
             "sr": snap["sr_channels"],
             "liq_up": snap["liq_up"],
             "liq_down": snap["liq_down"],
         })
+
+
+def _viewer_event_errors(trades) -> int:
+    """Re-validate the execution events the Viewer derived from the trades.
+
+    The Viewer only CONSUMES validated trades; this is a cheap independent
+    check that what it is about to draw is still a legal Entry/Exit sequence.
+    """
+    if trades is None or len(trades) == 0:
+        return 0
+    events = []
+    for r in trades.sort_values(["entry_fill_index"]).to_dict("records"):
+        d = str(r["direction"])
+        events.append((int(r["entry_fill_index"]),
+                       "LONG_ENTRY" if d == "LONG" else "SHORT_ENTRY"))
+        events.append((int(r["exit_fill_index"]),
+                       "LONG_EXIT" if d == "LONG" else "SHORT_EXIT"))
+    events.sort(key=event_sort_key)
+    return len(validate_execution_events(events))
 
 
 def _ff(x, p: int = 2) -> str:
@@ -907,6 +1209,132 @@ def _ff(x, p: int = 2) -> str:
         return f"{v:.{p}f}"
     except (TypeError, ValueError):
         return "—"
+
+
+def _render_dp_label_lifecycle(track, symbol, selected, lifecycle_records):
+    """Render the DP Label Lifecycle Gate panel (FUT-M15-DP-LABEL-VIZ-GATE-01).
+
+    Read-only: reads ONLY the canonical 15m DP oracle artifact (cached), derives
+    the lifecycle view, runs the A-E assertions + NC1-NC5 negative controls, and
+    displays the Lifecycle table + prev/current/next timeline. No DP recompute,
+    no model, no Layer-2.
+    """
+    st.markdown("---")
+    st.markdown("### DP Label Lifecycle Gate · 15m")
+    st.caption(
+        "Read-only view of the canonical DP label artifact. One Candidate Region "
+        "(DP proximity episode) -> exactly one ENTRY -> holding -> EXIT -> next "
+        "Candidate. No DP recompute; no model; no Layer-2. Exit reasons are "
+        "STRICTLY canonical: FLAT_EXIT / REVERSAL (this DP has no TP/STOP/TARGET)."
+    )
+
+    _lacy = load_oracle_artifact_v4_cached(
+        str(ORACLE_ARTIFACT_ROOT_V4), symbol, DP_M15_MATH_VERSION,
+        oracle_cache_token(str(ORACLE_ARTIFACT_ROOT_V4), symbol))
+    if not _lacy["ok"]:
+        st.error(f"DP Label Lifecycle: artifact unavailable (`{_lacy['reason']}`).")
+        return
+    trades = _lacy["trades"]
+    recs = lifecycle_records
+    ass = run_lifecycle_assertions(trades, recs)
+    cases = find_representative_cases(trades, recs)
+    neg = run_negative_controls(trades, recs)
+
+    sel = int(selected)
+    cur = next((r for r in recs if r.entry_fill_index <= sel <= r.exit_fill_index), None)
+    if cur is None and recs:
+        cur = min(recs, key=lambda r: abs(r.entry_fill_index - sel))
+
+    # ---- Lifecycle status ----
+    status = "VALID" if ass["all_pass"] else "INVALID"
+    _gate_keys = [
+        "A_one_entry_per_candidate", "B_no_overlapping_trades",
+        "C_previous_closed_before_new_entry", "D_allowed", "E_one_label_per_candidate",
+    ]
+    _n_pass = sum(1 for k in _gate_keys if ass[k])
+    st.markdown(f"**Lifecycle status: {status}**  (A-E pass = {_n_pass}/5)")
+
+    # ---- manual-case navigation (task #13) ----
+    st.markdown("**Jump to required manual cases**")
+    cbtns = st.columns(4)
+    _case_map = [
+        ("Case1: prev exits → next", "case1_previous_exits_then_next"),
+        ("Case2: next quick after exit", "case2_next_quick_after_exit"),
+        ("Case3: same-direction cont.", "case3_same_direction_continuation"),
+        ("Case4: region re-entered → 1 entry", "case4_longest_proximity_episode_one_entry"),
+    ]
+    for col, (label, key) in zip(cbtns, _case_map):
+        with col:
+            if st.button(label, key=f"lc_{key}"):
+                cid = cases.get(key)
+                _tgt = next((r for r in recs if r.candidate_id == cid), None)
+                if _tgt is not None:
+                    st.session_state.iv_selected = int(_tgt.entry_fill_index)
+                    st.rerun()
+
+    # ---- Lifecycle table for the current candidate ----
+    if cur is not None:
+        st.markdown(f"**Lifecycle table — Candidate #{cur.candidate_id}**")
+        lrows = [
+            ("candidate_id", cur.candidate_id),
+            ("candidate_region_id", cur.candidate_region_id),
+            ("candidate_time", cur.candidate_time),
+            ("candidate_anchor", round(float(cur.candidate_anchor_price), 2)),
+            ("direction", cur.direction),
+            ("entry_time", cur.entry_time),
+            ("entry_price", round(float(cur.entry_price), 2)),
+            ("number_of_entries", cur.number_of_entries),
+            ("exit_time", cur.exit_time),
+            ("exit_price", round(float(cur.exit_price), 2)),
+            ("exit_reason", cur.exit_reason),
+            ("next_candidate_id", cur.next_candidate_id),
+            ("next_candidate_time", cur.next_candidate_time),
+            ("overlap_with_next", cur.overlap_with_next),
+        ]
+        st.table(pd.DataFrame(lrows, columns=["Field", "Value"]))
+
+        st.markdown("**Previous / Current / Next timeline**")
+        prev_exit = cur.prev_exit_time if cur.prev_candidate_id is not None else "—"
+        next_entry = cur.next_entry_time if cur.next_candidate_id is not None else "—"
+        tl = [
+            ("Previous candidate", cur.prev_candidate_id, "exit", prev_exit),
+            ("Current candidate", cur.candidate_id, "entry", cur.entry_time),
+            ("Current candidate", cur.candidate_id, "exit", cur.exit_time),
+            ("Next candidate", cur.next_candidate_id, "entry", next_entry),
+        ]
+        st.table(pd.DataFrame(tl, columns=["Candidate", "id", "event", "time"]))
+        if cur.prev_candidate_id is not None:
+            ok_prev = pd.Timestamp(prev_exit) <= pd.Timestamp(cur.entry_time)
+            st.caption(
+                f"Exit(prev) ≤ Entry(curr): {ok_prev}  |  "
+                f"Exit(curr) ≤ Entry(next): {cur.overlap_with_next == False}"
+            )
+
+    # ---- assertions A-E ----
+    with st.expander("Lifecycle assertions (A–E)", expanded=True):
+        arows = [
+            ("A. one candidate → one entry", ass["A_one_entry_per_candidate"],
+             f"max entries/candidate={ass['A_max_entries_per_candidate']}"),
+            ("B. no overlapping trades (exit ≤ next entry)", ass["B_no_overlapping_trades"],
+             f"violations={len(ass['B_overlap_indices'])}"),
+            ("C. prev trade closed before new entry", ass["C_previous_closed_before_new_entry"],
+             f"violations={len(ass['C_violations'])}"),
+            ("D. same-direction continuation allowed", ass["D_allowed"],
+             f"count={ass['D_same_direction_continuation_count']}"),
+            ("E. one label per candidate", ass["E_one_label_per_candidate"],
+             f"violations={len(ass['E_violations'])}"),
+        ]
+        st.table(pd.DataFrame(arows, columns=["Gate", "PASS", "detail"]))
+
+    # ---- negative controls NC1-NC5 ----
+    with st.expander("Negative controls (NC1–NC5)", expanded=True):
+        nrows = [(r["name"], r["expect"], "PASS" if r["passed"] else "FAIL") for r in neg]
+        st.table(pd.DataFrame(nrows, columns=["Control", "Expected", "Result"]))
+        st.caption(
+            "NC1/NC3 must trip A (two entries in one candidate region); NC2/NC4 must "
+            "trip B/C (overlapping positions); NC5 (LONG→LONG) must PASS — proving the "
+            "gate checks position OVERLAP, not direction alternation."
+        )
 
 
 def _render_candidate_audit(track, symbol, selected, cand_by_time, cand_audit, segments, timing):
@@ -921,7 +1349,7 @@ def _render_candidate_audit(track, symbol, selected, cand_by_time, cand_audit, s
     """
     dt = pd.Timestamp(track.available_time[selected])
     st.markdown("**Candidate Audit**")
-    state = candidate_state_at(cand_by_time, dt)
+    state = candidate_state_at_r4(cand_by_time, selected)
     if not state["is_candidate"]:
         st.caption(
             "Candidate: NO at this bar (frozen T2 truth). "
@@ -930,7 +1358,7 @@ def _render_candidate_audit(track, symbol, selected, cand_by_time, cand_audit, s
         return
 
     # A. frozen candidate truth  (R3 gate artifact = single source of truth)
-    st.markdown("**A. Frozen candidate truth (R3 gate artifact)**")
+    st.markdown("**A. Frozen candidate truth (R4 gate artifact)**")
     st.text(f"Decision time : {dt}")
     st.text(f"Candidate     : YES")
     st.text(f"Episode       : {state['episode']}")
@@ -938,26 +1366,36 @@ def _render_candidate_audit(track, symbol, selected, cand_by_time, cand_audit, s
     st.text(f"Trigger bar   : {trig_dt}")
     # Decode the retained full 4TF true-touch mask of the trigger bar.
     tb = int(state["trigger_bits"])
-    st.markdown("**Trigger context (true-touch at trigger bar, 5m close-known)**")
-    for tf, fam in TRIGGER_BITS:
-        hit = bool(touch_bit(np.uint16(tb), tf, fam)[0]) if tb else False
-        kind = "ELIG" if tf == "m5" else "conf"
+    st.markdown("**Trigger context (true-touch at trigger bar, 15m close-known)**")
+    for tf, fam in TRIGGER_BITS_R4:
+        hit = bool(touch_bit_r4(np.uint8(tb), tf, fam)[0]) if tb else False
+        kind = "ELIG" if tf == "m15" else "conf"
         st.text(f"  {tf} {fam:3s} : {'YES' if hit else 'no '}  ({kind})")
-    st.text("  5m SR/LIQ = execution eligibility; higher-TF = confluence/context.")
+    st.text("  15m SR/LIQ = execution eligibility; higher-TF = confluence/context.")
 
     # C. FIX2 exact trigger proof: WHICH zone each bit came from (single source).
+    #    AUDIT-FIX1: overlap interval = AUDIT DISPLAY ONLY (never redefines the
+    #    Candidate); trigger OHLC + zone + overlap shown as exact numbers.
     st.markdown("**C. Trigger proof (exact hit zones at trigger bar)**")
     _tbi = int(state.get("trigger_bar_index", -1))
     if _tbi < 0:
         st.caption("Trigger bar index unknown for this candidate.")
     else:
-        _trow = selected_snapshot(track, _tbi)
-        st.text(
-            f"Trigger bar {_tbi} @ {pd.Timestamp(track.available_time[_tbi])}  "
-            f"OHLC {_trow['o']:.2f}/{_trow['h']:.2f}/{_trow['l']:.2f}/{_trow['c']:.2f}"
-        )
+        _tlow = _thigh = None
         try:
-            _proof = load_candidate_proof_cached(symbol)
+            _ex = load_exec_frame_r4_cached(symbol)
+            _trow = _ex.iloc[_tbi]
+            _tlow = float(_trow["low"])
+            _thigh = float(_trow["high"])
+            st.text(
+                f"Trigger bar {_tbi} @ {pd.Timestamp(_ex['decision_time'].iloc[_tbi])}  "
+                f"OHLC {float(_trow['open']):.2f}/{_thigh:.2f}/"
+                f"{_tlow:.2f}/{float(_trow['close']):.2f}"
+            )
+        except Exception as _e:
+            st.warning(f"R4 exec frame unavailable: {_e}")
+        try:
+            _proof = load_candidate_proof_r4_cached(symbol)
             _rows = _proof[_proof["trigger_bar_index"] == _tbi].to_dict("records")
         except Exception as _e:
             _rows = []
@@ -966,15 +1404,23 @@ def _render_candidate_audit(track, symbol, selected, cand_by_time, cand_audit, s
             st.caption("No hit-zone proof recorded for this trigger bar.")
         else:
             for _m in _rows:
-                _is_m5 = _m["tf"] == "m5"
-                _tag = "ELIG" if _is_m5 else "conf"
-                _zone = f"[{float(_m['bottom']):.2f}, {float(_m['top']):.2f}]"
+                _is_m15 = _m["tf"] == "m15"
+                _tag = "ELIG" if _is_m15 else "conf"
+                _bot = float(_m["bottom"])
+                _top = float(_m["top"])
+                _zone = f"[{_bot:.2f}, {_top:.2f}]"
+                _ov = ""
+                if _tlow is not None and bool(_m.get("intersects", True)):
+                    _ov = (
+                        f" overlap=[{max(_tlow, _bot):.2f},"
+                        f" {min(_thigh, _top):.2f}]"
+                    )
                 if _m["family"] == "LIQ":
                     _lvl = f" level={float(_m['level']):.2f}" if pd.notna(_m.get("level")) else ""
                     _side = f" {_m.get('side')}" if _m.get("side") else ""
                     st.text(
                         f"  {_m['tf']} {_m['family']}{_side} #{int(_m['slot'])} "
-                        f"{_zone}{_lvl} intersect={_m.get('intersects')} ({_tag})"
+                        f"{_zone}{_lvl} intersect={_m.get('intersects')}{_ov} ({_tag})"
                     )
                 else:
                     _str = (
@@ -983,70 +1429,44 @@ def _render_candidate_audit(track, symbol, selected, cand_by_time, cand_audit, s
                     )
                     st.text(
                         f"  {_m['tf']} {_m['family']} #{int(_m['slot'])} "
-                        f"{_zone}{_str} intersect={_m.get('intersects')} ({_tag})"
+                        f"{_zone}{_str} intersect={_m.get('intersects')}{_ov} ({_tag})"
                     )
             st.text("  Trigger range = [Low, High] of trigger bar; intersect is the")
             st.text("  stored hit result (Viewer does NOT re-judge bar_hits_zone).")
+            st.text("  overlap = [max(L,bottom), min(H,top)] — AUDIT DISPLAY ONLY;")
+            st.text("  it NEVER redefines the Candidate.")
 
-    # B. canonical FORMING multi-timeframe state (canonical owner)
-    st.markdown("**B. Current canonical FORMING indicator state**")
-    st.text("→ manually judge: does Oracle's candidate make sense vs SR/Liq/DTP?")
-    st.text("   5m = ViewerTrack snapshot (forming 5m bar); 15m/1h/4h = forming")
-    st.text("   bar at this 5m close via canonical forming-MTF owner (NOT the")
-    st.text("   last fully-closed HTF bar).")
+    # B. canonical R4 execution-environment state (canonical owner, single pass).
+    st.markdown("**B. Current canonical R4 execution-environment state**")
+    st.text("→ manually judge: does the candidate make sense vs SR/Liq/DTP?")
+    st.text("   m15 = committed (15m bar complete at this close); 1h/4h = forming.")
     _t0 = time.perf_counter()
-    fdf = load_forming_env_cached(symbol)
+    fdf = load_env_features_r4_cached(symbol)
     timing["forming_env_ms"] = (time.perf_counter() - _t0) * 1000.0
-
-    # 5m: the forming 5m state IS the ViewerTrack selected snapshot (parity
-    # tested). Sourcing it here avoids the ~35s of trivial m5 previews that the
-    # forming owner would otherwise do.
-    snap5 = selected_snapshot(track, selected)
-    d5 = snap5["dtp"]
-    t5 = d5["trend"]
-    st.text(
-        f"5m: DTP {'UP' if t5 == 1 else ('DOWN' if t5 == -1 else 'FLAT/NA')} "
-        f"score={_ff(d5['trend_score'], 3)} dev={_ff(snap5['dev'], 3)} "
-        f"slope={_ff(snap5['slope'], 3)} sma={_ff(snap5['ma'])} atr={_ff(snap5['atr'])}"
-    )
-    ch5 = snap5["sr_channels"]
-    sup5 = min((c["bottom"] for c in ch5), default=float("nan"))
-    res5 = max((c["top"] for c in ch5), default=float("nan"))
-    st.text(
-        f"     SR in_zone={int(snap5['sr_in_zone'])} ch={int(snap5['sr_n_channels'])} "
-        f"sup={_ff(sup5)} res={_ff(res5)}"
-    )
-    st.text(
-        f"     LIQ up={int(snap5['liq_up_count'])} dn={int(snap5['liq_down_count'])}"
-    )
-
-    # 15m/1h/4h: forming bar at this 5m close (canonical owner).
-    sub = fdf[fdf["decision_time"] == dt]
-    row = sub.iloc[0] if len(sub) else (fdf.iloc[selected] if 0 <= selected < len(fdf) else None)
-    if row is None:
-        st.text("   (no forming-state row for this decision time)")
-    else:
-        for tf in ("15m", "1H", "4H"):
-            p = TF_PREFIX[tf]
-            ts = int(row[f"{p}_trend_state"])
+    if 0 <= selected < len(fdf):
+        for tf in ("m15", "h1", "h4"):
+            _r = fdf.iloc[selected]
+            ts = int(_r[f"{tf}_trend_state"])
             tlabel = "UP" if ts == 1 else ("DOWN" if ts == -1 else "FLAT/NA")
             st.text(
-                f"{tf}: DTP {tlabel} score={_ff(row[f'{p}_trend_score'], 3)} "
-                f"dev={_ff(row[f'{p}_dev'], 3)} slope={_ff(row[f'{p}_slope_atr'], 3)} "
-                f"sma={_ff(row[f'{p}_sma'])} atr={_ff(row[f'{p}_atr'])}"
+                f"{tf}: DTP {tlabel} score={_ff(_r[f'{tf}_trend_score'], 3)} "
+                f"dev={_ff(_r[f'{tf}_dev'], 3)} slope={_ff(_r[f'{tf}_slope_atr'], 3)} "
+                f"sma={_ff(_r[f'{tf}_sma'])} atr={_ff(_r[f'{tf}_atr'])}"
             )
             st.text(
-                f"     SR in_zone={int(row[f'{p}_sr_in_zone'])} ch={int(row[f'{p}_sr_n_channels'])} "
-                f"sup={_ff(row[f'{p}_sr_support_price'])} "
-                f"({_ff(row[f'{p}_sr_support_dist_atr'])}σ,{_ff(row[f'{p}_sr_support_strength'], 0)}) "
-                f"res={_ff(row[f'{p}_sr_resistance_price'])} "
-                f"({_ff(row[f'{p}_sr_resistance_dist_atr'])}σ,{_ff(row[f'{p}_sr_resistance_strength'], 0)})"
+                f"     SR in_zone={int(_r[f'{tf}_sr_in_zone'])} ch={int(_r[f'{tf}_sr_n_channels'])} "
+                f"sup={_ff(_r[f'{tf}_sr_support_price'])} "
+                f"({_ff(_r[f'{tf}_sr_support_dist_atr'])}σ,{_ff(_r[f'{tf}_sr_support_strength'], 0)}) "
+                f"res={_ff(_r[f'{tf}_sr_resistance_price'])} "
+                f"({_ff(_r[f'{tf}_sr_resistance_dist_atr'])}σ,{_ff(_r[f'{tf}_sr_resistance_strength'], 0)})"
             )
             st.text(
-                f"     LIQ up={int(row[f'{p}_liq_up_count'])} dn={int(row[f'{p}_liq_down_count'])} "
-                f"upLvl={_ff(row[f'{p}_liq_up_level_price'])} dnLvl={_ff(row[f'{p}_liq_down_level_price'])} "
-                f"upDist={_ff(row[f'{p}_liq_up_dist_atr'])} dnDist={_ff(row[f'{p}_liq_down_dist_atr'])}"
+                f"     LIQ up={int(_r[f'{tf}_liq_up_count'])} dn={int(_r[f'{tf}_liq_down_count'])} "
+                f"upLvl={_ff(_r[f'{tf}_liq_up_level_price'])} dnLvl={_ff(_r[f'{tf}_liq_down_level_price'])} "
+                f"upDist={_ff(_r[f'{tf}_liq_up_dist_atr'])} dnDist={_ff(_r[f'{tf}_liq_down_dist_atr'])}"
             )
+    else:
+        st.text("   (no R4 environment row for this bar)")
 
     # Hard validation table (Section 19)
     with st.expander("Candidate Overlay Audit", expanded=False):
@@ -1066,10 +1486,22 @@ def _render_candidate_audit(track, symbol, selected, cand_by_time, cand_audit, s
             st.text(f"Last candidate time       : {a['last_candidate_time']}")
         st.text(f"Full-symbol candidate rows: {a['t2_candidate_rows']}")
         st.text(f"Visible candidate rows     : {vis_rows}")
+        # AUDIT-FIX1 point 10: viewport bar-level audit counters
+        _va = timing.get("viewport_audit")
+        if _va is not None:
+            st.text("--- bar-level viewport audit (last three must be 0) ---")
+            st.text(f"Visible candidates        : {_va['visible_candidates']}")
+            st.text(f"Visible triggers          : {_va['visible_triggers']}")
+            st.text(f"Candidates w/ m15 proof   : {_va['candidates_with_m15_proof']}")
+            st.text(f"Missing m15 proof         : {_va['missing_m15_proof']}  (must be 0)")
+            st.text(f"Bits/proof mismatch       : {_va['bits_proof_mismatch']}  (must be 0)")
         invariants_ok = (
             a["unmatched_candidate_rows"] == 0
             and a["duplicate_decision_keys"] == 0
             and a["matched_5m_bars"] == a["t2_candidate_rows"]
+            and _va is not None
+            and _va["missing_m15_proof"] == 0
+            and _va["bits_proof_mismatch"] == 0
         )
         st.text(f"INVARIANTS MET            : {invariants_ok}")
 
