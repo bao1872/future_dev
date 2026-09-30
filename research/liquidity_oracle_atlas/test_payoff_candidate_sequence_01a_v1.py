@@ -7,10 +7,36 @@ import research.liquidity_oracle_atlas.payoff_candidate_sequence_01a_v1 as M
 from research.liquidity_oracle_atlas.payoff_candidate_sequence_01a_v1 import (
     PAY8_COLS, STATIC, ARMS, build_candidate_event_history,
     build_candidate_ledger, meta_fold_splits, residual_targets, run_sequence_oof,
-    analyze, run_t1, reset_counters,
+    analyze, run_t1, reset_counters, feature_list_hash,
+    _fit_correction, _day_es_split, _paired_abs_diff,
+    ranking_diagnostic, value_diagnostic,
+    paired_block_bootstrap, paired_block_bootstrap_reference,
+)
+from research.liquidity_oracle_atlas.walkforward_development_v1 import (
+    enforce_pair_purity,
 )
 
 PAY8_DUMMY = {c: 1.0 for c in PAY8_COLS}
+
+# Frozen SHA256 feature-list hashes (NEWLINE-delimited, deterministic).
+# Any column/order change to an arm MUST break this test.
+EXPECTED_FEATURE_HASH = {
+    "S0": "c2254166944d99594e3dc7776517c0228f23352a83f9f713e8b1f1e85b27df44",
+    "S3P": "e7c9a67703a515961e5d651a8b9fbf47739277a75cd1bcc26b7b43bdfb73a389",
+    "S3F": "04d8c1f345bed0b7e3da35c4939e3ea11c2fe5e1926f7b16543ff55f64ee1427",
+    "S5F": "50cc3c0bbc616a33f37b8851ad58a4d8d6120304bcc9c7cd9061f2aa0f271fab",
+}
+
+
+class FakePlan:
+    """Minimal canonical plan stub for unit tests that only need .outer bounds."""
+    outer = [
+        ("2024-01-01", "2024-01-05"),
+        ("2024-01-06", "2024-01-15"),
+        ("2024-01-16", "2024-02-15"),
+        ("2024-02-16", "2024-03-15"),
+        ("2024-03-16", "2024-04-15"),
+    ]
 
 
 def mk(symbol, side, decision_bar, decision_time, label_available_time,
@@ -65,7 +91,7 @@ def test_previous_event_ordering_not_bar_lag():
 
 
 # --------------------------------------------------------------------------- #
-# B. Same-side isolation                                                       #
+# B. Same-side isolation                                                         #
 # --------------------------------------------------------------------------- #
 def test_same_side_isolation():
     rows = []
@@ -94,7 +120,7 @@ def test_same_side_isolation():
 
 
 # --------------------------------------------------------------------------- #
-# C. Unresolved event stays in its slot                                        #
+# C. Unresolved event stays in its slot                                          #
 # --------------------------------------------------------------------------- #
 def test_unresolved_event_keeps_slot():
     rows = [
@@ -118,11 +144,11 @@ def test_unresolved_event_keeps_slot():
     # do NOT promote C1 to lag1
     assert cur["h1__p_win"] == 0.45   # C2
     assert cur["h2__p_win"] == 0.40   # C1
-    assert cur["h1__return"] != cur["h1__return"] or pd.isna(cur["h1__return"])
+    assert pd.isna(cur["h1__return"])
 
 
 # --------------------------------------------------------------------------- #
-# D. Label-availability gate                                                   #
+# D. Label-availability gate                                                     #
 # --------------------------------------------------------------------------- #
 def test_label_availability_gate():
     rows = [
@@ -143,7 +169,7 @@ def test_label_availability_gate():
 
 
 # --------------------------------------------------------------------------- #
-# E. Availability mutation                                                     #
+# E. Availability mutation                                                       #
 # --------------------------------------------------------------------------- #
 def test_availability_mutation_does_not_change_features():
     rows = [
@@ -165,7 +191,7 @@ def test_availability_mutation_does_not_change_features():
 
 
 # --------------------------------------------------------------------------- #
-# F. Future mutation                                                           #
+# F. Future mutation                                                             #
 # --------------------------------------------------------------------------- #
 def test_future_mutation_does_not_change_current_history():
     # current = bar 30; its history references bars 20 (h1) and 10 (h2).
@@ -195,7 +221,7 @@ def test_future_mutation_does_not_change_current_history():
 
 
 # --------------------------------------------------------------------------- #
-# G. Historical prediction missing                                             #
+# G. Historical prediction missing                                               #
 # --------------------------------------------------------------------------- #
 def test_historical_prediction_missing():
     rows = [
@@ -215,7 +241,7 @@ def test_historical_prediction_missing():
 
 
 # --------------------------------------------------------------------------- #
-# H. Surprise hand calculation                                                 #
+# H. Surprise hand calculation                                                   #
 # --------------------------------------------------------------------------- #
 def test_surprise_hand_calculation():
     rows = [
@@ -238,7 +264,7 @@ def test_surprise_hand_calculation():
 
 
 # --------------------------------------------------------------------------- #
-# I. Current-outcome leakage                                                   #
+# I. Current-outcome leakage                                                     #
 # --------------------------------------------------------------------------- #
 def test_current_outcome_leakage_none():
     rows = [
@@ -262,50 +288,50 @@ def test_current_outcome_leakage_none():
 
 
 # --------------------------------------------------------------------------- #
-# J. Feature schema + stable hashes                                            #
+# J. Feature schema + FROZEN SHA256 hashes                                       #
 # --------------------------------------------------------------------------- #
-def _col_hash(cols):
-    return hashlib.md5(",".join(cols).encode()).hexdigest()
-
-
-def test_feature_schema_and_hashes():
+def test_feature_schema_and_frozen_hashes():
     assert ARMS["S0"] == STATIC
     assert ARMS["S3P"] == STATIC + M.pred_history_cols(3)
     assert ARMS["S3F"] == STATIC + M.pred_history_cols(3) + M.outcome_history_cols(3)
     assert ARMS["S5F"] == STATIC + M.pred_history_cols(5) + M.outcome_history_cols(5)
-    # stable hashes (deterministic)
-    h0 = _col_hash(ARMS["S0"]); h3p = _col_hash(ARMS["S3P"])
-    h3f = _col_hash(ARMS["S3F"]); h5f = _col_hash(ARMS["S5F"])
-    assert h0 == _col_hash(ARMS["S0"])
-    assert h3p == _col_hash(ARMS["S3P"])
-    assert h3f == _col_hash(ARMS["S3F"])
-    assert h5f == _col_hash(ARMS["S5F"])
     # no overlap between pred-history and outcome-history feature names
     assert set(M.pred_history_cols(3)).isdisjoint(set(M.outcome_history_cols(3)))
     assert len(ARMS["S5F"]) == len(set(ARMS["S5F"]))
+    # FROZEN expected SHA256 hashes (any col/order change must break)
+    for arm, h in EXPECTED_FEATURE_HASH.items():
+        assert feature_list_hash(ARMS[arm]) == h, arm
 
 
 # --------------------------------------------------------------------------- #
-# K. Meta-fold causality                                                       #
+# K. Meta-fold causality (requires canonical plan)                               #
 # --------------------------------------------------------------------------- #
 def test_meta_fold_causality():
     rows = [
-        mk("AG", "LONG", 10, "2024-01-01", "2024-01-02", 1.0, 0.5, 1.0, 0.5, fold=0),
-        mk("AG", "LONG", 20, "2024-01-03", "2024-01-04", -1.0, 0.5, 1.0, 0.5, fold=0),
-        mk("AG", "LONG", 30, "2024-01-10", "2024-01-11", 2.0, 0.5, 1.0, 0.5, fold=1),
-        mk("AG", "LONG", 40, "2024-01-12", "2024-01-13", -2.0, 0.5, 1.0, 0.5, fold=1),
-        mk("AG", "LONG", 50, "2024-02-01", "2024-02-02", 0.5, 0.5, 1.0, 0.5, fold=2),
+        mk("AG", "LONG", 10, "2024-01-01", "2024-01-02", 1.0, 0.5, 1.0, 0.5,
+           fold=0, sample_weight=1.0, horizon="td5"),
+        mk("AG", "LONG", 20, "2024-01-03", "2024-01-04", -1.0, 0.5, 1.0, 0.5,
+           fold=0, sample_weight=1.0, horizon="td5"),
+        mk("AG", "LONG", 30, "2024-01-10", "2024-01-11", 2.0, 0.5, 1.0, 0.5,
+           fold=1, sample_weight=1.0, horizon="td5"),
+        mk("AG", "LONG", 40, "2024-01-12", "2024-01-13", -2.0, 0.5, 1.0, 0.5,
+           fold=1, sample_weight=1.0, horizon="td5"),
+        mk("AG", "LONG", 50, "2024-02-01", "2024-02-02", 0.5, 0.5, 1.0, 0.5,
+           fold=2, sample_weight=1.0, horizon="td5"),
     ]
     df = make_ledger(rows)
-    splits = meta_fold_splits(df)
-    eval_folds = [k for k, _, _ in splits]
+    splits = meta_fold_splits(df, FakePlan())
+    eval_folds = [k for k, _ in [(s["k"], None) for s in splits]]
     assert eval_folds == [1, 2]
-    for k, tr, ev in splits:
-        tr_set = set(np.where(tr)[0]); ev_set = set(np.where(ev)[0])
+    for s in splits:
+        k = s["k"]
+        tr_mask = s["train_mask"]
+        ev_mask = s["eval_mask"]
+        tr_set = set(np.where(tr_mask)[0]); ev_set = set(np.where(ev_mask)[0])
         assert tr_set.isdisjoint(ev_set)
-        assert (df.iloc[np.where(tr)[0]]["fold"] < k).all()
+        assert (df.iloc[np.where(tr_mask)[0]]["fold"] < k).all()
         T = pd.Timestamp(sorted(df[df["fold"] == k]["decision_time"])[0])
-        tr_rows = df.iloc[np.where(tr)[0]]
+        tr_rows = df.iloc[np.where(tr_mask)[0]]
         assert (pd.to_datetime(tr_rows["label_available_time"]) < T).all()
 
 
@@ -326,7 +352,7 @@ def test_base_model_fit_prohibited_and_fit_count():
 
 
 # --------------------------------------------------------------------------- #
-# M. TEST-label prohibition                                                    #
+# M. TEST-label prohibition                                                      #
 # --------------------------------------------------------------------------- #
 def test_no_test_label_read():
     reset_counters()
@@ -335,7 +361,7 @@ def test_no_test_label_read():
 
 
 # --------------------------------------------------------------------------- #
-# Extra: residual targets + ledger invariants                                  #
+# Extra: residual targets + ledger invariants                                    #
 # --------------------------------------------------------------------------- #
 def test_residual_targets_and_ledger_invariants():
     # small real ledger for AG only (fast enough)
@@ -364,3 +390,236 @@ def test_run_t1_symbol_subset(syms):
     res = run_t1(symbols=syms)
     assert res["counters"]["correction_model_fit_count"] == 32
     assert res["meta_rows"].keys() == {1, 2, 3, 4}
+
+
+# =========================================================================== #
+# CLOSURE TESTS (audit A..J)                                                    #
+# =========================================================================== #
+
+# --- A. Correction fit uses the FROZEN LightGBM contract (n_jobs overridden) --- #
+def test_fit_correction_uses_frozen_params_njobs1(monkeypatch):
+    seen = {}
+
+    class RecLGBM:
+        def __init__(self, **kw):
+            seen["init_kw"] = dict(kw)
+        def fit(self, X, y, sample_weight=None, eval_set=None,
+                 eval_sample_weight=None, **kw2):
+            seen["fit_called"] = True
+            return self
+        def predict(self, X):
+            return np.zeros(len(X))
+
+    monkeypatch.setattr(M, "LGBMRegressor", RecLGBM)
+    X = np.zeros((4, 3)); y = np.zeros(4)
+    M._fit_correction(X, y, np.ones(4), X[:2], y[:2], np.ones(2))
+    assert seen.get("fit_called")
+    # objective/metric must be the frozen regression contract
+    assert seen["init_kw"].get("objective") == "regression"
+    assert seen["init_kw"].get("metric") == "l2"
+    # ONLY n_jobs overridden (to 1) for macOS/libomp stability
+    assert seen["init_kw"].get("n_jobs") == 1
+    # global frozen dict NOT mutated (its n_jobs value is unchanged)
+    from research.liquidity_oracle_atlas.payoff_ratio_model_v1 import REG_PARAMS
+    before = REG_PARAMS.get("n_jobs")
+    M._fit_correction(np.zeros((4, 3)), np.zeros(4), np.ones(4),
+                      np.zeros((2, 3)), np.zeros(2), np.ones(2))
+    assert REG_PARAMS.get("n_jobs") == before
+
+
+# --- B/J. Correction fit RECEIVES canonical sample weights (fit + ES) --------- #
+def test_fit_correction_receives_canonical_weights(monkeypatch):
+    cap = {}
+
+    class RecLGBM:
+        def __init__(self, **kw):
+            pass
+        def fit(self, X, y, sample_weight=None, eval_set=None,
+                eval_sample_weight=None, **kw2):
+            cap["sw"] = sample_weight
+            cap["esw"] = eval_sample_weight
+            return self
+        def predict(self, X):
+            return np.zeros(len(X))
+
+    monkeypatch.setattr(M, "LGBMRegressor", RecLGBM)
+    X = np.zeros((4, 3)); y = np.zeros(4)
+    wf = np.array([0.1, 0.2, 0.3, 0.4])
+    we = np.array([0.5, 0.6])
+    M._fit_correction(X, y, wf, X[:2], y[:2], we)
+    # exact canonical weights passed through (no unit/default substitution)
+    assert cap["sw"] is wf
+    assert cap["esw"] == [we]
+
+
+# --- C. Meta-cutoff pair purity drops a two-side epoch losing one side -------- #
+def test_meta_cutoff_pair_purity_drops_broken_epoch():
+    rows = [
+        # epoch (AG, bar10): LONG available, SHORT NOT available at T
+        mk("AG", "LONG", 10, "2024-01-01", "2024-01-02", 1.0, 0.5, 1.0, 0.5,
+           fold=0, sample_weight=1.0, horizon="td5"),
+        mk("AG", "SHORT", 10, "2024-01-01", "2024-02-02", -1.0, 0.5, 1.0, 0.5,
+           fold=0, sample_weight=1.0, horizon="td5"),
+        # eval fold row
+        mk("AG", "LONG", 20, "2024-03-01", "2024-03-02", 1.0, 0.5, 1.0, 0.5,
+           fold=1, sample_weight=1.0, horizon="td5"),
+    ]
+    df = make_ledger(rows)
+    splits = meta_fold_splits(df, FakePlan())
+    assert len(splits) == 1
+    s = splits[0]
+    assert s["k"] == 1
+    # the two-side epoch lost exactly one side -> entire epoch dropped
+    assert s["purity_stats"]["dropped_pair_break"] >= 1
+    assert int(s["train_mask"].sum()) == 0
+    # eval row still present
+    assert int(s["eval_mask"].sum()) == 1
+    # reporting carried (meta_fold_splits dict keys)
+    assert "n_avail" in s and "purity_stats" in s
+
+
+# --- C. Retained epoch weight-sum integrity (canonical unit = 1.0) ------------ #
+def test_epoch_weight_unit_retained_and_rejected():
+    ok_rows = [
+        mk("AG", "LONG", 10, "2024-01-01", "2024-01-02", 1.0, 0.5, 1.0, 0.5,
+           sample_weight=0.5, horizon="td5"),
+        mk("AG", "SHORT", 10, "2024-01-01", "2024-01-02", -1.0, 0.5, 1.0, 0.5,
+           sample_weight=0.5, horizon="td5"),
+    ]
+    df_ok = make_ledger(ok_rows)
+    purged, stats = enforce_pair_purity(df_ok, np.array([True, True]))
+    assert purged.all()
+    # retained rows' per-epoch sample_weight sum == 1.0
+    assert np.isclose(
+        df_ok.iloc[np.where(purged)[0]]["sample_weight"].sum(), 1.0)
+
+    bad_rows = [
+        mk("AG", "LONG", 10, "2024-01-01", "2024-01-02", 1.0, 0.5, 1.0, 0.5,
+           sample_weight=0.4, horizon="td5"),
+        mk("AG", "SHORT", 10, "2024-01-01", "2024-01-02", -1.0, 0.5, 1.0, 0.5,
+           sample_weight=0.4, horizon="td5"),
+    ]
+    df_bad = make_ledger(bad_rows)
+    # corrupted epoch weight unit (sum != 1) must HARD-fail the purity gate
+    with pytest.raises(Exception):
+        enforce_pair_purity(df_bad, np.array([True, True]))
+
+
+# --- D. ES is last 15% of unique available DAYS, not rows --------------------- #
+def test_day_based_es_not_row_based():
+    base = pd.Timestamp("2024-01-01")
+    rows = []
+    # day 0: many rows; days 1..9: one row each -> 10 days total
+    for i in range(100):
+        rows.append(dict(decision_time=base + pd.Timedelta(hours=i),
+                         sample_weight=1.0))
+    for d in range(1, 10):
+        rows.append(dict(decision_time=base + pd.Timedelta(days=d),
+                         sample_weight=1.0))
+    df = pd.DataFrame(rows)
+    mask = np.ones(len(df), dtype=bool)
+    fit_idx, es_idx = _day_es_split(df, mask)
+    # day-based: 15% of 10 days = 1 day -> ES has exactly the single last-day row
+    assert len(es_idx) == 1
+    es_t = df.iloc[es_idx]["decision_time"].to_numpy()
+    assert (es_t == base + pd.Timedelta(days=9)).all()
+    fit_t = df.iloc[fit_idx]["decision_time"].to_numpy()
+    assert (fit_t != base + pd.Timedelta(days=9)).all()
+    # crucially ES is NOT ~15% of the 109 rows (which would be ~16 day-0 rows)
+    assert len(es_idx) != int(round(0.15 * len(df)))
+
+
+# --- E. Canonical plan / shard-bound parity (real OOF shards) ----------------- #
+def test_canonical_plan_shard_parity():
+    plan = M.build_canonical_oof_plan()
+    assert plan.n_outer == 5
+    for k in range(5):
+        sh = pd.read_parquet(
+            M.OOF_DIR / f"A0_V1_DISJOINT_f{k}_{M.PRIMARY_HORIZON}.parquet")
+        d = M.decision_day(sh)
+        smin, smax = str(d.min().date()), str(d.max().date())
+        assert (smin, smax) == plan.outer[k]
+
+
+# --- F. LOSS-head metric uses target -Y (sign correctness) -------------------- #
+def test_loss_head_target_sign():
+    df = pd.DataFrame({
+        "episode_return_atr": [2.0],
+        "sample_weight": [1.0],
+    })
+    mu_a = np.array([1.0]); mu_b = np.array([3.0])
+    mask = np.array([True])
+    win_d = _paired_abs_diff(df, "win", mu_a, mu_b, mask)
+    loss_d = _paired_abs_diff(df, "loss", mu_a, mu_b, mask)
+    # WIN : |2-1| - |2-3| = 0
+    assert np.isclose(win_d, 0.0)
+    # LOSS: |-2-1| - |-2-3| = -2  (uses -Y, not Y)
+    assert np.isclose(loss_d, -2.0)
+    assert win_d != loss_d
+
+
+# --- G. Weighted 5-day block bootstrap: production == reference --------------- #
+def test_weighted_bootstrap_reference_parity():
+    n = 12  # 12 distinct days, block=5 -> 2 complete blocks, 2 tail days
+    base = pd.Timestamp("2024-01-01")
+    rows = [dict(
+        decision_time=base + pd.Timedelta(days=i),
+        episode_return_atr=float(i % 3),
+        sample_weight=1.0) for i in range(n)]
+    df = pd.DataFrame(rows)
+    mu_a = np.linspace(1.0, 2.0, n)
+    mu_b = np.linspace(0.5, 1.5, n)
+    mask = np.ones(n, dtype=bool)
+    B = 50
+    prod = paired_block_bootstrap(df, "win", mu_a, mu_b, mask, B)
+    ref = paired_block_bootstrap_reference(df, "win", mu_a, mu_b, mask, B)
+    for key in ["observed_D", "bootstrap_mean", "ci_low", "ci_high",
+                "n_valid_reps", "n_blocks", "excluded_tail_days"]:
+        if key in ("n_valid_reps", "n_blocks", "excluded_tail_days"):
+            assert prod[key] == ref[key], key
+        else:
+            assert np.isclose(prod[key], ref[key], atol=1e-9), key
+
+
+# --- H. Ranking diagnostic hand calculation ----------------------------------- #
+def test_ranking_diagnostic_hand_calc():
+    n = 10
+    df = pd.DataFrame({
+        "p_win": [0.3] * n,
+        "episode_return_atr": list(range(1, n + 1)),  # 1..10
+        "sample_weight": [1.0] * n,
+    })
+    mu = np.array(list(range(1, n + 1)), dtype=float)
+    pred_store = {(arm, "win"): mu.copy() for arm in ARMS}
+    for arm in ARMS:
+        pred_store[(arm, "loss")] = np.full(n, np.nan)
+    diag = ranking_diagnostic(df, pred_store)
+    # top20% (floor(10*0.2)=2 largest mu -> Y 9,10 mean 9.5)
+    # bottom20% (mu 1,2 -> Y 1,2 mean 1.5) -> spread 8.0
+    assert np.isclose(diag["winner_spread_arm"]["S0"], 8.0)
+    assert np.isclose(diag["winner_spread_vs_S0"]["S0"], 0.0)
+
+
+# --- H. Value diagnostic hand calculation ------------------------------------- #
+def test_value_diagnostic_hand_calc():
+    df = pd.DataFrame({
+        "p_win": [0.4],
+        "episode_return_atr": [1.0],
+        "sample_weight": [1.0],
+    })
+    mw = np.array([2.0]); ml = np.array([1.0])
+    pred_store = {}
+    for arm in ARMS:
+        pred_store[(arm, "win")] = mw.copy()
+        pred_store[(arm, "loss")] = ml.copy()
+    diag = value_diagnostic(df, pred_store)
+    # value_score = 0.4*2 - 0.6*1 = 0.2 ; err = 0.2 - 1 = -0.8
+    # MAE = 0.8, MSE = 0.64
+    assert np.isclose(diag["value_mae"]["S0"], 0.8)
+    assert np.isclose(diag["value_mse"]["S0"], 0.64)
+
+
+# --- I. Exact feature hash constants (independence from recomputation) -------- #
+def test_exact_feature_hash_constants():
+    for arm in ["S0", "S3P", "S3F", "S5F"]:
+        assert feature_list_hash(ARMS[arm]) == EXPECTED_FEATURE_HASH[arm], arm
