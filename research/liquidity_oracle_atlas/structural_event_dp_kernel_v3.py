@@ -89,6 +89,7 @@ R_LOSS = "DP_LOSS_EXIT"
 # invalid reasons ("cannot be constructed", never "not worth trading")
 INVALID_REASONS = (
     "NO_DIRECTION_INPUT",
+    "DIRECTION_EVENT_ID_MISMATCH",
     "DIRECTION_NOT_AVAILABLE_YET",
     "INVALID_DIRECTION_VALUE",
     "BAD_GEOMETRY",
@@ -277,12 +278,18 @@ def solve_event_production_v3(
     if hi < s_bar:
         return {"ok": False, "invalid_reason": "NO_EXECUTABLE_ENTRY"}
 
-    # precompute O(L)
+    # precompute O(L).  NOTE: the first target touch is measured from the EVENT
+    # START, not from a candidate entry. Once the frozen target is touched the
+    # structural event is over, so every later bar leaves the entry candidate
+    # set (see the filter below).
     suf = _suffix_argmax_per_unit(mv, s_bar + 1, hi, sign)
-    nt = _next_target_touch(mv, s_bar + 1, hi, direction, target_price)
+    nt = _next_target_touch(mv, s_bar, hi, direction, target_price)
+    # FIRST target touch measured from the EVENT START (not from a candidate).
+    t_first = int(nt[s_bar]) if (target_price is not None and s_bar < n) else -1
 
     n_candidates = 0
     n_with_path = 0
+    n_rejected_target_before_entry = 0
     best: Optional[Dict[str, Any]] = None
 
     d_hi = min(e_bar - 2, n - 2)
@@ -290,18 +297,36 @@ def solve_event_production_v3(
         n_candidates += 1
         f = d + 1
         H = min(e_bar, mv.unit_end(f), n - 1)
-        if f + 1 > H:
+        entry_price = float(mv.opens[f])
+
+        same_bar_target = False
+        if t_first >= 0:
+            if t_first < f:
+                # target was already touched BEFORE this entry -> event over
+                n_rejected_target_before_entry += 1
+                continue
+            if t_first == f:
+                # the fill bar touches the target: legal only when the fill is
+                # still on the correct side of the target.
+                if direction == "LONG" and not entry_price < float(target_price):
+                    n_rejected_target_before_entry += 1
+                    continue
+                if direction == "SHORT" and not entry_price > float(target_price):
+                    n_rejected_target_before_entry += 1
+                    continue
+                same_bar_target = True
+
+        if not same_bar_target and f + 1 > H:
             continue                      # no room for any legal exit
         n_with_path += 1
-        entry_price = float(mv.opens[f])
-        pnl = None
-        exit_fill = None
-        exit_price = None
-        reason = None
 
-        tt = int(nt[f]) if f < n else -1
-        if target_price is not None and tt >= 0 and tt <= H:
-            exit_fill = tt
+        if same_bar_target:
+            exit_fill = f
+            exit_price = float(target_price)
+            pnl = sign * (float(target_price) - entry_price)
+            reason = R_TARGET
+        elif t_first > f and t_first <= H:
+            exit_fill = t_first
             exit_price = float(target_price)
             pnl = sign * (float(target_price) - entry_price)
             reason = R_TARGET
@@ -328,14 +353,16 @@ def solve_event_production_v3(
     if best is None:
         reason = "NO_EXECUTABLE_ENTRY" if n_candidates == 0 else "INSUFFICIENT_PATH"
         return {"ok": False, "invalid_reason": reason,
-                "n_candidates": n_candidates, "n_with_path": n_with_path}
+                "n_candidates": n_candidates, "n_with_path": n_with_path,
+                "n_rejected_target_before_entry": n_rejected_target_before_entry}
 
     # terminal-priority ambiguity: target first touched exactly on the bar where
     # the NEXT structural event starts -> OHLC cannot order them -> do not guess.
     if (best["exit_reason"] == R_TARGET and best["exit_fill_index"] == e_bar
             and e_bar < n):
         return {"ok": False, "invalid_reason": "AMBIGUOUS_SAME_BAR_TERMINAL",
-                "n_candidates": n_candidates, "n_with_path": n_with_path}
+                "n_candidates": n_candidates, "n_with_path": n_with_path,
+                "n_rejected_target_before_entry": n_rejected_target_before_entry}
 
     return _finalize_solution(
         direction=direction, zone_bottom=zone_bottom, zone_top=zone_top,
@@ -371,13 +398,18 @@ def _finalize_solution(
 
     positive = pnl > PNL_EPS
     if best["exit_reason"] == R_TARGET:
+        # HARD INVARIANT (V3.1): the entry candidate set now excludes every bar
+        # at/after the first event-level target touch unless the fill is still
+        # on the correct side of the target, so a target touch can never be a
+        # loss. This must never fire.
+        if not positive:
+            raise AssertionError(
+                "HARD_FAIL_TARGET_TOUCH_WITH_LOSS: "
+                f"entry={entry_price} target={exit_price} pnl={pnl}"
+            )
         remaining = 0.0
         remaining_raw = 0.0
-        # §12 literal: a non-positive exit reports tp_atr = NA, even when the
-        # terminal was a target touch (the frozen target can sit BEHIND the
-        # entry because the target is frozen at event start, not at entry).
-        tp_atr = (_directional(entry_price, exit_price) / float(atr_value)
-                  if positive else float("nan"))
+        tp_atr = _directional(entry_price, exit_price) / float(atr_value)
     elif positive:
         tp_atr = _directional(entry_price, exit_price) / float(atr_value)
         if target_price is None:
@@ -477,6 +509,11 @@ def evaluate_event_v3(
     # 2) direction
     if direction_input is None:
         return _invalid("NO_DIRECTION_INPUT")
+    # Identity contract: a direction decision may never be applied to a
+    # different structural event (fail-closed, before anything else).
+    if int(direction_input.event_id) != ev_id:
+        return _invalid("DIRECTION_EVENT_ID_MISMATCH",
+                        direction_event_id=int(direction_input.event_id))
     dv = direction_input.validate()
     if dv:
         return _invalid(dv, direction=str(direction_input.direction))

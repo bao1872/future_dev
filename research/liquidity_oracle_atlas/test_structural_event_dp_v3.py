@@ -272,6 +272,92 @@ def test_T0_O_ambiguous_same_bar_terminal():
     print("T0-O PASS: target touch on the next-event bar -> AMBIGUOUS (no guessing)")
 
 
+def test_T0_P_target_touched_before_entry_is_not_a_candidate():
+    # target 56 is first touched at bar 5 (high[5]=60). Bars f=6,7 open BELOW
+    # the target and would look attractive (open[6]=50 -> +6) but the target was
+    # already touched, so they must be excluded. The legal best is f=3 (+4).
+    o = [50.0, 50.0, 50.0, 52.0, 53.0, 60.0, 50.0, 50.0, 50.0, 50.0]
+    h = [50.0, 50.0, 50.0, 53.0, 54.0, 60.0, 60.0, 50.0, 50.0, 50.0]
+    l = [49.0, 49.0, 49.0, 51.0, 52.0, 59.0, 49.0, 49.0, 49.0, 49.0]
+    mv = _mv(o, highs=h, lows=l)
+    sol = _solve("LONG", (49.0, 51.0), 2, 8, 56.0, mv)
+    ref = _solve("LONG", (49.0, 51.0), 2, 8, 56.0, mv, solve_event_reference_v3)
+    assert sol["entry_fill_index"] == 3, sol
+    assert sol["exit_fill_index"] == 5
+    assert abs(sol["utility"] - 4.0) < 1e-9      # NOT the post-touch +6
+    assert (ref["entry_fill_index"], ref["exit_fill_index"]) == (
+        sol["entry_fill_index"], sol["exit_fill_index"])
+    print("T0-P PASS: entries at/after the event-level target touch excluded")
+
+
+def test_T0_Q_same_bar_entry_and_target_touch_is_legal():
+    # unit_starts=[0,5] -> H=4 for f=3 and f=4, so the OLD code (which demanded
+    # f+1 <= H) would skip f=4. The same-bar path (open<target<=high) is legal.
+    o = [50.0, 50.0, 50.0, 55.0, 53.0, 54.0, 55.0, 56.0]
+    h = [50.0, 50.0, 50.0, 55.0, 58.0, 50.0, 50.0, 50.0]
+    l = [49.0, 49.0, 49.0, 54.0, 52.0, 50.0, 50.0, 50.0]
+    mv = _mv(o, highs=h, lows=l, unit_starts=[0, 5])
+    sol = _solve("LONG", (49.0, 51.0), 2, 5, 56.0, mv)
+    assert sol["entry_fill_index"] == 4 and sol["exit_fill_index"] == 4
+    assert sol["exit_reason"] == "TARGET_TOUCH"
+    assert abs(sol["utility"] - 3.0) < 1e-9
+    ref = _solve("LONG", (49.0, 51.0), 2, 5, 56.0, mv, solve_event_reference_v3)
+    assert (ref["entry_fill_index"], ref["exit_fill_index"], ref["utility"]) == (
+        sol["entry_fill_index"], sol["exit_fill_index"], sol["utility"])
+    # SHORT mirror: entry must be ABOVE the target (49 > 48), same bar TP
+    o2 = [50.0, 50.0, 50.0, 48.6, 49.0, 50.0, 50.0, 50.0]
+    l2 = [50.0, 50.0, 50.0, 48.5, 46.0, 50.0, 50.0, 50.0]
+    h2 = [51.0, 51.0, 51.0, 49.6, 50.0, 51.0, 51.0, 51.0]
+    mv2 = _mv(o2, highs=h2, lows=l2, unit_starts=[0, 5])
+    s2 = _solve("SHORT", (49.0, 51.0), 2, 5, 48.0, mv2)
+    assert s2["entry_fill_index"] == 4 and s2["exit_fill_index"] == 4
+    assert s2["exit_reason"] == "TARGET_TOUCH"
+    assert abs(s2["utility"] - 1.0) < 1e-9
+    print("T0-Q PASS: same-bar entry + TARGET_TOUCH legal for LONG and SHORT")
+
+
+def test_T0_R_entry_beyond_target_is_illegal():
+    # LONG: open[4]=60 > target 56 -> the fill bar is already past the target
+    o = [50.0, 50.0, 50.0, 55.0, 60.0, 54.0, 55.0, 56.0]
+    h = [50.0, 50.0, 50.0, 55.0, 61.0, 50.0, 50.0, 50.0]
+    l = [49.0, 49.0, 49.0, 54.0, 59.0, 49.0, 49.0, 49.0]
+    mv = _mv(o, highs=h, lows=l, unit_starts=[0, 5])
+    sol = _solve("LONG", (49.0, 51.0), 2, 5, 56.0, mv)
+    assert sol["entry_fill_index"] == 3          # f=4 rejected
+    assert abs(sol["utility"] - 1.0) < 1e-9
+    ref = _solve("LONG", (49.0, 51.0), 2, 5, 56.0, mv, solve_event_reference_v3)
+    assert ref["entry_fill_index"] == sol["entry_fill_index"]
+    # SHORT mirror: open[4]=47 < target 48 -> rejected
+    o2 = [50.0, 50.0, 50.0, 49.5, 47.0, 50.0, 50.0, 50.0]
+    l2 = [50.0, 50.0, 50.0, 49.0, 46.0, 50.0, 50.0, 50.0]
+    h2 = [51.0, 51.0, 51.0, 50.5, 48.0, 51.0, 51.0, 51.0]
+    mv2 = _mv(o2, highs=h2, lows=l2, unit_starts=[0, 5])
+    s2 = _solve("SHORT", (49.0, 51.0), 2, 5, 48.0, mv2)
+    assert s2["entry_fill_index"] == 3           # f=4 rejected
+    assert abs(s2["utility"] - 1.5) < 1e-9
+    r2 = _solve("SHORT", (49.0, 51.0), 2, 5, 48.0, mv2, solve_event_reference_v3)
+    assert r2["entry_fill_index"] == s2["entry_fill_index"]
+    print("T0-R PASS: entry beyond the frozen target rejected (LONG + SHORT)")
+
+
+def test_T0_S_direction_event_id_mismatch():
+    n = 8
+    o = [50.0, 50.0, 50.0, 52.0, 60.0, 58.0, 57.0, 56.0]
+    mv = _mv(o, times=_times(n))
+    event = _ev(event_id=7, sid="A", start=2, end=6)
+    tgt = {"structure_id": "B", "role": "RESISTANCE", "near_edge": 200.0, "tf": "m15"}
+    rec = evaluate_event_v3(event, mv, DirectionInput(event_id=6, direction="LONG"),
+                            ATR, tgt)
+    assert rec["event_valid"] is False
+    assert rec["invalid_reason"] == "DIRECTION_EVENT_ID_MISMATCH"
+    assert rec["entry_present"] is False
+    # the matching id is accepted
+    ok = evaluate_event_v3(event, mv, DirectionInput(event_id=7, direction="LONG"),
+                           ATR, tgt)
+    assert ok["event_valid"] is True
+    print("T0-S PASS: DirectionInput.event_id mismatch -> DIRECTION_EVENT_ID_MISMATCH")
+
+
 # --------------------------------------------------------------------------- #
 # Reference / Production parity + complexity
 # --------------------------------------------------------------------------- #
@@ -483,6 +569,15 @@ def test_real_diagnostic_subset():
     print(f"   positive_tp = {pos}   no_positive_tp = {neg}")
     print(f"   target_reached = {reached}   early_exit = {early}")
     print(f"   target_reached_with_loss = {meta['target_reached_with_loss']}")
+    # HARD INVARIANT (V3.1): with the target-before-entry filter, a frozen target
+    # touch can never be a loss.
+    assert meta["target_reached_with_loss"] == 0, (
+        f"target_reached_with_loss = {meta['target_reached_with_loss']} (must be 0)")
+    for r in valid:
+        if r["exit_reason"] == "TARGET_TOUCH":
+            assert r["positive_tp_exists"] is True
+            assert r["utility"] > 0
+    print("   HARD INVARIANT PASS: target_reached_with_loss == 0")
     for r in valid:
         if not r["positive_tp_exists"]:
             assert np.isnan(r["tp_atr"])
@@ -536,6 +631,10 @@ def main():
         test_T0_L_no_entry_from_optimization_never_happens,
         test_T0_M_equal_utility_tie_break,
         test_T0_O_ambiguous_same_bar_terminal,
+        test_T0_P_target_touched_before_entry_is_not_a_candidate,
+        test_T0_Q_same_bar_entry_and_target_touch_is_legal,
+        test_T0_R_entry_beyond_target_is_illegal,
+        test_T0_S_direction_event_id_mismatch,
         test_parity_synthetic_sweep,
         test_reference_is_independent_and_slower_complexity,
         test_structural_only_accounting,

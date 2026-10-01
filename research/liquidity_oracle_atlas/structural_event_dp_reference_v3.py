@@ -68,24 +68,45 @@ def solve_event_reference_v3(
         n_candidates += 1
         f = d + 1
         H = min(e_bar, _ref_unit_end(unit_starts, f, n), n - 1)
-        if f + 1 > H:
-            continue
-        n_with_path += 1
         entry_price = float(opens[f])
 
-        # --- target touch: scan forward, first touch wins (hard terminal) ---- #
-        touch_bar = None
+        # --- first target touch measured from the EVENT START ---------------- #
+        # Brute force: independent forward scan from start_bar (never reuses the
+        # production suffix/next-touch arrays).
+        first_touch = None
         if target_price is not None:
             tp = float(target_price)
-            for t in range(f, H + 1):
+            for t in range(s_bar, hi + 1):     # from the EVENT START horizon
                 if direction == "LONG":
                     if float(highs[t]) >= tp:
-                        touch_bar = t
+                        first_touch = t
                         break
                 else:
                     if float(lows[t]) <= tp:
-                        touch_bar = t
+                        first_touch = t
                         break
+
+        # --- entry legality w.r.t. the target ------------------------------- #
+        same_bar_target = False
+        if first_touch is not None:
+            if first_touch < f:
+                continue                       # target already touched -> over
+            if first_touch == f:
+                if direction == "LONG" and not entry_price < float(target_price):
+                    continue                   # fill already beyond the target
+                if direction == "SHORT" and not entry_price > float(target_price):
+                    continue
+                same_bar_target = True
+
+        if not same_bar_target and f + 1 > H:
+            continue
+        n_with_path += 1
+
+        touch_bar = first_touch
+        if same_bar_target:
+            touch_bar = f
+        elif first_touch is not None and first_touch > H:
+            touch_bar = None
 
         if touch_bar is not None:
             exit_fill = int(touch_bar)
@@ -145,8 +166,14 @@ def solve_event_reference_v3(
 
     positive = pnl > PNL_EPS
     if best["exit_reason"] == R_TARGET:
-        # §12 literal: non-positive exit -> tp_atr = NA even on a target touch.
-        tp_atr = (_dir(ep, xp) / float(atr_value) if positive else float("nan"))
+        # HARD INVARIANT (V3.1): with the target-before-entry filter, a target
+        # touch can never be a loss. Duplicated guard in the reference too.
+        if not positive:
+            raise AssertionError(
+                "HARD_FAIL_TARGET_TOUCH_WITH_LOSS: "
+                f"entry={ep} target={xp} pnl={pnl}"
+            )
+        tp_atr = _dir(ep, xp) / float(atr_value)
         remaining = 0.0
         remaining_raw = 0.0
     elif positive:
