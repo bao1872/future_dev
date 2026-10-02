@@ -604,6 +604,46 @@ def _unit_starts_from_arrays(td: np.ndarray, seg: np.ndarray) -> np.ndarray:
     return np.asarray(starts, dtype=np.int64)
 
 
+def _contact_is_consumed(contact_bar: int, cursor: int) -> bool:
+    """A contact bar is already consumed (must be skipped) iff it is strictly
+    before the current cursor. A contact exactly AT the cursor is the first
+    legal next entry decision and MUST remain eligible (off-by-one guard)."""
+    return int(contact_bar) < int(cursor)
+
+
+def _scan_next_candidate(
+    per_bar: List[Optional[List[Tuple[str, str, float, float]]]],
+    cursor: int,
+    eligible_sids: set,
+    n: int,
+) -> Tuple[Optional[int], Optional[str]]:
+    """Sequential-candidate discovery, DECOUPLED from the static-event window.
+
+    From ``cursor`` forward, find the earliest bar ``t`` that has at least one
+    still-eligible structure present in ``per_bar[t]`` (i.e. not in the no-trade
+    skip set and with a valid ``t+1`` fill). Among co-present eligible
+    structures pick the lexicographically smallest structure_id (deterministic).
+    A structure that previously COMPLETED a trade is intentionally still
+    eligible here once the cursor has passed that trade's exit. Return
+    ``(t, sid)``; if none remain, ``(None, None)``.
+
+    This is intentionally NOT gated by any event's ``[start_bar, end_bar)``:
+    a structure becomes a legal candidate the moment it first appears in
+    proximity after the previous trade's exit, regardless of when the static
+    builder would have started its event. The static event is used ONLY as a
+    metadata source (sid -> zone/timeframe/event_id), never to bound
+    eligibility.
+    """
+    for t in range(cursor, n):
+        pb = per_bar[t]
+        if pb is None:
+            continue
+        eligible = [x[0] for x in pb if x[0] in eligible_sids and t + 1 < n]
+        if eligible:
+            return (t, sorted(eligible)[0])
+    return (None, None)
+
+
 def _run_god_oracle_core(
     symbol: str,
     max_bars: Optional[int],
@@ -671,41 +711,80 @@ def _run_god_oracle_core(
     # is guaranteed because the next search never starts before exit+1, and
     # every emitted trade is a completed TARGET_TOUCH.
     # ----------------------------------------------------------------- #
-    all_contacts: List[Tuple[int, int]] = []
-    for e_idx, e in enumerate(events):
-        for cb in e["contact_bars"]:
-            all_contacts.append((int(cb), e_idx))
-    all_contacts.sort()
+    # ----------------------------------------------------------------- #
+    # Sequential trade stream (frozen God-Mode lifecycle).
+    #
+    # Candidate discovery is DECOUPLED from the static-event window:
+    # after each exit, cursor = exit_fill_index + 1, and the NEXT candidate
+    # is found by scanning per_bar proximity directly -- ANY structure
+    # present at a bar t >= cursor may become a new Candidate A, anchored at
+    # the earliest such bar. The static event's [start_bar, end_bar) is NOT
+    # used to gate eligibility. build_structural_events_v2 is retained ONLY
+    # as a METADATA source (structure_id -> zone/timeframe/event_id); its
+    # window semantics stay intact for its own (static) consumers.
+    # ----------------------------------------------------------------- #
+    # metadata lookup: structure_id -> (event_id, zone, timeframe, structure_type)
+    struct_meta: Dict[str, Dict[str, Any]] = {}
+    for e in events:
+        struct_meta[e["structure_id"]] = {
+            "event_id": int(e["event_id"]),
+            "zone_bottom": float(e["zone_bottom"]),
+            "zone_top": float(e["zone_top"]),
+            "timeframe": e.get("timeframe"),
+            "structure_type": e.get("structure_type"),
+        }
+    eligible_sids = set(struct_meta.keys())
+
+    # `no_trade_sids` blocks ONLY structures that cannot produce a trade at the
+    # current cursor (no valid contact bar, or scanned with no decision). It is
+    # deliberately NOT a global per-structure lifetime dedup: a structure that
+    # COMPLETED a trade must stay re-eligible after the cursor passes that exit,
+    # so the same structure may participate again as a fresh candidate
+    # (re-freezing geometry/target at its new decision time).
+    no_trade_sids: set = set()
 
     cursor = 0
-    i = 0
-    m = len(all_contacts)
-    while i < m:
-        c, e_idx = all_contacts[i]
-        if c < cursor:
-            i += 1
-            continue
+    guard = 0
+    # trade iterations advance `cursor`; no-trade iterations add to
+    # `no_trade_sids`. Either way the scan makes forward progress.
+    MAX_ITER = 10 * (len(events) + 16)
+    while True:
+        guard += 1
+        if guard > MAX_ITER:
+            raise AssertionError("HARD_FAIL_CANDIDATE_SCAN_RUNWAY")
 
-        e = events[e_idx]
-        s_bar = int(e["start_bar"])
-        e_bar = int(e["end_bar"])
-        zb, zt = float(e["zone_bottom"]), float(e["zone_top"])
+        c, cand_sid = _scan_next_candidate(per_bar, cursor, eligible_sids - no_trade_sids, n)
+        if c is None:
+            break
+
+        meta = struct_meta[cand_sid]
+        eid = meta["event_id"]
+        zb, zt = meta["zone_bottom"], meta["zone_top"]
+        tf = meta["timeframe"]
+
         atr_value = (
             float(atr_series[c]) if c < len(atr_series) else float("nan")
         )
         seg_c = int(seg_arr[c]) if c < n else 0
         geom_prev = geom[c - 1] if c >= 1 else None
-        cand_sid = e["structure_id"]
-        tf = e.get("timeframe")
 
-        # The candidate IS this single contact bar: the trade enters here
-        # (fill at c+1) and the God-mode rules are evaluated for THIS
-        # decision time. The current Entry rule (best gap selection inside
-        # solve_direction_god_v4) is preserved -- with a single candidate
-        # contact it simply selects that contact as the entry. This is what
-        # makes the stream restart after every exit instead of emitting one
-        # trade per static event.
-        cb_now = [c]
+        # God-mode best-entry: pass the COMPLETE legal contact-bar set of
+        # candidate A from the cursor forward. Any bar >= c (hence >= cursor)
+        # where A is present in per_bar is a decision candidate; the solver
+        # then picks the true best entry among all of them, geometry/targets
+        # frozen at this decision time c.
+        cb_full = [
+            t for t in range(c, n)
+            if t + 1 < n and per_bar[t] is not None
+            and any(x[0] == cand_sid for x in per_bar[t])
+        ]
+        if not cb_full:
+            # no legal contact remains for A from cursor forward: this structure
+            # can never yield a trade at/after the current cursor, so block it to
+            # keep the scan advancing. (Data-end case: only proximity at the last
+            # bar, with no subsequent bar to fill an entry.)
+            no_trade_sids.add(cand_sid)
+            continue
 
         tgt_long = pick_target_fn(
             geom_prev, "LONG", zb, zt, tf, seg_c, c,
@@ -727,28 +806,28 @@ def _run_god_oracle_core(
             long_sol: Dict[str, Any] = {
                 "ok": False, "invalid_reason": "NO_STRUCTURAL_TARGET",
                 "n_candidates": 0, "n_with_path": 0,
-                "n_rejected_target_before_entry": 0, "n_contact": len(cb_now),
+                "n_rejected_target_before_entry": 0, "n_contact": len(cb_full),
             }
         else:
             long_sol = solve_direction_fn(
                 direction="LONG", zone_bottom=zb, zone_top=zt, atr_value=atr_value,
                 start_bar=c, end_bar=n,
                 target_price=float(tgt_long["near_edge"]),
-                contact_bars=cb_now, mv=mv,
+                contact_bars=cb_full, mv=mv,
                 trading_day=td_arr, segment=seg_arr,
             )
         if tgt_short is None:
             short_sol: Dict[str, Any] = {
                 "ok": False, "invalid_reason": "NO_STRUCTURAL_TARGET",
                 "n_candidates": 0, "n_with_path": 0,
-                "n_rejected_target_before_entry": 0, "n_contact": len(cb_now),
+                "n_rejected_target_before_entry": 0, "n_contact": len(cb_full),
             }
         else:
             short_sol = solve_direction_fn(
                 direction="SHORT", zone_bottom=zb, zone_top=zt, atr_value=atr_value,
                 start_bar=c, end_bar=n,
                 target_price=float(tgt_short["near_edge"]),
-                contact_bars=cb_now, mv=mv,
+                contact_bars=cb_full, mv=mv,
                 trading_day=td_arr, segment=seg_arr,
             )
 
@@ -756,13 +835,13 @@ def _run_god_oracle_core(
             direction="LONG", zone_bottom=zb, zone_top=zt, atr_value=atr_value,
             target_price=(None if tgt_long is None else float(tgt_long["near_edge"])),
             mv=mv, best=long_sol, n_candidates=0, n_with_path=0,
-            n_rejected=0, n_contact=len(cb_now),
+            n_rejected=0, n_contact=len(cb_full),
         ) if long_sol.get("ok") else None
         short_final = _finalize_god(
             direction="SHORT", zone_bottom=zb, zone_top=zt, atr_value=atr_value,
             target_price=(None if tgt_short is None else float(tgt_short["near_edge"])),
             mv=mv, best=short_sol, n_candidates=0, n_with_path=0,
-            n_rejected=0, n_contact=len(cb_now),
+            n_rejected=0, n_contact=len(cb_full),
         ) if short_sol.get("ok") else None
 
         decision, lv, sv, winner_side = decide_oracle_v4(
@@ -773,25 +852,38 @@ def _run_god_oracle_core(
 
         if decision in (ORACLE_LONG, ORACLE_SHORT) and winner_side is not None:
             # freeze Candidate A and geometry at THIS decision time
-            e_rec = dict(e)
-            e_rec["start_bar"] = c
+            e_rec = {
+                "event_id": eid,
+                "structure_id": cand_sid,
+                "structure_type": meta["structure_type"],
+                "timeframe": tf,
+                "zone_bottom": zb,
+                "zone_top": zt,
+                "start_bar": c,
+                "end_bar": int(cb_full[-1]) + 1,
+            }
             rec = _build_record(
                 e=e_rec, mv=mv, atr_value=atr_value,
                 long_sol=long_sol, short_sol=short_sol,
                 long_final=long_final, short_final=short_final,
                 tgt_long=tgt_long, tgt_short=tgt_short,
                 decision=decision, lv=lv, sv=sv, winner_side=winner_side,
-                next_event=next_by_id.get(int(e["event_id"])),
+                next_event=next_by_id.get(eid),
             )
             records.append(rec)
             exit_idx = int(rec["exit_fill_index"])
             cursor = exit_idx + 1
-            # no overlap: skip every contact at or before the exit
-            while i < m and all_contacts[i][0] <= cursor:
-                i += 1
+            # no overlap: next candidate search starts strictly after this exit.
+            # IMPORTANT: a completed trade does NOT block cand_sid. After the
+            # cursor passes this exit, if the same structure is still/again in
+            # proximity it is eligible again as a fresh candidate (geometry and
+            # target re-frozen at the new decision time). This restores the
+            # required lifecycle; it is the inverse of the old global dedup.
         else:
-            # no canonical trade from this candidate; move to next contact
-            i += 1
+            # No canonical trade from this candidate (no decision / no structural
+            # target). Block it permanently so the scan makes forward progress:
+            # re-scanning the same structure here would never advance the cursor.
+            no_trade_sids.add(cand_sid)
 
     if self_target_total != 0:
         raise AssertionError(f"HARD_FAIL_SELF_TARGET_COUNT={self_target_total}")

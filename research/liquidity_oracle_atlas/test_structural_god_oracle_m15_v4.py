@@ -25,6 +25,8 @@ from research.liquidity_oracle_atlas.structural_god_oracle_m15_v4 import (
     build_per_bar_proximity,
     build_event_contact_bars,
     market_view_from_arrays,
+    _contact_is_consumed,
+    _scan_next_candidate,
     R_TARGET,
     ORACLE_LONG,
     ORACLE_SHORT,
@@ -587,6 +589,135 @@ def test_parity_full_run_on_ag():
     assert prod["meta"]["canonical_loss_count"] == 0
     assert prod["meta"]["self_target_count"] == 0
     assert prod["meta"]["valid_but_no_entry"] == 0
+
+
+# --------------------------------------------------------------------------- #
+# God-mode best-entry restoration regression (sequential-stream refactor)
+# --------------------------------------------------------------------------- #
+def test_god_mode_best_entry_full_contact_set():
+    # Step 11 (user scenario): Candidate A contacts 10, 11, 12; frozen LONG
+    # target = 120. fills: open[11]=100, open[12]=105, open[13]=112.
+    # The God-mode solver MUST choose the MAX-PROFIT entry across ALL of A's
+    # contacts (decision 10 -> fill 11 -> 100), not merely the first / a single
+    # contact. This is the behavior the cb_full orchestration fix restores.
+    n = 20
+    opens = [100.0] * n
+    opens[11] = 100.0
+    opens[12] = 105.0
+    opens[13] = 112.0
+    highs = [100.0] * n
+    highs[15] = 120.0  # target first touched at bar 15 (LONG)
+    lows = [100.0] * n
+    mv = make_mv(opens, highs, lows, unit_starts=np.array([0], dtype=np.int64))
+    sol = god_solve("LONG", mv, [10, 11, 12], 120.0)
+    assert sol["ok"]
+    assert sol["exit_reason"] == R_TARGET
+    assert sol["entry_decision_index"] == 10
+    assert sol["entry_fill_index"] == 11
+    assert abs(sol["entry_price"] - 100.0) < 1e-9
+
+
+def test_god_mode_best_entry_lost_if_single_contact():
+    # Step 11 discriminator: when the MAX-PROFIT contact is NOT the first one,
+    # a single-contact (cb_now=[c]) orchestration cannot find it. The full
+    # contact set (cb_full) fixes this. This test FAILS under cb_now behavior.
+    n = 20
+    opens = [100.0] * n
+    opens[11] = 112.0  # decision 10 -> fill 11 -> expensive
+    opens[12] = 105.0  # decision 11 -> fill 12
+    opens[13] = 100.0  # decision 12 -> fill 13 -> cheapest (God-mode best)
+    highs = [100.0] * n
+    highs[15] = 120.0
+    lows = [100.0] * n
+    mv = make_mv(opens, highs, lows, unit_starts=np.array([0], dtype=np.int64))
+    # full contact set -> God-mode picks the cheapest entry (decision 12)
+    full = god_solve("LONG", mv, [10, 11, 12], 120.0)
+    assert full["ok"]
+    assert full["entry_decision_index"] == 12
+    assert abs(full["entry_price"] - 100.0) < 1e-9
+    # single-contact (cb_now) at the first contact -> misses the best entry
+    single = god_solve("LONG", mv, [10], 120.0)
+    assert single["ok"]
+    assert single["entry_decision_index"] == 10
+    assert abs(single["entry_price"] - 112.0) < 1e-9
+    # the two diverge -> proves cb_now loses the God-mode best entry
+    assert full["entry_decision_index"] != single["entry_decision_index"]
+
+
+def test_cursor_boundary_contact_at_cursor_eligible():
+    # Step 12: previous exit = 20 -> cursor = 21. A candidate contact exactly at
+    # the cursor (bar 21) MUST remain eligible; a contact strictly before it
+    # (bar 20) must be skipped. This is the off-by-one (< cursor, not <= cursor)
+    # guard in the sequential orchestration.
+    assert _contact_is_consumed(20, 21) is True   # before cursor -> consumed
+    assert _contact_is_consumed(21, 21) is False  # at cursor -> eligible
+    assert _contact_is_consumed(22, 21) is False  # after cursor -> eligible
+
+
+# --------------------------------------------------------------------------- #
+# Sequential candidate discovery DECOUPLED from the static-event window
+# --------------------------------------------------------------------------- #
+def test_sequential_candidate_decoupled_from_event_window():
+    # A structure is present in per_bar at bars 348/349/350 only. The static
+    # builder might place the event's start_bar at 350 while the structure is
+    # ALREADY in proximity at 348/349. The sequential scan MUST anchor the
+    # candidate at the EARLIEST per_bar appearance (348), not at the static
+    # event start (350). This is the precise decoupling contract.
+    n = 360
+    S = "SR|m15|0|346|7705.0|7694.0|75.0"
+    per_bar = [None] * n
+    for t in (348, 349, 350):
+        per_bar[t] = [(S, "RESISTANCE", 0.0, 0.0)]
+    c, sid = _scan_next_candidate(per_bar, cursor=347, eligible_sids={S}, n=n)
+    assert sid == S
+    assert c == 348  # NOT 350 -- proof of decoupling
+    # full legal contact set from cursor forward
+    cb = [t for t in range(c, n)
+          if per_bar[t] is not None and any(x[0] == S for x in per_bar[t])]
+    assert cb == [348, 349, 350]
+
+
+def test_sequential_best_entry_trade2_region():
+    # Mirrors the diagnosed Trade-2 region: candidate structure contacts
+    # 348/349/350, frozen LONG target 7773; fills open[349]=7705, open[350]=7700,
+    # open[351]=7741; target touched later. God-mode MUST pick the max-profit
+    # entry (decision 349 -> fill 350 -> 7700 -> +73), NOT the late first-contact
+    # 350 (fill 351 -> 7741 -> +32).
+    n = 400
+    opens = [7700.0] * n
+    opens[349] = 7705.0
+    opens[350] = 7700.0
+    opens[351] = 7741.0
+    highs = [7700.0] * n
+    highs[360] = 7773.0  # first LONG target touch
+    lows = [7700.0] * n
+    mv = make_mv(opens, highs, lows, unit_starts=np.array([0], dtype=np.int64))
+    sol = god_solve("LONG", mv, [348, 349, 350], 7773.0)
+    assert sol["ok"]
+    assert sol["exit_reason"] == R_TARGET
+    assert sol["entry_decision_index"] == 349
+    assert sol["entry_fill_index"] == 350
+    assert abs(sol["entry_price"] - 7700.0) < 1e-9
+    assert abs(sol["utility"] - 73.0) < 1e-6
+
+
+def test_ag_trade2_decoupled_best_entry():
+    # End-to-end regression for the diagnosed Trade-2 region. After decoupling
+    # candidate discovery from the static event window, the candidate structure
+    # SR|m15|0|346|7705.0|7694.0|75.0 MUST be eligible from its first per_bar
+    # appearance (348/349/350) and the God-mode solver MUST select the best
+    # entry (decision 349 -> fill 350 -> 7700), not the previously-reported
+    # late first-contact entry at ~7741.
+    res = run_god_oracle_v4("AG", max_bars=AG_MAX_BARS)
+    canon = [r for r in res["records"] if r["canonical_oracle_trade"]]
+    t2 = next((r for r in canon
+               if r["structure_id"] == "SR|m15|0|346|7705.0|7694.0|75.0"), None)
+    assert t2 is not None, "decoupled candidate structure must form a trade"
+    assert t2["oracle_direction"] == "LONG"
+    assert t2["best_entry_decision_index"] == 349
+    assert t2["best_entry_fill_index"] == 350
+    assert abs(t2["best_entry_price"] - 7700.0) < 1e-6
+    assert abs(t2["target_price"] - 7773.0) < 1e-6
 
 
 if __name__ == "__main__":

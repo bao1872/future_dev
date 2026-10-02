@@ -4,10 +4,11 @@ pages/6_Indicator_Viewer.py
 
 Indicator Viewer — current God-Mode Oracle.
 
-This page shows ONLY the current production God-Mode Oracle
-(`structural_god_oracle_m15_v4.run_god_oracle_v4`). There is no selector
-and no old Oracle overlay: the page's single source of truth is the latest
-oracle.
+This page shows ONLY the current production God-Mode Oracle. There is no
+selector and no old Oracle overlay: the page's single source of truth is the
+materialized LATEST artifact (`artifacts/god_oracle_m15_latest/`), produced
+offline by `build_god_oracle_latest_artifact_v1.py`. No Oracle or environment
+math executes inside the viewer.
 
 For each candidate event the oracle decides a single completed trade:
 
@@ -25,9 +26,9 @@ Rendering rules (manual label review):
 * One contiguous index slice `[lo, hi]` is rendered (never a concatenated
   subset of event bars). It contains candidate start, Entry, Exit plus
   padding.
-* SR / Liquidity structures come from the EXACT SAME geometry owner the
-  oracle uses — `run_environment_m15` / `geom_by_decision`. No viewer-side
-  SR/liquidity calculation is invented.
+* SR / Liquidity structures are read from the materialized latest artifact
+  (`structures.parquet`) — the EXACT decision-time geometry the Oracle used.
+  No viewer-side SR/liquidity calculation is invented or recomputed.
 * Every canonical trade whose Entry or Exit lies in the visible index range
   is drawn (Entry + Exit + Entry->Exit line). LONG entry = up triangle,
   SHORT entry = down triangle, Exit = X. Non-selected are smaller / lighter;
@@ -43,11 +44,14 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from research.liquidity_oracle_atlas.structural_god_oracle_m15_v4 import (
-    run_god_oracle_v4,
-)
-from research.liquidity_oracle_atlas.build_execution_environment_m15_v1 import (
-    run_environment_m15,
+import hashlib
+import json
+from pathlib import Path
+
+# Single "latest" artifact location. All Oracle / environment math is computed
+# OFFLINE by build_god_oracle_latest_artifact_v1.py; the viewer only reads it.
+_ARTIFACT_DIR = (
+    Path(__file__).resolve().parents[1] / "artifacts" / "god_oracle_m15_latest"
 )
 
 SYMBOLS = ["AG"]
@@ -60,28 +64,46 @@ C_BULL = "#26A69A"
 C_BEAR = "#F23645"
 
 
-@st.cache_data(show_spinner="Loading latest God-Mode Oracle labels and geometry …")
 def load_oracle(symbol: str) -> dict:
-    """Run the production oracle for records, and the production geometry owner
-    for structures. Caches on `symbol` only; the oracle math is never
-    recomputed on rerun."""
-    res = run_god_oracle_v4(symbol)
-    records = res["records"]
-    canon = [r for r in records if r.get("canonical_oracle_trade")]
-    canon.sort(key=lambda r: int(r["candidate_start_bar"]))
-    mv = res["market_view"]
-    env = run_environment_m15(symbol, None, capture_provenance=False)
+    """Load the materialized LATEST oracle artifact (trades/bars/structures +
+    manifest). No Oracle or environment math runs in the viewer — the artifact
+    is the single source of truth, produced offline by
+    build_god_oracle_latest_artifact_v1.py."""
+    trades = pd.read_parquet(_ARTIFACT_DIR / "trades.parquet")
+    bars = pd.read_parquet(_ARTIFACT_DIR / "bars.parquet")
+    structs = pd.read_parquet(_ARTIFACT_DIR / "structures.parquet")
+    with open(_ARTIFACT_DIR / "manifest.json") as fh:
+        manifest = json.load(fh)
+
+    canon = trades.to_dict("records")
+    canon.sort(key=lambda r: int(r["candidate_decision_index"]))
+
+    n = int(len(bars))
+    geom = [None] * n
+    for _, row in structs.iterrows():
+        b = int(row["bar_index"])
+        if 0 <= b < n:
+            g = json.loads(row["geom"])
+            geom[b] = g if g else None
+
+    artifact_sha = hashlib.sha256(
+        (_ARTIFACT_DIR / "manifest.json").read_bytes()
+    ).hexdigest()
+
     return {
-        "records": records,
         "canon": canon,
-        "meta": res["meta"],
-        "opens": np.asarray(mv.opens, dtype=float),
-        "highs": np.asarray(mv.highs, dtype=float),
-        "lows": np.asarray(mv.lows, dtype=float),
-        "closes": np.asarray(mv.closes, dtype=float),
-        "times": np.asarray(mv.times),
-        "n": int(mv.n),
-        "geom": env["geom_by_decision"],
+        "meta": manifest.get("oracle_meta", {}),
+        "opens": np.asarray(bars["open"].to_numpy(), dtype=float),
+        "highs": np.asarray(bars["high"].to_numpy(), dtype=float),
+        "lows": np.asarray(bars["low"].to_numpy(), dtype=float),
+        "closes": np.asarray(bars["close"].to_numpy(), dtype=float),
+        "times": np.asarray(bars["bar_start_time"].to_numpy()),
+        "n": n,
+        "geom": geom,
+        "artifact_sha": artifact_sha,
+        "canonical_trade_count": int(
+            manifest.get("canonical_trade_count", len(canon))
+        ),
     }
 
 
@@ -91,7 +113,7 @@ def _to_dt(arr) -> pd.DatetimeIndex:
 
 def _build_fig(data: dict, sel: dict) -> go.Figure:
     n = data["n"]
-    s = int(sel["candidate_start_bar"])
+    s = int(sel["candidate_decision_index"])
     e = int(sel["exit_fill_index"])
     entry_idx = int(sel["best_entry_fill_index"])
 
@@ -241,7 +263,8 @@ def _build_fig(data: dict, sel: dict) -> go.Figure:
             name=(f"Entry {cr['event_id']}" if is_sel else None),
             showlegend=is_sel,
             hovertemplate=(
-                f"Entry {cr['event_id']}<br>{_to_dt(data['times'][ei])}<br>"
+                f"Entry {cr['event_id']}<br>"
+                f"{pd.Timestamp(cr['best_entry_fill_time']).strftime('%Y-%m-%d %H:%M')}<br>"
                 "%{y:.1f}<extra></extra>"
             ),
         ))
@@ -252,7 +275,8 @@ def _build_fig(data: dict, sel: dict) -> go.Figure:
             name=(f"Exit {cr['event_id']}" if is_sel else None),
             showlegend=is_sel,
             hovertemplate=(
-                f"Exit {cr['event_id']}<br>{_to_dt(data['times'][xi])}<br>"
+                f"Exit {cr['event_id']}<br>"
+                f"{pd.Timestamp(cr['exit_fill_time']).strftime('%Y-%m-%d %H:%M')}<br>"
                 "%{y:.1f}<extra></extra>"
             ),
         ))
@@ -306,8 +330,9 @@ def main() -> None:
         "search restarts immediately after the exit. Previous / Next step "
         "through the trade stream; event_id is diagnostic metadata only. "
         "Kline uses the global 15m bar index (no overnight / weekend gaps); "
-        "SR & Liquidity are the decision-time production geometry "
-        "(run_environment_m15 / geom_by_decision)."
+        "SR & Liquidity are read from the materialized latest artifact "
+        "(structures.parquet: decision-time production geometry, no runtime "
+        "computation)."
     )
 
     symbol = st.sidebar.selectbox("Symbol", SYMBOLS, index=0)
@@ -345,7 +370,25 @@ def main() -> None:
     )
     st.session_state["v_idx"] = idx
 
+    # ---- temporary page-load diagnostics (artifact sourcing; no runtime oracle) ----
     sel = canon[idx]
+    _sha = data["artifact_sha"]
+    _canon_n = data["canonical_trade_count"]
+    _seq = idx + 1
+    _entry = float(sel["best_entry_price"])
+    print(
+        f"[artifact] SHA={_sha}\n"
+        f"[artifact] canonical count={_canon_n}\n"
+        f"[artifact] selected trade seq={_seq}\n"
+        f"[artifact] selected entry={_entry}"
+    )
+    st.markdown(
+        f"**artifact SHA** = `{_sha[:16]}`  ·  "
+        f"**artifact canonical count** = {_canon_n}  ·  "
+        f"**selected trade seq** = {_seq}  ·  "
+        f"**selected entry** = {_entry:.1f}"
+    )
+
     fig = _build_fig(data, sel)
     st.plotly_chart(fig, use_container_width=True)
 
