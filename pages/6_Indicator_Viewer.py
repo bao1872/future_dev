@@ -307,7 +307,8 @@ def _meta_table(sel: dict) -> pd.DataFrame:
     rows = [
         ("event_id", sel["event_id"]),
         ("direction", sel["oracle_direction"]),
-        ("candidate_start_time", pd.Timestamp(sel["candidate_start_time"])),
+        # canonical artifact column is `candidate_time` (see builder trade schema)
+        ("candidate_time", pd.Timestamp(sel["candidate_time"])),
         ("candidate zone", f"{float(sel['zone_bottom']):.1f} – {float(sel['zone_top']):.1f}"),
         ("entry time", pd.Timestamp(sel["best_entry_fill_time"])),
         ("entry price", f"{float(sel['best_entry_price']):.1f}"),

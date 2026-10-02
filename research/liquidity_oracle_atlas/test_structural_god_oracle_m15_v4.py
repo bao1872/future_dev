@@ -668,7 +668,13 @@ def test_sequential_candidate_decoupled_from_event_window():
     per_bar = [None] * n
     for t in (348, 349, 350):
         per_bar[t] = [(S, "RESISTANCE", 0.0, 0.0)]
-    c, sid = _scan_next_candidate(per_bar, cursor=347, eligible_sids={S}, n=n)
+    # primary-structure owner needs the bar's own low/high; with exactly ONE
+    # co-present structure it is trivially that structure.
+    lows = np.zeros(n, dtype=float)
+    highs = np.zeros(n, dtype=float)
+    c, sid = _scan_next_candidate(
+        per_bar, cursor=347, eligible_sids={S}, n=n, lows=lows, highs=highs
+    )
     assert sid == S
     assert c == 348  # NOT 350 -- proof of decoupling
     # full legal contact set from cursor forward

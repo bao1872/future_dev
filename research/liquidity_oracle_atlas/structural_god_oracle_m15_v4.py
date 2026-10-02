@@ -58,6 +58,7 @@ import numpy as np
 import pandas as pd
 
 from research.liquidity_oracle_atlas.build_structural_dp_labels_m15_v2 import (
+    _primary_structure,
     _structures_in_proximity,
     build_structural_events_v2,
 )
@@ -76,9 +77,35 @@ from research.liquidity_oracle_atlas.structural_event_dp_kernel_v3 import (
     market_view_from_arrays,
 )
 
+from bisect import bisect_left
+
 MATH_VERSION = "structural-god-oracle-v4.3"
 TASK_ID = "FUT-M15-STRUCTURAL-GOD-ORACLE-V4.3"
 ATR_OWNER = "m15_atr@run_environment_m15"
+
+# --------------------------------------------------------------------------- #
+# TP hot-path counters (diagnostic only; they NEVER affect math or decisions)
+# --------------------------------------------------------------------------- #
+_HOTPATH_COUNTERS: Dict[str, int] = {
+    "candidate_scan_steps": 0,
+    "contact_future_scan_steps": 0,
+    "target_touch_scan_steps": 0,
+    "solver_call_count": 0,
+    "ineligible_primary_bars": 0,
+}
+
+
+def reset_hotpath_counters() -> None:
+    for _k in _HOTPATH_COUNTERS:
+        _HOTPATH_COUNTERS[_k] = 0
+
+
+def hotpath_counters() -> Dict[str, int]:
+    return dict(_HOTPATH_COUNTERS)
+
+
+def _bump(key: str, amount: int = 1) -> None:
+    _HOTPATH_COUNTERS[key] = _HOTPATH_COUNTERS.get(key, 0) + int(amount)
 
 LONG_ROLES = ("RESISTANCE", "BUYSIDE_LIQUIDITY")
 SHORT_ROLES = ("SUPPORT", "SELLSIDE_LIQUIDITY")
@@ -297,19 +324,35 @@ def _suffix_argmax_per_unit(
 def _next_target_touch(
     mv: EventMarketView, lo: int, hi: int, direction: str, target_price: Optional[float]
 ) -> np.ndarray:
-    """``nt[t]`` = earliest bar in [t .. hi] where the frozen target is touched."""
+    """``nt[t]`` = earliest bar in [t .. hi] where the frozen target is touched.
+
+    Semantically IDENTICAL to the previous reverse-scan implementation: the
+    recurrence ``nt[t] = t if touched[t] else nt[t+1]`` is unchanged. It is now
+    evaluated as a vectorized reverse cumulative minimum instead of a
+    Python-level loop over the whole window, because this function is on the
+    hot path (called once per direction per candidate decision). This is a pure
+    implementation change: no arithmetic, tie-break or decision is altered.
+    """
     n = mv.n
     nt = np.full(n, -1, dtype=np.int64)
     if target_price is None:
         return nt
+    lo_i, hi_i = int(lo), int(hi)
+    if hi_i < lo_i:
+        return nt
+    hi_i = min(hi_i, n - 1)
+    lo_i = max(lo_i, 0)
+    if hi_i < lo_i:
+        return nt
+    _bump("target_touch_scan_steps", hi_i - lo_i + 1)
     tp = float(target_price)
-    highs, lows = mv.highs, mv.lows
-    nxt = -1
-    for t in range(int(hi), int(lo) - 1, -1):
-        touched = (float(highs[t]) >= tp) if direction == "LONG" else (float(lows[t]) <= tp)
-        if touched:
-            nxt = t
-        nt[t] = nxt
+    series = np.asarray(mv.highs if direction == "LONG" else mv.lows, dtype=float)
+    window = series[lo_i:hi_i + 1]
+    touched = (window >= tp) if direction == "LONG" else (window <= tp)
+    sentinel = np.int64(n)  # strictly greater than any real bar index
+    vals = np.where(touched, np.arange(lo_i, hi_i + 1, dtype=np.int64), sentinel)
+    rev_min = np.minimum.accumulate(vals[::-1])[::-1]
+    nt[lo_i:hi_i + 1] = np.where(rev_min < sentinel, rev_min, -1)
     return nt
 
 
@@ -616,16 +659,17 @@ def _scan_next_candidate(
     cursor: int,
     eligible_sids: set,
     n: int,
+    lows: np.ndarray,
+    highs: np.ndarray,
 ) -> Tuple[Optional[int], Optional[str]]:
     """Sequential-candidate discovery, DECOUPLED from the static-event window.
 
-    From ``cursor`` forward, find the earliest bar ``t`` that has at least one
-    still-eligible structure present in ``per_bar[t]`` (i.e. not in the no-trade
-    skip set and with a valid ``t+1`` fill). Among co-present eligible
-    structures pick the lexicographically smallest structure_id (deterministic).
-    A structure that previously COMPLETED a trade is intentionally still
-    eligible here once the cursor has passed that trade's exit. Return
-    ``(t, sid)``; if none remain, ``(None, None)``.
+    From ``cursor`` forward, find the earliest bar ``t`` whose canonical primary
+    structure (nearest by ``bar_zone_distance``) is eligible and has a valid
+    ``t+1`` fill, and return that owner as the candidate. A structure that
+    previously COMPLETED a trade -- or that failed at an earlier decision bar --
+    is intentionally still eligible; nothing is permanently blacklisted.
+    Return ``(t, sid)``; if none remain, ``(None, None)``.
 
     This is intentionally NOT gated by any event's ``[start_bar, end_bar)``:
     a structure becomes a legal candidate the moment it first appears in
@@ -635,12 +679,27 @@ def _scan_next_candidate(
     eligibility.
     """
     for t in range(cursor, n):
+        _bump("candidate_scan_steps")
         pb = per_bar[t]
-        if pb is None:
+        if pb is None or not pb:
             continue
-        eligible = [x[0] for x in pb if x[0] in eligible_sids and t + 1 < n]
-        if eligible:
-            return (t, sorted(eligible)[0])
+        if t + 1 >= n:
+            # a decision at t fills at t+1, so the last bar cannot decide
+            continue
+        # CANONICAL owner (reuse, not invent): V2's primary-structure rule picks
+        # the structurally NEAREST co-present structure by bar_zone_distance.
+        # Lexical structure_id ordering is deliberately NOT used -- it is not a
+        # market property and it invented a second candidate rule.
+        prim = _primary_structure(pb, float(lows[t]), float(highs[t]))
+        if prim is None:
+            continue
+        sid = prim[0]
+        if sid not in eligible_sids:
+            # No frozen geometry/metadata exists for this owner, so this bar
+            # cannot carry a candidate decision. Counted for transparency.
+            _bump("ineligible_primary_bars")
+            continue
+        return (t, sid)
     return (None, None)
 
 
@@ -735,25 +794,41 @@ def _run_god_oracle_core(
         }
     eligible_sids = set(struct_meta.keys())
 
-    # `no_trade_sids` blocks ONLY structures that cannot produce a trade at the
-    # current cursor (no valid contact bar, or scanned with no decision). It is
-    # deliberately NOT a global per-structure lifetime dedup: a structure that
-    # COMPLETED a trade must stay re-eligible after the cursor passes that exit,
-    # so the same structure may participate again as a fresh candidate
-    # (re-freezing geometry/target at its new decision time).
-    no_trade_sids: set = set()
+    # structure_id -> ascending list of its proximity bars (built ONCE). Used
+    # only to answer "which contact bars of A start at/after c" without
+    # rescanning the whole future every time; the resulting list is identical
+    # (same set, same ascending order) to the previous comprehension over
+    # `range(c, n)`. This removes the per-candidate O(n) rescan, which was a
+    # dominant hot path (candidates x N).
+    bars_by_sid: Dict[str, List[int]] = {}
+    for _t in range(n):
+        _pb = per_bar[_t]
+        if _pb is None:
+            continue
+        for _x in _pb:
+            _lst = bars_by_sid.get(_x[0])
+            if _lst is None:
+                bars_by_sid[_x[0]] = [_t]
+            elif _lst[-1] != _t:
+                _lst.append(_t)
 
+    # cursor   = last completed trade's exit + 1  (non-overlap guard only)
+    # scan_pos = where the NEXT candidate scan starts (DECISION-level forward
+    #            progress). Nothing is ever permanently blacklisted.
     cursor = 0
+    scan_pos = 0
     guard = 0
-    # trade iterations advance `cursor`; no-trade iterations add to
-    # `no_trade_sids`. Either way the scan makes forward progress.
+    # Every iteration advances scan_pos STRICTLY forward (failed decision ->
+    # c + 1; completed trade -> exit + 1 > c), so the loop is bounded by n.
     MAX_ITER = 10 * (len(events) + 16)
     while True:
         guard += 1
         if guard > MAX_ITER:
             raise AssertionError("HARD_FAIL_CANDIDATE_SCAN_RUNWAY")
 
-        c, cand_sid = _scan_next_candidate(per_bar, cursor, eligible_sids - no_trade_sids, n)
+        c, cand_sid = _scan_next_candidate(
+            per_bar, scan_pos, eligible_sids, n, lows, highs
+        )
         if c is None:
             break
 
@@ -773,17 +848,15 @@ def _run_god_oracle_core(
         # where A is present in per_bar is a decision candidate; the solver
         # then picks the true best entry among all of them, geometry/targets
         # frozen at this decision time c.
-        cb_full = [
-            t for t in range(c, n)
-            if t + 1 < n and per_bar[t] is not None
-            and any(x[0] == cand_sid for x in per_bar[t])
-        ]
+        cb_list = bars_by_sid.get(cand_sid) or []
+        cb_pos = bisect_left(cb_list, c)
+        cb_full = [t for t in cb_list[cb_pos:] if t + 1 < n]
+        _bump("contact_future_scan_steps", len(cb_list) - cb_pos)
         if not cb_full:
-            # no legal contact remains for A from cursor forward: this structure
-            # can never yield a trade at/after the current cursor, so block it to
-            # keep the scan advancing. (Data-end case: only proximity at the last
-            # bar, with no subsequent bar to fill an entry.)
-            no_trade_sids.add(cand_sid)
+            # No legal contact remains at/after this decision bar. Move past THIS
+            # DECISION only; the structure is NOT blacklisted -- if it is the
+            # owner again later it can still become a candidate there.
+            scan_pos = c + 1
             continue
 
         tgt_long = pick_target_fn(
@@ -809,6 +882,7 @@ def _run_god_oracle_core(
                 "n_rejected_target_before_entry": 0, "n_contact": len(cb_full),
             }
         else:
+            _bump("solver_call_count")
             long_sol = solve_direction_fn(
                 direction="LONG", zone_bottom=zb, zone_top=zt, atr_value=atr_value,
                 start_bar=c, end_bar=n,
@@ -823,6 +897,7 @@ def _run_god_oracle_core(
                 "n_rejected_target_before_entry": 0, "n_contact": len(cb_full),
             }
         else:
+            _bump("solver_call_count")
             short_sol = solve_direction_fn(
                 direction="SHORT", zone_bottom=zb, zone_top=zt, atr_value=atr_value,
                 start_bar=c, end_bar=n,
@@ -873,17 +948,19 @@ def _run_god_oracle_core(
             records.append(rec)
             exit_idx = int(rec["exit_fill_index"])
             cursor = exit_idx + 1
-            # no overlap: next candidate search starts strictly after this exit.
-            # IMPORTANT: a completed trade does NOT block cand_sid. After the
-            # cursor passes this exit, if the same structure is still/again in
-            # proximity it is eligible again as a fresh candidate (geometry and
-            # target re-frozen at the new decision time). This restores the
-            # required lifecycle; it is the inverse of the old global dedup.
+            scan_pos = cursor
+            # Non-overlap: the next candidate search starts strictly after this
+            # exit. A completed trade does NOT block cand_sid: once the cursor
+            # has passed this exit, the same structure may be the owner again
+            # and then it is a FRESH candidate with geometry/target re-frozen at
+            # its new decision time.
         else:
-            # No canonical trade from this candidate (no decision / no structural
-            # target). Block it permanently so the scan makes forward progress:
-            # re-scanning the same structure here would never advance the cursor.
-            no_trade_sids.add(cand_sid)
+            # No canonical trade from this decision bar (e.g. no structural
+            # target right now). DECISION-level forward progress ONLY: skip this
+            # decision bar and keep scanning. The structure is NOT blacklisted,
+            # so if it is the owner again at a later bar it gets another chance
+            # with re-frozen geometry/target.
+            scan_pos = c + 1
 
     if self_target_total != 0:
         raise AssertionError(f"HARD_FAIL_SELF_TARGET_COUNT={self_target_total}")
