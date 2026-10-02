@@ -76,8 +76,8 @@ from research.liquidity_oracle_atlas.structural_event_dp_kernel_v3 import (
     market_view_from_arrays,
 )
 
-MATH_VERSION = "structural-god-oracle-v4"
-TASK_ID = "FUT-M15-STRUCTURAL-GOD-ORACLE-V4"
+MATH_VERSION = "structural-god-oracle-v4.3"
+TASK_ID = "FUT-M15-STRUCTURAL-GOD-ORACLE-V4.3"
 ATR_OWNER = "m15_atr@run_environment_m15"
 
 LONG_ROLES = ("RESISTANCE", "BUYSIDE_LIQUIDITY")
@@ -353,7 +353,6 @@ def solve_direction_god_v4(
             "n_rejected_target_before_entry": 0, "n_contact": n_contact,
         }
 
-    suf = _suffix_argmax_per_unit(mv, s_bar + 1, hi, sign)
     nt = _next_target_touch(mv, s_bar, hi, direction, target_price)
     t_first = int(nt[s_bar]) if (target_price is not None and s_bar < n) else -1
 
@@ -400,6 +399,9 @@ def solve_direction_god_v4(
             continue
         n_with_path += 1
 
+        # V4.3: the ONLY valid exit is TARGET_TOUCH. If the target is not
+        # reached within the allowed holding window, this entry does not form
+        # a completed A->B label, so we skip it (no early-exit fallback).
         if same_bar_target:
             exit_fill = f
             exit_price = float(target_price)
@@ -411,13 +413,8 @@ def solve_direction_god_v4(
             pnl = sign * (float(target_price) - entry_price)
             reason = R_TARGET
         else:
-            k = int(suf[f + 1]) if (f + 1) < n else -1
-            if k < 0 or k > H:
-                continue
-            exit_price = float(mv.opens[k])
-            pnl = sign * (exit_price - entry_price)
-            exit_fill = k
-            reason = R_EARLY if pnl > PNL_EPS else R_LOSS
+            n_rejected += 1
+            continue
 
         cand = {
             "entry_decision_index": int(d),
@@ -432,7 +429,9 @@ def solve_direction_god_v4(
             best = cand
 
     if best is None:
-        reason = "NO_EXECUTABLE_ENTRY" if n_candidates == 0 else "INSUFFICIENT_PATH"
+        # V4.3: a direction with contact bars but no target-reaching entry has
+        # its target NOT reached; no early-exit label is manufactured.
+        reason = "NO_EXECUTABLE_ENTRY" if n_candidates == 0 else "TARGET_NOT_REACHED"
         return {
             "ok": False, "invalid_reason": reason,
             "n_candidates": n_candidates, "n_with_path": n_with_path,
@@ -650,24 +649,70 @@ def _run_god_oracle_core(
     records: List[Dict[str, Any]] = []
     self_target_total = 0
 
-    for e in events:
+    # ----------------------------------------------------------------- #
+    # Sequential trade stream (the frozen God-Mode lifecycle).
+    #
+    #   find candidate -> Entry -> frozen Target -> first TARGET_TOUCH
+    #   -> trade completed -> IMMEDIATELY restart search after that exit
+    #   -> next trade
+    #
+    # The old orchestration emitted at most ONE record per static structural
+    # event, so the label stream was far too sparse. Here a single GLOBAL
+    # bar cursor drives the stream: at each step we take the earliest legal
+    # contact bar (>= cursor) from the EXISTING structural-event / proximity
+    # owner, freeze Candidate A + geometry at that NEW decision time, compute
+    # LONG/SHORT with the current God-mode rules, emit the winning completed
+    # trade, then set cursor = exit_fill_index + 1 and restart. A previously
+    # alive static event may therefore participate again as a NEW trade
+    # after its exit (re-freezing geometry/target at its own decision time).
+    #
+    # Global non-overlap hard invariant:
+    #   Entry_1 <= Exit_1 < Entry_2 <= Exit_2 < Entry_3 ...
+    # is guaranteed because the next search never starts before exit+1, and
+    # every emitted trade is a completed TARGET_TOUCH.
+    # ----------------------------------------------------------------- #
+    all_contacts: List[Tuple[int, int]] = []
+    for e_idx, e in enumerate(events):
+        for cb in e["contact_bars"]:
+            all_contacts.append((int(cb), e_idx))
+    all_contacts.sort()
+
+    cursor = 0
+    i = 0
+    m = len(all_contacts)
+    while i < m:
+        c, e_idx = all_contacts[i]
+        if c < cursor:
+            i += 1
+            continue
+
+        e = events[e_idx]
         s_bar = int(e["start_bar"])
         e_bar = int(e["end_bar"])
         zb, zt = float(e["zone_bottom"]), float(e["zone_top"])
         atr_value = (
-            float(atr_series[s_bar]) if s_bar < len(atr_series) else float("nan")
+            float(atr_series[c]) if c < len(atr_series) else float("nan")
         )
-        cb = e["contact_bars"]
-        seg_s = int(seg_arr[s_bar]) if s_bar < n else 0
-        geom_prev = geom[s_bar - 1] if s_bar >= 1 else None
+        seg_c = int(seg_arr[c]) if c < n else 0
+        geom_prev = geom[c - 1] if c >= 1 else None
         cand_sid = e["structure_id"]
+        tf = e.get("timeframe")
+
+        # The candidate IS this single contact bar: the trade enters here
+        # (fill at c+1) and the God-mode rules are evaluated for THIS
+        # decision time. The current Entry rule (best gap selection inside
+        # solve_direction_god_v4) is preserved -- with a single candidate
+        # contact it simply selects that contact as the entry. This is what
+        # makes the stream restart after every exit instead of emitting one
+        # trade per static event.
+        cb_now = [c]
 
         tgt_long = pick_target_fn(
-            geom_prev, "LONG", zb, zt, e["timeframe"], seg_s, s_bar,
+            geom_prev, "LONG", zb, zt, tf, seg_c, c,
             sr_fs, cand_sid,
         )
         tgt_short = pick_target_fn(
-            geom_prev, "SHORT", zb, zt, e["timeframe"], seg_s, s_bar,
+            geom_prev, "SHORT", zb, zt, tf, seg_c, c,
             sr_fs, cand_sid,
         )
         if tgt_long is not None and target_is_self(tgt_long["structure_id"], cand_sid):
@@ -682,28 +727,28 @@ def _run_god_oracle_core(
             long_sol: Dict[str, Any] = {
                 "ok": False, "invalid_reason": "NO_STRUCTURAL_TARGET",
                 "n_candidates": 0, "n_with_path": 0,
-                "n_rejected_target_before_entry": 0, "n_contact": len(cb),
+                "n_rejected_target_before_entry": 0, "n_contact": len(cb_now),
             }
         else:
             long_sol = solve_direction_fn(
                 direction="LONG", zone_bottom=zb, zone_top=zt, atr_value=atr_value,
-                start_bar=s_bar, end_bar=e_bar,
+                start_bar=c, end_bar=n,
                 target_price=float(tgt_long["near_edge"]),
-                contact_bars=cb, mv=mv,
+                contact_bars=cb_now, mv=mv,
                 trading_day=td_arr, segment=seg_arr,
             )
         if tgt_short is None:
             short_sol: Dict[str, Any] = {
                 "ok": False, "invalid_reason": "NO_STRUCTURAL_TARGET",
                 "n_candidates": 0, "n_with_path": 0,
-                "n_rejected_target_before_entry": 0, "n_contact": len(cb),
+                "n_rejected_target_before_entry": 0, "n_contact": len(cb_now),
             }
         else:
             short_sol = solve_direction_fn(
                 direction="SHORT", zone_bottom=zb, zone_top=zt, atr_value=atr_value,
-                start_bar=s_bar, end_bar=e_bar,
+                start_bar=c, end_bar=n,
                 target_price=float(tgt_short["near_edge"]),
-                contact_bars=cb, mv=mv,
+                contact_bars=cb_now, mv=mv,
                 trading_day=td_arr, segment=seg_arr,
             )
 
@@ -711,13 +756,13 @@ def _run_god_oracle_core(
             direction="LONG", zone_bottom=zb, zone_top=zt, atr_value=atr_value,
             target_price=(None if tgt_long is None else float(tgt_long["near_edge"])),
             mv=mv, best=long_sol, n_candidates=0, n_with_path=0,
-            n_rejected=0, n_contact=len(cb),
+            n_rejected=0, n_contact=len(cb_now),
         ) if long_sol.get("ok") else None
         short_final = _finalize_god(
             direction="SHORT", zone_bottom=zb, zone_top=zt, atr_value=atr_value,
             target_price=(None if tgt_short is None else float(tgt_short["near_edge"])),
             mv=mv, best=short_sol, n_candidates=0, n_with_path=0,
-            n_rejected=0, n_contact=len(cb),
+            n_rejected=0, n_contact=len(cb_now),
         ) if short_sol.get("ok") else None
 
         decision, lv, sv, winner_side = decide_oracle_v4(
@@ -726,15 +771,27 @@ def _run_god_oracle_core(
             short_has_target=(tgt_short is not None),
         )
 
-        rec = _build_record(
-            e=e, mv=mv, atr_value=atr_value,
-            long_sol=long_sol, short_sol=short_sol,
-            long_final=long_final, short_final=short_final,
-            tgt_long=tgt_long, tgt_short=tgt_short,
-            decision=decision, lv=lv, sv=sv, winner_side=winner_side,
-            next_event=next_by_id.get(int(e["event_id"])),
-        )
-        records.append(rec)
+        if decision in (ORACLE_LONG, ORACLE_SHORT) and winner_side is not None:
+            # freeze Candidate A and geometry at THIS decision time
+            e_rec = dict(e)
+            e_rec["start_bar"] = c
+            rec = _build_record(
+                e=e_rec, mv=mv, atr_value=atr_value,
+                long_sol=long_sol, short_sol=short_sol,
+                long_final=long_final, short_final=short_final,
+                tgt_long=tgt_long, tgt_short=tgt_short,
+                decision=decision, lv=lv, sv=sv, winner_side=winner_side,
+                next_event=next_by_id.get(int(e["event_id"])),
+            )
+            records.append(rec)
+            exit_idx = int(rec["exit_fill_index"])
+            cursor = exit_idx + 1
+            # no overlap: skip every contact at or before the exit
+            while i < m and all_contacts[i][0] <= cursor:
+                i += 1
+        else:
+            # no canonical trade from this candidate; move to next contact
+            i += 1
 
     if self_target_total != 0:
         raise AssertionError(f"HARD_FAIL_SELF_TARGET_COUNT={self_target_total}")
@@ -872,7 +929,18 @@ def _build_record(
             "target_zone_bottom": (float(tgt["bottom"]) if tgt else None),
             "target_zone_top": (float(tgt["top"]) if tgt else None),
             "direction_margin_atr": (float(margin) if margin is not None else float("nan")),
-            "label_available_time": winner["exit_fill_time"],
+            # V4.2 time-purity fix for label availability (Phase 1).
+            # Open-fill exits (DP_EARLY_EXIT / DP_LOSS_EXIT) fill exactly at the
+            # next bar's open, so the label is known at the exit bar's START.
+            # TARGET_TOUCH is only known when the exit bar CLOSES (the touch may
+            # occur anytime within the bar), so its label becomes available at
+            # exit bar close = exit bar start + 15min. This removes up-to-15min
+            # look-ahead when constructing the previous-5 label history.
+            "label_available_time": (
+                winner["exit_fill_time"] + pd.Timedelta(minutes=15)
+                if winner["exit_reason"] == R_TARGET
+                else winner["exit_fill_time"]
+            ),
         })
     else:
         base.update({
@@ -925,7 +993,12 @@ def _build_meta(
     ties = sum(1 for r in records if r["oracle_decision"] == ORACLE_TIE)
     canonical_loss = sum(1 for r in canonical if not (r["utility"] > PNL_EPS))
     target_touch = sum(1 for r in canonical if r["exit_reason"] == R_TARGET)
-    early_exit = sum(1 for r in canonical if r["exit_reason"] == R_EARLY)
+    early_exit = sum(1 for r in canonical if r["exit_reason"] in (R_EARLY, R_LOSS))
+    target_not_reached = sum(
+        1 for r in records
+        for _k in ("long_branch_invalid_reason", "short_branch_invalid_reason")
+        if r.get(_k) == "TARGET_NOT_REACHED"
+    )
     valid_but_no_entry = 0  # by construction an ok branch always yields one entry
 
     return {
@@ -952,6 +1025,7 @@ def _build_meta(
         "direction_ties": int(ties),
         "target_touch": int(target_touch),
         "early_exit": int(early_exit),
+        "target_not_reached_directions": int(target_not_reached),
         "cross_day_fill_count": int(cross_day),
         "cross_segment_fill_count": int(cross_seg),
         "cross_unit_fill_count": int(cross_unit),
@@ -1086,7 +1160,7 @@ def main(symbol: str = "AG") -> None:
     audit = audit_target_vs_next_static(records)
 
     print(f"=== {TASK_ID} ({symbol}) ===")
-    print(f"BASE SHA context: 777908ac")
+    print(f"BASE SHA context: 7b6a1a364d37f388b9039eadffe277dac20ad8ec")
     print("God-mode contract: direction decided by future oracle = PASS")
     print("old direction model dependency = NONE")
     print()
@@ -1106,6 +1180,9 @@ def main(symbol: str = "AG") -> None:
     assert meta["cross_unit_fill_count"] == 0, "cross_unit_fill_count MUST be 0"
     assert meta["canonical_oracle_trades"] > 0, "expected some canonical oracle trades"
     assert summ["min_tp_atr"] > 0, "min(tp_atr) MUST be > 0"
+    assert meta["early_exit"] == 0, "V4.3: early_exit MUST be 0"
+    assert meta["target_touch"] == meta["canonical_oracle_trades"], \
+        "V4.3: every canonical oracle trade MUST be TARGET_TOUCH"
     print("\nALL HARD SANITY CHECKS PASSED")
 
 

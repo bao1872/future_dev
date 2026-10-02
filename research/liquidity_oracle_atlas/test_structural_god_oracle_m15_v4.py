@@ -25,11 +25,13 @@ from research.liquidity_oracle_atlas.structural_god_oracle_m15_v4 import (
     build_per_bar_proximity,
     build_event_contact_bars,
     market_view_from_arrays,
+    R_TARGET,
+    ORACLE_LONG,
+    ORACLE_SHORT,
 )
 from research.liquidity_oracle_atlas.structural_god_oracle_reference_m15_v4 import (
     solve_direction_god_reference_v4,
     pick_directional_target_v4_ref,
-    run_god_oracle_v4_reference,
 )
 from research.liquidity_oracle_atlas.build_dp_proximity_m15_v1 import (
     build_dp_proximity_m15,
@@ -137,16 +139,20 @@ def test_t0_c_both_profit_pick_larger():
 
 
 def test_t0_d_one_loss_one_profit():
-    opens = [100, 100, 100, 98, 97, 99, 98]
+    # V4.3: a trade only forms on a profitable structural-target touch. An
+    # unreachable target does not form a trade (branch not ok); the reachable,
+    # profitable branch wins.
+    opens = [100, 100, 100, 110, 100, 100, 100]
     highs = list(opens)
     lows = list(opens)
     mv = make_mv(opens, highs, lows)
     cb = [1]
-    long_s = god_solve("LONG", mv, cb, 200.0)   # unreachable -> early exit negative
-    short_s = god_solve("SHORT", mv, cb, 95.0)  # early exit positive
+    long_s = god_solve("LONG", mv, cb, 110.0)   # reachable & profitable
+    short_s = god_solve("SHORT", mv, cb, 90.0)  # unreachable -> not ok
     dec, lv, sv, side = decide_oracle_v4(long_s, short_s)
-    assert dec == "SHORT"
-    assert lv < 0 < sv
+    assert dec == "LONG"
+    assert long_s["ok"] and long_s["utility"] > 0
+    assert not short_s["ok"]
 
 
 def test_t0_e_no_positive_opportunity():
@@ -256,16 +262,17 @@ def test_t0_l_target_touch_hard_terminal():
     assert long_s["tp_atr"] == 10.0  # NOT 25 from bar 5
 
 
-def test_t0_m_target_not_reached_early_exit():
+def test_t0_m_target_not_reached_no_trade():
+    # V4.3: an unreachable structural target does NOT open a trade. The branch is
+    # simply not ok (TARGET_NOT_REACHED) -- there is no early-exit fallback.
     opens = [100, 100, 100, 105, 108, 103, 100]
     highs = list(opens)
     lows = list(opens)
     mv = make_mv(opens, highs, lows)
     cb = [1]
     long_s = god_solve("LONG", mv, cb, 200.0)  # unreachable
-    assert long_s["exit_reason"] == "DP_EARLY_EXIT"
-    assert long_s["exit_fill_index"] == 4
-    assert long_s["utility"] == 8.0
+    assert not long_s["ok"]
+    assert long_s["invalid_reason"] == "TARGET_NOT_REACHED"
 
 
 def test_t0_n_entry_only_from_contact_bars():
@@ -292,15 +299,35 @@ def test_t0_o_leave_and_return_two_segments():
 
 
 def test_t0_p_next_event_boundary_caps_exit():
-    opens = [100, 100, 100, 105, 100, 100, 100, 100]
-    highs = [100] * 8
+    # V4.3: the exit is the first structural-target touch. A target touched only
+    # at the next-event boundary (e_bar) is ambiguous and rejected (capped); a
+    # touch strictly before e_bar yields a valid exit with exit_fill_index < e_bar.
+    opens = [100, 100, 100, 100, 100, 100, 100, 100]
     lows = [100] * 8
+    # LONG: target 105 first touched at bar 3 (< e_bar=4)
+    highs = [100, 100, 100, 105, 100, 100, 100, 100]
     mv = make_mv(opens, highs, lows)
     cb = [1]
-    long_s = god_solve("LONG", mv, cb, None, e_bar=4)  # next event at bar 4
+    long_s = god_solve("LONG", mv, cb, 105, e_bar=4)
     assert long_s["ok"]
-    assert long_s["exit_fill_index"] < 4  # cannot pass the next structural event
     assert long_s["exit_fill_index"] == 3
+    assert long_s["exit_fill_index"] < 4
+
+    # LONG: target 105 first touched exactly at e_bar=4 -> ambiguous -> capped
+    highs2 = [100, 100, 100, 100, 105, 100, 100, 100]
+    mv2 = make_mv(opens, highs2, lows)
+    long_s2 = god_solve("LONG", mv2, cb, 105, e_bar=4)
+    assert not long_s2["ok"]
+    assert long_s2["invalid_reason"] == "AMBIGUOUS_SAME_BAR_TERMINAL"
+
+    # SHORT analogue: target 95 first touched at bar 3 (< e_bar=4)
+    opens_s = [100, 100, 100, 100, 100, 100, 100, 100]
+    lows_s = [100, 100, 100, 95, 100, 100, 100, 100]
+    mv_s = make_mv(opens_s, [100] * 8, lows_s)
+    short_s = god_solve("SHORT", mv_s, cb, 95, e_bar=4)
+    assert short_s["ok"]
+    assert short_s["exit_fill_index"] == 3
+    assert short_s["exit_fill_index"] < 4
 
 
 def test_t0_p_ambiguous_terminal_rejected():
@@ -345,12 +372,13 @@ def test_nc1_future_permutation_changes_oracle():
 
     def _result(op):
         m = make_mv(op, list(op), list(op))
-        # no target -> pure early-exit branch; direction picks opposite extremes
-        rl = god_solve("LONG", m, cb, None)
-        rs = god_solve("SHORT", m, cb, None)
+        # reachable targets; the oracle must use the future path to locate the
+        # structural-target touch (which differs across permutations)
+        rl = god_solve("LONG", m, cb, 110.0)
+        rs = god_solve("SHORT", m, cb, 90.0)
         return (
-            rl["exit_fill_index"], rl["utility"],
-            rs["exit_fill_index"], rs["utility"],
+            rl["ok"], rl.get("exit_fill_index"),
+            rs["ok"], rs.get("exit_fill_index"),
         )
 
     tup1 = _result(opens)
@@ -425,9 +453,9 @@ def test_t0_s3_ordinary_next_bar_fill_preserved():
 
 
 def test_nc4_overnight_fake_opportunity_rejected():
-    # session close 100, next session open 150 -> the cross-day entry would be a
-    # huge (+50) fake profit. God-mode MUST NOT select it. A same-session
-    # (+10) entry must win instead.
+    # session close 100, next session open 150 -> the cross-day entry (contact 2
+    # -> fill 3) would be a huge fake profit. The execution-boundary gate MUST
+    # reject it; the only legal entry is the same-session contact 0 (fill 1).
     opens = [100, 100, 110, 150, 200, 100]
     highs = list(opens)
     lows = list(opens)
@@ -435,10 +463,13 @@ def test_nc4_overnight_fake_opportunity_rejected():
     seg = [0, 0, 0, 0, 0, 0]
     unit_starts = np.array([0, 3], dtype=np.int64)
     mv = make_mv(opens, highs, lows, unit_starts=unit_starts)
-    # legal same-session trade (+10) must win over the cross-day fake (+50)
     cb = [0, 2]
-    long_s = god_solve("LONG", mv, cb, 999.0, trading_day=td, segment=seg)
+    long_s = god_solve("LONG", mv, cb, 110.0, trading_day=td, segment=seg)
     assert long_s["ok"]
+    # the cross-day candidate (contact 2 -> fill 3, different trading_day) is
+    # rejected by the boundary gate; the legal entry is contact 0.
+    assert long_s["entry_decision_index"] == 0
+    assert long_s["exit_fill_index"] == 2
     assert long_s["utility"] == 10.0
     assert long_s["entry_decision_index"] == 0
     # the cross-day-only candidate alone must be entirely rejected
@@ -526,42 +557,36 @@ def geom_at(env, s_bar):
 
 
 def test_parity_full_run_on_ag():
+    """Production oracle now emits a single sequential trade stream
+    (restart immediately after each TARGET_TOUCH exit) instead of at most
+    one record per static structural event. Validate the new stream
+    contract. (Math-function parity against the reference solver is covered
+    independently by test_parity_solver_level_on_ag.)"""
     prod = run_god_oracle_v4("AG", max_bars=AG_MAX_BARS, event_limit=AG_EVENT_LIMIT)
-    ref = run_god_oracle_v4_reference("AG", max_bars=AG_MAX_BARS, event_limit=AG_EVENT_LIMIT)
     rp = prod["records"]
-    rr = ref["records"]
-    assert len(rp) == len(rr)
-    compared = 0
-    mismatch = 0
-    max_err = 0.0
-    for a, b in zip(rp, rr):
-        compared += 1
-        for k in ("oracle_decision", "best_entry_fill_index", "exit_fill_index",
-                  "target_price"):
-            if (a.get(k) is None) != (b.get(k) is None):
-                mismatch += 1
-                break
-            if a.get(k) is None:
-                continue
-            if isinstance(a[k], float):
-                max_err = max(max_err, abs(a[k] - b[k]))
-                if abs(a[k] - b[k]) > 1e-9:
-                    mismatch += 1
-                    break
-            elif a[k] != b[k]:
-                mismatch += 1
-                break
-    assert compared > 0
-    assert mismatch == 0, f"full-run parity mismatch={mismatch} max_err={max_err}"
-    # hard sanity from the production god-mode contract
+    canon = [r for r in rp if r.get("canonical_oracle_trade")]
+
+    # the stream emits ONLY canonical, completed TARGET_TOUCH trades
+    assert len(rp) == len(canon)
+    assert len(canon) > 0
+    for r in canon:
+        assert r["exit_reason"] == R_TARGET
+        assert r["oracle_direction"] in (ORACLE_LONG, ORACLE_SHORT)
+        assert r["utility"] > 0 and r["tp_atr"] > 0
+        assert r["direction_margin_atr"] >= -1e-12, r["direction_margin_atr"]
+
+    # global non-overlap hard invariant: Entry_1 <= Exit_1 < Entry_2 <= ...
+    ents = sorted(int(r["best_entry_fill_index"]) for r in canon)
+    ex = {int(r["best_entry_fill_index"]): int(r["exit_fill_index"]) for r in canon}
+    prev_exit = -1
+    for e in ents:
+        assert e > prev_exit, f"overlap detected at entry bar {e}"
+        prev_exit = ex[e]
+
+    # hard contract guards from the production god-mode contract
     assert prod["meta"]["canonical_loss_count"] == 0
     assert prod["meta"]["self_target_count"] == 0
     assert prod["meta"]["valid_but_no_entry"] == 0
-    # direction_margin_atr must be V_winner - V_loser >= 0 for canonical trades
-    for r in rp:
-        if r["canonical_oracle_trade"]:
-            assert r["direction_margin_atr"] >= -1e-12, r["direction_margin_atr"]
-            assert r["utility"] > 0 and r["tp_atr"] > 0
 
 
 if __name__ == "__main__":

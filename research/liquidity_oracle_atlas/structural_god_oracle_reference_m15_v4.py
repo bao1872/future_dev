@@ -242,19 +242,9 @@ def solve_direction_god_reference_v4(
             pnl = sign * (float(target_price) - entry_price)
             reason = R_TARGET
         else:
-            best_k = None
-            best_p = None
-            for k in range(f + 1, H + 1):
-                p = sign * (float(opens[k]) - entry_price)
-                if best_p is None or p > best_p:  # strict -> earlier exit wins ties
-                    best_p = p
-                    best_k = k
-            if best_k is None:
-                continue
-            exit_fill = int(best_k)
-            exit_price = float(opens[best_k])
-            pnl = float(best_p)
-            reason = R_EARLY if pnl > PNL_EPS_R else R_LOSS
+            # V4.3: no early exit. A direction whose structural target is never
+            # touched inside its intraday unit does not open -> reject.
+            continue
 
         cand = {
             "entry_decision_index": int(d),
@@ -269,7 +259,7 @@ def solve_direction_god_reference_v4(
             best = cand
 
     if best is None:
-        reason = "NO_EXECUTABLE_ENTRY" if n_candidates == 0 else "INSUFFICIENT_PATH"
+        reason = "NO_EXECUTABLE_ENTRY" if n_candidates == 0 else "TARGET_NOT_REACHED"
         return {
             "ok": False, "invalid_reason": reason,
             "n_candidates": n_candidates, "n_with_path": n_with_path,
