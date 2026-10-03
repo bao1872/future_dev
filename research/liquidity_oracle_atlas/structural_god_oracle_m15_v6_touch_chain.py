@@ -281,7 +281,7 @@ def same_execution_unit(
 
 
 def best_entry(
-    contact_bars: List[int],
+    source_bar: int,
     opens: np.ndarray,
     segments: np.ndarray,
     trading_days: np.ndarray,
@@ -291,24 +291,25 @@ def best_entry(
     eps: float = EPS,
 ) -> Optional[Tuple[int, int, float]]:
     """
-    Optimize ONLY Entry.
+    God-mode Entry over the COMPLETE frozen A->B leg.
 
-    LONG  -> minimum next open
-    SHORT -> maximum next open
+    A defines the beginning of the opportunity.
+    B defines the terminal target.
 
-    Decision must be an A-touch bar.
-    Fill = open[d+1].
+    Entry is NOT restricted to bars that re-touch A.
     """
 
     best = None
 
-    for d in sorted(set(contact_bars)):
+    for d in range(
+        int(source_bar),
+        int(target_bar),
+    ):
 
-        if d >= target_bar:
-            continue
+        f = d + 1
 
-        if d + 1 >= len(opens):
-            continue
+        if f >= len(opens):
+            break
 
         if not same_execution_unit(
             d,
@@ -317,60 +318,47 @@ def best_entry(
         ):
             continue
 
-        fill = float(opens[d + 1])
+        fill = float(opens[f])
 
         if direction == LONG:
 
-            if fill >= target_price - eps:
+            if fill >= float(target_price) - eps:
                 continue
-
-            candidate = (
-                fill,
-                d,
-                d + 1,
-            )
 
             if (
                 best is None
-                or candidate[0] < best[0] - eps
+                or fill < best[2] - eps
                 or (
-                    abs(candidate[0] - best[0]) <= eps
-                    and candidate[1] < best[1]
+                    abs(fill - best[2]) <= eps
+                    and d < best[0]
                 )
             ):
-                best = candidate
+                best = (
+                    int(d),
+                    int(f),
+                    float(fill),
+                )
 
         else:
 
-            if fill <= target_price + eps:
+            if fill <= float(target_price) + eps:
                 continue
-
-            candidate = (
-                fill,
-                d,
-                d + 1,
-            )
 
             if (
                 best is None
-                or candidate[0] > best[0] + eps
+                or fill > best[2] + eps
                 or (
-                    abs(candidate[0] - best[0]) <= eps
-                    and candidate[1] < best[1]
+                    abs(fill - best[2]) <= eps
+                    and d < best[0]
                 )
             ):
-                best = candidate
+                best = (
+                    int(d),
+                    int(f),
+                    float(fill),
+                )
 
-    if best is None:
-        return None
-
-    fill_price, decision, fill_bar = best
-
-    return (
-        int(decision),
-        int(fill_bar),
-        float(fill_price),
-    )
+    return best
 
 
 # ============================================================
@@ -585,11 +573,11 @@ def solve_location_touch_chain(
         assert target_price is not None
 
         entry = best_entry(
-            source_contacts,
-            opens,
-            segments,
-            trading_days,
-            target_bar=bar,
+            source_bar=int(source.bar),
+            opens=opens,
+            segments=segments,
+            trading_days=trading_days,
+            target_bar=int(bar),
             target_price=float(target_price),
             direction=direction,
         )

@@ -53,6 +53,14 @@ def solve(spec, opens):
     return solve_location_touch_chain(frames, opens, segments, tdays)
 
 
+def solve_with(spec, opens, segments, tdays):
+    frames = frames_from_spec(spec)
+    opens = np.asarray(opens, dtype=float)
+    segments = np.asarray(segments, dtype=np.int64)
+    tdays = np.asarray(tdays, dtype=np.int64)
+    return solve_location_touch_chain(frames, opens, segments, tdays)
+
+
 # --------------------------------------------------------------------------- #
 # 1. same bar, overlapping -> ONE location
 # --------------------------------------------------------------------------- #
@@ -247,6 +255,109 @@ def test_retouch_plus_one_upper_is_long():
     assert audit["canonical_trades"] == 1
     assert trades[0]["oracle_direction"] == LONG
     assert trades[0]["target_price"] == pytest.approx(200)
+
+
+# --------------------------------------------------------------------------- #
+# 13. SHORT: Entry over whole leg, NOT A-touch next-open
+# --------------------------------------------------------------------------- #
+def test_short_entry_whole_leg_not_contact_only():
+    spec = [
+        (0, [(200, 210)]),     # A
+        (5, [(100, 110)]),     # B below -> SHORT
+    ]
+    # opens[1..5] = 150,160,155,140,180 -> max fill is 180 (open[5], d=4)
+    opens = [0.0, 150.0, 160.0, 155.0, 140.0, 180.0, 0.0]
+    trades, audit = solve(spec, opens)
+    assert audit["canonical_trades"] == 1
+    t = trades[0]
+    assert t["oracle_direction"] == SHORT
+    # best Entry uses the highest whole-leg next-open (open[5]=180),
+    # NOT the A-touch next-open (open[1]=150).
+    assert t["best_entry_decision_index"] == 4
+    assert t["best_entry_fill_index"] == 5
+    assert t["best_entry_price"] == pytest.approx(180.0)
+    assert t["best_entry_price"] != 150.0
+
+
+# --------------------------------------------------------------------------- #
+# 14. LONG: lowest valid next-open occurs mid-leg without A retouch
+# --------------------------------------------------------------------------- #
+def test_long_entry_whole_leg_mid_leg_low():
+    spec = [
+        (0, [(100, 110)]),     # A
+        (5, [(200, 210)]),     # B above -> LONG
+    ]
+    # opens[1..5] = 150,120,160,155,170 -> min fill is 120 (open[2], d=1)
+    opens = [0.0, 150.0, 120.0, 160.0, 155.0, 170.0, 0.0]
+    trades, audit = solve(spec, opens)
+    assert audit["canonical_trades"] == 1
+    t = trades[0]
+    assert t["oracle_direction"] == LONG
+    assert t["best_entry_decision_index"] == 1
+    assert t["best_entry_fill_index"] == 2
+    assert t["best_entry_price"] == pytest.approx(120.0)
+
+
+# --------------------------------------------------------------------------- #
+# 15. Repeated A touches do NOT create multiple trades and do NOT constrain Entry
+# --------------------------------------------------------------------------- #
+def test_repeated_a_touches_single_trade_unconstrained_entry():
+    spec = [
+        (0, [(200, 210)]),
+        (1, [(200, 210)]),     # A retouch
+        (2, [(200, 210)]),     # A retouch
+        (5, [(100, 110)]),     # B below -> SHORT
+    ]
+    # opens[1..5] = 150,155,160,145,175 -> max fill is 175 (open[5], d=4)
+    opens = [0.0, 150.0, 155.0, 160.0, 145.0, 175.0, 0.0]
+    trades, audit = solve(spec, opens)
+    # exactly ONE trade, not one per A touch
+    assert audit["canonical_trades"] == 1
+    assert len(trades) == 1
+    # Entry is the whole-leg max, NOT constrained to an A-touch bar
+    assert trades[0]["best_entry_decision_index"] == 4
+    assert trades[0]["best_entry_price"] == pytest.approx(175.0)
+
+
+# --------------------------------------------------------------------------- #
+# 16. Entry fix must not change A->B direction / target / exit
+# --------------------------------------------------------------------------- #
+def test_entry_fix_preserves_direction_target_exit():
+    spec = [(0, [(100, 110)]), (5, [(200, 210)])]
+    opens1 = [0.0, 150.0, 120.0, 160.0, 155.0, 170.0, 0.0]
+    opens2 = [0.0, 140.0, 100.0, 130.0, 145.0, 160.0, 0.0]
+    t1, _ = solve(spec, opens1)
+    t2, _ = solve(spec, opens2)
+    a, b = t1[0], t2[0]
+    # A->B labels identical regardless of where Entry lands
+    assert a["oracle_direction"] == b["oracle_direction"] == LONG
+    assert a["target_price"] == b["target_price"] == pytest.approx(200)
+    assert a["exit_fill_index"] == b["exit_fill_index"] == 5
+    assert a["exit_price"] == b["exit_price"] == pytest.approx(200)
+    # Entry genuinely changed
+    assert a["best_entry_price"] != b["best_entry_price"]
+
+
+# --------------------------------------------------------------------------- #
+# 17. Same execution-boundary gate (decision d -> fill d+1) still applies
+# --------------------------------------------------------------------------- #
+def test_execution_boundary_gate_still_applied():
+    spec = [
+        (0, [(200, 210)]),     # A
+        (4, [(100, 110)]),     # B below -> SHORT
+    ]
+    # segment changes between bar1 and bar2 -> d=1 fill is rejected
+    segments = [1, 1, 2, 2, 2]
+    tdays = [1, 1, 1, 1, 1]
+    # opens[1..4] = 150,200,160,155 ; 200 (d=1) is highest but cross-boundary
+    opens = [0.0, 150.0, 200.0, 160.0, 155.0, 0.0]
+    trades, audit = solve_with(spec, opens, segments, tdays)
+    assert audit["canonical_trades"] == 1
+    t = trades[0]
+    # best legal fill is 160 (open[3], d=2), NOT the cross-boundary 200
+    assert t["best_entry_decision_index"] == 2
+    assert t["best_entry_price"] == pytest.approx(160.0)
+    assert t["best_entry_price"] != 200.0
 
 
 if __name__ == "__main__":
