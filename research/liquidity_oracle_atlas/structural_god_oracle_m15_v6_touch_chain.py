@@ -218,57 +218,44 @@ def classify_new_locations(
     source: LocationTouch,
     locations: List[LocationTouch],
     eps: float = EPS,
-) -> Tuple[
-    str,
-    Optional[LocationTouch],
-    Optional[float],
-]:
+):
     """
-    locations are the location-distinct touches on the FIRST target bar.
+    `locations` are all location-distinct touches on the FIRST
+    bar that leaves frozen source A.
 
-    Returns:
-        LONG / SHORT / AMBIGUOUS
-        chosen target location
-        target near-edge price
+    With 15m OHLC we know all were touched during this bar,
+    but we do NOT know their intrabar ordering.
+
+    Therefore exactly one distinct location is required for
+    a canonical next-touch label.
     """
 
-    upper = [
-        x for x in locations
-        if x.bottom > source.top + eps
-    ]
+    if len(locations) == 0:
+        raise AssertionError(
+            "classify_new_locations requires at least one distinct location"
+        )
 
-    lower = [
-        x for x in locations
-        if x.top < source.bottom - eps
-    ]
-
-    if upper and lower:
+    if len(locations) > 1:
         return "AMBIGUOUS", None, None
 
-    if upper:
+    target = locations[0]
 
-        # Travelling upward:
-        # nearest location's lower edge is touched first.
-        target = min(
-            upper,
-            key=lambda x: x.bottom,
+    if target.bottom > source.top + eps:
+        return (
+            LONG,
+            target,
+            float(target.bottom),
         )
 
-        return LONG, target, float(target.bottom)
-
-    if lower:
-
-        # Travelling downward:
-        # nearest location's upper edge is touched first.
-        target = max(
-            lower,
-            key=lambda x: x.top,
+    if target.top < source.bottom - eps:
+        return (
+            SHORT,
+            target,
+            float(target.top),
         )
-
-        return SHORT, target, float(target.top)
 
     raise AssertionError(
-        "classify_new_locations received no distinct target"
+        "distinct target unexpectedly overlaps frozen source"
     )
 
 

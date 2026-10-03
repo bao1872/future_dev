@@ -205,5 +205,49 @@ def test_one_entry_from_repeated_contacts():
     assert trades2[0]["best_entry_price"] == pytest.approx(110.0)
 
 
+# --------------------------------------------------------------------------- #
+# 10. same target bar, TWO distinct ABOVE -> AMBIGUOUS (no intrabar ordering)
+# --------------------------------------------------------------------------- #
+def test_multi_upper_same_bar_ambiguous():
+    spec = [
+        (0, [(100, 110)]),                 # A
+        (1, [(150, 160), (200, 210)]),     # two distinct ABOVE A
+    ]
+    opens = [0.0, 100.0, 0.0]
+    trades, audit = solve(spec, opens)
+    assert audit["canonical_trades"] == 0
+    assert audit["ambiguous_target_bars"] == 1
+
+
+# --------------------------------------------------------------------------- #
+# 11. same target bar, TWO distinct BELOW -> AMBIGUOUS
+# --------------------------------------------------------------------------- #
+def test_multi_lower_same_bar_ambiguous():
+    spec = [
+        (0, [(200, 210)]),                 # A
+        (1, [(100, 110), (50, 60)]),       # two distinct BELOW A
+    ]
+    opens = [0.0, 200.0, 0.0]
+    trades, audit = solve(spec, opens)
+    assert audit["canonical_trades"] == 0
+    assert audit["ambiguous_target_bars"] == 1
+
+
+# --------------------------------------------------------------------------- #
+# 12. source A retouch + exactly one new upper B on same bar -> LONG
+#     (A retouch is NOT part of distinct_locations)
+# --------------------------------------------------------------------------- #
+def test_retouch_plus_one_upper_is_long():
+    spec = [
+        (0, [(100, 110)]),                 # A
+        (1, [(100, 110), (200, 210)]),     # A retouch + one upper B
+    ]
+    opens = [0.0, 100.0, 0.0]
+    trades, audit = solve(spec, opens)
+    assert audit["canonical_trades"] == 1
+    assert trades[0]["oracle_direction"] == LONG
+    assert trades[0]["target_price"] == pytest.approx(200)
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))
