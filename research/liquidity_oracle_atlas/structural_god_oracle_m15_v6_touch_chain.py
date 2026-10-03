@@ -226,47 +226,57 @@ def _classify_transition(
     Bzone: Dict[str, Tuple[float, float]],
     eps: float = EPS,
 ) -> Tuple[str, Optional[str], Optional[str], Optional[float]]:
-    """Classify the transition A -> B (zones keyed by structure_id).
+    """Classify the transition A -> B where B is the FIRST later touch group
+    that contains at least one NEW structure (``find_next_distinct_group``
+    guarantees this, so a same-only B never reaches here).
+
+    B's new structures define direction + fixed Exit. The Exit is the NEAR edge
+    of the chosen target (the edge the price reaches FIRST):
+
+      LONG  -- price travels UP from A, so the LOWEST zone_bottom is hit first.
+      SHORT -- price travels DOWN from A, so the HIGHEST zone_top is hit first.
 
     Returns (status, direction, target_id, exit_price).
 
     status:
-      CONTINUATION        -- B has no structure distinct from A (B == A revisit)
-      AMBIGUOUS_SAME_BAR  -- same next-bar group holds BOTH an upper and a lower
-                             distinct target -> no canonical direction
+      AMBIGUOUS_SAME_BAR  -- the distinct next-touch bar holds BOTH an upper and
+                             a lower target -> no canonical direction
       OVERLAP             -- only overlapping (unordered) distinct targets
       CANONICAL           -- a single unambiguous direction; target chosen
     """
-    cand_ids = [bid for bid in Bzone if bid not in Azone]
-    if not cand_ids:
-        return ("CONTINUATION", None, None, None)
+    new_ids = [sid for sid in Bzone if sid not in Azone]
+    if not new_ids:
+        raise AssertionError(
+            "find_next_distinct_group must not return a same-only B"
+        )
 
-    long_pairs: List[Tuple[str, float]] = []    # (bid, b_top)
-    short_pairs: List[Tuple[str, float]] = []   # (bid, b_bottom)
-    for aid, (ab, at) in Azone.items():
-        for bid in cand_ids:
-            bb, bt = Bzone[bid]
+    upper: List[Tuple[str, float]] = []   # (bid, b_bottom) -- LONG near edge
+    lower: List[Tuple[str, float]] = []   # (bid, b_top)    -- SHORT near edge
+    for bid in new_ids:
+        bb, bt = Bzone[bid]
+        is_upper = False
+        is_lower = False
+        for _aid, (ab, at) in Azone.items():
             if bb > at + eps:
-                long_pairs.append((bid, bt))
-            elif bt < ab - eps:
-                short_pairs.append((bid, bb))
+                is_upper = True
+            if bt < ab - eps:
+                is_lower = True
+        if is_upper:
+            upper.append((bid, float(bb)))
+        if is_lower:
+            lower.append((bid, float(bt)))
 
-    if long_pairs and short_pairs:
+    if upper and lower:
         return ("AMBIGUOUS_SAME_BAR", None, None, None)
-    if not long_pairs and not short_pairs:
-        return ("OVERLAP", None, None, None)
-
-    if long_pairs:
-        direction = ORACLE_LONG
-        # LOWEST B near-edge above A that is actually touched on that group.
-        target_id = min(long_pairs, key=lambda x: x[1])[0]
-        exit_price = Bzone[target_id][0]  # zone_bottom (near edge from below)
-    else:
-        direction = ORACLE_SHORT
-        # HIGHEST B near-edge below A that is actually touched on that group.
-        target_id = max(short_pairs, key=lambda x: x[1])[0]
-        exit_price = Bzone[target_id][1]  # zone_top (near edge from above)
-    return ("CANONICAL", direction, target_id, exit_price)
+    if upper:
+        # price travelling upward reaches the LOWEST bottom first
+        target_id, exit_price = min(upper, key=lambda x: x[1])
+        return ("CANONICAL", ORACLE_LONG, target_id, float(exit_price))
+    if lower:
+        # price travelling downward reaches the HIGHEST top first
+        target_id, exit_price = max(lower, key=lambda x: x[1])
+        return ("CANONICAL", ORACLE_SHORT, target_id, float(exit_price))
+    return ("OVERLAP", None, None, None)
 
 
 def _choose_anchor(
@@ -275,25 +285,64 @@ def _choose_anchor(
     target_id: str,
     Bzone: Dict[str, Tuple[float, float]],
     eps: float = EPS,
-) -> str:
+) -> Optional[str]:
     """Pick the A structure_id to record as the trade's anchor structure.
 
-    For a single-structure A this is trivially that structure. For a
-    multi-structure A we pick the A structure on the correct side of the chosen
-    target (the one that participates in the directional relation), then the
-    median-mid one among those.
+    The anchor must be on the correct side of the CHOSEN target, then we pick
+    the A structure CLOSEST to the target:
+
+      LONG  : among A strictly below target -> highest zone_top (nearest below)
+      SHORT : among A strictly above target -> lowest zone_bottom (nearest above)
+
+    Entry search then uses ONLY this anchor's touched_bars (never a union of all
+    A structures).
     """
-    tb, tt = Bzone[target_id]
-    cands: List[str] = []
-    for aid, (ab, at) in Azone.items():
-        if direction == ORACLE_LONG and tb > at + eps:
-            cands.append(aid)
-        elif direction == ORACLE_SHORT and tt < ab - eps:
-            cands.append(aid)
-    if not cands:
-        cands = list(Azone.keys())
-    cands.sort(key=lambda s: (Azone[s][0] + Azone[s][1]) / 2.0)
-    return cands[len(cands) // 2]
+    bb, bt = Bzone[target_id]
+    valid: List[Tuple[str, float]] = []
+    if direction == ORACLE_LONG:
+        for aid, (ab, at) in Azone.items():
+            if bb > at + eps:
+                valid.append((aid, float(at)))
+        if not valid:
+            return None
+        return max(valid, key=lambda x: x[1])[0]
+    else:
+        for aid, (ab, at) in Azone.items():
+            if bt < ab - eps:
+                valid.append((aid, float(ab)))
+        if not valid:
+            return None
+        return min(valid, key=lambda x: x[1])[0]
+
+
+# --------------------------------------------------------------------------- #
+# Step 7 -- find the NEXT DISTINCT touch (skip same-location revisits)
+# --------------------------------------------------------------------------- #
+def _find_next_distinct_group(
+    groups: List[TouchGroup],
+    k: int,
+) -> Tuple[Optional[int], Optional[TouchGroup], int]:
+    """Starting after ``groups[k]``, skip groups that contain ONLY structural
+    identities already present in A.
+
+    Return the FIRST later group that contains at least one NEW structure.
+
+    Same-location revisits do NOT terminate the search and are NOT a rejected
+    trade -- they are simply ignored while searching for B.
+
+    Returns ``(index, group, skipped)`` or ``(None, None, skipped)`` if no
+    later distinct group exists.
+    """
+    A_ids = set(groups[k].structures)
+    j = k + 1
+    skipped = 0
+    while j < len(groups):
+        B_ids = set(groups[j].structures)
+        if B_ids - A_ids:
+            return j, groups[j], skipped
+        skipped += 1
+        j += 1
+    return None, None, skipped
 
 
 # --------------------------------------------------------------------------- #
@@ -367,21 +416,24 @@ def solve_touch_chain(
     eps: float = EPS,
     times: Optional[np.ndarray] = None,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
-    """Walk consecutive touch-group pairs and emit the canonical trade stream.
+    """Walk the touch-group chain and emit the canonical trade stream.
 
-    Every adjacent group pair is classified into exactly one reconciliation
-    bucket (hard-asserted at the end). No global scheduler.
+    For every source group A we search forward for the FIRST later group that
+    contains a NEW structure (``_find_next_distinct_group``). Same-location
+    revisits are skipped (not lost trades). Every source resolves into exactly
+    one reconciliation bucket (hard-asserted at the end). No global scheduler.
     """
     trades: List[Dict[str, Any]] = []
     audit = {
         "total_true_touch_records": int(total_true_touch_records),
         "total_touch_episodes": int(total_touch_episodes),
         "total_touch_groups": int(total_touch_groups),
-        "adjacent_group_transitions": 0,
+        "source_groups_with_future": int(total_touch_groups) - 1,
+        "same_location_groups_skipped": 0,
         "ambiguous_same_bar_target_groups": 0,
         "overlapping_zone_transitions": 0,
         "no_legal_entry_transitions": 0,
-        "continuation_transitions": 0,
+        "no_later_distinct_target_transitions": 0,
         "canonical_trades": 0,
     }
 
@@ -391,16 +443,16 @@ def solve_touch_chain(
     m = len(groups)
     for k in range(m - 1):
         A = groups[k]
-        B = groups[k + 1]
-        audit["adjacent_group_transitions"] += 1
+        j, B, skipped = _find_next_distinct_group(groups, k)
+        audit["same_location_groups_skipped"] += skipped
+        if B is None:
+            audit["no_later_distinct_target_transitions"] += 1
+            continue
 
         Azone = {sid: (ep.zone_bottom, ep.zone_top) for sid, ep in A.structures.items()}
         Bzone = {sid: (ep.zone_bottom, ep.zone_top) for sid, ep in B.structures.items()}
 
         status, direction, target_id, exit_price = _classify_transition(Azone, Bzone, eps)
-        if status == "CONTINUATION":
-            audit["continuation_transitions"] += 1
-            continue
         if status == "AMBIGUOUS_SAME_BAR":
             audit["ambiguous_same_bar_target_groups"] += 1
             continue
@@ -408,12 +460,14 @@ def solve_touch_chain(
             audit["overlapping_zone_transitions"] += 1
             continue
 
-        # CANONICAL: fixed Exit + Entry search within A's contact bars.
+        # CANONICAL: pick the anchor A FIRST, then search Entry ONLY inside that
+        # anchor's own contact bars (never a union of all A structures).
         exit_bar = B.start_bar
-        contact: List[int] = []
-        for ep in A.structures.values():
-            contact.extend(ep.touched_bars)
-        contact = sorted(set(contact))
+        anchor = _choose_anchor(Azone, direction, target_id, Bzone, eps)
+        if anchor is None:
+            audit["no_legal_entry_transitions"] += 1
+            continue
+        contact = sorted(set(A.structures[anchor].touched_bars))
 
         entry = best_entry(
             contact, opens, segments, tds, float(exit_price), direction, n, exit_bar, eps
@@ -423,7 +477,6 @@ def solve_touch_chain(
             continue
 
         d_star, entry_price = entry
-        anchor = _choose_anchor(Azone, direction, target_id, Bzone, eps)
         a_zb, a_zt = Azone[anchor]
 
         utility = (
@@ -456,18 +509,18 @@ def solve_touch_chain(
         audit["canonical_trades"] += 1
 
     # ---- HARD RECONCILIATION (no unexplained disappearance) ----
-    lhs = audit["adjacent_group_transitions"]
+    lhs = audit["source_groups_with_future"]
     rhs = (
         audit["canonical_trades"]
         + audit["ambiguous_same_bar_target_groups"]
         + audit["overlapping_zone_transitions"]
         + audit["no_legal_entry_transitions"]
-        + audit["continuation_transitions"]
+        + audit["no_later_distinct_target_transitions"]
     )
     if lhs != rhs:
         raise AssertionError(
             f"HARD_FAIL_TOUCH_CHAIN_RECONCILIATION: "
-            f"adjacent_group_transitions={lhs} != buckets={rhs}"
+            f"source_groups_with_future={lhs} != buckets={rhs}"
         )
     return trades, audit
 
@@ -564,14 +617,12 @@ def print_screenshot_audit(
     print(f"  target/exit   : {a['target_price']:.1f}  (exit_bar={a['exit_fill_index']})")
     print(f"  exit_reason   : {a['exit_reason']}")
     print("-" * 72)
-    print("legal A entry bars (best Entry search):")
+    print("legal A entry bars (best Entry search, anchor-only contact bars):")
     # locate the group for A
     A_group = next((g for g in groups if g.start_bar == a["candidate_start_bar"]), None)
     if A_group is not None:
-        contact: List[int] = []
-        for ep in A_group.structures.values():
-            contact.extend(ep.touched_bars)
-        contact = sorted(set(contact))
+        ep = A_group.structures.get(a["structure_id"])
+        contact = sorted(set(ep.touched_bars)) if ep is not None else []
         for d in contact:
             if d >= a["exit_fill_index"]:
                 break
@@ -614,11 +665,12 @@ def main() -> None:
         "total_true_touch_records",
         "total_touch_episodes",
         "total_touch_groups",
-        "adjacent_group_transitions",
+        "source_groups_with_future",
+        "same_location_groups_skipped",
         "ambiguous_same_bar_target_groups",
         "overlapping_zone_transitions",
         "no_legal_entry_transitions",
-        "continuation_transitions",
+        "no_later_distinct_target_transitions",
         "canonical_trades",
     ):
         print(f"  {k:32s}: {audit[k]}")

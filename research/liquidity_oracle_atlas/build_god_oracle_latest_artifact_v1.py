@@ -139,27 +139,20 @@ def _hard_validate(canon: list, source_sha: str, audit: dict) -> None:
     if not all(float(r["utility"]) > 0 for r in canon):
         raise SystemExit("HARD STOP: a canonical trade has non-positive utility")
 
-    # Sequential one-position stream, no overlap. The V6 chain hands off at the
-    # shared group bar, so compare the FILL indices (exit fill < next entry fill).
-    for i in range(len(canon) - 1):
-        if not (
-            int(canon[i]["exit_fill_index"])
-            < int(canon[i + 1]["best_entry_fill_index"])
-        ):
-            raise SystemExit(
-                f"HARD STOP: trades overlap at i={i} "
-                f"(exit {canon[i]['exit_fill_index']} >= next entry fill "
-                f"{canon[i + 1]['best_entry_fill_index']})"
-            )
+    # NOTE: the V6 touch-chain is NOT a strictly sequential non-overlapping
+    # stream. Repeated same-location touches of A each resolve to the same next
+    # DISTINCT B, so several trades legitimately target the same B and overlap
+    # in time. The only invariants are the V6 generic contract below
+    # (TARGET_TOUCH / utility>0 / reconciliation) -- no fill-based ordering.
 
     # ---- V6 touch-chain reconciliation (no unexplained loss) ----
-    lhs = int(audit["adjacent_group_transitions"])
+    lhs = int(audit["source_groups_with_future"])
     rhs = (
         int(audit["canonical_trades"])
         + int(audit["ambiguous_same_bar_target_groups"])
         + int(audit["overlapping_zone_transitions"])
         + int(audit["no_legal_entry_transitions"])
-        + int(audit["continuation_transitions"])
+        + int(audit["no_later_distinct_target_transitions"])
     )
     if lhs != rhs:
         raise SystemExit(
@@ -176,15 +169,16 @@ def _print_touch_chain_counts(audit: dict) -> None:
         "total_true_touch_records",
         "total_touch_episodes",
         "total_touch_groups",
-        "adjacent_group_transitions",
-        "continuation_transitions",
+        "source_groups_with_future",
+        "same_location_groups_skipped",
         "ambiguous_same_bar_target_groups",
         "overlapping_zone_transitions",
         "no_legal_entry_transitions",
+        "no_later_distinct_target_transitions",
         "canonical_trades",
     ):
         print(f"  {k:34s}: {audit[k]}")
-    denom = audit["adjacent_group_transitions"] or 1
+    denom = audit["source_groups_with_future"] or 1
     print(
         f"  canonical/adjacent ratio    : "
         f"{audit['canonical_trades'] / denom:.3f}"
@@ -214,7 +208,7 @@ def _build_trade_rows(canon: list) -> list:
                 if r.get("best_entry_fill_time") is not None else pd.NaT
             ),
             "best_entry_price": float(r["best_entry_price"]),
-            "best_entry_gap_atr": 0.0,   # V6: no ATR-normalized gap computed
+            "best_entry_gap_atr": np.nan,   # V6 does not compute an ATR gap
             "target_structure_id": tid,
             "target_structure_type": tid.split("|")[0],
             "target_price": float(r["target_price"]),
@@ -224,7 +218,7 @@ def _build_trade_rows(canon: list) -> list:
                 if r.get("exit_fill_time") is not None else pd.NaT
             ),
             "exit_price": float(r["exit_price"]),
-            "tp_atr": 0.0,               # V6: no ATR-normalized target distance
+            "tp_atr": np.nan,               # V6 does not compute an ATR target dist
             "exit_reason": str(r["exit_reason"]),
             "utility": float(r["utility"]),
         })
@@ -239,10 +233,10 @@ def _print_manual_audit(res: dict) -> None:
         "  seq | A_bar | A_structure | A_zone | "
         "B_bar | B_structure | B_zone | dir | entry_dec | entry | exit_bar | exit"
     )
-    for t in canon[:20]:
+    for seq, t in enumerate(canon[:20], start=1):
         a_mid = 0.5 * (t["zone_bottom"] + t["zone_top"])
         print(
-            f"  {1:>3} | {t['candidate_start_bar']:>5} | "
+            f"  {seq:>3} | {t['candidate_start_bar']:>5} | "
             f"{t['structure_id'][:22]:22s} | {a_mid:7.1f} | "
             f"{t['exit_fill_index']:>5} | {str(t['target_structure_id'])[:22]:22s} | "
             f"{t['target_price']:7.1f} | {t['oracle_direction']:4s} | "
@@ -279,12 +273,12 @@ def build_artifact(symbol: str, out_dir: Path, max_bars: Optional[int] = None) -
     _hard_validate(canon, head, audit)
     print(
         f"[gen] hard-validation PASS: V6 reconciliation "
-        f"({audit['adjacent_group_transitions']} adjacent -> "
+        f"({audit['source_groups_with_future']} sources -> "
         f"{audit['canonical_trades']} canonical + "
         f"{audit['ambiguous_same_bar_target_groups']} ambiguous + "
         f"{audit['overlapping_zone_transitions']} overlap + "
         f"{audit['no_legal_entry_transitions']} no_entry + "
-        f"{audit['continuation_transitions']} continuation)"
+        f"{audit['no_later_distinct_target_transitions']} no_later_distinct)"
     )
 
     # ---- trades.parquet ----
@@ -312,12 +306,12 @@ def build_artifact(symbol: str, out_dir: Path, max_bars: Optional[int] = None) -
 
     # ---- manifest.json (V6 contract) ----
     reconciliation_pass = (
-        int(audit["adjacent_group_transitions"])
+        int(audit["source_groups_with_future"])
         == int(audit["canonical_trades"])
         + int(audit["ambiguous_same_bar_target_groups"])
         + int(audit["overlapping_zone_transitions"])
         + int(audit["no_legal_entry_transitions"])
-        + int(audit["continuation_transitions"])
+        + int(audit["no_later_distinct_target_transitions"])
     )
     manifest = {
         "source_git_sha": head,
@@ -329,13 +323,16 @@ def build_artifact(symbol: str, out_dir: Path, max_bars: Optional[int] = None) -
         "total_true_touch_records": int(audit["total_true_touch_records"]),
         "total_touch_episodes": int(audit["total_touch_episodes"]),
         "total_touch_groups": int(audit["total_touch_groups"]),
-        "adjacent_group_transitions": int(audit["adjacent_group_transitions"]),
-        "continuation_transitions": int(audit["continuation_transitions"]),
+        "source_groups_with_future": int(audit["source_groups_with_future"]),
+        "same_location_groups_skipped": int(audit["same_location_groups_skipped"]),
         "ambiguous_same_bar_target_groups": int(
             audit["ambiguous_same_bar_target_groups"]
         ),
         "overlapping_zone_transitions": int(audit["overlapping_zone_transitions"]),
         "no_legal_entry_transitions": int(audit["no_legal_entry_transitions"]),
+        "no_later_distinct_target_transitions": int(
+            audit["no_later_distinct_target_transitions"]
+        ),
         "oracle_meta": {
             "target_touch": len(canon),
             "early_exit": 0,

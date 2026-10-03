@@ -82,9 +82,9 @@ def test_v6_artifact_contract_and_viewer_render(tmp_path):
     assert manifest["reconciliation_pass"] is True
     for k in (
         "total_true_touch_records", "total_touch_episodes", "total_touch_groups",
-        "adjacent_group_transitions", "continuation_transitions",
+        "source_groups_with_future", "same_location_groups_skipped",
         "ambiguous_same_bar_target_groups", "overlapping_zone_transitions",
-        "no_legal_entry_transitions",
+        "no_legal_entry_transitions", "no_later_distinct_target_transitions",
     ):
         assert k in manifest
 
