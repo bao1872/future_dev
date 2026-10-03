@@ -70,37 +70,47 @@ def test_builder_uses_v6_not_v4_v5():
 
 
 # --------------------------------------------------------------------------- #
-# 2. Generated artifact satisfies the V6 contract + Viewer can load/render
+# 2. Generated artifact satisfies the V6.1 contract + Viewer can load/render
 # --------------------------------------------------------------------------- #
 def test_v6_artifact_contract_and_viewer_render(tmp_path):
     manifest = builder.build_artifact("AG", tmp_path, max_bars=1500)
 
-    # math_version == V6
+    # math_version == V6.1 location-chain
     assert manifest["math_version"] == MATH_VERSION
 
-    # reconciliation_pass == True and counts are present
-    assert manifest["reconciliation_pass"] is True
-    for k in (
-        "total_true_touch_records", "total_touch_episodes", "total_touch_groups",
-        "source_clusters", "same_location_groups_absorbed", "target_transitions",
-        "ambiguous_same_bar_target_groups", "overlapping_zone_transitions",
-        "no_legal_entry_transitions", "no_later_distinct_target_transitions",
-    ):
-        assert k in manifest
+    # the ONLY audit keys persisted are the V6.1 seven
+    audit = manifest["oracle_meta"]["audit"]
+    assert set(audit.keys()) == {
+        "bars_with_true_touch",
+        "location_touches",
+        "same_location_retouch_bars",
+        "target_transitions",
+        "ambiguous_target_bars",
+        "no_legal_entry",
+        "canonical_trades",
+    }
 
     # manifest count == len(trades.parquet) == > 0
     trades = pd.read_parquet(tmp_path / "trades.parquet")
     assert manifest["canonical_trade_count"] == len(trades)
     assert manifest["canonical_trade_count"] > 0
 
-    # every emitted trade is a genuine V6 TARGET_TOUCH label
+    # every emitted trade is a genuine V6.1 TARGET_TOUCH label
     assert (trades["exit_reason"] == "TARGET_TOUCH").all()
     assert (trades["utility"] > 0).all()
+
+    # first 5 trade rows: one Entry, one Exit, TARGET_TOUCH, utility > 0
+    for i in range(min(5, len(trades))):
+        row = trades.iloc[i]
+        assert int(row["best_entry_fill_index"]) >= 0
+        assert int(row["exit_fill_index"]) >= 0
+        assert row["exit_reason"] == "TARGET_TOUCH"
+        assert float(row["utility"]) > 0
 
     # frozen Viewer schema preserved
     assert VIEWER_TRADE_COLUMNS.issubset(set(trades.columns))
 
-    # Viewer load count == artifact count
+    # Viewer load count == artifact count (Viewer not modified)
     viewer = _load_viewer()
     saved = viewer._ARTIFACT_DIR
     viewer._ARTIFACT_DIR = tmp_path

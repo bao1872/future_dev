@@ -23,27 +23,22 @@ Artifacts (one clearly named "latest" location):
         structures.parquet
         manifest.json
 
-manifest.json records (V6 touch-chain contract):
+manifest.json records (V6.1 location-chain contract):
 
     source_git_sha
     generated_at
     symbol
     canonical_trade_count
-    math_version                       (= V6 touch-chain math version)
-    reconciliation_pass               (= True; source_clusters reconcile to
-                                        the named buckets)
-    total_true_touch_records
-    total_touch_episodes
-    total_touch_groups
-    source_clusters
-    same_location_groups_absorbed
+    math_version                       (= V6.1 location-chain math version)
+    bars_with_true_touch
+    location_touches
+    same_location_retouch_bars
     target_transitions
-    ambiguous_same_bar_target_groups
-    overlapping_zone_transitions
-    no_legal_entry_transitions
-    no_later_distinct_target_transitions
+    ambiguous_target_bars
+    no_legal_entry
+    canonical_trades
     oracle_meta                       (target_touch / early_exit for the
-                                        viewer sidebar + full V6 audit)
+                                        viewer sidebar + full V6.1 audit)
 
 Trade fields persisted (all the viewer needs -- schema is frozen so the
 viewer requires NO math change):
@@ -61,30 +56,23 @@ does NOT recompute anything.
 
 HARD VALIDATION (must hold or the script refuses to write and exits non-zero):
 
-    V6 generic contract (every build):
-        canonical count > 0
+    V6.1 location-chain contract (every build):
+        canonical trades > 0
+        len(canon) == audit["canonical_trades"]
         every trade exits on TARGET_TOUCH
         every trade utility > 0
-        V6 reconciliation:
-            source_clusters
-              = target_transitions + no_later_distinct_target_transitions
-              = canonical_trades
-              + ambiguous_same_bar_target_groups
-              + overlapping_zone_transitions
-              + no_legal_entry_transitions
-              + no_later_distinct_target_transitions
-            target_transitions
-              = canonical_trades
-              + ambiguous_same_bar_target_groups
-              + overlapping_zone_transitions
-              + no_legal_entry_transitions
-            total_touch_groups
-              = source_clusters + same_location_groups_absorbed
+        canonical_trades <= target_transitions
+        no_legal_entry <= target_transitions
         source_git_sha == current HEAD
 
+    NOTE: ambiguous_target_bars also includes ambiguous bars encountered
+    while no source is active after an ambiguous reset, so it is NOT a pure
+    target-transition rejection bucket. The builder does NOT invent a new
+    reconciliation equation.
+
 NOTE: the builder does NOT invent any static-event semantics. event_id is -1,
-and best_entry_gap_atr / tp_atr are np.nan placeholders (V6 does not compute an
-ATR-normalized gap; the viewer only displays them).
+and best_entry_gap_atr / tp_atr are np.nan placeholders (V6.1 does not compute
+an ATR-normalized gap; the viewer only displays them).
 """
 
 from __future__ import annotations
@@ -139,66 +127,47 @@ def _assert_source_sha(source_sha: str) -> None:
 
 
 def _hard_validate(canon: list, source_sha: str, audit: dict) -> None:
-    # ---- V6 generic invariants (every build) ----
+    # ---- V6.1 generic invariants (every build) ----
     if not canon:
         raise SystemExit("HARD STOP: zero canonical trades produced")
+    if len(canon) != int(audit["canonical_trades"]):
+        raise SystemExit(
+            f"HARD STOP: trade-row count {len(canon)} != "
+            f"audit canonical_trades {audit['canonical_trades']}"
+        )
     if not all(r["exit_reason"] == "TARGET_TOUCH" for r in canon):
         raise SystemExit("HARD STOP: a canonical trade is not TARGET_TOUCH")
     if not all(float(r["utility"]) > 0 for r in canon):
         raise SystemExit("HARD STOP: a canonical trade has non-positive utility")
 
-    # NOTE: the V6 touch-chain emits ONE trade per source price location:
-    # repeated same-location touches are absorbed into a single source cluster
-    # and produce exactly ONE trade to the next distinct target. The chain
-    # advances to that target, so trades never share a target group / exit.
-
-    # ---- V6 touch-chain reconciliation (no unexplained loss) ----
-    buckets = (
-        int(audit["canonical_trades"])
-        + int(audit["ambiguous_same_bar_target_groups"])
-        + int(audit["overlapping_zone_transitions"])
-        + int(audit["no_legal_entry_transitions"])
-        + int(audit["no_later_distinct_target_transitions"])
-    )
-    if int(audit["source_clusters"]) != buckets:
+    # ---- V6.1 bucket bounds (simple, no invented reconciliation) ----
+    if int(audit["canonical_trades"]) > int(audit["target_transitions"]):
         raise SystemExit(
-            f"HARD STOP: V6 touch-chain reconciliation failed "
-            f"(source_clusters={audit['source_clusters']} != buckets={buckets})"
+            "HARD STOP: canonical_trades exceeds target_transitions"
         )
-    if int(audit["total_touch_groups"]) != (
-        int(audit["source_clusters"])
-        + int(audit["same_location_groups_absorbed"])
-    ):
+    if int(audit["no_legal_entry"]) > int(audit["target_transitions"]):
         raise SystemExit(
-            f"HARD STOP: V6 touch-chain group accounting failed "
-            f"(total_touch_groups={audit['total_touch_groups']} != "
-            f"source_clusters={audit['source_clusters']} + "
-            f"absorbed={audit['same_location_groups_absorbed']})"
+            "HARD STOP: no_legal_entry exceeds target_transitions"
         )
 
     _assert_source_sha(source_sha)
 
 
 def _print_touch_chain_counts(audit: dict) -> None:
-    print("[artifact] V6 touch-chain counts:")
+    print("[artifact] V6.1 location-chain counts:")
     for k in (
-        "total_true_touch_records",
-        "total_touch_episodes",
-        "total_touch_groups",
-        "source_clusters",
-        "same_location_groups_absorbed",
+        "bars_with_true_touch",
+        "location_touches",
+        "same_location_retouch_bars",
         "target_transitions",
-        "ambiguous_same_bar_target_groups",
-        "overlapping_zone_transitions",
-        "no_legal_entry_transitions",
-        "no_later_distinct_target_transitions",
+        "ambiguous_target_bars",
+        "no_legal_entry",
         "canonical_trades",
     ):
         print(f"  {k:34s}: {audit[k]}")
-    denom = audit["target_transitions"] or 1
     print(
-        f"  canonical/target_transitions ratio : "
-        f"{audit['canonical_trades'] / denom:.3f}"
+        "canonical/target_transitions =",
+        audit["canonical_trades"] / max(1, audit["target_transitions"]),
     )
 
 
@@ -289,13 +258,11 @@ def build_artifact(symbol: str, out_dir: Path, max_bars: Optional[int] = None) -
     head = _git_sha()
     _hard_validate(canon, head, audit)
     print(
-        f"[gen] hard-validation PASS: V6 reconciliation "
-        f"({audit['source_clusters']} source clusters -> "
+        f"[gen] hard-validation PASS: V6.1 location-chain "
+        f"({audit['target_transitions']} transitions -> "
         f"{audit['canonical_trades']} canonical + "
-        f"{audit['ambiguous_same_bar_target_groups']} ambiguous + "
-        f"{audit['overlapping_zone_transitions']} overlap + "
-        f"{audit['no_legal_entry_transitions']} no_entry + "
-        f"{audit['no_later_distinct_target_transitions']} no_later_distinct)"
+        f"{audit['ambiguous_target_bars']} ambiguous + "
+        f"{audit['no_legal_entry']} no_entry)"
     )
 
     # ---- trades.parquet ----
@@ -321,44 +288,22 @@ def build_artifact(symbol: str, out_dir: Path, max_bars: Optional[int] = None) -
         })
     struct_df = pd.DataFrame(struct_rows)
 
-    # ---- manifest.json (V6 contract) ----
-    bucket_sum = (
-        int(audit["canonical_trades"])
-        + int(audit["ambiguous_same_bar_target_groups"])
-        + int(audit["overlapping_zone_transitions"])
-        + int(audit["no_legal_entry_transitions"])
-        + int(audit["no_later_distinct_target_transitions"])
-    )
-    reconciliation_pass = (
-        int(audit["source_clusters"]) == bucket_sum
-        and int(audit["target_transitions"])
-        == bucket_sum - int(audit["no_later_distinct_target_transitions"])
-        and int(audit["total_touch_groups"])
-        == int(audit["source_clusters"]) + int(audit["same_location_groups_absorbed"])
-    )
+    # ---- manifest.json (V6.1 contract) ----
     manifest = {
         "source_git_sha": head,
         "generated_at": pd.Timestamp.now(tz="UTC").isoformat(),
         "symbol": symbol,
         "canonical_trade_count": len(canon),
         "math_version": MATH_VERSION,
-        "reconciliation_pass": bool(reconciliation_pass),
-        "total_true_touch_records": int(audit["total_true_touch_records"]),
-        "total_touch_episodes": int(audit["total_touch_episodes"]),
-        "total_touch_groups": int(audit["total_touch_groups"]),
-        "source_clusters": int(audit["source_clusters"]),
-        "same_location_groups_absorbed": int(
-            audit["same_location_groups_absorbed"]
-        ),
+
+        "bars_with_true_touch": int(audit["bars_with_true_touch"]),
+        "location_touches": int(audit["location_touches"]),
+        "same_location_retouch_bars": int(audit["same_location_retouch_bars"]),
         "target_transitions": int(audit["target_transitions"]),
-        "ambiguous_same_bar_target_groups": int(
-            audit["ambiguous_same_bar_target_groups"]
-        ),
-        "overlapping_zone_transitions": int(audit["overlapping_zone_transitions"]),
-        "no_legal_entry_transitions": int(audit["no_legal_entry_transitions"]),
-        "no_later_distinct_target_transitions": int(
-            audit["no_later_distinct_target_transitions"]
-        ),
+        "ambiguous_target_bars": int(audit["ambiguous_target_bars"]),
+        "no_legal_entry": int(audit["no_legal_entry"]),
+        "canonical_trades": int(audit["canonical_trades"]),
+
         "oracle_meta": {
             "target_touch": len(canon),
             "early_exit": 0,
