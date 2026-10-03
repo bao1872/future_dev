@@ -30,13 +30,14 @@ manifest.json records (V6 touch-chain contract):
     symbol
     canonical_trade_count
     math_version                       (= V6 touch-chain math version)
-    reconciliation_pass               (= True; source_groups_with_future
-                                        reconciles to the named buckets)
+    reconciliation_pass               (= True; source_clusters reconcile to
+                                        the named buckets)
     total_true_touch_records
     total_touch_episodes
     total_touch_groups
-    source_groups_with_future
-    same_location_groups_skipped
+    source_clusters
+    same_location_groups_absorbed
+    target_transitions
     ambiguous_same_bar_target_groups
     overlapping_zone_transitions
     no_legal_entry_transitions
@@ -65,12 +66,20 @@ HARD VALIDATION (must hold or the script refuses to write and exits non-zero):
         every trade exits on TARGET_TOUCH
         every trade utility > 0
         V6 reconciliation:
-            source_groups_with_future
+            source_clusters
+              = target_transitions + no_later_distinct_target_transitions
               = canonical_trades
               + ambiguous_same_bar_target_groups
               + overlapping_zone_transitions
               + no_legal_entry_transitions
               + no_later_distinct_target_transitions
+            target_transitions
+              = canonical_trades
+              + ambiguous_same_bar_target_groups
+              + overlapping_zone_transitions
+              + no_legal_entry_transitions
+            total_touch_groups
+              = source_clusters + same_location_groups_absorbed
         source_git_sha == current HEAD
 
 NOTE: the builder does NOT invent any static-event semantics. event_id is -1,
@@ -138,25 +147,33 @@ def _hard_validate(canon: list, source_sha: str, audit: dict) -> None:
     if not all(float(r["utility"]) > 0 for r in canon):
         raise SystemExit("HARD STOP: a canonical trade has non-positive utility")
 
-    # NOTE: the V6 touch-chain is NOT a strictly sequential non-overlapping
-    # stream. Repeated same-location touches of A each resolve to the same next
-    # DISTINCT B, so several trades legitimately target the same B and overlap
-    # in time. The only invariants are the V6 generic contract below
-    # (TARGET_TOUCH / utility>0 / reconciliation) -- no fill-based ordering.
+    # NOTE: the V6 touch-chain emits ONE trade per source price location:
+    # repeated same-location touches are absorbed into a single source cluster
+    # and produce exactly ONE trade to the next distinct target. The chain
+    # advances to that target, so trades never share a target group / exit.
 
     # ---- V6 touch-chain reconciliation (no unexplained loss) ----
-    lhs = int(audit["source_groups_with_future"])
-    rhs = (
+    buckets = (
         int(audit["canonical_trades"])
         + int(audit["ambiguous_same_bar_target_groups"])
         + int(audit["overlapping_zone_transitions"])
         + int(audit["no_legal_entry_transitions"])
         + int(audit["no_later_distinct_target_transitions"])
     )
-    if lhs != rhs:
+    if int(audit["source_clusters"]) != buckets:
         raise SystemExit(
             f"HARD STOP: V6 touch-chain reconciliation failed "
-            f"({lhs} != {rhs})"
+            f"(source_clusters={audit['source_clusters']} != buckets={buckets})"
+        )
+    if int(audit["total_touch_groups"]) != (
+        int(audit["source_clusters"])
+        + int(audit["same_location_groups_absorbed"])
+    ):
+        raise SystemExit(
+            f"HARD STOP: V6 touch-chain group accounting failed "
+            f"(total_touch_groups={audit['total_touch_groups']} != "
+            f"source_clusters={audit['source_clusters']} + "
+            f"absorbed={audit['same_location_groups_absorbed']})"
         )
 
     _assert_source_sha(source_sha)
@@ -168,8 +185,9 @@ def _print_touch_chain_counts(audit: dict) -> None:
         "total_true_touch_records",
         "total_touch_episodes",
         "total_touch_groups",
-        "source_groups_with_future",
-        "same_location_groups_skipped",
+        "source_clusters",
+        "same_location_groups_absorbed",
+        "target_transitions",
         "ambiguous_same_bar_target_groups",
         "overlapping_zone_transitions",
         "no_legal_entry_transitions",
@@ -177,9 +195,9 @@ def _print_touch_chain_counts(audit: dict) -> None:
         "canonical_trades",
     ):
         print(f"  {k:34s}: {audit[k]}")
-    denom = audit["source_groups_with_future"] or 1
+    denom = audit["target_transitions"] or 1
     print(
-        f"  canonical/adjacent ratio    : "
+        f"  canonical/target_transitions ratio : "
         f"{audit['canonical_trades'] / denom:.3f}"
     )
 
@@ -272,7 +290,7 @@ def build_artifact(symbol: str, out_dir: Path, max_bars: Optional[int] = None) -
     _hard_validate(canon, head, audit)
     print(
         f"[gen] hard-validation PASS: V6 reconciliation "
-        f"({audit['source_groups_with_future']} sources -> "
+        f"({audit['source_clusters']} source clusters -> "
         f"{audit['canonical_trades']} canonical + "
         f"{audit['ambiguous_same_bar_target_groups']} ambiguous + "
         f"{audit['overlapping_zone_transitions']} overlap + "
@@ -304,13 +322,19 @@ def build_artifact(symbol: str, out_dir: Path, max_bars: Optional[int] = None) -
     struct_df = pd.DataFrame(struct_rows)
 
     # ---- manifest.json (V6 contract) ----
-    reconciliation_pass = (
-        int(audit["source_groups_with_future"])
-        == int(audit["canonical_trades"])
+    bucket_sum = (
+        int(audit["canonical_trades"])
         + int(audit["ambiguous_same_bar_target_groups"])
         + int(audit["overlapping_zone_transitions"])
         + int(audit["no_legal_entry_transitions"])
         + int(audit["no_later_distinct_target_transitions"])
+    )
+    reconciliation_pass = (
+        int(audit["source_clusters"]) == bucket_sum
+        and int(audit["target_transitions"])
+        == bucket_sum - int(audit["no_later_distinct_target_transitions"])
+        and int(audit["total_touch_groups"])
+        == int(audit["source_clusters"]) + int(audit["same_location_groups_absorbed"])
     )
     manifest = {
         "source_git_sha": head,
@@ -322,8 +346,11 @@ def build_artifact(symbol: str, out_dir: Path, max_bars: Optional[int] = None) -
         "total_true_touch_records": int(audit["total_true_touch_records"]),
         "total_touch_episodes": int(audit["total_touch_episodes"]),
         "total_touch_groups": int(audit["total_touch_groups"]),
-        "source_groups_with_future": int(audit["source_groups_with_future"]),
-        "same_location_groups_skipped": int(audit["same_location_groups_skipped"]),
+        "source_clusters": int(audit["source_clusters"]),
+        "same_location_groups_absorbed": int(
+            audit["same_location_groups_absorbed"]
+        ),
+        "target_transitions": int(audit["target_transitions"]),
         "ambiguous_same_bar_target_groups": int(
             audit["ambiguous_same_bar_target_groups"]
         ),

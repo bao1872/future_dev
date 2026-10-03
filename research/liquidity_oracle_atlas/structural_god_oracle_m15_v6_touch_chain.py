@@ -229,7 +229,7 @@ def _classify_transition(
 ) -> Tuple[str, Optional[str], Optional[str], Optional[float]]:
     """Classify the transition A -> B where B is the FIRST later touch group
     that contains at least one LOCATION-DISTINCT structure zone
-    (``_find_next_distinct_group`` guarantees this).
+    (``collect_source_cluster_and_next_target`` guarantees this).
 
     Only the location-distinct B zones (``distinct_b_ids``) drive direction and
     target selection; same-location zones (overlapping A) have NO effect.
@@ -359,41 +359,55 @@ def split_same_vs_distinct_location(
 
 
 # --------------------------------------------------------------------------- #
-# Step 7 -- find the NEXT DISTINCT touch (skip same-location revisits)
+# Step 7 -- ONE source location -> ONE next target (source-cluster collector)
 # --------------------------------------------------------------------------- #
-def _find_next_distinct_group(
+def collect_source_cluster_and_next_target(
     groups: List[TouchGroup],
-    k: int,
+    start_idx: int,
     eps: float = EPS,
-) -> Tuple[Optional[int], Optional[TouchGroup], int, set]:
-    """Starting after ``groups[k]``, skip groups whose zones ALL overlap the
-    current A location (same location, regardless of structure_id / timeframe).
+) -> Tuple[List[int], Optional[int], Optional[TouchGroup], set]:
+    """Collect ONE source opportunity starting at ``groups[start_idx]``.
 
-    Return the FIRST later group that contains at least one LOCATION-DISTINCT
-    structure zone. Same-location revisits do NOT terminate the search and are
-    NOT a rejected trade -- they are simply ignored while searching for B.
+    - The source LOCATION is defined by the first group's zones.
+    - Every later group whose structures are ALL in the SAME overlapping price
+      location is ABSORBED into the source cluster (repeated touches of the
+      same location are ONE source opportunity, regardless of structure_id /
+      timeframe).
+    - The cluster stops at the FIRST later group containing a location-distinct
+      structure -- that group is the single next target B.
 
-    Returns ``(index, group, skipped, distinct_b_ids)`` or
-    ``(None, None, skipped, set())`` if no later distinct group exists.
+    Returns ``(source_group_indices, target_group_index, target_group,
+    distinct_target_ids)``. ``target_group_index``/``target_group`` are None
+    (and ``distinct_target_ids`` empty) when no later distinct location exists.
+
+    Example: A@10, A@20, A@30, B@40  ->
+        source_indices = [0, 1, 2], target = B@40.
+    These source groups represent ONE trade opportunity.
     """
-    A = groups[k]
-    Azone = {
-        sid: (ep.zone_bottom, ep.zone_top) for sid, ep in A.structures.items()
+    A0 = groups[start_idx]
+    source_indices = [start_idx]
+
+    # The source location grows only by structures overlapping the current
+    # source location cluster.
+    source_zones: Dict[str, Tuple[float, float]] = {
+        sid: (ep.zone_bottom, ep.zone_top) for sid, ep in A0.structures.items()
     }
-    j = k + 1
-    skipped = 0
+
+    j = start_idx + 1
     while j < len(groups):
-        B = groups[j]
-        Bzone = {
-            sid: (ep.zone_bottom, ep.zone_top) for sid, ep in B.structures.items()
+        G = groups[j]
+        Gzone = {
+            sid: (ep.zone_bottom, ep.zone_top) for sid, ep in G.structures.items()
         }
-        _same, distinct = split_same_vs_distinct_location(Azone, Bzone, eps)
+        _same, distinct = split_same_vs_distinct_location(source_zones, Gzone, eps)
         if distinct:
-            return j, B, skipped, set(distinct.keys())
-        # B contains only zones overlapping current A: still the same location.
-        skipped += 1
+            return source_indices, j, G, set(distinct.keys())
+        # Entire group is the same source location: absorb it.
+        source_indices.append(j)
+        source_zones.update(Gzone)
         j += 1
-    return None, None, skipped, set()
+
+    return source_indices, None, None, set()
 
 
 # --------------------------------------------------------------------------- #
@@ -470,19 +484,23 @@ def solve_touch_chain(
 ) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
     """Walk the touch-group chain and emit the canonical trade stream.
 
-    For every source group A we search forward for the FIRST later group that
-    contains a LOCATION-DISTINCT structure zone (``_find_next_distinct_group``).
-    Same-location revisits (overlapping zones, even different id/timeframe) are
-    skipped (not lost trades). Every source resolves into exactly one
-    reconciliation bucket (hard-asserted at the end). No global scheduler.
+    ONE source price location -> ONE next distinct target -> ONE trade.
+
+    Repeated same-location touches (overlapping zones, even different
+    structure_id / timeframe) are ABSORBED into a single source cluster
+    (``collect_source_cluster_and_next_target``); they only enlarge the legal
+    Entry search set for the ONE A->B trade. The chain advances to B, so
+    A->B->C produces exactly two trades. Every source cluster resolves into
+    exactly one reconciliation bucket (hard-asserted at the end).
     """
     trades: List[Dict[str, Any]] = []
     audit = {
         "total_true_touch_records": int(total_true_touch_records),
         "total_touch_episodes": int(total_touch_episodes),
         "total_touch_groups": int(total_touch_groups),
-        "source_groups_with_future": int(total_touch_groups) - 1,
-        "same_location_groups_skipped": 0,
+        "source_clusters": 0,
+        "same_location_groups_absorbed": 0,
+        "target_transitions": 0,
         "ambiguous_same_bar_target_groups": 0,
         "overlapping_zone_transitions": 0,
         "no_legal_entry_transitions": 0,
@@ -494,52 +512,75 @@ def solve_touch_chain(
         return None if times is None or idx >= len(times) else times[idx]
 
     m = len(groups)
-    for k in range(m - 1):
-        A = groups[k]
-        j, B, skipped, distinct_b_ids = _find_next_distinct_group(groups, k, eps)
-        audit["same_location_groups_skipped"] += skipped
+    k = 0
+    while k < m:
+        source_indices, j, B, distinct_b_ids = (
+            collect_source_cluster_and_next_target(groups, k, eps)
+        )
+        audit["source_clusters"] += 1
+        audit["same_location_groups_absorbed"] += len(source_indices) - 1
         if B is None:
+            # The final cluster reaches the end of the chain with no target.
             audit["no_later_distinct_target_transitions"] += 1
-            continue
+            break
+        audit["target_transitions"] += 1
 
-        Azone = {sid: (ep.zone_bottom, ep.zone_top) for sid, ep in A.structures.items()}
-        Bzone = {sid: (ep.zone_bottom, ep.zone_top) for sid, ep in B.structures.items()}
+        Azone = {
+            sid: (ep.zone_bottom, ep.zone_top)
+            for idx in source_indices
+            for sid, ep in groups[idx].structures.items()
+        }
+        Bzone = {
+            sid: (ep.zone_bottom, ep.zone_top) for sid, ep in B.structures.items()
+        }
 
         status, direction, target_id, exit_price = _classify_transition(
             Azone, Bzone, distinct_b_ids, eps
         )
         if status == "AMBIGUOUS_SAME_BAR":
             audit["ambiguous_same_bar_target_groups"] += 1
+            k = j
             continue
         if status == "OVERLAP":
             audit["overlapping_zone_transitions"] += 1
             if overlap_examples is not None and len(overlap_examples) < 20:
                 overlap_examples.append({
-                    "A_start_bar": int(A.start_bar),
-                    "A_structures": sorted(A.structures.keys()),
+                    "A_start_bar": int(groups[source_indices[0]].start_bar),
+                    "A_structures": sorted(Azone.keys()),
                     "B_start_bar": int(B.start_bar),
                     "B_structures": sorted(B.structures.keys()),
                 })
+            k = j
             continue
 
-        # CANONICAL: pick the anchor A FIRST, then search Entry ONLY inside that
-        # anchor's own contact bars (never a union of all A structures).
+        # CANONICAL: pick the anchor A FIRST, then search Entry ONLY inside the
+        # anchor's own PRICE LOCATION across the whole source cluster (the
+        # cluster IS one location; absorbed groups enlarge the contact set).
         exit_bar = B.start_bar
         anchor = _choose_anchor(Azone, direction, target_id, Bzone, eps)
         if anchor is None:
             audit["no_legal_entry_transitions"] += 1
+            k = j
             continue
-        contact = sorted(set(A.structures[anchor].touched_bars))
+        anchor_zone = Azone[anchor]
+        contact = sorted({
+            bar
+            for idx in source_indices
+            for sid, ep in groups[idx].structures.items()
+            if zones_overlap(Azone[sid], anchor_zone, eps)
+            for bar in ep.touched_bars
+        })
 
         entry = best_entry(
             contact, opens, segments, tds, float(exit_price), direction, n, exit_bar, eps
         )
         if entry is None:
             audit["no_legal_entry_transitions"] += 1
+            k = j
             continue
 
         d_star, entry_price = entry
-        a_zb, a_zt = Azone[anchor]
+        a_zb, a_zt = anchor_zone
 
         utility = (
             (float(exit_price) - entry_price)
@@ -550,8 +591,8 @@ def solve_touch_chain(
         trades.append({
             "structure_id": anchor,
             "oracle_direction": direction,
-            "candidate_start_bar": int(A.start_bar),
-            "candidate_start_time": _t(A.start_bar),
+            "candidate_start_bar": int(groups[source_indices[0]].start_bar),
+            "candidate_start_time": _t(groups[source_indices[0]].start_bar),
             "zone_bottom": float(a_zb),
             "zone_top": float(a_zt),
             "best_entry_decision_index": int(d_star),
@@ -567,23 +608,65 @@ def solve_touch_chain(
             "utility": float(utility),
             "event_id": None,
             "canonical_oracle_trade": True,
+            # provenance (diagnostic; not part of the artifact trade schema)
+            "absorbed_source_group_start_bars": [
+                int(groups[idx].start_bar) for idx in source_indices
+            ],
+            "entry_contact_bars": [int(b) for b in contact],
         })
         audit["canonical_trades"] += 1
+        k = j
 
     # ---- HARD RECONCILIATION (no unexplained disappearance) ----
-    lhs = audit["source_groups_with_future"]
-    rhs = (
+    # Every source cluster resolves into EXACTLY ONE named bucket:
+    #   source_clusters
+    #     = target_transitions + no_later_distinct_target_transitions
+    #     = canonical + ambiguous + overlap + no_entry + no_later_distinct
+    #   target_transitions
+    #     = canonical + ambiguous + overlap + no_entry
+    bucket_sum = (
         audit["canonical_trades"]
         + audit["ambiguous_same_bar_target_groups"]
         + audit["overlapping_zone_transitions"]
         + audit["no_legal_entry_transitions"]
         + audit["no_later_distinct_target_transitions"]
     )
-    if lhs != rhs:
+    if audit["source_clusters"] != bucket_sum:
         raise AssertionError(
             f"HARD_FAIL_TOUCH_CHAIN_RECONCILIATION: "
-            f"source_groups_with_future={lhs} != buckets={rhs}"
+            f"source_clusters={audit['source_clusters']} != buckets={bucket_sum}"
         )
+    if audit["target_transitions"] != (
+        bucket_sum - audit["no_later_distinct_target_transitions"]
+    ):
+        raise AssertionError(
+            f"HARD_FAIL_TOUCH_CHAIN_RECONCILIATION: "
+            f"target_transitions={audit['target_transitions']} != "
+            f"buckets-with-target={bucket_sum - audit['no_later_distinct_target_transitions']}"
+        )
+    if audit["total_touch_groups"] != (
+        audit["source_clusters"] + audit["same_location_groups_absorbed"]
+    ):
+        raise AssertionError(
+            f"HARD_FAIL_TOUCH_CHAIN_GROUP_ACCOUNTING: "
+            f"total_touch_groups={audit['total_touch_groups']} != "
+            f"source_clusters={audit['source_clusters']} + "
+            f"absorbed={audit['same_location_groups_absorbed']}"
+        )
+
+    # ---- HARD DUPLICATE AUDIT: one source location -> one trade -> one exit --
+    # Targets strictly advance along the chain, so the same target group / exit
+    # can never serve two canonical trades.
+    seen: Dict[Tuple[str, int], int] = {}
+    for t in trades:
+        key = (str(t["target_structure_id"]), int(t["exit_fill_index"]))
+        if key in seen:
+            raise AssertionError(
+                f"HARD_FAIL_DUPLICATE_TARGET_EXIT: "
+                f"target={key[0]} exit_fill_index={key[1]} emitted twice "
+                f"(same source location was not consumed)"
+            )
+        seen[key] = 1
     return trades, audit
 
 
@@ -673,25 +756,24 @@ def print_screenshot_audit(
     a = target_trade
     print(f"current A (anchor structure): {a['structure_id']}")
     print(f"  A zone        : [{a['zone_bottom']:.1f}, {a['zone_top']:.1f}]")
+    print(
+        f"  source cluster: {a['absorbed_source_group_start_bars']} "
+        f"(start bars; {len(a['absorbed_source_group_start_bars']) - 1} absorbed)"
+    )
     print(f"  A start bar   : {a['candidate_start_bar']}")
     print(f"  DIRECTION     : {a['oracle_direction']}")
     print(f"  target B      : {a['target_structure_id']}")
     print(f"  target/exit   : {a['target_price']:.1f}  (exit_bar={a['exit_fill_index']})")
     print(f"  exit_reason   : {a['exit_reason']}")
     print("-" * 72)
-    print("legal A entry bars (best Entry search, anchor-only contact bars):")
-    # locate the group for A
-    A_group = next((g for g in groups if g.start_bar == a["candidate_start_bar"]), None)
-    if A_group is not None:
-        ep = A_group.structures.get(a["structure_id"])
-        contact = sorted(set(ep.touched_bars)) if ep is not None else []
-        for d in contact:
-            if d >= a["exit_fill_index"]:
-                break
-            print(
-                f"  decision_bar={d:5d}  next_open={opens[d + 1]:.1f}  "
-                f"same_unit_ok  -> fill@{d + 1}"
-            )
+    print("legal A entry bars (anchor price location across the WHOLE source cluster):")
+    for d in a["entry_contact_bars"]:
+        if d >= a["exit_fill_index"]:
+            break
+        print(
+            f"  decision_bar={d:5d}  next_open={opens[d + 1]:.1f}  "
+            f"same_unit_ok  -> fill@{d + 1}"
+        )
     print("-" * 72)
     print(
         f"CHOSEN best Entry: decision_bar={a['best_entry_decision_index']} "
@@ -727,15 +809,27 @@ def main() -> None:
         "total_true_touch_records",
         "total_touch_episodes",
         "total_touch_groups",
-        "source_groups_with_future",
-        "same_location_groups_skipped",
+        "source_clusters",
+        "same_location_groups_absorbed",
+        "target_transitions",
         "ambiguous_same_bar_target_groups",
         "overlapping_zone_transitions",
         "no_legal_entry_transitions",
         "no_later_distinct_target_transitions",
         "canonical_trades",
     ):
-        print(f"  {k:32s}: {audit[k]}")
+        print(f"  {k:36s}: {audit[k]}")
+
+    # ---- duplicate audit: group canonical trades by (target, exit) ----
+    dup: Dict[Tuple[str, int], int] = {}
+    for t in res["trades"]:
+        key = (str(t["target_structure_id"]), int(t["exit_fill_index"]))
+        dup[key] = dup.get(key, 0) + 1
+    duplicates = {k: v for k, v in dup.items() if v > 1}
+    print(f"[v6] duplicate (target, exit_fill_index) groups: {len(duplicates)}")
+    for key, cnt in sorted(duplicates.items())[:20]:
+        print(f"    target={key[0]} exit={key[1]} count={cnt}")
+
     print_screenshot_audit(res, around_price=7690.0, band=30.0)
 
 

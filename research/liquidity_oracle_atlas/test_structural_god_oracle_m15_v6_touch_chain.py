@@ -27,7 +27,7 @@ from research.liquidity_oracle_atlas.structural_god_oracle_m15_v6_touch_chain im
     build_episodes,
     build_touch_groups,
     solve_touch_chain,
-    _find_next_distinct_group,
+    collect_source_cluster_and_next_target,
     _classify_transition,
     _choose_anchor,
     extract_touch_records,
@@ -118,8 +118,8 @@ def test_A_lower_B_SHORT():
 
 def test_overlapping_B_is_skipped_not_overlap():
     """A=[100,110]; B=[104,114] overlaps A (same location) so it must be
-    skipped, NOT rejected as OVERLAP. A later distinct C=[200,210] yields the
-    trade."""
+    ABSORBED into the source cluster, NOT rejected as OVERLAP. A later distinct
+    C=[200,210] yields the ONE A->C trade."""
     groups = [
         mkgrp(0, "A", 100, 110, [0]),
         mkgrp(1, "A_h1", 104, 114, [1]),  # overlapping -> same location
@@ -132,11 +132,15 @@ def test_overlapping_B_is_skipped_not_overlap():
         groups, opens, segments, tds, n,
         total_true_touch_records=3, total_touch_episodes=3, total_touch_groups=3,
     )
-    assert len(trades) == 2  # A->C and A_h1->C (A_h1 also a valid source)
-    assert all(t["oracle_direction"] == "LONG" for t in trades)
-    assert all(t["target_structure_id"] == "C" for t in trades)
+    assert len(trades) == 1  # ONE source location -> ONE trade to C
+    assert trades[0]["oracle_direction"] == "LONG"
+    assert trades[0]["target_structure_id"] == "C"
     assert audit["overlapping_zone_transitions"] == 0
-    assert audit["same_location_groups_skipped"] == 1
+    assert audit["same_location_groups_absorbed"] == 1
+    assert audit["source_clusters"] == 2  # [A, A_h1] -> C, then trailing C
+    assert audit["target_transitions"] == 1
+    assert audit["no_later_distinct_target_transitions"] == 1
+    assert audit["canonical_trades"] == 1
 
 
 def test_same_bar_upper_and_lower_AMBIGUOUS_SAME_BAR():
@@ -150,8 +154,9 @@ def test_same_bar_upper_and_lower_AMBIGUOUS_SAME_BAR():
 
 
 def test_classify_requires_distinct_B():
-    """find_next_distinct_group owns same-location skipping; _classify_transition
-    must never be called with an empty distinct set (programming error)."""
+    """collect_source_cluster_and_next_target owns same-location absorption;
+    _classify_transition must never be called with an empty distinct set
+    (programming error)."""
     Azone = {"A": (100.0, 110.0)}
     with pytest.raises(AssertionError):
         _classify_transition(Azone, {"A": (100.0, 110.0)}, set())
@@ -243,12 +248,13 @@ def test_A_B_C_two_transactions_two_trades():
         total_true_touch_records=9, total_touch_episodes=3, total_touch_groups=3,
     )
     assert len(trades) == 2
-    assert audit["source_groups_with_future"] == 2
+    assert audit["source_clusters"] == 3  # [A]->B, [B]->C, trailing [C]
+    assert audit["target_transitions"] == 2
     assert audit["canonical_trades"] == 2
-    assert audit["no_later_distinct_target_transitions"] == 0
-    assert audit["same_location_groups_skipped"] == 0
+    assert audit["no_later_distinct_target_transitions"] == 1
+    assert audit["same_location_groups_absorbed"] == 0
     # reconciliation
-    assert audit["source_groups_with_future"] == (
+    assert audit["source_clusters"] == (
         audit["canonical_trades"]
         + audit["ambiguous_same_bar_target_groups"]
         + audit["overlapping_zone_transitions"]
@@ -279,14 +285,17 @@ def test_reconciliation_overlap_and_ambiguous_buckets():
         groups, opens, segments, tds, n,
         total_true_touch_records=4, total_touch_episodes=4, total_touch_groups=3,
     )
-    # B is the SAME location as A -> skipped, NOT counted as OVERLAP
+    # B is the SAME location as A -> ABSORBED into the source cluster,
+    # NOT counted as OVERLAP
     assert audit["overlapping_zone_transitions"] == 0
-    assert audit["same_location_groups_skipped"] == 1
-    # both sources (A, B) forward-resolve to the ambiguous (C,D) target bar
-    assert audit["ambiguous_same_bar_target_groups"] == 2
-    assert audit["source_groups_with_future"] == 2
-    assert audit["no_later_distinct_target_transitions"] == 0
-    assert audit["source_groups_with_future"] == (
+    assert audit["same_location_groups_absorbed"] == 1
+    # cluster [A, B] resolves ONCE to the ambiguous (C,D) target bar
+    assert audit["ambiguous_same_bar_target_groups"] == 1
+    # then the (C,D) cluster reaches the end with no later distinct group
+    assert audit["no_later_distinct_target_transitions"] == 1
+    assert audit["source_clusters"] == 2
+    assert audit["target_transitions"] == 1
+    assert audit["source_clusters"] == (
         audit["canonical_trades"]
         + audit["ambiguous_same_bar_target_groups"]
         + audit["overlapping_zone_transitions"]
@@ -316,12 +325,15 @@ def test_T1_real_AG_support_region_no_old_artifact_short():
     trades = res["trades"]
 
     # 1) reconciliation
-    assert a["source_groups_with_future"] == (
+    assert a["source_clusters"] == (
         a["canonical_trades"]
         + a["ambiguous_same_bar_target_groups"]
         + a["overlapping_zone_transitions"]
         + a["no_legal_entry_transitions"]
         + a["no_later_distinct_target_transitions"]
+    )
+    assert a["total_touch_groups"] == (
+        a["source_clusters"] + a["same_location_groups_absorbed"]
     )
 
     # 2) model emits a real trade stream
@@ -367,8 +379,10 @@ def mkgrp(start, sid, zb, zt, bars):
 
 
 def test_A_A_B_resolves_not_lost():
-    """Repeated same-location touches of A are searched THROUGH; the source A
-    still resolves to the next DISTINCT B. No continuation loss."""
+    """Repeated same-location touches of A are ONE source opportunity; the
+    cluster resolves to the next DISTINCT B with exactly ONE trade. The best
+    Entry may come from any absorbed A contact bar (all fills tie here, so the
+    earliest decision bar wins)."""
     groups = [
         mkgrp(0, "A", 100, 110, [0, 1]),
         mkgrp(2, "A", 100, 110, [2, 3]),
@@ -381,16 +395,22 @@ def test_A_A_B_resolves_not_lost():
         groups, opens, segments, tds, n,
         total_true_touch_records=6, total_touch_episodes=3, total_touch_groups=3,
     )
-    # both A groups resolve to B (not lost)
-    assert len(trades) == 2
-    assert all(t["oracle_direction"] == "LONG" for t in trades)
-    assert all(t["target_structure_id"] == "B" for t in trades)
-    assert audit["no_later_distinct_target_transitions"] == 0
-    assert audit["same_location_groups_skipped"] >= 1
+    # ONE source location -> ONE trade to B (not lost, not duplicated)
+    assert len(trades) == 1
+    assert trades[0]["oracle_direction"] == "LONG"
+    assert trades[0]["target_structure_id"] == "B"
+    assert audit["no_later_distinct_target_transitions"] == 1
+    assert audit["source_clusters"] == 2  # [A, A] -> B, then trailing B
+    assert audit["target_transitions"] == 1
+    assert audit["same_location_groups_absorbed"] == 1
+    # contact set spans BOTH absorbed A groups
+    assert trades[0]["entry_contact_bars"] == [0, 1, 2, 3]
+    assert trades[0]["best_entry_decision_index"] == 0
 
 
-def test_A_A_A_B_three_resolutions():
-    """A -> A -> A -> B yields THREE trades (each A occurrence -> same B)."""
+def test_A_A_A_B_one_trade():
+    """A -> A -> A -> B yields exactly ONE trade (one source location, one
+    next target), NOT three duplicate labels to the same B."""
     groups = [
         mkgrp(0, "A", 100, 110, [0]),
         mkgrp(1, "A", 100, 110, [1]),
@@ -404,15 +424,18 @@ def test_A_A_A_B_three_resolutions():
         groups, opens, segments, tds, n,
         total_true_touch_records=4, total_touch_episodes=4, total_touch_groups=4,
     )
-    assert len(trades) == 3
-    assert audit["canonical_trades"] == 3
-    # skipped = 2 (from k=0) + 1 (from k=1) + 0 (from k=2)
-    assert audit["same_location_groups_skipped"] == 3
+    assert len(trades) == 1
+    assert audit["canonical_trades"] == 1
+    assert audit["source_clusters"] == 2  # [A, A, A] -> B, then trailing B
+    assert audit["target_transitions"] == 1
+    assert audit["no_later_distinct_target_transitions"] == 1
+    assert audit["same_location_groups_absorbed"] == 2
+    assert trades[0]["entry_contact_bars"] == [0, 1, 2]
 
 
 def test_no_later_distinct_B():
-    """When no later distinct structure exists, the source resolves to the
-    no_later_distinct bucket (diagnostic, not a lost label)."""
+    """When no later distinct structure exists, the final cluster resolves to
+    the no_later_distinct bucket (diagnostic, not a lost label)."""
     groups = [
         mkgrp(0, "A", 100, 110, [0]),
         mkgrp(1, "A", 100, 110, [1]),
@@ -426,7 +449,9 @@ def test_no_later_distinct_B():
     )
     assert len(trades) == 0
     assert audit["no_later_distinct_target_transitions"] == 1
-    assert audit["source_groups_with_future"] == 1
+    assert audit["source_clusters"] == 1
+    assert audit["target_transitions"] == 0
+    assert audit["same_location_groups_absorbed"] == 1
 
 
 def test_two_upper_targets_pick_lowest_bottom():
@@ -503,9 +528,9 @@ def test_entry_only_from_anchor_contact_bars():
     assert trades[0]["best_entry_decision_index"] == 0
 
 
-def test_hard_reconciliation_after_skips():
-    """After skipping same-location groups, the hard reconciliation still holds
-    exactly (no unexplained disappearance)."""
+def test_hard_reconciliation_after_absorption():
+    """After absorbing same-location groups into the source cluster, the hard
+    reconciliation still holds exactly (no unexplained disappearance)."""
     groups = [
         mkgrp(0, "A", 100, 110, [0]),
         mkgrp(1, "A", 100, 110, [1]),
@@ -519,22 +544,28 @@ def test_hard_reconciliation_after_skips():
         groups, opens, segments, tds, n,
         total_true_touch_records=4, total_touch_episodes=4, total_touch_groups=4,
     )
-    assert audit["source_groups_with_future"] == 3
-    assert audit["source_groups_with_future"] == (
+    assert audit["source_clusters"] == 2  # [A, A, A] -> B, then trailing B
+    assert audit["target_transitions"] == 1
+    assert audit["same_location_groups_absorbed"] == 2
+    assert audit["source_clusters"] == (
         audit["canonical_trades"]
         + audit["ambiguous_same_bar_target_groups"]
         + audit["overlapping_zone_transitions"]
         + audit["no_legal_entry_transitions"]
         + audit["no_later_distinct_target_transitions"]
     )
-    assert audit["canonical_trades"] == 3
+    assert audit["total_touch_groups"] == (
+        audit["source_clusters"] + audit["same_location_groups_absorbed"]
+    )
+    assert audit["canonical_trades"] == 1
 
 
 # --------------------------------------------------------------------------- #
 # T0c -- DISTINCT = price LOCATION, not structure_id / timeframe
 # --------------------------------------------------------------------------- #
 def test_diff_id_overlapping_zone_same_location():
-    """Different structure_id but overlapping zone => SAME location, skipped."""
+    """Different structure_id but overlapping zone => SAME location, absorbed
+    into ONE source cluster -> ONE trade."""
     groups = [
         mkgrp(0, "A1", 100, 110, [0]),
         mkgrp(1, "A2", 104, 114, [1]),  # overlapping -> same location
@@ -547,14 +578,17 @@ def test_diff_id_overlapping_zone_same_location():
         groups, opens, segments, tds, n,
         total_true_touch_records=3, total_touch_episodes=3, total_touch_groups=3,
     )
-    assert len(trades) == 2  # A1->B and A2->B (A2 also a valid source)
-    assert all(t["target_structure_id"] == "B" for t in trades)
-    assert audit["same_location_groups_skipped"] == 1
+    assert len(trades) == 1  # ONE source cluster -> ONE trade to B
+    assert trades[0]["target_structure_id"] == "B"
+    assert audit["source_clusters"] == 2  # [A1, A2] -> B, then trailing B
+    assert audit["target_transitions"] == 1
+    assert audit["same_location_groups_absorbed"] == 1
     assert audit["overlapping_zone_transitions"] == 0
 
 
 def test_diff_timeframe_overlapping_zone_same_location():
-    """Different timeframe but overlapping zone => SAME location, skipped."""
+    """Different timeframe but overlapping zone => SAME location, absorbed
+    into ONE source cluster -> ONE trade."""
     groups = [
         mkgrp(0, "A_m15", 100, 110, [0]),
         mkgrp(1, "A_h1", 104, 114, [1]),  # different TF, overlapping
@@ -567,9 +601,11 @@ def test_diff_timeframe_overlapping_zone_same_location():
         groups, opens, segments, tds, n,
         total_true_touch_records=3, total_touch_episodes=3, total_touch_groups=3,
     )
-    assert len(trades) == 2  # A_m15->B and A_h1->B (A_h1 also a valid source)
-    assert all(t["target_structure_id"] == "B" for t in trades)
-    assert audit["same_location_groups_skipped"] == 1
+    assert len(trades) == 1  # ONE source cluster -> ONE trade to B
+    assert trades[0]["target_structure_id"] == "B"
+    assert audit["source_clusters"] == 2  # [A_m15, A_h1] -> B, then trailing B
+    assert audit["target_transitions"] == 1
+    assert audit["same_location_groups_absorbed"] == 1
     assert audit["overlapping_zone_transitions"] == 0
 
 
@@ -595,8 +631,8 @@ def test_mixed_group_ignores_overlapping_x_uses_y():
 
 
 def test_repeated_overlapping_groups_continue():
-    """Several overlapping-only groups in a row are skipped until a real
-    distinct B is found."""
+    """Several overlapping-only groups in a row are ABSORBED into the source
+    cluster until a real distinct B is found -> ONE trade."""
     groups = [
         mkgrp(0, "A", 100, 110, [0]),
         mkgrp(1, "X1", 104, 114, [1]),
@@ -610,10 +646,89 @@ def test_repeated_overlapping_groups_continue():
         groups, opens, segments, tds, n,
         total_true_touch_records=4, total_touch_episodes=4, total_touch_groups=4,
     )
-    assert len(trades) == 3  # A->B, X1->B, X2->B (each overlapping group is a source)
-    assert all(t["target_structure_id"] == "B" for t in trades)
-    assert audit["same_location_groups_skipped"] == 3
+    assert len(trades) == 1  # ONE source cluster -> ONE trade to B
+    assert trades[0]["target_structure_id"] == "B"
+    assert audit["source_clusters"] == 2  # [A, X1, X2] -> B, then trailing B
+    assert audit["target_transitions"] == 1
+    assert audit["same_location_groups_absorbed"] == 2
     assert audit["overlapping_zone_transitions"] == 0
+
+
+# --------------------------------------------------------------------------- #
+# T0d -- ONE source location -> ONE next target -> ONE trade (chain semantics)
+# --------------------------------------------------------------------------- #
+def test_collector_clusters_repeated_touches():
+    """A@10, A@20, A@30, B@40 -> source_indices=[0,1,2], target=B."""
+    groups = [
+        mkgrp(10, "A", 100, 110, [10]),
+        mkgrp(20, "A", 100, 110, [20]),
+        mkgrp(30, "A", 100, 110, [30]),
+        mkgrp(40, "B", 200, 210, [40]),
+    ]
+    src_idx, j, B, distinct_ids = collect_source_cluster_and_next_target(groups, 0)
+    assert src_idx == [0, 1, 2]
+    assert j == 3
+    assert B is groups[3]
+    assert distinct_ids == {"B"}
+
+
+def test_A_A_B_B_C_two_trades():
+    """A@10,A@20,B@30,B@40,C@50 -> exactly TWO trades: A->B and B->C.
+    The two trades never share a target group / exit bar."""
+    groups = [
+        mkgrp(10, "A", 100, 110, [10]),
+        mkgrp(20, "A", 100, 110, [20]),
+        mkgrp(30, "B", 200, 210, [30]),
+        mkgrp(40, "B", 200, 210, [40]),
+        mkgrp(50, "C", 150, 160, [50]),
+    ]
+    n = 60
+    segments, tds = common_arrays(n)
+    # A->B LONG needs open[d+1] < 210; B->C SHORT needs open[d+1] > 160
+    opens = np.full(n, 180.0)
+    trades, audit = solve_touch_chain(
+        groups, opens, segments, tds, n,
+        total_true_touch_records=5, total_touch_episodes=3, total_touch_groups=5,
+    )
+    assert len(trades) == 2
+    assert audit["source_clusters"] == 3  # [A,A]->B, [B,B]->C, trailing [C]
+    assert audit["target_transitions"] == 2
+    assert audit["no_later_distinct_target_transitions"] == 1
+    assert audit["same_location_groups_absorbed"] == 2  # 2nd A + 2nd B
+    assert audit["canonical_trades"] == 2
+    assert trades[0]["oracle_direction"] == "LONG"
+    assert trades[0]["target_structure_id"] == "B"
+    assert trades[1]["oracle_direction"] == "SHORT"
+    assert trades[1]["target_structure_id"] == "C"
+    # no duplicate (target, exit) across canonical trades
+    keys = {(t["target_structure_id"], t["exit_fill_index"]) for t in trades}
+    assert len(keys) == 2
+
+
+def test_best_entry_can_come_from_absorbed_group():
+    """The single best Entry may come from an ABSORBED A group's contact bar;
+    only ONE Entry survives."""
+    groups = [
+        mkgrp(0, "A", 100, 110, [0, 1]),   # first touch group
+        mkgrp(2, "A", 100, 110, [2, 3]),   # absorbed same-location group
+        mkgrp(4, "B", 200, 210, [4]),
+    ]
+    n = 6
+    segments, tds = common_arrays(n)
+    # best (lowest) LONG fill only available on the absorbed group's bar 3
+    # (open[2] / open[4] are the fills of decision bars 1 / 3 -> keep them
+    # realistic and nonzero; the minimum legal fill is open[4]=140)
+    opens = np.array([100.0, 150.0, 155.0, 160.0, 140.0, 145.0])
+    trades, audit = solve_touch_chain(
+        groups, opens, segments, tds, n,
+        total_true_touch_records=5, total_touch_episodes=3, total_touch_groups=3,
+    )
+    assert len(trades) == 1
+    assert trades[0]["oracle_direction"] == "LONG"
+    # entry decision bar 3 belongs to the ABSORBED group (not the head group)
+    assert trades[0]["best_entry_decision_index"] == 3
+    assert trades[0]["best_entry_price"] == pytest.approx(140.0)
+    assert trades[0]["entry_contact_bars"] == [0, 1, 2, 3]
 
 
 def test_upper_lower_distinct_same_group_ambiguous():
