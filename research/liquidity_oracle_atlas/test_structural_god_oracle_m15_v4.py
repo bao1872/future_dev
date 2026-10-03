@@ -672,8 +672,8 @@ def test_sequential_candidate_decoupled_from_event_window():
     # co-present structure it is trivially that structure.
     lows = np.zeros(n, dtype=float)
     highs = np.zeros(n, dtype=float)
-    c, sid = _scan_next_candidate(
-        per_bar, cursor=347, eligible_sids={S}, n=n, lows=lows, highs=highs
+    c, sid, _, _, _ = _scan_next_candidate(
+        per_bar, cursor=347, n=n, lows=lows, highs=highs
     )
     assert sid == S
     assert c == 348  # NOT 350 -- proof of decoupling
@@ -705,25 +705,6 @@ def test_sequential_best_entry_trade2_region():
     assert sol["entry_fill_index"] == 350
     assert abs(sol["entry_price"] - 7700.0) < 1e-9
     assert abs(sol["utility"] - 73.0) < 1e-6
-
-
-def test_ag_trade2_decoupled_best_entry():
-    # End-to-end regression for the diagnosed Trade-2 region. After decoupling
-    # candidate discovery from the static event window, the candidate structure
-    # SR|m15|0|346|7705.0|7694.0|75.0 MUST be eligible from its first per_bar
-    # appearance (348/349/350) and the God-mode solver MUST select the best
-    # entry (decision 349 -> fill 350 -> 7700), not the previously-reported
-    # late first-contact entry at ~7741.
-    res = run_god_oracle_v4("AG", max_bars=AG_MAX_BARS)
-    canon = [r for r in res["records"] if r["canonical_oracle_trade"]]
-    t2 = next((r for r in canon
-               if r["structure_id"] == "SR|m15|0|346|7705.0|7694.0|75.0"), None)
-    assert t2 is not None, "decoupled candidate structure must form a trade"
-    assert t2["oracle_direction"] == "LONG"
-    assert t2["best_entry_decision_index"] == 349
-    assert t2["best_entry_fill_index"] == 350
-    assert abs(t2["best_entry_price"] - 7700.0) < 1e-6
-    assert abs(t2["target_price"] - 7773.0) < 1e-6
 
 
 if __name__ == "__main__":

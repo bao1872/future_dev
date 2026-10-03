@@ -158,6 +158,7 @@ def solve_direction_god_reference_v4(
     mv: Any,
     trading_day: Optional[np.ndarray] = None,
     segment: Optional[np.ndarray] = None,
+    target_tree: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """Brute force: enumerate every legal (entry, exit) pair, take the best. O(L^2).
 
@@ -198,7 +199,11 @@ def solve_direction_god_reference_v4(
                      or _ref_unit_of(unit_starts, d) != _ref_unit_of(unit_starts, f))):
             n_rejected += 1
             continue
-        H = min(e_bar, _ref_unit_end(unit_starts, f, n), n - 1)
+        # Frozen lifecycle AFTER entry: NO artificial holding-time limit.
+        # Target may be reached across intraday-unit / trading-day boundaries
+        # (as far as the dataset end). The old _ref_unit_end(f) cap is removed;
+        # it must match production exactly for the parity differential.
+        H = min(e_bar, n - 1)
         entry_price = float(opens[f])
 
         # independent first-target-touch scan measured from the EVENT START

@@ -96,16 +96,25 @@ def main(argv: Optional[list] = None) -> int:
 
     print("\n=== full run + hot-path counters ===")
     print(f"{'mod':>6} {'N':>6} {'rows':>6} {'TOTAL':>8} {'SETUP':>8} {'LOOP':>8} "
-          f"{'trades':>7} {'tt_steps':>12} {'ratio':>6}")
+          f"{'trades':>7} {'tt_q':>8} {'tt_nodes':>10} {'nodes/q':>8} {'ref':>5} {'ratio':>6}")
     for name, mod in modules:
         prev_t: Optional[float] = None
+        prev_nodes: Optional[int] = None
         for n in args.ns:
             total, canon, c = _run_cost(mod, 3 * n)
             loop = total - setup[n]
             ratio = (total / prev_t) if prev_t else float("nan")
+            q = c.get("target_touch_query_count", -1)
+            nodes = c.get("target_touch_tree_node_visits", -1)
+            ref = c.get("reference_call_count", -1)
+            npq = (nodes / q) if q else float("nan")
+            nodes_ratio = (nodes / prev_nodes) if prev_nodes else float("nan")
             print(f"{name:>6} {n:>6} {n:>6} {total:8.3f} {setup[n]:8.3f} {loop:8.3f} "
-                  f"{canon:>7} {c.get('target_touch_scan_steps', -1):>12} {ratio:6.2f}")
+                  f"{canon:>7} {q:>8} {nodes:>10} {npq:>8.2f} {ref:>5} {ratio:6.2f}")
+            print(f"            tt_node_scaling N->2N = {nodes_ratio:.2f} "
+                  f"(sub-quadratic => <=~2.5; quadratic => ~4)")
             prev_t = total
+            prev_nodes = nodes
     return 0
 
 

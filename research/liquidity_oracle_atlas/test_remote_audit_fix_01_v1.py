@@ -34,8 +34,12 @@ import pandas as pd
 import pytest
 
 from research.liquidity_oracle_atlas.structural_god_oracle_m15_v4 import (
+    _build_target_tree,
+    _first_target_touch,
     _next_target_touch,
     _scan_next_candidate,
+    run_god_oracle_v4,
+    solve_direction_god_v4,
 )
 from research.liquidity_oracle_atlas.structural_event_dp_kernel_v3 import (
     market_view_from_arrays,
@@ -111,12 +115,12 @@ def test_failed_decision_does_not_blacklist_structure():
     lows = [0.0] * n
     highs = [0.0] * n
 
-    c1, sid1 = _scan_next_candidate(per_bar, 0, {S}, n, lows, highs)
+    c1, sid1, _, _, _ = _scan_next_candidate(per_bar, 0, n, lows, highs)
     assert (c1, sid1) == (10, S)
 
     # decisions-level forward progress after a failed decision at bar 10
     scan_pos = c1 + 1
-    c2, sid2 = _scan_next_candidate(per_bar, scan_pos, {S}, n, lows, highs)
+    c2, sid2, _, _, _ = _scan_next_candidate(per_bar, scan_pos, n, lows, highs)
     assert (c2, sid2) == (20, S), (
         "structure was blacklisted after one failed decision "
         "(permanent no-trade skip set still present)"
@@ -143,7 +147,7 @@ def test_co_present_structures_use_primary_owner():
     eligible = {S_LEX_FIRST_FAR, S_LEX_LAST_NEAR}
     assert sorted(eligible)[0] == S_LEX_FIRST_FAR  # what lexical order would pick
 
-    c, sid = _scan_next_candidate(per_bar, 0, eligible, n, lows, highs)
+    c, sid, _, _, _ = _scan_next_candidate(per_bar, 0, n, lows, highs)
     assert c == 10
     assert sid == S_LEX_LAST_NEAR, "co-present owner must be the NEAREST structure"
     assert sid != sorted(eligible)[0], "owner fell back to lexical structure_id order"
@@ -381,3 +385,126 @@ def test_failed_decision_reconsidered_later_end_to_end():
         "structures that failed a decision are never reconsidered later "
         "(a permanent no-trade blacklist has been reintroduced)"
     )
+
+    # G.1: a primary structure that was NEVER a static-event owner must still
+    # become a Candidate A. Such candidates carry event_id == -1 (diagnostic
+    # only). Their existence is the direct proof that static-event membership
+    # no longer gates eligibility.
+    no_event = sum(1 for r in canon if r["event_id"] == -1)
+    assert no_event > 0, (
+        "no canonical trade came from a primary structure absent from static "
+        "events -- the primary-is-candidate rule is not actually applied"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# G.4 / G.5: holding-time gate (entry boundary KEPT; post-entry cap REMOVED)
+# --------------------------------------------------------------------------- #
+def _make_mv_units(opens, highs, lows, unit_starts):
+    n = len(opens)
+    closes = list(opens)
+    times = [
+        pd.Timestamp("2020-01-01") + pd.Timedelta(minutes=15 * i) for i in range(n)
+    ]
+    return market_view_from_arrays(
+        opens, highs, lows, closes, times=times,
+        unit_starts=np.asarray(unit_starts, dtype=np.int64), symbol="SYNTH",
+    )
+
+
+def test_next_day_target_touch_accepted():
+    """G.4: a valid entry whose frozen Target is reached on the NEXT trading day
+    (across an intraday-unit / session boundary) is ACCEPTED -- not judged
+    TARGET_NOT_REACHED by a hidden holding-time cap.
+    """
+    n = 5
+    opens = [100.0] * n
+    highs = [100.0, 100.0, 100.0, 100.0, 110.0]   # target only touched at bar 4
+    lows = [99.0, 99.0, 99.0, 99.0, 109.0]
+    unit_starts = [0, 3]                           # bars 0-2 unit0, 3-4 unit1
+    trading_day = np.array([0, 0, 0, 1, 1], dtype=np.int64)
+    segment = np.array([0, 0, 0, 0, 0], dtype=np.int64)
+    mv = _make_mv_units(opens, highs, lows, unit_starts)
+    target = 105.0
+
+    for tree in (None, _build_target_tree(mv)):
+        sol = solve_direction_god_v4(
+            direction="LONG", zone_bottom=99.0, zone_top=100.0, atr_value=1.0,
+            start_bar=0, end_bar=n, target_price=target, contact_bars=[0],
+            mv=mv, trading_day=trading_day, segment=segment, target_tree=tree,
+        )
+        assert sol["ok"], f"next-day target rejected (tree={tree is not None})"
+        assert sol["exit_fill_index"] == 4, sol
+        assert abs(sol["exit_price"] - target) < 1e-9
+
+
+def test_entry_fill_crossing_session_rejected():
+    """G.5: decision t -> fill t+1 that crosses a trading_day/segment/unit
+    boundary is rejected by the ENTRY execution gate (kept), regardless of any
+    later target.
+    """
+    n = 5
+    opens = [100.0] * n
+    highs = [100.0, 100.0, 100.0, 100.0, 110.0]
+    lows = [99.0, 99.0, 99.0, 99.0, 109.0]
+    unit_starts = [0, 3]
+    trading_day = np.array([0, 0, 0, 1, 1], dtype=np.int64)
+    segment = np.array([0, 0, 0, 0, 0], dtype=np.int64)
+    mv = _make_mv_units(opens, highs, lows, unit_starts)
+    sol = solve_direction_god_v4(
+        direction="LONG", zone_bottom=99.0, zone_top=100.0, atr_value=1.0,
+        start_bar=0, end_bar=n, target_price=105.0, contact_bars=[2],
+        mv=mv, trading_day=trading_day, segment=segment,
+    )
+    assert sol["ok"] is False
+    assert sol["n_rejected_target_before_entry"] >= 1
+
+
+def test_target_touch_tree_equals_vectorized_reference():
+    """G.6: production O(log N) target-touch index must exactly equal the
+    vectorized full-window reference (which equals the naive scan).
+    """
+    rng = np.random.RandomState(777)
+    n = 300
+    highs = 100.0 + np.cumsum(rng.randn(n) * 0.05)
+    lows = highs - np.abs(rng.randn(n)) * 0.05
+    opens = highs - 0.01
+    mv = make_mv(opens.tolist(), highs.tolist(), lows.tolist())
+    tree = _build_target_tree(mv)
+    for direction, tp in (
+        ("LONG", float(highs.mean())),
+        ("LONG", float(highs.max()) + 10.0),
+        ("SHORT", float(lows.mean())),
+        ("SHORT", float(lows.min()) - 10.0),
+    ):
+        for lo in (0, 50, 200, 299):
+            got = _first_target_touch(tree, lo, direction, tp)
+            exp = _next_target_touch(mv, lo, n - 1, direction, tp)[lo]
+            assert got == exp, f"mismatch lo={lo} {direction} tp={tp}: {got} vs {exp}"
+
+
+def test_production_reference_parity_small_sample():
+    """G.8: production (tree path) vs independent O(L^2) reference must agree on a
+    small AG sample -- the required production/reference differential.
+    """
+    from research.liquidity_oracle_atlas.structural_god_oracle_reference_m15_v4 import (
+        run_god_oracle_v4_reference,
+    )
+    prod = run_god_oracle_v4("AG", max_bars=600)
+    ref = run_god_oracle_v4_reference("AG", max_bars=600)
+    p = {
+        r["candidate_start_bar"]: r
+        for r in prod["records"] if r["canonical_oracle_trade"]
+    }
+    q = {
+        r["candidate_start_bar"]: r
+        for r in ref["records"] if r["canonical_oracle_trade"]
+    }
+    assert set(p) == set(q), "production/reference decision-bar set mismatch"
+    for bar in p:
+        rp, rq = p[bar], q[bar]
+        assert rp["oracle_direction"] == rq["oracle_direction"]
+        assert rp["best_entry_fill_index"] == rq["best_entry_fill_index"]
+        assert rp["exit_fill_index"] == rq["exit_fill_index"]
+        assert abs(float(rp["best_entry_price"]) - float(rq["best_entry_price"])) < 1e-9
+        assert abs(float(rp["exit_price"]) - float(rq["exit_price"])) < 1e-9

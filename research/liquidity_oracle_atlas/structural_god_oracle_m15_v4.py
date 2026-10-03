@@ -89,9 +89,10 @@ ATR_OWNER = "m15_atr@run_environment_m15"
 _HOTPATH_COUNTERS: Dict[str, int] = {
     "candidate_scan_steps": 0,
     "contact_future_scan_steps": 0,
-    "target_touch_scan_steps": 0,
+    "target_touch_query_count": 0,
+    "target_touch_tree_node_visits": 0,
     "solver_call_count": 0,
-    "ineligible_primary_bars": 0,
+    "reference_call_count": 0,
 }
 
 
@@ -361,6 +362,95 @@ def _unit_of(mv: "EventMarketView", bar: int) -> int:
     return int(np.searchsorted(mv.unit_starts, int(bar), side="right")) - 1
 
 
+# --------------------------------------------------------------------------- #
+# Production target-touch index: O(log N) per query (fixes the O(N^2) hot path)
+# --------------------------------------------------------------------------- #
+def _build_target_tree(mv: "EventMarketView") -> Dict[str, Any]:
+    """One-time range-max / range-min index over the whole price series.
+
+    Enables an ``O(log N)`` first-threshold query (the first bar >= s where the
+    frozen target is touched), replacing the per-candidate ``O(N)`` full-window
+    scan that made the sequential stream ``O(trades x N)``. Built ONCE per run.
+    Reference keeps its naive scan; production never calls it.
+    """
+    highs = np.asarray(mv.highs, dtype=float)
+    lows = np.asarray(mv.lows, dtype=float)
+    n = mv.n
+    size = 1
+    while size < n:
+        size <<= 1
+    tmax = np.full(2 * size, -np.inf, dtype=float)
+    tmin = np.full(2 * size, np.inf, dtype=float)
+    tmax[size:size + n] = highs
+    tmin[size:size + n] = lows
+    for i in range(size - 1, 0, -1):
+        tmax[i] = max(tmax[2 * i], tmax[2 * i + 1])
+        tmin[i] = min(tmin[2 * i], tmin[2 * i + 1])
+    return {"size": size, "n": n, "tmax": tmax, "tmin": tmin}
+
+
+def _first_target_touch(
+    tree: Dict[str, Any], start: int, direction: str, target_price: Optional[float]
+) -> int:
+    """First bar index >= ``start`` where the frozen target is touched.
+
+    LONG -> high[index] >= target ; SHORT -> low[index] <= target.
+    Returns -1 if no such bar exists in [start, n-1].
+
+    Semantically identical to
+    ``_next_target_touch(mv, start, n-1, direction, target)[start]`` but costs
+    ``O(log N)`` node visits instead of scanning the whole future window, so the
+    sequential stream is ``O(N + Q log N + K)`` rather than ``O(trades x N)``.
+    """
+    if target_price is None:
+        return -1
+    n = int(tree["n"])
+    start = max(0, int(start))
+    if start >= n:
+        return -1
+    tp = float(target_price)
+    size = tree["size"]
+    tmax = tree["tmax"]
+    tmin = tree["tmin"]
+    visits = 0
+
+    if direction == "LONG":
+        def rec(p: int, l: int, r: int, ql: int) -> int:
+            nonlocal visits
+            visits += 1
+            if r < ql:
+                return -1
+            if tmax[p] < tp:
+                return -1
+            if l == r:
+                return l
+            mid = (l + r) // 2
+            a = rec(2 * p, l, mid, ql)
+            if a != -1:
+                return a
+            return rec(2 * p + 1, mid + 1, r, ql)
+    else:
+        def rec(p: int, l: int, r: int, ql: int) -> int:
+            nonlocal visits
+            visits += 1
+            if r < ql:
+                return -1
+            if tmin[p] > tp:
+                return -1
+            if l == r:
+                return l
+            mid = (l + r) // 2
+            a = rec(2 * p, l, mid, ql)
+            if a != -1:
+                return a
+            return rec(2 * p + 1, mid + 1, r, ql)
+
+    idx = rec(1, 0, size - 1, start)
+    _bump("target_touch_query_count")
+    _bump("target_touch_tree_node_visits", visits)
+    return idx if 0 <= idx < n else -1
+
+
 def solve_direction_god_v4(
     *,
     direction: str,
@@ -374,6 +464,7 @@ def solve_direction_god_v4(
     mv: EventMarketView,
     trading_day: Optional[np.ndarray] = None,
     segment: Optional[np.ndarray] = None,
+    target_tree: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """Joint entry+exit DP for ONE direction, constrained to contact bars. O(L).
 
@@ -396,8 +487,15 @@ def solve_direction_god_v4(
             "n_rejected_target_before_entry": 0, "n_contact": n_contact,
         }
 
-    nt = _next_target_touch(mv, s_bar, hi, direction, target_price)
-    t_first = int(nt[s_bar]) if (target_price is not None and s_bar < n) else -1
+    # Target-touch first-index: O(log N) via the prebuilt tree in production,
+    # or the full-window vectorized scan as a faithful fallback (used by tests
+    # and the audit script). Both return the first bar >= s_bar that touches the
+    # frozen target.
+    if target_tree is not None and target_price is not None and s_bar < n:
+        t_first = _first_target_touch(target_tree, s_bar, direction, target_price)
+    else:
+        nt = _next_target_touch(mv, s_bar, hi, direction, target_price)
+        t_first = int(nt[s_bar]) if (target_price is not None and s_bar < n) else -1
 
     n_candidates = 0
     n_with_path = 0
@@ -421,7 +519,13 @@ def solve_direction_god_v4(
                      or _unit_of(mv, d) != _unit_of(mv, f))):
             n_rejected += 1
             continue
-        H = min(e_bar, mv.unit_end(f), n - 1)
+        # Frozen lifecycle AFTER entry: NO artificial holding-time limit. The
+        # target may be reached across intraday-unit / trading-day boundaries,
+        # as far as the dataset end. The old ``mv.unit_end(f)`` cap silently
+        # judged trades "TARGET_NOT_REACHED" once the entry's session ended --
+        # that hidden limit is removed (H = n-1). The entry EXECUTION boundary
+        # (decision t -> fill t+1, same trading_day/segment/unit) is kept above.
+        H = min(e_bar, n - 1)
         entry_price = float(mv.opens[f])
 
         same_bar_target = False
@@ -657,26 +761,25 @@ def _contact_is_consumed(contact_bar: int, cursor: int) -> bool:
 def _scan_next_candidate(
     per_bar: List[Optional[List[Tuple[str, str, float, float]]]],
     cursor: int,
-    eligible_sids: set,
     n: int,
     lows: np.ndarray,
     highs: np.ndarray,
-) -> Tuple[Optional[int], Optional[str]]:
+) -> Tuple[Optional[int], Optional[str], Optional[str], Optional[float], Optional[float]]:
     """Sequential-candidate discovery, DECOUPLED from the static-event window.
 
     From ``cursor`` forward, find the earliest bar ``t`` whose canonical primary
-    structure (nearest by ``bar_zone_distance``) is eligible and has a valid
-    ``t+1`` fill, and return that owner as the candidate. A structure that
-    previously COMPLETED a trade -- or that failed at an earlier decision bar --
-    is intentionally still eligible; nothing is permanently blacklisted.
-    Return ``(t, sid)``; if none remain, ``(None, None)``.
+    structure (nearest by ``bar_zone_distance``) has a valid ``t+1`` fill, and
+    return ``(t, sid, structure_type, zone_bottom, zone_top)`` for that owner.
 
-    This is intentionally NOT gated by any event's ``[start_bar, end_bar)``:
-    a structure becomes a legal candidate the moment it first appears in
-    proximity after the previous trade's exit, regardless of when the static
-    builder would have started its event. The static event is used ONLY as a
-    metadata source (sid -> zone/timeframe/event_id), never to bound
-    eligibility.
+    The primary structure IS Candidate A. Its metadata (type / zone) comes
+    directly from the primary tuple returned by ``_primary_structure``, NEVER
+    from a static-event lookup. A structure that merely appears in proximity is
+    a valid candidate REGARDLESS of whether the static builder ever made it an
+    event owner -- static event membership must never gate eligibility
+    (``event_id`` is only diagnostic metadata, resolved later).
+
+    A structure that previously COMPLETED a trade or failed a decision is still
+    eligible here; nothing is permanently blacklisted.
     """
     for t in range(cursor, n):
         _bump("candidate_scan_steps")
@@ -693,14 +796,8 @@ def _scan_next_candidate(
         prim = _primary_structure(pb, float(lows[t]), float(highs[t]))
         if prim is None:
             continue
-        sid = prim[0]
-        if sid not in eligible_sids:
-            # No frozen geometry/metadata exists for this owner, so this bar
-            # cannot carry a candidate decision. Counted for transparency.
-            _bump("ineligible_primary_bars")
-            continue
-        return (t, sid)
-    return (None, None)
+        return (t, prim[0], prim[1], float(prim[2]), float(prim[3]))
+    return (None, None, None, None, None)
 
 
 def _run_god_oracle_core(
@@ -782,7 +879,11 @@ def _run_god_oracle_core(
     # as a METADATA source (structure_id -> zone/timeframe/event_id); its
     # window semantics stay intact for its own (static) consumers.
     # ----------------------------------------------------------------- #
-    # metadata lookup: structure_id -> (event_id, zone, timeframe, structure_type)
+    # DIAGNOSTIC METADATA ONLY. Candidate eligibility no longer depends on the
+    # static event at all: the primary structure in per_bar is Candidate A and
+    # its geometry/type come straight from the primary tuple. ``struct_meta`` is
+    # kept solely to populate the diagnostic ``event_id`` (None when the primary
+    # structure was never a static-event owner).
     struct_meta: Dict[str, Dict[str, Any]] = {}
     for e in events:
         struct_meta[e["structure_id"]] = {
@@ -792,7 +893,10 @@ def _run_god_oracle_core(
             "timeframe": e.get("timeframe"),
             "structure_type": e.get("structure_type"),
         }
-    eligible_sids = set(struct_meta.keys())
+
+    # One-time target-touch index (O(log N) queries); replaces the per-candidate
+    # O(N) full-window scan that made the sequential stream O(trades x N).
+    target_tree = _build_target_tree(mv)
 
     # structure_id -> ascending list of its proximity bars (built ONCE). Used
     # only to answer "which contact bars of A start at/after c" without
@@ -818,24 +922,26 @@ def _run_god_oracle_core(
     cursor = 0
     scan_pos = 0
     guard = 0
-    # Every iteration advances scan_pos STRICTLY forward (failed decision ->
-    # c + 1; completed trade -> exit + 1 > c), so the loop is bounded by n.
-    MAX_ITER = 10 * (len(events) + 16)
+    # scan_pos advances STRICTLY forward every iteration (failed decision -> c+1;
+    # completed trade -> exit+1 > c). The number of iterations is bounded by the
+    # number of trade starts plus failed decisions, both <= n, so an n-derived
+    # bound is correct and does NOT depend on how many old static events exist.
+    MAX_ITER = 3 * n + 16
     while True:
         guard += 1
         if guard > MAX_ITER:
             raise AssertionError("HARD_FAIL_CANDIDATE_SCAN_RUNWAY")
 
-        c, cand_sid = _scan_next_candidate(
-            per_bar, scan_pos, eligible_sids, n, lows, highs
+        # Primary structure IS Candidate A. Geometry/type come from the primary
+        # tuple; event_id is only diagnostic (None if never a static-event owner).
+        c, cand_sid, stype, zb, zt = _scan_next_candidate(
+            per_bar, scan_pos, n, lows, highs
         )
         if c is None:
             break
 
-        meta = struct_meta[cand_sid]
-        eid = meta["event_id"]
-        zb, zt = meta["zone_bottom"], meta["zone_top"]
-        tf = meta["timeframe"]
+        tf = cand_sid.split("|")[1]
+        eid = struct_meta[cand_sid]["event_id"] if cand_sid in struct_meta else None
 
         atr_value = (
             float(atr_series[c]) if c < len(atr_series) else float("nan")
@@ -889,6 +995,7 @@ def _run_god_oracle_core(
                 target_price=float(tgt_long["near_edge"]),
                 contact_bars=cb_full, mv=mv,
                 trading_day=td_arr, segment=seg_arr,
+                target_tree=target_tree,
             )
         if tgt_short is None:
             short_sol: Dict[str, Any] = {
@@ -904,6 +1011,7 @@ def _run_god_oracle_core(
                 target_price=float(tgt_short["near_edge"]),
                 contact_bars=cb_full, mv=mv,
                 trading_day=td_arr, segment=seg_arr,
+                target_tree=target_tree,
             )
 
         long_final = _finalize_god(
@@ -930,7 +1038,7 @@ def _run_god_oracle_core(
             e_rec = {
                 "event_id": eid,
                 "structure_id": cand_sid,
-                "structure_type": meta["structure_type"],
+                "structure_type": stype,
                 "timeframe": tf,
                 "zone_bottom": zb,
                 "zone_top": zt,
@@ -1004,7 +1112,7 @@ def _build_record(
     cand_sid = e["structure_id"]
 
     base = {
-        "event_id": int(e["event_id"]),
+        "event_id": int(e["event_id"]) if e["event_id"] is not None else -1,
         "structure_id": cand_sid,
         "structure_type": e.get("structure_type"),
         "timeframe": e.get("timeframe"),
