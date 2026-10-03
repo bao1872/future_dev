@@ -24,7 +24,7 @@ manifest.json records:
     math_version
     oracle_meta            (full res["meta"] for sidebar diagnostics)
 
-Trade fields persisted (all viewer needs, plus the diagnosed-case checks):
+Trade fields persisted (all the viewer needs):
     trade_seq, event_id, structure_id, candidate_decision_index, candidate_time,
     zone_bottom, zone_top, oracle_direction, best_entry_fill_index,
     best_entry_fill_time, best_entry_price, best_entry_gap_atr,
@@ -37,14 +37,30 @@ decision-time owner) is persisted as JSON in structures.parquet so the viewer
 does NOT recompute anything.
 
 HARD VALIDATION (must hold or the script refuses to write and exits non-zero):
-    For the diagnosed structure
-        SR|m15|0|346|7705.0|7694.0|75.0
-    the produced trade must contain:
-        best_entry_decision_index = 349
-        best_entry_fill_index     = 350
-        best_entry_price          = 7700
-        target_price              = 7773
-        utility (profit_to_target)= 73
+
+    Generic invariants (every build):
+        canonical count > 0
+        every trade exits on TARGET_TOUCH
+        every trade utility > 0
+        Exit_i < Entry_{i+1}   (sequential one-position stream, no overlap)
+        source_git_sha == current HEAD
+
+    Option A / FIX-02 semantic sentinel:
+        The diagnosed 349/350/7700/7773 case (SR|m15|0|346|7705.0|7694.0|75.0)
+        is LOCAL-regression-only -- it must be ABSENT from the full stream,
+        because the earlier PREEMPT structure (SR|m15|0|346|7691.0|7681.0|72.0)
+        now legitimately completes first and advances the cursor past it.
+        The builder therefore validates the PREEMPT sentinel instead:
+            oracle_direction            = SHORT
+            candidate_start_bar         = 347
+            best_entry_decision_index   = 348
+            best_entry_fill_index       = 349
+            best_entry_price            = 7705
+            exit_fill_index             = 570
+            target_price                = 7655
+            exit_price                  = 7655
+            utility                     = 50
+            exit_reason                 = TARGET_TOUCH
 """
 
 from __future__ import annotations
@@ -70,13 +86,22 @@ MATH_VERSION = "structural_god_oracle_m15_v4"
 REPO_ROOT = Path(__file__).resolve().parents[2]  # .../future_dev
 ARTIFACT_DIR = REPO_ROOT / "artifacts" / "god_oracle_m15_latest"
 
+# Option A / FIX-02: the diagnosed 349/350/7700/7773 case is LOCAL-regression
+# only (see tests). It must NOT appear in the full stream, so the builder uses
+# the PREEMPT sentinel that replaced it as the hard checkpoint.
 DIAG_SID = "SR|m15|0|346|7705.0|7694.0|75.0"
-DIAG_EXPECT = {
-    "best_entry_decision_index": 349,
-    "best_entry_fill_index": 350,
-    "best_entry_price": 7700.0,
-    "target_price": 7773.0,
-    "utility": 73.0,
+PREEMPT_SID = "SR|m15|0|346|7691.0|7681.0|72.0"
+PREEMPT_EXPECT = {
+    "oracle_direction": "SHORT",
+    "candidate_start_bar": 347,
+    "best_entry_decision_index": 348,
+    "best_entry_fill_index": 349,
+    "best_entry_price": 7705.0,
+    "exit_fill_index": 570,
+    "target_price": 7655.0,
+    "exit_price": 7655.0,
+    "utility": 50.0,
+    "exit_reason": "TARGET_TOUCH",
 }
 
 
@@ -90,18 +115,66 @@ def _git_sha() -> str:
         return "unknown"
 
 
-def _hard_validate(canon: list) -> dict:
-    t2 = next((r for r in canon if r["structure_id"] == DIAG_SID), None)
+def _assert_source_sha(source_sha: str) -> None:
+    if source_sha == "unknown":
+        raise SystemExit("HARD STOP: could not resolve current git HEAD sha")
+    try:
+        cur = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=str(REPO_ROOT),
+            stderr=subprocess.DEVNULL,
+        ).decode().strip()
+    except Exception as exc:  # pragma: no cover - environment failure
+        raise SystemExit(f"HARD STOP: git rev-parse HEAD failed: {exc}")
+    if source_sha != cur:
+        raise SystemExit(
+            f"HARD STOP: source_git_sha {source_sha} != current HEAD {cur}"
+        )
+
+
+def _hard_validate(canon: list, source_sha: str) -> dict:
+    # ---- generic invariants (every build) ----
+    if not canon:
+        raise SystemExit("HARD STOP: zero canonical trades produced")
+    if not all(r["exit_reason"] == "TARGET_TOUCH" for r in canon):
+        raise SystemExit("HARD STOP: a canonical trade is not TARGET_TOUCH")
+    if not all(float(r["utility"]) > 0 for r in canon):
+        raise SystemExit("HARD STOP: a canonical trade has non-positive utility")
+    for i in range(len(canon) - 1):
+        if not (int(canon[i]["exit_fill_index"])
+                < int(canon[i + 1]["best_entry_decision_index"])):
+            raise SystemExit(
+                f"HARD STOP: trades overlap at i={i} "
+                f"(exit {canon[i]['exit_fill_index']} >= next entry "
+                f"{canon[i + 1]['best_entry_decision_index']})"
+            )
+    _assert_source_sha(source_sha)
+
+    # ---- Option A / FIX-02 semantic sentinel ----
+    # The diagnosed 349/350/7700/7773 case is LOCAL-regression-only; it must
+    # NOT appear in the full stream (an earlier PREEMPT trade consumes the
+    # cursor). Assert its absence.
+    if any(r["structure_id"] == DIAG_SID for r in canon):
+        raise SystemExit(
+            f"HARD STOP: diagnosed structure {DIAG_SID} unexpectedly present "
+            f"in full stream (Option A requires it to be absent)"
+        )
+
+    # PREEMPT is the full-stream sentinel that replaced DIAG.
+    t2 = next((r for r in canon if r["structure_id"] == PREEMPT_SID), None)
     if t2 is None:
         raise SystemExit(
-            f"HARD STOP: diagnosed structure {DIAG_SID} not found in canonical trades"
+            f"HARD STOP: PREEMPT sentinel {PREEMPT_SID} not found in canonical trades"
         )
-    for k, exp in DIAG_EXPECT.items():
-        got = float(t2[k]) if isinstance(exp, float) else int(t2[k])
-        if abs(got - exp) > 1e-6:
-            raise SystemExit(
-                f"HARD STOP: {DIAG_SID} {k} = {got}, expected {exp}"
-            )
+    for k, exp in PREEMPT_EXPECT.items():
+        got = t2[k]
+        if isinstance(exp, float):
+            if abs(float(got) - exp) > 1e-6:
+                raise SystemExit(f"HARD STOP: {PREEMPT_SID} {k} = {got}, expected {exp}")
+        else:
+            if str(got) != str(exp):
+                raise SystemExit(
+                    f"HARD STOP: {PREEMPT_SID} {k} = {got!r}, expected {exp!r}"
+                )
     return t2
 
 
@@ -116,13 +189,16 @@ def main() -> None:
     backend_canonical = len(canon)
     print(f"[gen] backend canonical count = {backend_canonical}")
 
+    head = _git_sha()
     # HARD VALIDATION before touching any artifact
-    t2 = _hard_validate(canon)
+    t2 = _hard_validate(canon, head)
     print(
-        f"[gen] hard-validation PASS: {DIAG_SID} -> "
+        f"[gen] hard-validation PASS: {PREEMPT_SID} -> "
+        f"dir={t2['oracle_direction']} cand_start={t2['candidate_start_bar']} "
         f"decision={t2['best_entry_decision_index']} "
         f"fill={t2['best_entry_fill_index']} "
         f"entry={t2['best_entry_price']:.1f} "
+        f"exit={t2['exit_fill_index']} "
         f"target={t2['target_price']:.1f} "
         f"profit={t2['utility']:.1f}"
     )
@@ -193,8 +269,8 @@ def main() -> None:
         "canonical_trade_count": backend_canonical,
         "math_version": MATH_VERSION,
         "oracle_meta": meta,
-        "diagnosed_structure_id": DIAG_SID,
-        "diagnosed_expect": DIAG_EXPECT,
+        "sentinel_structure_id": PREEMPT_SID,
+        "sentinel_expect": PREEMPT_EXPECT,
     }
 
     ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
