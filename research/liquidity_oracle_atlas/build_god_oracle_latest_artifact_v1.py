@@ -30,16 +30,17 @@ manifest.json records (V6 touch-chain contract):
     symbol
     canonical_trade_count
     math_version                       (= V6 touch-chain math version)
-    reconciliation_pass               (= True; adjacent_group_transitions
+    reconciliation_pass               (= True; source_groups_with_future
                                         reconciles to the named buckets)
     total_true_touch_records
     total_touch_episodes
     total_touch_groups
-    adjacent_group_transitions
-    continuation_transitions
+    source_groups_with_future
+    same_location_groups_skipped
     ambiguous_same_bar_target_groups
     overlapping_zone_transitions
     no_legal_entry_transitions
+    no_later_distinct_target_transitions
     oracle_meta                       (target_touch / early_exit for the
                                         viewer sidebar + full V6 audit)
 
@@ -63,19 +64,17 @@ HARD VALIDATION (must hold or the script refuses to write and exits non-zero):
         canonical count > 0
         every trade exits on TARGET_TOUCH
         every trade utility > 0
-        exit_fill_index_i < best_entry_fill_index_{i+1}   (sequential one-position
-                                                            stream, no overlap)
         V6 reconciliation:
-            adjacent_group_transitions
+            source_groups_with_future
               = canonical_trades
               + ambiguous_same_bar_target_groups
               + overlapping_zone_transitions
               + no_legal_entry_transitions
-              + continuation_transitions
+              + no_later_distinct_target_transitions
         source_git_sha == current HEAD
 
 NOTE: the builder does NOT invent any static-event semantics. event_id is -1,
-and best_entry_gap_atr / tp_atr are 0.0 placeholders (V6 does not compute an
+and best_entry_gap_atr / tp_atr are np.nan placeholders (V6 does not compute an
 ATR-normalized gap; the viewer only displays them).
 """
 

@@ -224,14 +224,17 @@ def build_touch_groups(episodes: List[Episode]) -> List[TouchGroup]:
 def _classify_transition(
     Azone: Dict[str, Tuple[float, float]],
     Bzone: Dict[str, Tuple[float, float]],
+    distinct_b_ids: Any,
     eps: float = EPS,
 ) -> Tuple[str, Optional[str], Optional[str], Optional[float]]:
     """Classify the transition A -> B where B is the FIRST later touch group
-    that contains at least one NEW structure (``find_next_distinct_group``
-    guarantees this, so a same-only B never reaches here).
+    that contains at least one LOCATION-DISTINCT structure zone
+    (``_find_next_distinct_group`` guarantees this).
 
-    B's new structures define direction + fixed Exit. The Exit is the NEAR edge
-    of the chosen target (the edge the price reaches FIRST):
+    Only the location-distinct B zones (``distinct_b_ids``) drive direction and
+    target selection; same-location zones (overlapping A) have NO effect.
+
+    The Exit is the NEAR edge of the chosen target:
 
       LONG  -- price travels UP from A, so the LOWEST zone_bottom is hit first.
       SHORT -- price travels DOWN from A, so the HIGHEST zone_top is hit first.
@@ -239,12 +242,12 @@ def _classify_transition(
     Returns (status, direction, target_id, exit_price).
 
     status:
-      AMBIGUOUS_SAME_BAR  -- the distinct next-touch bar holds BOTH an upper and
-                             a lower target -> no canonical direction
-      OVERLAP             -- only overlapping (unordered) distinct targets
+      AMBIGUOUS_SAME_BAR  -- the distinct targets include one ABOVE and one
+                             BELOW A -> no canonical direction
+      OVERLAP             -- (defensive) no clean upper/lower distinct target
       CANONICAL           -- a single unambiguous direction; target chosen
     """
-    new_ids = [sid for sid in Bzone if sid not in Azone]
+    new_ids = list(distinct_b_ids)
     if not new_ids:
         raise AssertionError(
             "find_next_distinct_group must not return a same-only B"
@@ -316,33 +319,81 @@ def _choose_anchor(
 
 
 # --------------------------------------------------------------------------- #
+# Location-distinct ownership helpers
+# --------------------------------------------------------------------------- #
+def zones_overlap(
+    z1: Tuple[float, float],
+    z2: Tuple[float, float],
+    eps: float = EPS,
+) -> bool:
+    a_bottom, a_top = z1
+    b_bottom, b_top = z2
+    # strictly separated (disjoint) => not overlapping
+    return not (b_top < a_bottom - eps or b_bottom > a_top + eps)
+
+
+def split_same_vs_distinct_location(
+    Azone: Dict[str, Tuple[float, float]],
+    Bzone: Dict[str, Tuple[float, float]],
+    eps: float = EPS,
+) -> Tuple[Dict[str, Tuple[float, float]], Dict[str, Tuple[float, float]]]:
+    """Split B's structures into same-location vs location-distinct relative to A.
+
+    A B-structure is SAME LOCATION if its zone overlaps ANY structure zone in
+    the current A group. Only a B-zone overlapping NONE of A's zones is
+    location-distinct. A different structure_id / timeframe / SR object whose
+    zone still overlaps A is the SAME location and must be skipped -- never
+    rejected as OVERLAP.
+    """
+    same: Dict[str, Tuple[float, float]] = {}
+    distinct: Dict[str, Tuple[float, float]] = {}
+    for bid, bz in Bzone.items():
+        is_same_location = any(
+            zones_overlap(az, bz, eps) for az in Azone.values()
+        )
+        if is_same_location:
+            same[bid] = bz
+        else:
+            distinct[bid] = bz
+    return same, distinct
+
+
+# --------------------------------------------------------------------------- #
 # Step 7 -- find the NEXT DISTINCT touch (skip same-location revisits)
 # --------------------------------------------------------------------------- #
 def _find_next_distinct_group(
     groups: List[TouchGroup],
     k: int,
-) -> Tuple[Optional[int], Optional[TouchGroup], int]:
-    """Starting after ``groups[k]``, skip groups that contain ONLY structural
-    identities already present in A.
+    eps: float = EPS,
+) -> Tuple[Optional[int], Optional[TouchGroup], int, set]:
+    """Starting after ``groups[k]``, skip groups whose zones ALL overlap the
+    current A location (same location, regardless of structure_id / timeframe).
 
-    Return the FIRST later group that contains at least one NEW structure.
+    Return the FIRST later group that contains at least one LOCATION-DISTINCT
+    structure zone. Same-location revisits do NOT terminate the search and are
+    NOT a rejected trade -- they are simply ignored while searching for B.
 
-    Same-location revisits do NOT terminate the search and are NOT a rejected
-    trade -- they are simply ignored while searching for B.
-
-    Returns ``(index, group, skipped)`` or ``(None, None, skipped)`` if no
-    later distinct group exists.
+    Returns ``(index, group, skipped, distinct_b_ids)`` or
+    ``(None, None, skipped, set())`` if no later distinct group exists.
     """
-    A_ids = set(groups[k].structures)
+    A = groups[k]
+    Azone = {
+        sid: (ep.zone_bottom, ep.zone_top) for sid, ep in A.structures.items()
+    }
     j = k + 1
     skipped = 0
     while j < len(groups):
-        B_ids = set(groups[j].structures)
-        if B_ids - A_ids:
-            return j, groups[j], skipped
+        B = groups[j]
+        Bzone = {
+            sid: (ep.zone_bottom, ep.zone_top) for sid, ep in B.structures.items()
+        }
+        _same, distinct = split_same_vs_distinct_location(Azone, Bzone, eps)
+        if distinct:
+            return j, B, skipped, set(distinct.keys())
+        # B contains only zones overlapping current A: still the same location.
         skipped += 1
         j += 1
-    return None, None, skipped
+    return None, None, skipped, set()
 
 
 # --------------------------------------------------------------------------- #
@@ -415,13 +466,15 @@ def solve_touch_chain(
     total_touch_groups: int,
     eps: float = EPS,
     times: Optional[np.ndarray] = None,
+    overlap_examples: Optional[List[Dict[str, Any]]] = None,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
     """Walk the touch-group chain and emit the canonical trade stream.
 
     For every source group A we search forward for the FIRST later group that
-    contains a NEW structure (``_find_next_distinct_group``). Same-location
-    revisits are skipped (not lost trades). Every source resolves into exactly
-    one reconciliation bucket (hard-asserted at the end). No global scheduler.
+    contains a LOCATION-DISTINCT structure zone (``_find_next_distinct_group``).
+    Same-location revisits (overlapping zones, even different id/timeframe) are
+    skipped (not lost trades). Every source resolves into exactly one
+    reconciliation bucket (hard-asserted at the end). No global scheduler.
     """
     trades: List[Dict[str, Any]] = []
     audit = {
@@ -443,7 +496,7 @@ def solve_touch_chain(
     m = len(groups)
     for k in range(m - 1):
         A = groups[k]
-        j, B, skipped = _find_next_distinct_group(groups, k)
+        j, B, skipped, distinct_b_ids = _find_next_distinct_group(groups, k, eps)
         audit["same_location_groups_skipped"] += skipped
         if B is None:
             audit["no_later_distinct_target_transitions"] += 1
@@ -452,12 +505,21 @@ def solve_touch_chain(
         Azone = {sid: (ep.zone_bottom, ep.zone_top) for sid, ep in A.structures.items()}
         Bzone = {sid: (ep.zone_bottom, ep.zone_top) for sid, ep in B.structures.items()}
 
-        status, direction, target_id, exit_price = _classify_transition(Azone, Bzone, eps)
+        status, direction, target_id, exit_price = _classify_transition(
+            Azone, Bzone, distinct_b_ids, eps
+        )
         if status == "AMBIGUOUS_SAME_BAR":
             audit["ambiguous_same_bar_target_groups"] += 1
             continue
         if status == "OVERLAP":
             audit["overlapping_zone_transitions"] += 1
+            if overlap_examples is not None and len(overlap_examples) < 20:
+                overlap_examples.append({
+                    "A_start_bar": int(A.start_bar),
+                    "A_structures": sorted(A.structures.keys()),
+                    "B_start_bar": int(B.start_bar),
+                    "B_structures": sorted(B.structures.keys()),
+                })
             continue
 
         # CANONICAL: pick the anchor A FIRST, then search Entry ONLY inside that

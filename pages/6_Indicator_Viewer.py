@@ -325,15 +325,16 @@ def _meta_table(sel: dict) -> pd.DataFrame:
 def main() -> None:
     st.markdown("### God-Mode Oracle · Indicator Viewer")
     st.caption(
-        "Latest production oracle only: each valid opportunity becomes one "
-        "completed trade in a single sequential stream — Candidate A → best "
-        "Entry → frozen Target B → first touch of B (TARGET_TOUCH), then the "
-        "search restarts immediately after the exit. Previous / Next step "
-        "through the trade stream; event_id is diagnostic metadata only. "
-        "Kline uses the global 15m bar index (no overnight / weekend gaps); "
-        "SR & Liquidity are read from the materialized latest artifact "
-        "(structures.parquet: decision-time production geometry, no runtime "
-        "computation)."
+        "Latest production oracle only: each true structural touch is linked to "
+        "the next distinct touched price location. Direction is determined by "
+        "whether that next location is above or below; Exit is fixed at that "
+        "next touch; Entry is optimized within the source touch episode ("
+        "Candidate A → best Entry → frozen Target B → first touch of B, "
+        "TARGET_TOUCH). Previous / Next step through the trades; event_id is "
+        "diagnostic metadata only. Kline uses the global 15m bar index (no "
+        "overnight / weekend gaps); SR & Liquidity are read from the "
+        "materialized latest artifact (structures.parquet: decision-time "
+        "production geometry, no runtime computation)."
     )
 
     symbol = st.sidebar.selectbox("Symbol", SYMBOLS, index=0)

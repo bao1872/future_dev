@@ -99,7 +99,7 @@ def test_extract_builds_stable_id_and_zone():
 def test_A_upper_B_LONG():
     Azone = {"A": (100.0, 110.0)}
     Bzone = {"B": (200.0, 210.0)}
-    status, direction, tid, exit_price = _classify_transition(Azone, Bzone)
+    status, direction, tid, exit_price = _classify_transition(Azone, Bzone, {"B"})
     assert status == "CANONICAL"
     assert direction == "LONG"
     assert tid == "B"
@@ -109,36 +109,52 @@ def test_A_upper_B_LONG():
 def test_A_lower_B_SHORT():
     Azone = {"A": (100.0, 110.0)}
     Bzone = {"B": (50.0, 60.0)}
-    status, direction, tid, exit_price = _classify_transition(Azone, Bzone)
+    status, direction, tid, exit_price = _classify_transition(Azone, Bzone, {"B"})
     assert status == "CANONICAL"
     assert direction == "SHORT"
     assert tid == "B"
     assert exit_price == 60.0  # B.zone_top
 
 
-def test_overlapping_zones_ambiguous():
-    Azone = {"A": (100.0, 110.0)}
-    Bzone = {"B": (104.0, 114.0)}
-    status, direction, tid, exit_price = _classify_transition(Azone, Bzone)
-    assert status == "OVERLAP"
-    assert direction is None
+def test_overlapping_B_is_skipped_not_overlap():
+    """A=[100,110]; B=[104,114] overlaps A (same location) so it must be
+    skipped, NOT rejected as OVERLAP. A later distinct C=[200,210] yields the
+    trade."""
+    groups = [
+        mkgrp(0, "A", 100, 110, [0]),
+        mkgrp(1, "A_h1", 104, 114, [1]),  # overlapping -> same location
+        mkgrp(2, "C", 200, 210, [2]),
+    ]
+    n = 3
+    segments, tds = common_arrays(n)
+    opens = np.full(n, 150.0)
+    trades, audit = solve_touch_chain(
+        groups, opens, segments, tds, n,
+        total_true_touch_records=3, total_touch_episodes=3, total_touch_groups=3,
+    )
+    assert len(trades) == 2  # A->C and A_h1->C (A_h1 also a valid source)
+    assert all(t["oracle_direction"] == "LONG" for t in trades)
+    assert all(t["target_structure_id"] == "C" for t in trades)
+    assert audit["overlapping_zone_transitions"] == 0
+    assert audit["same_location_groups_skipped"] == 1
 
 
 def test_same_bar_upper_and_lower_AMBIGUOUS_SAME_BAR():
     Azone = {"A": (100.0, 110.0)}
     Bzone = {"B": (200.0, 210.0), "C": (50.0, 60.0)}
-    status, direction, tid, exit_price = _classify_transition(Azone, Bzone)
+    status, direction, tid, exit_price = _classify_transition(
+        Azone, Bzone, {"B", "C"}
+    )
     assert status == "AMBIGUOUS_SAME_BAR"
     assert direction is None
 
 
 def test_classify_requires_distinct_B():
     """find_next_distinct_group owns same-location skipping; _classify_transition
-    must never be called with a same-only B (it is a programming error)."""
+    must never be called with an empty distinct set (programming error)."""
     Azone = {"A": (100.0, 110.0)}
-    Bzone = {"A": (100.0, 110.0)}  # identical revisit
     with pytest.raises(AssertionError):
-        _classify_transition(Azone, Bzone)
+        _classify_transition(Azone, {"A": (100.0, 110.0)}, set())
 
 
 # --------------------------------------------------------------------------- #
@@ -247,11 +263,11 @@ def test_A_B_C_two_transactions_two_trades():
 
 
 def test_reconciliation_overlap_and_ambiguous_buckets():
-    """A->B overlap, B->C ambiguous same bar -> no canonical trades but
-    reconciliation still holds exactly."""
+    """A->B where B OVERLAPS A is SKIPPED (not OVERLAP). The later (C,D)
+    ambiguous same-bar target still counts. Reconciliation holds exactly."""
     touch_by_bar = [[] for _ in range(7)]
     touch_by_bar[0] = [mk(0, "A", 100, 110)]
-    touch_by_bar[3] = [mk(3, "B", 104, 114)]   # overlap with A
+    touch_by_bar[3] = [mk(3, "B", 104, 114)]   # OVERLAPS A -> same location, skipped
     touch_by_bar[6] = [mk(6, "C", 200, 210), mk(6, "D", 50, 60)]  # same bar -> ambiguous
     # Build groups: A@0, B@3, (C,D)@6
     eps = build_episodes(touch_by_bar)
@@ -263,10 +279,11 @@ def test_reconciliation_overlap_and_ambiguous_buckets():
         groups, opens, segments, tds, n,
         total_true_touch_records=4, total_touch_episodes=4, total_touch_groups=3,
     )
-    # A->B overlap, B->(C,D) ambiguous same bar
-    assert len(trades) == 0
-    assert audit["overlapping_zone_transitions"] == 1
-    assert audit["ambiguous_same_bar_target_groups"] == 1
+    # B is the SAME location as A -> skipped, NOT counted as OVERLAP
+    assert audit["overlapping_zone_transitions"] == 0
+    assert audit["same_location_groups_skipped"] == 1
+    # both sources (A, B) forward-resolve to the ambiguous (C,D) target bar
+    assert audit["ambiguous_same_bar_target_groups"] == 2
     assert audit["source_groups_with_future"] == 2
     assert audit["no_later_distinct_target_transitions"] == 0
     assert audit["source_groups_with_future"] == (
@@ -417,7 +434,9 @@ def test_two_upper_targets_pick_lowest_bottom():
     smaller TOP is NOT the one with the smaller BOTTOM."""
     Azone = {"A": (100.0, 110.0)}
     Bzone = {"B1": (200.0, 210.0), "B2": (150.0, 300.0)}
-    status, direction, tid, exit_price = _classify_transition(Azone, Bzone)
+    status, direction, tid, exit_price = _classify_transition(
+        Azone, Bzone, {"B1", "B2"}
+    )
     assert status == "CANONICAL"
     assert direction == "LONG"
     assert tid == "B2"
@@ -429,7 +448,9 @@ def test_two_lower_targets_pick_highest_top():
     larger BOTTOM is NOT the one with the larger TOP."""
     Azone = {"A": (100.0, 110.0)}
     Bzone = {"B1": (90.0, 95.0), "B2": (20.0, 98.0)}  # both below A
-    status, direction, tid, exit_price = _classify_transition(Azone, Bzone)
+    status, direction, tid, exit_price = _classify_transition(
+        Azone, Bzone, {"B1", "B2"}
+    )
     assert status == "CANONICAL"
     assert direction == "SHORT"
     assert tid == "B2"
@@ -507,6 +528,111 @@ def test_hard_reconciliation_after_skips():
         + audit["no_later_distinct_target_transitions"]
     )
     assert audit["canonical_trades"] == 3
+
+
+# --------------------------------------------------------------------------- #
+# T0c -- DISTINCT = price LOCATION, not structure_id / timeframe
+# --------------------------------------------------------------------------- #
+def test_diff_id_overlapping_zone_same_location():
+    """Different structure_id but overlapping zone => SAME location, skipped."""
+    groups = [
+        mkgrp(0, "A1", 100, 110, [0]),
+        mkgrp(1, "A2", 104, 114, [1]),  # overlapping -> same location
+        mkgrp(2, "B", 200, 210, [2]),
+    ]
+    n = 3
+    segments, tds = common_arrays(n)
+    opens = np.full(n, 150.0)
+    trades, audit = solve_touch_chain(
+        groups, opens, segments, tds, n,
+        total_true_touch_records=3, total_touch_episodes=3, total_touch_groups=3,
+    )
+    assert len(trades) == 2  # A1->B and A2->B (A2 also a valid source)
+    assert all(t["target_structure_id"] == "B" for t in trades)
+    assert audit["same_location_groups_skipped"] == 1
+    assert audit["overlapping_zone_transitions"] == 0
+
+
+def test_diff_timeframe_overlapping_zone_same_location():
+    """Different timeframe but overlapping zone => SAME location, skipped."""
+    groups = [
+        mkgrp(0, "A_m15", 100, 110, [0]),
+        mkgrp(1, "A_h1", 104, 114, [1]),  # different TF, overlapping
+        mkgrp(2, "B", 200, 210, [2]),
+    ]
+    n = 3
+    segments, tds = common_arrays(n)
+    opens = np.full(n, 150.0)
+    trades, audit = solve_touch_chain(
+        groups, opens, segments, tds, n,
+        total_true_touch_records=3, total_touch_episodes=3, total_touch_groups=3,
+    )
+    assert len(trades) == 2  # A_m15->B and A_h1->B (A_h1 also a valid source)
+    assert all(t["target_structure_id"] == "B" for t in trades)
+    assert audit["same_location_groups_skipped"] == 1
+    assert audit["overlapping_zone_transitions"] == 0
+
+
+def test_mixed_group_ignores_overlapping_x_uses_y():
+    """A later group holds an overlapping X AND a distinct Y; Y is selected,
+    the transition must NOT be marked OVERLAP."""
+    A = mkgrp(0, "A", 100, 110, [0])
+    X = Episode("X", [1], 1, 1, 105, 115, "SR", "m15", None)  # overlaps A
+    Y = Episode("Y", [1], 1, 1, 150, 160, "SR", "m15", None)  # distinct
+    Bgroup = TouchGroup(start_bar=1, episodes=[X, Y], structures={"X": X, "Y": Y})
+    groups = [A, Bgroup]
+    n = 2
+    segments, tds = common_arrays(n)
+    opens = np.full(n, 120.0)  # open[d+1]=120 < 150 -> legal LONG entry
+    trades, audit = solve_touch_chain(
+        groups, opens, segments, tds, n,
+        total_true_touch_records=2, total_touch_episodes=2, total_touch_groups=2,
+    )
+    assert len(trades) == 1
+    assert trades[0]["target_structure_id"] == "Y"
+    assert trades[0]["oracle_direction"] == "LONG"
+    assert audit["overlapping_zone_transitions"] == 0
+
+
+def test_repeated_overlapping_groups_continue():
+    """Several overlapping-only groups in a row are skipped until a real
+    distinct B is found."""
+    groups = [
+        mkgrp(0, "A", 100, 110, [0]),
+        mkgrp(1, "X1", 104, 114, [1]),
+        mkgrp(2, "X2", 102, 108, [2]),
+        mkgrp(3, "B", 200, 210, [3]),
+    ]
+    n = 4
+    segments, tds = common_arrays(n)
+    opens = np.full(n, 150.0)
+    trades, audit = solve_touch_chain(
+        groups, opens, segments, tds, n,
+        total_true_touch_records=4, total_touch_episodes=4, total_touch_groups=4,
+    )
+    assert len(trades) == 3  # A->B, X1->B, X2->B (each overlapping group is a source)
+    assert all(t["target_structure_id"] == "B" for t in trades)
+    assert audit["same_location_groups_skipped"] == 3
+    assert audit["overlapping_zone_transitions"] == 0
+
+
+def test_upper_lower_distinct_same_group_ambiguous():
+    """Upper AND lower location-distinct targets on the same touch bar =>
+    AMBIGUOUS_SAME_BAR (rule preserved)."""
+    A = mkgrp(0, "A", 100, 110, [0])
+    C = Episode("C", [1], 1, 1, 200, 210, "SR", "m15", None)  # above
+    D = Episode("D", [1], 1, 1, 50, 60, "SR", "m15", None)    # below
+    Bgroup = TouchGroup(start_bar=1, episodes=[C, D], structures={"C": C, "D": D})
+    groups = [A, Bgroup]
+    n = 2
+    segments, tds = common_arrays(n)
+    opens = np.full(n, 150.0)
+    trades, audit = solve_touch_chain(
+        groups, opens, segments, tds, n,
+        total_true_touch_records=2, total_touch_episodes=2, total_touch_groups=2,
+    )
+    assert len(trades) == 0
+    assert audit["ambiguous_same_bar_target_groups"] == 1
 
 
 if __name__ == "__main__":
