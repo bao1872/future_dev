@@ -1,0 +1,183 @@
+==============================================================================
+V6.2 ENTRY-TIME AUDIT  symbol=AG
+==============================================================================
+reference legs from the OLD V6.1 artifact (951-label view):
+  V6.1 Trade 7: LONG  bars [351, 417]  entry=7763.0 target=7810.0
+  V6.1 Trade 8: SHORT  bars [417, 423]  entry=7838.0 target=7780.0
+
+V6.2 canonical labels (local kernel): 894
+
+--- OLD V6.1 reference targets vs ENTRY-TIME visibility (context) ---
+  V6.1 Trade 7: old target 7810.0 visible at OLD entry decision 356: NO
+  V6.1 Trade 8: old target 7780.0 visible at OLD entry decision 420: YES
+
+##############################################################################
+SEGMENT OF OLD V6.1 Trade 7 (bars [351, 417])  ->  3 V6.2 label(s)
+##############################################################################
+
+==============================================================================
+V6.2 LABEL  source_bar=346  dir=SHORT  entry_decision=346  entry_fill=347
+==============================================================================
+  entry_time        : 2025-01-15 14:45:00
+  entry_price       : 7685.0
+  planned_target    : 7655.0  (location [7648.0, 7655.0])
+  target_id         : SR|m15|7655.000000|7648.000000
+  exit_bar          : 570  (2025-01-23 21:00:00)
+  utility           : 30.0
+
+  ALL VISIBLE LOCATIONS AT ENTRY DECISION d=346 (geom_by_decision[346]):
+    [   7582.6,    7625.2]  LIQ|m15|SELL|7596.000000|7602.416855|7582.583145, LIQ|h1|SELL|7614.000000|7625.179684|7583.820316, SR|m15|7595.000000|7589.000000, SR|m15|7625.000000|7614.000000
+    [   7648.0,    7655.0]  SR|m15|7655.000000|7648.000000
+    [   7681.0,    7691.0]  SR|m15|7691.000000|7681.000000
+    [   7694.0,    7705.0]  SR|m15|7705.000000|7694.000000
+    [   7773.0,    7780.0]  SR|m15|7780.000000|7773.000000
+
+  HARD CHECKS:
+    target_snapshot_index == entry_decision      : PASS
+    target independently re-derived from geom[346]: PASS
+    TARGET VISIBLE AT ENTRY                      : YES
+
+  TARGET MEMBER PROVENANCE (structure_id -> first ever bar):
+    SR|m15|7655.000000|7648.000000  first_bar=331  -> pre-existing at entry
+
+==============================================================================
+V6.2 LABEL  source_bar=349  dir=LONG  entry_decision=349  entry_fill=350
+==============================================================================
+  entry_time        : 2025-01-15 21:30:00
+  entry_price       : 7700.0
+  planned_target    : 7773.0  (location [7773.0, 7780.0])
+  target_id         : SR|m15|7780.000000|7773.000000
+  exit_bar          : 351  (2025-01-15 21:45:00)
+  utility           : 73.0
+
+  ALL VISIBLE LOCATIONS AT ENTRY DECISION d=349 (geom_by_decision[349]):
+    [   7582.6,    7625.2]  LIQ|m15|SELL|7596.000000|7602.416855|7582.583145, LIQ|h1|SELL|7614.000000|7625.179684|7583.820316, SR|m15|7595.000000|7589.000000, SR|m15|7625.000000|7614.000000
+    [   7648.0,    7655.0]  SR|m15|7655.000000|7648.000000
+    [   7681.0,    7691.0]  SR|m15|7691.000000|7681.000000
+    [   7694.0,    7705.0]  SR|m15|7705.000000|7694.000000
+    [   7773.0,    7780.0]  SR|m15|7780.000000|7773.000000
+
+  HARD CHECKS:
+    target_snapshot_index == entry_decision      : PASS
+    target independently re-derived from geom[349]: PASS
+    TARGET VISIBLE AT ENTRY                      : YES
+
+  TARGET MEMBER PROVENANCE (structure_id -> first ever bar):
+    SR|m15|7780.000000|7773.000000  first_bar=306  -> pre-existing at entry
+
+==============================================================================
+V6.2 LABEL  source_bar=351  dir=SHORT  entry_decision=371  entry_fill=372
+==============================================================================
+  entry_time        : 2025-01-16 09:30:00
+  entry_price       : 7861.0
+  planned_target    : 7705.0  (location [7694.0, 7705.0])
+  target_id         : SR|m15|7705.000000|7694.000000
+  exit_bar          : 444  (2025-01-20 09:00:00)
+  utility           : 156.0
+
+  ALL VISIBLE LOCATIONS AT ENTRY DECISION d=371 (geom_by_decision[371]):
+    [   7582.6,    7625.2]  LIQ|m15|SELL|7596.000000|7602.416855|7582.583145, LIQ|h1|SELL|7614.000000|7625.179684|7583.820316, SR|m15|7595.000000|7589.000000, SR|m15|7625.000000|7614.000000
+    [   7648.0,    7655.0]  SR|m15|7655.000000|7648.000000
+    [   7681.0,    7691.0]  SR|m15|7691.000000|7681.000000
+    [   7694.0,    7705.0]  SR|m15|7705.000000|7694.000000
+    [   7773.0,    7780.0]  SR|m15|7780.000000|7773.000000
+
+  HARD CHECKS:
+    target_snapshot_index == entry_decision      : PASS
+    target independently re-derived from geom[371]: PASS
+    TARGET VISIBLE AT ENTRY                      : YES
+
+  TARGET MEMBER PROVENANCE (structure_id -> first ever bar):
+    SR|m15|7705.000000|7694.000000  first_bar=306  -> pre-existing at entry
+
+##############################################################################
+SEGMENT OF OLD V6.1 Trade 8 (bars [417, 423])  ->  3 V6.2 label(s)
+##############################################################################
+
+==============================================================================
+V6.2 LABEL  source_bar=346  dir=SHORT  entry_decision=346  entry_fill=347
+==============================================================================
+  entry_time        : 2025-01-15 14:45:00
+  entry_price       : 7685.0
+  planned_target    : 7655.0  (location [7648.0, 7655.0])
+  target_id         : SR|m15|7655.000000|7648.000000
+  exit_bar          : 570  (2025-01-23 21:00:00)
+  utility           : 30.0
+
+  ALL VISIBLE LOCATIONS AT ENTRY DECISION d=346 (geom_by_decision[346]):
+    [   7582.6,    7625.2]  LIQ|m15|SELL|7596.000000|7602.416855|7582.583145, LIQ|h1|SELL|7614.000000|7625.179684|7583.820316, SR|m15|7595.000000|7589.000000, SR|m15|7625.000000|7614.000000
+    [   7648.0,    7655.0]  SR|m15|7655.000000|7648.000000
+    [   7681.0,    7691.0]  SR|m15|7691.000000|7681.000000
+    [   7694.0,    7705.0]  SR|m15|7705.000000|7694.000000
+    [   7773.0,    7780.0]  SR|m15|7780.000000|7773.000000
+
+  HARD CHECKS:
+    target_snapshot_index == entry_decision      : PASS
+    target independently re-derived from geom[346]: PASS
+    TARGET VISIBLE AT ENTRY                      : YES
+
+  TARGET MEMBER PROVENANCE (structure_id -> first ever bar):
+    SR|m15|7655.000000|7648.000000  first_bar=331  -> pre-existing at entry
+
+==============================================================================
+V6.2 LABEL  source_bar=351  dir=SHORT  entry_decision=371  entry_fill=372
+==============================================================================
+  entry_time        : 2025-01-16 09:30:00
+  entry_price       : 7861.0
+  planned_target    : 7705.0  (location [7694.0, 7705.0])
+  target_id         : SR|m15|7705.000000|7694.000000
+  exit_bar          : 444  (2025-01-20 09:00:00)
+  utility           : 156.0
+
+  ALL VISIBLE LOCATIONS AT ENTRY DECISION d=371 (geom_by_decision[371]):
+    [   7582.6,    7625.2]  LIQ|m15|SELL|7596.000000|7602.416855|7582.583145, LIQ|h1|SELL|7614.000000|7625.179684|7583.820316, SR|m15|7595.000000|7589.000000, SR|m15|7625.000000|7614.000000
+    [   7648.0,    7655.0]  SR|m15|7655.000000|7648.000000
+    [   7681.0,    7691.0]  SR|m15|7691.000000|7681.000000
+    [   7694.0,    7705.0]  SR|m15|7705.000000|7694.000000
+    [   7773.0,    7780.0]  SR|m15|7780.000000|7773.000000
+
+  HARD CHECKS:
+    target_snapshot_index == entry_decision      : PASS
+    target independently re-derived from geom[371]: PASS
+    TARGET VISIBLE AT ENTRY                      : YES
+
+  TARGET MEMBER PROVENANCE (structure_id -> first ever bar):
+    SR|m15|7705.000000|7694.000000  first_bar=306  -> pre-existing at entry
+
+==============================================================================
+V6.2 LABEL  source_bar=417  dir=SHORT  entry_decision=420  entry_fill=421
+==============================================================================
+  entry_time        : 2025-01-17 14:45:00
+  entry_price       : 7838.0
+  planned_target    : 7780.0  (location [7775.0, 7780.0])
+  target_id         : SR|m15|7780.000000|7775.000000
+  exit_bar          : 423  (2025-01-17 21:15:00)
+  utility           : 58.0
+
+  ALL VISIBLE LOCATIONS AT ENTRY DECISION d=420 (geom_by_decision[420]):
+    [   7582.6,    7627.0]  LIQ|m15|SELL|7596.000000|7602.416855|7582.583145, LIQ|h1|SELL|7614.000000|7625.179684|7583.820316, SR|m15|7627.000000|7625.000000
+    [   7648.0,    7655.0]  SR|m15|7655.000000|7648.000000
+    [   7681.0,    7694.0]  SR|m15|7694.000000|7681.000000
+    [   7741.0,    7755.0]  SR|m15|7755.000000|7741.000000
+    [   7775.0,    7780.0]  SR|m15|7780.000000|7775.000000
+    [   7810.0,    7825.0]  SR|m15|7825.000000|7810.000000
+
+  HARD CHECKS:
+    target_snapshot_index == entry_decision      : PASS
+    target independently re-derived from geom[420]: PASS
+    TARGET VISIBLE AT ENTRY                      : YES
+
+  TARGET MEMBER PROVENANCE (structure_id -> first ever bar):
+    SR|m15|7780.000000|7775.000000  first_bar=413  -> pre-existing at entry
+
+==============================================================================
+ENTRY-TIME INVARIANT (hard visual invariant, machine-checked):
+  every matched V6.2 label has its planned target visible at the entry decision: PASS
+  figures written to: /Users/zhenbao/Desktop/coding/future_dev/research/liquidity_oracle_atlas/evidence/entry_time_audit_v1
+    v62_trade_src346_short_d346.html
+    v62_trade_src349_long_d349.html
+    v62_trade_src351_short_d371.html
+    v62_trade_src346_short_d346.html
+    v62_trade_src351_short_d371.html
+    v62_trade_src417_short_d420.html
+==============================================================================
