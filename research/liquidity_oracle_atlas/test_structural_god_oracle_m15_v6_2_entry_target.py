@@ -448,5 +448,37 @@ def test_T16_terminal_location_is_not_the_target():
     assert t["target_price"] != pytest.approx(310.0)
 
 
+# --------------------------------------------------------------------------- #
+# T17 -- A RETOUCH + EXACTLY ONE DISTINCT B HANDOFF
+# --------------------------------------------------------------------------- #
+def test_T17_a_retouch_plus_one_distinct_b_handoff():
+    # bar 3 is the terminal of source A and carries BOTH an A-retouch and a
+    # single distinct B. V6.2 must treat A-retouch as retouch and promote the
+    # distinct B to the next source AT bar 3 (not skip the bar and lose B).
+    n = 10
+    spec = [
+        (0, [(100, 110)]),                  # source A
+        (3, [(100, 110), (300, 310)]),      # A retouch + exactly one distinct B
+    ]
+    opens = [100, 120, 130, 305, 306, 307, 308, 309, 310, 311]
+    highs = [0, 155, 155, 200, 360, 360, 360, 360, 360, 360]
+    lows = [NO_HIT_LOW] * n
+    geoms = [
+        mk_geom(channels=[(160.0, 150.0, 1.0), (360.0, 350.0, 1.0), (60.0, 50.0, 1.0)])
+        for _ in range(n)
+    ]
+    trades, audit = run_solve(spec, n, opens, highs, lows, geoms)
+    # A -> one label; B -> one label promoted at the combined bar (no skip).
+    assert audit["canonical_trades"] == 2, audit
+    a, b = trades[0], trades[1]
+    assert a["source_bar"] == 0
+    assert a["zone_bottom"] == pytest.approx(100.0)
+    # The key handoff assertion: B is sourced at the combined terminal bar 3,
+    # not dropped / not pushed to a later bar.
+    assert b["source_bar"] == 3, b
+    assert b["zone_bottom"] == pytest.approx(300.0)
+    assert b["zone_top"] == pytest.approx(310.0)
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))

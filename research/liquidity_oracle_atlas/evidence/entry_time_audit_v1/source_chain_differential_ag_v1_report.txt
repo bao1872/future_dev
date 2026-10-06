@@ -2,60 +2,38 @@
 SOURCE-CHAIN DIFFERENTIAL AUDIT  symbol=AG
 ==============================================================================
 V6.1 trade source keys           : 951
-V6.2 trade source keys           : 894
-intersection (self-check ~713)   : 713
+V6.2 trade source keys           : 1096
+intersection (self-check ~713)   : 950
 
 V6.1 source establishments (chain): 1105
-V6.2 source establishments (chain): 902
+V6.2 source establishments (chain): 1108
 
 --- terminal bar = A retouch + exactly one distinct B ---
-  occurrences                          : 234
-  B recovered at a later bar          : 142
-  B dropped (V6.2 never sources it)   : 92
+  occurrences                          : 332
+  B recovered at a later bar          : 332
+  B dropped (V6.2 never sources it)   : 0
 
 --- per-bar classification ---
-  MATCH                           : 766
-  A_RETOUCH_PLUS_B_HANDOFF_LOST   : 330
-  NEW_V62                         : 136
-  CASCADE_AFTER_DIVERGENCE        : 9
-  NO_LEGAL_ENTRY                  : 8
+  MATCH                           : 1104
+  NEW_V62                         : 4
+  CASCADE_AFTER_DIVERGENCE        : 1
+  NO_LEGAL_ENTRY                  : 12
 
 --- examples ---
 
-  [A_RETOUCH_PLUS_B_HANDOFF_LOST]
-    bar=348  zone=(7694.0, 7705.0)  ctx=len=2
-    bar=481  zone=(7694.0, 7703.0)  ctx=len=2
-    bar=594  zone=(7744.0, 7747.0)  ctx=len=2
-    bar=595  zone=(7775.0, 7788.0)  ctx=len=2
-    bar=614  zone=(7775.0, 7788.0)  ctx=len=2
-    bar=628  zone=(7718.0, 7729.0)  ctx=len=2
-    bar=629  zone=(7693.0, 7703.0)  ctx=len=2
-    bar=913  zone=(8125.0, 8146.0)  ctx=len=2
-
   [NEW_V62]
-    bar=349  zone=(7694.0, 7705.0)  ctx=len=1
-    bar=596  zone=(7775.0, 7788.0)  ctx=len=1
-    bar=630  zone=(7693.0, 7703.0)  ctx=len=1
-    bar=930  zone=(8091.0, 8115.0)  ctx=len=1
-    bar=1098  zone=(8105.0, 8125.0)  ctx=len=1
-    bar=1163  zone=(8035.0, 8048.0)  ctx=len=1
-    bar=1409  zone=(8008.0, 8008.0)  ctx=len=1
-    bar=1922  zone=(8346.0, 8360.0)  ctx=len=1
+    bar=8785  zone=(18044.0, 18077.0)  ctx=len=2
+    bar=12028  zone=(18136.0, 18341.0)  ctx=len=2
+    bar=12029  zone=(18349.0, 18349.0)  ctx=len=2
+    bar=12030  zone=(18136.0, 18341.0)  ctx=len=2
 
   [CASCADE_AFTER_DIVERGENCE]
-    bar=2842  zone=(8242.0, 8254.0)  ctx=len=1
-    bar=3964  zone=(8795.000977, 8810.000977)  ctx=len=1
-    bar=4019  zone=(8766.000977, 8777.000977)  ctx=len=1
-    bar=4039  zone=(8790.000977, 8810.000977)  ctx=len=1
-    bar=4049  zone=(8790.000977, 8810.000977)  ctx=len=1
-    bar=4053  zone=(8790.000977, 8810.000977)  ctx=len=1
-    bar=4056  zone=(8766.000977, 8778.000977)  ctx=len=1
-    bar=5135  zone=(8966.000977, 9020.000977)  ctx=len=1
+    bar=12031  zone=(18136.0, 18341.0)  ctx=len=1
 
 ==============================================================================
 VERDICT
 ==============================================================================
-  MATCH (source chain identical)        : 766
-  divergences explained by known class  : 475
+  MATCH (source chain identical)        : 1104
+  divergences explained by known class  : 5
   UNEXPLAINED (OTHER*)                 : 0
   -> OTHER* must be 0 or manually explained before production.

@@ -363,6 +363,7 @@ def solve_entry_time_target_oracle(
         return times[i]
 
     i = 0
+    prev_source = None
     while i < n:
         frame = frames[i]
 
@@ -370,14 +371,33 @@ def solve_entry_time_target_oracle(
             i += 1
             continue
 
-        # Candidate A must be an unambiguous single price location.
-        if len(frame) > 1:
-            audit["ambiguous_candidate_bars"] += 1
-            i += 1
-            continue
+        # Candidate A is either an unambiguous single price location, OR a
+        # multi-location bar that V6.1 resolves as (A retouch + exactly one
+        # distinct B): the distinct B becomes the next source. Overlapping
+        # retouches of the frozen previous source do NOT make the bar ambiguous.
+        if len(frame) == 1:
+            source = frame[0]
+        else:
+            if prev_source is None:
+                # No frozen A to disambiguate against: genuinely ambiguous start.
+                audit["ambiguous_candidate_bars"] += 1
+                i += 1
+                continue
+            distinct = [x for x in frame if not location_overlap(prev_source, x)]
+            if len(distinct) == 1:
+                source = distinct[0]
+            elif len(distinct) == 0:
+                # Pure retouch of the frozen source: no new source here, keep
+                # scanning without resetting the chain.
+                i += 1
+                continue
+            else:
+                audit["ambiguous_candidate_bars"] += 1
+                i += 1
+                continue
 
-        source = frame[0]
         audit["sources_evaluated"] += 1
+        prev_source = source
 
         # ---- observed_leg_terminal: first later bar with a location that is
         #      NOT frozen A. This only CLOSES the entry-opportunity interval.

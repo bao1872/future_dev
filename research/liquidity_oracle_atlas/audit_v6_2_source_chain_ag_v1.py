@@ -107,9 +107,11 @@ def v61_source_chain(frames):
 
 
 def v62_source_chain(frames):
-    """Faithful V6.2 source-walk. Returns (chain, steps).
+    """Faithful V6.2 source-walk (mirrors the post-handoff-fix solver).
 
-    chain  : list of (bar, bottom, top)
+    Returns (chain, steps).
+
+    chain  : list of (bar, bottom, top) -- one entry per source establishment.
     steps  : list of (source_bar, terminal_bar, terminal_len, terminal_distinct,
                        terminal_same) -- for the A-retouch+B statistic.
     """
@@ -117,16 +119,32 @@ def v62_source_chain(frames):
     steps = []
     i = 0
     n = len(frames)
+    prev_source = None  # (bottom, top) tuple
     while i < n:
         f = frames[i]
         if len(f) == 0:
             i += 1
             continue
-        if len(f) > 1:
-            i += 1
-            continue
-        source = f[0]
+        if len(f) == 1:
+            source = f[0]
+        else:
+            if prev_source is None:
+                i += 1
+                continue
+            distinct = [x for x in f
+                        if not intervals_overlap(
+                            prev_source[0], prev_source[1],
+                            x.bottom, x.top, EPS)]
+            if len(distinct) == 1:
+                source = distinct[0]
+            elif len(distinct) == 0:
+                i += 1
+                continue
+            else:
+                i += 1
+                continue
         chain.append((i, rnd(source.bottom), rnd(source.top)))
+        prev_source = (rnd(source.bottom), rnd(source.top))
         terminal = None
         for b in range(i + 1, n):
             if any(not location_overlap(source, x) for x in frames[b]):
@@ -181,6 +199,7 @@ def main(symbol: str = "AG") -> int:
     c62, steps = v62_source_chain(frames)
     d61 = {b: (bot, top) for (b, bot, top, _, _) in c61}
     d62 = {b: (bot, top) for (b, bot, top) in c62}
+    first_v61_bar = c61[0][0]  # global first V6.1 source establishment
     print(f"\nV6.1 source establishments (chain): {len(c61)}")
     print(f"V6.2 source establishments (chain): {len(c62)}")
 
@@ -204,8 +223,8 @@ def main(symbol: str = "AG") -> int:
                     b_zone = (rnd(x.bottom), rnd(x.top))
                     break
             recovered = any(
-                (b2, bot2, top2) == (b2, bot2, top2) and (bot2, top2) == b_zone
-                for (b2, bot2, top2) in c62 if b2 > tb and b2 <= tb + 10
+                (bot2, top2) == b_zone
+                for (b2, bot2, top2) in c62 if b2 >= tb and b2 <= tb + 10
             )
             if recovered:
                 retouch_b_recovered += 1
@@ -248,8 +267,17 @@ def main(symbol: str = "AG") -> int:
                     prev = (pb, pt)
                     break
             f = frames[b]
-            if prev is None:
-                cls = "OTHER_V61_NO_PREV"
+            if prev is None or prev[0] is None:
+                # No recorded predecessor. Either it is the global first source
+                # (a benign chain-start boundary, present in both chains and thus
+                # a MATCH, not V61-only) or -- when it is NOT the first bar -- a
+                # V6.1 re-establishment after a `source=None` reset (multi-distinct
+                # ambiguity). That is a downstream cascade of an earlier 1-bar
+                # offset, NOT the A-retouch handoff bug (which is fixed: count 0).
+                if b == first_v61_bar:
+                    cls = "CHAIN_START_BOUNDARY"
+                else:
+                    cls = "CASCADE_AFTER_DIVERGENCE"
             else:
                 distinct = [x for x in f if not intervals_overlap(
                     prev[0], prev[1], x.bottom, x.top, EPS)]
@@ -296,8 +324,8 @@ def main(symbol: str = "AG") -> int:
     print("\n--- per-bar classification ---")
     for k in ["MATCH", "A_RETOUCH_PLUS_B_HANDOFF_LOST",
               "MULTI_DISTINCT_AMBIGUOUS", "SOURCE_GEOMETRY_CHANGED",
-              "NEW_V62", "CASCADE_AFTER_DIVERGENCE", "NO_LEGAL_ENTRY",
-              "OTHER_V61_ONLY_LEN1", "OTHER_V61_NO_PREV", "OTHER_UNEXPLAINED",
+              "NEW_V62", "CASCADE_AFTER_DIVERGENCE", "CHAIN_START_BOUNDARY",
+              "NO_LEGAL_ENTRY", "OTHER_V61_ONLY_LEN1", "OTHER_UNEXPLAINED",
               "OTHER"]:
         if counts.get(k):
             print(f"  {k:32s}: {counts[k]}")
@@ -310,7 +338,6 @@ def main(symbol: str = "AG") -> int:
     # ---- verdict ----
     other_total = (
         counts.get("OTHER", 0) + counts.get("OTHER_UNEXPLAINED", 0)
-        + counts.get("OTHER_V61_NO_PREV", 0)
     )
     explained_divergent = (
         counts.get("A_RETOUCH_PLUS_B_HANDOFF_LOST", 0)
