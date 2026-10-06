@@ -15,17 +15,23 @@ Reports:
   4. target-never-touched count
   5. direction-tie count
   6. entry-boundary rejection count
-  7. non-overlap violation count
+  7. labels_with_overlapping_exit (count, NOT a constraint)
   8. target_snapshot_mismatch count
 
-Mandatory invariants:
+Mandatory invariant (causal correctness):
     target_snapshot_mismatch == 0
-    non_overlap_violation_count == 0
 
-Diagnostic (does NOT influence V6.2 semantics):
-    old_target_not_visible_at_entry_count
-      = how many OLD V6.1 labels used a target that was NOT visible in
-        geom_by_decision[best_entry_decision_index].
+REMOVED constraint (2026-10-06):
+    labels were previously forced to be non-overlapping in calendar time
+    (portfolio single-position constraint). That belongs to later backtesting,
+    NOT to oracle label generation. Overlap is now REQUIRED behavior and is
+    only REPORTED, never enforced.
+
+Four required numbers (this round):
+    source opportunities                = sources_evaluated
+    canonical labels                    = canonical_trades
+    labels with overlapping exit        = labels_with_overlapping_exit
+    old V6.1 source locations matched   = intersection of V6.1 / V6.2 source keys
 
 This audit does NOT generate or overwrite the production artifact.
 """
@@ -102,7 +108,7 @@ def main(symbol: str = "AG") -> int:
         ("5 direction_tie_count", audit["direction_tie_count"]),
         ("6 entry_boundary_rejection_count",
          audit["entry_boundary_rejection_count"]),
-        ("7 non_overlap_violation_count", audit["non_overlap_violation_count"]),
+        ("7 labels_with_overlapping_exit", audit["labels_with_overlapping_exit"]),
         ("8 target_snapshot_mismatch_count",
          audit["target_snapshot_mismatch_count"]),
         ("  ambiguous_candidate_bars", audit["ambiguous_candidate_bars"]),
@@ -112,13 +118,15 @@ def main(symbol: str = "AG") -> int:
     for k, v in rows:
         print(f"  {k:36s}: {v}")
 
-    print("\n--- mandatory invariants ---")
+    print("\n--- causal invariant (must hold) ---")
     ok_mm = audit["target_snapshot_mismatch_count"] == 0
-    ok_no = audit["non_overlap_violation_count"] == 0
     print(f"  target_snapshot_mismatch == 0 : {'PASS' if ok_mm else 'FAIL'}"
           f"  ({audit['target_snapshot_mismatch_count']})")
-    print(f"  non_overlap_violation    == 0 : {'PASS' if ok_no else 'FAIL'}"
-          f"  ({audit['non_overlap_violation_count']})")
+
+    print("\n--- overlap report (NOT a constraint) ---")
+    print(f"  labels_with_overlapping_exit : {audit['labels_with_overlapping_exit']}")
+    print("  (overlap is REQUIRED behavior; portfolio non-overlap belongs to "
+          "later backtesting)")
 
     # ---------------- old-vs-entry-time diagnostic ----------------
     print("\n" + "=" * 72)
@@ -220,7 +228,31 @@ def main(symbol: str = "AG") -> int:
     if not violating:
         print("  (none)")
 
-    return 0 if (ok_mm and ok_no) else 1
+    # ---------------- four required numbers ----------------
+    print("\n" + "=" * 72)
+    print("FOUR REQUIRED NUMBERS (V6.2 after removing portfolio non-overlap)")
+    print("=" * 72)
+
+    old_keys = set()
+    for t in old_trades:
+        old_keys.add((int(t["candidate_start_bar"]),
+                      round(float(t["zone_bottom"]), 6),
+                      round(float(t["zone_top"]), 6)))
+    new_keys = set()
+    for t in trades:
+        new_keys.add((int(t["candidate_start_bar"]),
+                      round(float(t["zone_bottom"]), 6),
+                      round(float(t["zone_top"]), 6)))
+    matched = len(old_keys & new_keys)
+
+    print(f"  source opportunities              : {audit['sources_evaluated']}")
+    print(f"  canonical labels                  : {audit['canonical_trades']}")
+    print(f"  labels with overlapping exit      : {audit['labels_with_overlapping_exit']}")
+    print(f"  old V6.1 source locations matched : {matched}")
+    print(f"      (new unique source keys = {len(new_keys)}; "
+          f"old V6.1 unique source keys = {len(old_keys)})")
+
+    return 0 if ok_mm else 1
 
 
 if __name__ == "__main__":

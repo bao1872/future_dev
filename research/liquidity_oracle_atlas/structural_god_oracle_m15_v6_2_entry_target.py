@@ -320,8 +320,16 @@ def solve_entry_time_target_oracle(
 ) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
     """V6.2 entry-time-target oracle.
 
-    Never emits overlapping canonical trades:
-        Entry1 <= Exit1 < Entry2 <= Exit2 < ...
+    Labels from different sources MAY overlap in calendar time. This is
+    REQUIRED, not an error: a label answers "what is the God-mode label for
+    THIS candidate opportunity?", not "how would a single-position account
+    sequence these trades?". Portfolio / one-position-at-a-time constraints
+    belong to a later backtesting layer, never to oracle label generation.
+
+    The structural location chain A -> B -> C owns the source sequence:
+    after A's label is generated, the source advances to observed_leg_terminal
+    B (the first bar with a location distinct from frozen A). It does NOT wait
+    for A's trade to exit.
     """
     n = len(frames)
     opens = np.asarray(opens, dtype=float)
@@ -343,7 +351,7 @@ def solve_entry_time_target_oracle(
         "ambiguous_candidate_bars": 0,
         "sources_evaluated": 0,
         "sources_without_canonical": 0,
-        "non_overlap_violation_count": 0,
+        "labels_with_overlapping_exit": 0,
         "target_snapshot_mismatch_count": 0,
     }
 
@@ -477,19 +485,33 @@ def solve_entry_time_target_oracle(
         else:
             audit["short_count"] += 1
 
-        # next candidate search begins strictly after this exit
-        i = k + 1
+        # Advance the STRUCTURAL CHAIN to observed_leg_terminal B -- the first
+        # bar with a location distinct from frozen source A. This does NOT wait
+        # for A's trade to exit. Labels from different sources may therefore
+        # overlap in calendar time (required, not an error).
+        i = terminal if terminal < n else n
 
-    # ---- hard invariants ----
-    for idx in range(1, len(trades)):
-        prev = trades[idx - 1]
-        cur = trades[idx]
-        if not (
-            prev["best_entry_fill_index"] <= prev["exit_fill_index"]
-            < cur["best_entry_fill_index"] <= cur["exit_fill_index"]
-        ):
-            audit["non_overlap_violation_count"] += 1
+    # ---- overlap REPORTING (NOT a constraint) ----
+    # Labels are permitted to overlap in calendar time. We only COUNT how many
+    # labels' [entry, exit] intervals intersect another label's interval, so
+    # the reviewer can see how prevalent overlap is. Overlap is correct
+    # behavior; it is NOT a violation.
+    m = len(trades)
+    overlap_count = 0
+    for a in range(m):
+        ta = trades[a]
+        a_lo = ta["best_entry_fill_index"]
+        a_hi = ta["exit_fill_index"]
+        for b in range(m):
+            if b == a:
+                continue
+            tb = trades[b]
+            if a_lo <= tb["exit_fill_index"] and tb["best_entry_fill_index"] <= a_hi:
+                overlap_count += 1
+                break
+    audit["labels_with_overlapping_exit"] = overlap_count
 
+    # ---- causal invariant (unchanged) ----
     for t in trades:
         if t["target_snapshot_index"] != t["best_entry_decision_index"]:
             audit["target_snapshot_mismatch_count"] += 1

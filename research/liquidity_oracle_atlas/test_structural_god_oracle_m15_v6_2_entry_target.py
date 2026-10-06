@@ -381,22 +381,20 @@ def test_T14_entry_execution_boundary():
 
 
 # --------------------------------------------------------------------------- #
-# T15 -- NON-OVERLAPPING CANONICAL TRADES
+# T15 -- OVERLAP IS ALLOWED (portfolio non-overlap constraint removed)
 # --------------------------------------------------------------------------- #
-def test_T15_non_overlap():
+def test_T15_overlap_allowed():
     n = 14
     spec = [
-        (0, [(100, 110)]),
-        (4, [(400, 410)]),
-        (5, [(400, 410)]),
-        (9, [(700, 710)]),
+        (0, [(100, 110)]),     # source A
+        (4, [(400, 410)]),     # source B (first distinct touch after A)
     ]
-    opens = [100, 105, 120, 130, 140, 400, 405, 410, 420, 430,
+    opens = [100, 100, 110, 120, 140, 430, 420, 410, 405, 400,
              400, 400, 400, 400]
     highs = np.full(n, NO_HIT_HIGH)
     lows = np.full(n, NO_HIT_LOW)
-    lows[4] = 50.0      # leg 1 SHORT target 60 hit at bar 4
-    lows[9] = 300.0     # leg 2 SHORT target 310 hit at bar 9
+    lows[9] = 300.0    # B SHORT target 310 first touched at bar 9
+    lows[12] = 50.0    # A SHORT target 60 first touched at bar 12
 
     geoms = []
     for _ in range(n):
@@ -408,15 +406,16 @@ def test_T15_non_overlap():
         ]))
 
     trades, audit = run_solve(spec, n, opens, highs, lows, geoms)
+    # A -> label [entry bar 4, exit bar 12]; B -> label [entry bar 5, exit bar 9].
+    # B's label lives INSIDE A's window, so the two overlap in calendar time.
     assert audit["canonical_trades"] == 2
-    assert audit["non_overlap_violation_count"] == 0
+    # With the portfolio non-overlap constraint REMOVED, labels from different
+    # sources are allowed (and here DO) overlap in calendar time.
+    assert audit["labels_with_overlapping_exit"] >= 1
 
-    for idx in range(1, len(trades)):
-        p, c = trades[idx - 1], trades[idx]
-        assert (
-            p["best_entry_fill_index"] <= p["exit_fill_index"]
-            < c["best_entry_fill_index"] <= c["exit_fill_index"]
-        )
+    # The causal invariant is unchanged: target frozen at the entry decision.
+    assert audit["target_snapshot_mismatch_count"] == 0
+
     for t in trades:
         assert t["exit_reason"] == TARGET_TOUCH
         assert t["utility"] > 0
